@@ -14,11 +14,11 @@ plot(tsne$Y[,1:2],col=apply(mat,1,which.max))
 
 ###
 
-#system("head -n4 Tetra_all.lrn | tail -n1 | cut -f2- -d' ' > tnfs.txt")
+system("head -n4 Tetra_all_clean_1000.lrn | tail -n1 | cut -f2- -d' ' > tnfs.txt")
 tnfs = as.character(read.table("tnfs.txt",stringsAsFactors=F))
 tnfs = tnfs[2:length(tnfs)]
 
-lrn = read_table("Tetra_all.lrn",comment="%",col_names=F)
+lrn = read_table("Tetra_all_clean_1000.lrn",comment="%",col_names=F)
 lrn$X1 = NULL
 
 ATs = rowSums(lrn[,!grepl("G|C",tnfs)])
