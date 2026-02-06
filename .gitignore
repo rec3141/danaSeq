@@ -1,0 +1,141 @@
+# Dana Pipeline .gitignore
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+
+# Temporary files
+*.tmp
+*.tmp.*
+*.partial
+.fastq_pass/
+
+# Logs
+*.log
+*.out
+*.err
+
+# Data files (too large for git)
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.fasta
+*.fasta.gz
+*.fa
+*.fa.gz
+*.bam
+*.sam
+*.cram
+*.bai
+
+# Database files
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite
+
+# Output directories
+output/
+results/
+mag_assembly_output/
+bins/
+assembly/
+mapping/
+polished/
+checkm2/
+taxonomy/
+
+# Kraken2 databases (too large)
+kraken_db/
+kraken2_db/
+
+# HMM databases (except CANT-HYD.hmm which is included)
+*.hmm
+!CANT-HYD.hmm
+
+# Prokka output
+prokka/
+*.gff
+*.gbk
+*.fna
+*.faa
+*.ffn
+*.sqn
+*.fsa
+*.tbl
+*.err
+*.tsv
+
+# Assembly graphs
+*.gfa
+*.gfa.gz
+
+# Coverage files
+*.depth
+*.coverage
+*coverage*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+env/
+ENV/
+
+# R
+.Rhistory
+.RData
+.Rproj.user
+*.Rproj
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude memory (keep local only)
+.claude/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Compressed archives
+*.tar.gz
+*.zip
+*.tar
+*.gz
+*.bz2
+*.xz
+
+# Semaphore lock files
+/tmp/sem.*

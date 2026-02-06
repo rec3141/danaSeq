@@ -1,0 +1,378 @@
+#!/usr/bin/env python3
+import sys, time, math, argparse
+import numpy as np
+import pandas as pd
+
+from vispy import app, scene
+from vispy.scene.visuals import Markers
+from vispy.color import Colormap
+from PySide6 import QtWidgets, QtCore
+from matplotlib import colormaps as mcm
+
+# ----------------------------
+# Config knobs you may tweak
+# ----------------------------
+FPS_TARGET = 60                       # request ~60 FPS
+BASE_ALPHA = 0.15                     # faint base visibility for all points
+PULSE_ADD  = 20.00                     # how much glow to add when a contig is active
+DECAY_PER_SEC = 0.999                  # residual glow decay per second (0.8 -> 20% per second)
+DECAY_PER_SEC_STRONG = 0.65           # stronger glow when toggled (press 'G')
+POINT_SIZE = 2.0                      # pixel size for each point (GPU-side)
+HISTORY_ADD = 0.001                    # how much to add to history on each activation
+HISTORY_DECAY = 1                 # very slow decay of history (0.998 = ~0.2% per second)
+HISTORY_ALPHA_BOOST = 0.1             # max alpha boost from history (0-1)
+HISTORY_SIZE_BOOST = 10              # max size multiplier from history
+
+# ----------------------------
+# Parse arguments
+# ----------------------------
+ap = argparse.ArgumentParser(description="Nanopore t-SNE Live Replay")
+ap.add_argument("events_file", help="Path to events.parquet file")
+ap.add_argument("--debug", action="store_true", help="Enable debug logging")
+args = ap.parse_args()
+
+# ----------------------------
+# Load events
+# ----------------------------
+events_path = args.events_file
+events = pd.read_parquet(events_path)
+# sanitize columns
+required = {"contig","tsne_x","tsne_y","start_time","end_time","barcode"}
+missing = required - set(events.columns)
+if missing:
+    raise SystemExit(f"Missing required columns: {missing}")
+
+# Normalize barcodes and map to integers
+barcodes = sorted(events["barcode"].astype(str).unique())
+B = len(barcodes)
+barcode_to_idx = {b:i for i,b in enumerate(barcodes)}
+events["bix"] = events["barcode"].map(barcode_to_idx).astype(np.int32)
+
+# Build contig table: unique positions and indices
+contigs = events[["contig","tsne_x","tsne_y"]].drop_duplicates().reset_index(drop=True)
+contigs["idx"] = np.arange(len(contigs), dtype=np.int32)
+contig_to_idx = dict(zip(contigs["contig"], contigs["idx"]))
+N = len(contigs)
+print(f"[info] contigs: {N:,}  barcodes: {B}")
+
+# Map events to indices and make (time, delta, bix, cix) tuples
+def to_tuples(df):
+    cix = df["contig"].map(contig_to_idx).values
+    bix = df["bix"].values
+    starts = np.stack([df["start_time"].values, np.ones_like(bix), bix, cix], axis=1)
+    ends   = np.stack([df["end_time"].values,  -np.ones_like(bix), bix, cix], axis=1)
+    return np.concatenate([starts, ends], axis=0)
+
+timeline = to_tuples(events).astype(np.float64)
+# sort by time
+timeline = timeline[np.argsort(timeline[:,0])]
+T0 = timeline[0,0]
+T1 = timeline[-1,0]
+
+if args.debug:
+    print(f"[config] BASE_ALPHA={BASE_ALPHA} PULSE_ADD={PULSE_ADD}", file=sys.stderr)
+    print(f"[config] DECAY_PER_SEC={DECAY_PER_SEC} DECAY_PER_SEC_STRONG={DECAY_PER_SEC_STRONG}", file=sys.stderr)
+    print(f"[config] HISTORY_ADD={HISTORY_ADD} HISTORY_DECAY={HISTORY_DECAY}", file=sys.stderr)
+    print(f"[config] HISTORY_ALPHA_BOOST={HISTORY_ALPHA_BOOST} HISTORY_SIZE_BOOST={HISTORY_SIZE_BOOST}", file=sys.stderr)
+    print(f"[config] POINT_SIZE={POINT_SIZE}", file=sys.stderr)
+    print(f"[timeline] T0={T0:.2f} T1={T1:.2f} duration={T1-T0:.2f}s events={len(timeline)}", file=sys.stderr)
+
+# ----------------------------
+# Precompute static GPU buffers
+# ----------------------------
+pos = contigs[["tsne_x","tsne_y"]].to_numpy(np.float32)
+
+# Colors per barcode from viridis
+#cmap = mcm['viridis']
+#cmap = mcm['hsv']
+#cmap = mcm['rainbow']
+#cmap = mcm['turbo']  # Google's improved rainbow, very vibrant
+#cmap = mcm['PRGn']  # Purple-Green diverging
+#cmap = mcm['twilight']  # Purple-yellow-cyan circular
+cmap = mcm['Spectral']  # Red-orange-yellow-green-blue
+#cmap = mcm['plasma']  # Purple-pink-yellow
+#cmap = mcm['jet']  # Classic rainbow (blue-cyan-green-yellow-red)
+
+barcode_rgb = cmap(np.linspace(0, 1, B))[:, :3].astype(np.float32)   # (B,3), 0..1
+
+# State arrays
+counts = np.zeros((B, N), dtype=np.int16)   # active reads per (barcode, contig)
+glow   = np.zeros(N, dtype=np.float32)      # residual intensity 0..1
+rgb    = np.zeros((N, 3), dtype=np.float32) # current display color (0..1)
+rgba   = np.empty((N, 4), dtype=np.float32)
+history = np.zeros(N, dtype=np.float32)     # cumulative activation history 0..1
+
+# initial colors faint gray
+rgb[:] = 0.7
+
+# timeline cursor
+cursor = 0
+
+# ----------------------------
+# Qt UI setup
+# ----------------------------
+class PlayerWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Nanopore t-SNE Live Replay (VisPy)")
+        self.resize(1200, 1200)
+
+        # VisPy canvas
+        self.canvas = scene.SceneCanvas(keys='interactive', size=(1100, 800), bgcolor='black', show=True)
+        self.view   = self.canvas.central_widget.add_view()
+        self.view.camera = scene.PanZoomCamera(aspect=1)
+        self.view.camera.set_range(x=(pos[:,0].min(), pos[:,0].max()),
+                                   y=(pos[:,1].min(), pos[:,1].max()))
+
+        self.markers_history = Markers(parent=self.view.scene)
+        self.markers_history.set_gl_state('translucent', depth_test=False)
+        self.markers_history_initialized = False
+
+    # Base markers layer (all points, faint)
+        rgba_init = np.empty((N, 4), dtype=np.float32)
+        rgba_init[:, :3] = rgb
+        rgba_init[:, 3]  = np.float32(BASE_ALPHA)
+        self.markers = Markers(parent=self.view.scene)
+        self.markers.set_gl_state('translucent', depth_test=False)
+        self.markers.set_data(pos=pos, face_color=rgba_init, size=POINT_SIZE, edge_width=0)
+
+        # Background history layer (inactive points with history - rendered between base and highlight)
+        self.markers_history = Markers(parent=self.view.scene)
+        self.markers_history.set_gl_state('translucent', depth_test=False)
+        self.markers_history_initialized = False
+
+        # Highlight markers layer (active points only, bright)
+        self.markers_hi = Markers(parent=self.view.scene)
+        self.markers_hi.set_gl_state('additive', depth_test=False)
+        # Don't initialize with empty data - VisPy doesn't like zero-size arrays
+        self.markers_hi_initialized = False
+
+        # UI controls
+        self.speed_label = QtWidgets.QLabel("Speed: 1.0×")
+        self.speed_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.speed_slider.setMinimum(1)    # 0.1×
+        self.speed_slider.setMaximum(10000)   # 20× (or set higher if needed)
+        self.speed_slider.setValue(10)
+        self.speed_slider.valueChanged.connect(self.on_speed_change)
+
+        self.time_label = QtWidgets.QLabel("t = 0.0 s")
+        self.active_label = QtWidgets.QLabel("active: 0 contigs (0 events)")
+        self.history_label = QtWidgets.QLabel("history: avg=0.00 max=0.00")
+        self.glow_btn = QtWidgets.QPushButton("Glow: normal (G)")
+        self.glow_btn.setCheckable(True)
+        self.glow_btn.clicked.connect(self.on_glow_toggle)
+
+        # layout
+        topbar = QtWidgets.QHBoxLayout()
+        topbar.addWidget(self.speed_label)
+        topbar.addWidget(self.speed_slider)
+        topbar.addStretch(1)
+        topbar.addWidget(self.time_label)
+        topbar.addWidget(self.glow_btn)
+        topbar.addWidget(self.active_label)
+        topbar.addWidget(self.history_label)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self.canvas.native)
+        layout.addLayout(topbar)
+
+        # timers / playback
+        self.running = True
+        self.speed   = 1.0
+        self.t_vis   = T0  # virtual time (seconds)
+        self.last_wall = time.perf_counter()
+        self.decay_strong = False
+
+        # draw timer ~FPS_TARGET
+        self.timer = app.Timer(1.0 / FPS_TARGET, connect=self.on_timer, start=True)
+
+        # keyboard
+        self.canvas.events.key_press.connect(self.on_key)
+
+    def on_speed_change(self, value):
+        self.speed = value / 10.0
+        self.speed_label.setText(f"Speed: {self.speed:.1f}×")
+
+    def on_glow_toggle(self, checked):
+        self.decay_strong = checked
+        label = "Glow: STRONG (G)" if checked else "Glow: normal (G)"
+        self.glow_btn.setText(label)
+        if args.debug:
+            print(f"Glow decay toggled: {'STRONG' if checked else 'normal'} "
+                  f"(decay rate: {DECAY_PER_SEC_STRONG if checked else DECAY_PER_SEC})",
+                  file=sys.stderr, flush=True)
+
+    def on_key(self, event):
+        if event.key == ' ':
+            self.running = not self.running
+        elif event.key == '+':
+            v = min(self.speed_slider.maximum(), self.speed_slider.value()+1)
+            self.speed_slider.setValue(v)
+        elif event.key == '-':
+            v = max(self.speed_slider.minimum(), self.speed_slider.value()-1)
+            self.speed_slider.setValue(v)
+        elif event.key == 'G':
+            self.glow_btn.toggle()
+        elif event.key == 'R':
+            self.reset()
+        elif event.key == 'H':
+            global history
+            history.fill(0)
+            print("History cleared")
+
+    def reset(self):
+        global cursor, counts, glow, rgb, history
+        cursor = 0
+        counts.fill(0)
+        glow.fill(0)
+        history.fill(0)
+        rgb[:] = 0.7
+        self.t_vis = T0
+
+    def on_timer(self, _):
+        global cursor, counts, glow, rgb, rgba, history
+
+        now = time.perf_counter()
+        dt_wall = now - self.last_wall
+        self.last_wall = now
+
+        if self.running:
+            # advance virtual time
+            self.t_vis = min(T1, self.t_vis + dt_wall * self.speed)
+
+            # apply events up to current time
+            tl = timeline
+            while cursor < len(tl) and tl[cursor, 0] <= self.t_vis:
+                _, delta, bix, cix = tl[cursor]
+                bi = int(bix); ci = int(cix)
+                counts[bi, ci] = np.int16(max(0, counts[bi, ci] + int(delta)))
+                cursor += 1
+
+            # compute which contigs are active per barcode
+            active = counts > 0
+            n_active = active.sum(axis=0)            # (N,)
+            any_active = n_active > 0
+            n_active_contigs = int(active.any(axis=0).sum())
+            n_active_events  = int(active.sum())
+            self.active_label.setText(f"active: {n_active_contigs} contigs ({n_active_events} events)")
+
+            # decay glow and history
+            decay = DECAY_PER_SEC_STRONG if self.decay_strong else DECAY_PER_SEC
+            if dt_wall > 0:
+                decay_factor = decay ** dt_wall
+                history_decay_factor = HISTORY_DECAY ** dt_wall
+            else:
+                decay_factor = 1.0
+                history_decay_factor = 1.0
+            
+            # glow *= decay_factor
+            # history *= history_decay_factor
+
+            if any_active.any():
+                # pick the barcode with the largest active count per contig
+                dom_idx = counts[:, any_active].argmax(axis=0)
+                rgb[any_active] = barcode_rgb[dom_idx]
+                glow[any_active] = np.minimum(1.0, glow[any_active] + PULSE_ADD * dt_wall * self.speed)
+                
+                # accumulate history for active contigs
+                history[any_active] = np.minimum(1.0, history[any_active] + HISTORY_ADD * dt_wall * self.speed)
+
+            # compose RGBA for base layer, with history-based visibility
+            # Background points with history should be visible even when inactive
+            
+            # Color retention: use history (not glow) to retain color
+            # Points with high history keep their barcode color
+            gray = np.array([0.7, 0.7, 0.7], dtype=np.float32)
+            color_retention = np.clip(history * 2.0, 0.0, 1.0)[:, None]  # history drives color persistence
+            display_color = rgb * color_retention + gray * (1.0 - color_retention)
+            
+            # Alpha: base + history boost + glow boost
+            history_alpha = history * HISTORY_ALPHA_BOOST
+            glow_alpha = glow * (1.0 - BASE_ALPHA)
+            a = np.clip(BASE_ALPHA + history_alpha + glow_alpha, 0.0, 1.0)
+            
+            rgba[:, 0:3] = np.clip(display_color, 0.0, 1.0)
+            rgba[:, 3]   = a
+            
+            # Update base layer with uniform small size
+#            self.markers.set_data(face_color=rgba, size=POINT_SIZE, edge_width=0)
+            
+            # --- HISTORY LAYER (inactive points with history) ---
+            history_threshold = 0.05
+            has_history = history > history_threshold
+            history_and_inactive = has_history & ~any_active
+            history_idx = np.nonzero(history_and_inactive)[0]
+            
+            if history_idx.size > 0:
+                pos_hist = pos[history_idx]
+                rgba_hist = rgba[history_idx].copy()
+                # Variable size based on history value
+                hist_vals = history[history_idx]
+                sizes_hist = POINT_SIZE  * (1.0 + hist_vals * HISTORY_SIZE_BOOST)
+                
+                self.markers_history.set_data(pos=pos_hist, face_color=rgba_hist, size=sizes_hist, edge_width=0)
+                self.markers_history_initialized = True
+            elif self.markers_history_initialized:
+                # Clear history layer
+                dummy_pos = np.array([[0.0, 0.0]], dtype=np.float32)
+                dummy_color = np.array([[0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+                self.markers_history.set_data(pos=dummy_pos, face_color=dummy_color, size=0.0, edge_width=0)
+    
+    
+            # --- ALWAYS-VISIBLE HIGHLIGHTS (subset of active indices) ---
+            active_idx = np.nonzero(any_active)[0]
+            if active_idx.size:
+                pos_hi = pos[active_idx]
+                rgba_hi = rgba[active_idx].copy()
+                rgba_hi[:, 3] = np.maximum(rgba_hi[:, 3], 0.8)  # make them pop
+                # Use history-boosted size for highlights - calculate max size for this set
+                hist_active = history[active_idx]
+                avg_hist_active = hist_active.mean() if hist_active.size > 0 else 0.0
+                size_hi = POINT_SIZE #* (1.0 + avg_hist_active * HISTORY_SIZE_BOOST) * 1.8
+#                self.markers_hi.set_data(pos=pos_hi, face_color=rgba_hi, size=size_hi, edge_width=0)
+                self.markers_hi_initialized = True
+                
+                if args.debug:
+                    # cap log to avoid spam
+                    max_log = 5
+                    for i, idx in enumerate(active_idx[:max_log]):
+                        p = pos_hi[i]; c = rgba_hi[i]
+                        h = history[idx]
+                        print(f"  [active] contig={int(idx)} "
+                              f"hist={h:.3f} size={size_hi:.2f} "
+                              f"rgba=({c[0]:.3f},{c[1]:.3f},{c[2]:.3f},{c[3]:.3f})",
+                              file=sys.stderr, flush=True)
+                    if active_idx.size > max_log:
+                        print(f"  [active] ... {active_idx.size-max_log} more", 
+                              file=sys.stderr, flush=True)
+            elif self.markers_hi_initialized:
+                # clear highlight layer when no actives (only if it was previously initialized)
+                # Use a single dummy point instead of empty array
+                dummy_pos = np.array([[0.0, 0.0]], dtype=np.float32)
+                dummy_color = np.array([[0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+                self.markers_hi.set_data(pos=dummy_pos, face_color=dummy_color, size=0.0, edge_width=0)
+
+            if self.t_vis >= T1 and self.running:
+                self.running = False
+
+        # UI update
+        self.time_label.setText(f"t = {self.t_vis - T0:,.1f} s  ({self.t_vis:,.1f})")
+        
+        # Update history stats
+        hist_avg = history.mean()
+        hist_max = history.max()
+        self.history_label.setText(f"history: avg={hist_avg:.3f} max={hist_max:.3f}")
+
+        # request redraw
+        self.canvas.update()
+
+def main():
+    app.use_app('pyside6')
+    qtapp = QtWidgets.QApplication(sys.argv)
+    w = PlayerWidget()
+    w.show()
+    qtapp.exec()
+
+if __name__ == "__main__":
+    main()
+  

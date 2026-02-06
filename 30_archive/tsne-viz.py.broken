@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+import sys
+import time
+import math
+import argparse
+import numpy as np
+import pandas as pd
+
+from vispy import app, scene
+from vispy.scene.visuals import Markers
+from PySide6 import QtWidgets, QtCore
+from matplotlib import colormaps as mcm
+
+# ----------------------------
+# Config knobs
+# ----------------------------
+FPS_TARGET = 60
+BASE_ALPHA = 0.20
+POINT_SIZE = 2.5
+PULSE_ADD  = 2.0
+DECAY_PER_SEC = 0.65
+DECAY_PER_SEC_STRONG = 0.50
+
+# Globals filled after loading
+pos = None           # (N,2) float32
+rgba = None          # (N,4) float32
+rgb  = None          # (N,3) float32
+glow = None          # (N,)  float32
+counts = None        # (B,N) int32
+timeline = None      # (M,4) float32: [time, delta, bix, cix]
+barcodes = None      # (B,)
+barcode_rgb = None   # (B,3) float32 in 0..1
+T0 = 0.0
+T1 = 0.0
+
+def load_events(path: str):
+    global pos, rgba, rgb, glow, counts, timeline, barcodes, barcode_rgb, T0, T1
+    events = pd.read_parquet(path)
+    # Required columns
+    required = {"contig","tsne_x","tsne_y","start_time","end_time","barcode"}
+#    required = {"contig","barcode","time","tsne_x","tsne_y"}
+    missing = required - set(events.columns)
+    if missing:
+        raise SystemExit(f"events file missing required columns: {missing}")
+
+    # Accept either delta column or treat each row as +1
+    if "delta" not in events.columns:
+        events["delta"] = 1
+
+    # Build barcode mapping
+    barcodes = np.array(sorted(events["barcode"].unique()), dtype=object)
+    B = len(barcodes)
+    barcode_to_idx = {b:i for i,b in enumerate(barcodes)}
+    events["bix"] = events["barcode"].map(barcode_to_idx).astype(np.int32)
+
+    # Build contigs from unique tsne positions
+    contigs = events[["contig","tsne_x","tsne_y"]].drop_duplicates().reset_index(drop=True)
+    contigs["cix"] = np.arange(len(contigs), dtype=np.int32)
+    contig_to_idx = dict(zip(contigs["contig"], contigs["cix"]))
+    N = len(contigs)
+
+    print(f"[info] contigs: {N:,}  barcodes: {B}")
+
+    # Map events to indices
+    events["cix"] = events["contig"].map(contig_to_idx).astype(np.int32)
+    # Construct timeline: (time, delta, bix, cix)
+    tl = events[["time","delta","bix","cix"]].to_numpy(dtype=np.float32)
+    tl = tl[np.argsort(tl[:,0])]
+    timeline = tl
+    T0 = float(timeline[0,0])
+    T1 = float(timeline[-1,0])
+
+    # Geometry
+    pos = contigs[["tsne_x","tsne_y"]].to_numpy(np.float32)
+
+    # Per-barcode colors (viridis)
+    cmap = mcm.get_cmap("viridis", B)
+    barcode_rgb = cmap(np.linspace(0,1,B, dtype=np.float32))[:, :3].astype(np.float32)
+
+    # Per-point visual state
+    rgba = np.empty((N,4), dtype=np.float32)
+    rgb  = np.zeros((N,3), dtype=np.float32)
+    glow = np.zeros((N,),  dtype=np.float32)
+    rgba[:, :3] = 0.0
+    rgba[:, 3]  = BASE_ALPHA
+
+    # Count matrix
+    counts = np.zeros((B,N), dtype=np.int32)
+
+class PlayerWidget(QtWidgets.QWidget):
+    def __init__(self, args):
+        super().__init__()
+        self.args = args
+        self.setWindowTitle("Nanopore t-SNE Live Replay (VisPy)")
+        self.resize(1200, 900)
+
+        # Canvas
+        self.canvas = scene.SceneCanvas(keys='interactive', size=(1100, 800), bgcolor='black', show=True)
+        self.view   = self.canvas.central_widget.add_view()
+        self.view.camera = scene.PanZoomCamera(aspect=1)
+        self.view.camera.set_range(x=(pos[:,0].min(), pos[:,0].max()),
+                                   y=(pos[:,1].min(), pos[:,1].max()))
+
+        # Base layer
+        self.markers = Markers(parent=self.view.scene)
+        self.markers.set_gl_state("translucent", depth_test=False)
+        self.markers.set_data(pos=pos, face_color=rgba, size=POINT_SIZE)
+
+        # Highlight layer: always draw actives
+        self.markers_hi = Markers(parent=self.view.scene)
+        self.markers_hi.set_gl_state("additive", depth_test=False)
+        self.markers_hi.set_data(pos=np.zeros((0,2), np.float32),
+                                 face_color=np.zeros((0,4), np.float32),
+                                 size=POINT_SIZE*1.8)
+
+        # UI
+        topbar = QtWidgets.QHBoxLayout()
+        self.speed_label = QtWidgets.QLabel("Speed: 1.0×")
+        self.speed_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.speed_slider.setMinimum(1)   # 0.1×
+        self.speed_slider.setMaximum(80)  # 8×
+        self.speed_slider.setValue(10)
+        self.speed_slider.valueChanged.connect(self.on_speed_change)
+
+        self.time_label = QtWidgets.QLabel("t = 0.0 s (abs 0.0)")
+        self.active_label = QtWidgets.QLabel("active: 0 contigs (0 events)")
+        self.glow_btn = QtWidgets.QPushButton("Glow: normal")
+        self.glow_btn.setCheckable(True)
+        self.glow_btn.toggled.connect(self.on_glow_toggle)
+
+        for w in (self.speed_label, self.speed_slider, self.time_label, self.glow_btn, self.active_label):
+            topbar.addWidget(w)
+
+        main = QtWidgets.QVBoxLayout(self)
+        main.addLayout(topbar)
+        main.addWidget(self.canvas.native)
+
+        # State
+        self.speed = 1.0
+        self.running = True
+        self.decay_strong = False
+        self.last_wall = time.perf_counter()
+        self.t_vis = T0
+
+        # Timer
+        self.timer = app.Timer(interval=1.0/FPS_TARGET, connect=self.on_timer, start=True)
+
+        # Keys
+        self.canvas.events.key_press.connect(self.on_key)
+
+    def on_speed_change(self, value: int):
+        self.speed = value / 10.0
+        self.speed_label.setText(f"Speed: {self.speed:.1f}×")
+
+    def on_glow_toggle(self, checked: bool):
+        self.decay_strong = checked
+        self.glow_btn.setText("Glow: strong" if checked else "Glow: normal")
+
+    def on_key(self, ev):
+        if ev.key in (" ", "Space"):
+            self.running = not self.running
+        elif ev.key in ("G","g"):
+            self.decay_strong = not self.decay_strong
+            self.glow_btn.setChecked(self.decay_strong)
+
+    def on_timer(self, _):
+        global counts, glow, rgb, rgba
+
+        now = time.perf_counter()
+        dt_wall = now - self.last_wall
+        self.last_wall = now
+
+        if self.running:
+            self.t_vis = min(T1, self.t_vis + dt_wall * self.speed)
+
+            # apply events up to current time
+            tl = timeline
+            i = getattr(self, "_cursor", 0)
+            while i < len(tl) and tl[i,0] <= self.t_vis:
+                _, delta, bix, cix = tl[i]
+                bix = int(bix); cix = int(cix); delta = int(delta)
+                counts[bix, cix] += delta
+                i += 1
+            self._cursor = i
+
+        # activity
+        active = counts > 0
+        n_active = active.sum(axis=0)
+        any_active = n_active > 0
+        n_active_contigs = int((n_active>0).sum())
+        n_active_events  = int(active.sum())
+        self.active_label.setText(f"active: {n_active_contigs} contigs ({n_active_events} events)")
+
+        # decay glow
+        decay = DECAY_PER_SEC_STRONG if self.decay_strong else DECAY_PER_SEC
+        decay_factor = (decay ** (dt_wall*self.speed)) if dt_wall > 0 else 1.0
+        glow *= decay_factor
+
+        # color updates (weighted mean, then gamma to avoid gray)
+        if any_active.any():
+            w = counts.astype(np.float32)
+            rgb_accum = (w.T @ barcode_rgb.astype(np.float32))  # (N,3)
+            s = np.maximum(1e-6, w.sum(axis=0, dtype=np.float32))
+            rgb_new = rgb_accum / s[:,None]
+            rgb_new = np.clip(rgb_new ** 0.6, 0.0, 1.0)  # saturate a bit
+            alpha_col = 0.5
+            rgb[any_active] = (1 - alpha_col) * rgb[any_active] + alpha_col * rgb_new[any_active]
+            glow[any_active] = np.minimum(1.0, glow[any_active] + PULSE_ADD * dt_wall * self.speed)
+
+        # compose and upload
+        a = np.clip(BASE_ALPHA + glow * (1.0 - BASE_ALPHA), 0.0, 1.0)
+        rgba[:, :3] = np.clip(rgb, 0.0, 1.0)
+        rgba[:, 3]  = a
+        self.markers.set_data(face_color=rgba, size=POINT_SIZE)
+
+        # highlight active subset (never decimated)
+        active_idx = np.nonzero(any_active)[0]
+        if active_idx.size:
+            pos_hi = pos[active_idx]
+            rgba_hi = rgba[active_idx].copy()
+            rgba_hi[:,3] = np.maximum(rgba_hi[:,3], 0.8)
+            self.markers_hi.set_data(pos=pos_hi, face_color=rgba_hi, size=POINT_SIZE*1.8)
+            if self.args.debug:
+                max_log = 50
+                for i, idx in enumerate(active_idx[:max_log]):
+                    p = pos_hi[i]; c = rgba_hi[i]
+                    print(f"[t={self.t_vis:.2f}] contig={int(idx)} "
+                          f"x={p[0]:.5f} y={p[1]:.5f} "
+                          f"rgba=({c[0]:.3f},{c[1]:.3f},{c[2]:.3f},{c[3]:.3f}) "
+                          f"size={POINT_SIZE*1.8:.2f}",
+                          file=sys.stderr, flush=True)
+                if active_idx.size > max_log:
+                    print(f"[t={self.t_vis:.2f}] ... {active_idx.size-max_log} more", file=sys.stderr, flush=True)
+        else:
+            self.markers_hi.set_data(pos=np.zeros((0,2), np.float32),
+                                     face_color=np.zeros((0,4), np.float32),
+                                     size=POINT_SIZE*1.8)
+
+        self.time_label.setText(f"t = {self.t_vis - T0:,.1f} s  ({self.t_vis:,.1f})")
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("events_parquet", help="events.parquet with columns contig, barcode, time, [delta], tsne_x, tsne_y")
+    p.add_argument("--debug", action="store_true", help="log highlighted points to stderr")
+    args = p.parse_args()
+
+    load_events(args.events_parquet)
+    app.use_app('pyside6')
+    qtapp = QtWidgets.QApplication(sys.argv)
+    w = PlayerWidget(args)
+    w.show()
+    qtapp.exec()
+
+if __name__ == "__main__":
+    main()

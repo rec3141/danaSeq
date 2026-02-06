@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+import sys, time, math
+import numpy as np
+import pandas as pd
+
+from vispy import app, scene
+from vispy.scene.visuals import Markers
+from vispy.color import Colormap
+from PySide6 import QtWidgets, QtCore
+from matplotlib import colormaps as mcm
+
+# ----------------------------
+# Config knobs you may tweak
+# ----------------------------
+FPS_TARGET = 60                       # request ~60 FPS
+BASE_ALPHA = 0.15                     # faint base visibility for all points
+PULSE_ADD  = 20.00                     # how much glow to add when a contig is active
+DECAY_PER_SEC = 0.999                  # residual glow decay per second (0.8 -> 20% per second)
+DECAY_PER_SEC_STRONG = 0.65           # stronger glow when toggled (press 'G')
+POINT_SIZE = 5.0                      # pixel size for each point (GPU-side)
+
+# ----------------------------
+# Load events
+# ----------------------------
+if len(sys.argv) < 2:
+    print("Usage: tsne-viz.py events.parquet")
+    sys.exit(1)
+
+events_path = sys.argv[1]
+events = pd.read_parquet(events_path)
+# sanitize columns
+required = {"contig","tsne_x","tsne_y","start_time","end_time","barcode"}
+missing = required - set(events.columns)
+if missing:
+    raise SystemExit(f"Missing required columns: {missing}")
+
+# Normalize barcodes and map to integers
+barcodes = sorted(events["barcode"].astype(str).unique())
+B = len(barcodes)
+barcode_to_idx = {b:i for i,b in enumerate(barcodes)}
+events["bix"] = events["barcode"].map(barcode_to_idx).astype(np.int32)
+
+# Build contig table: unique positions and indices
+contigs = events[["contig","tsne_x","tsne_y"]].drop_duplicates().reset_index(drop=True)
+contigs["idx"] = np.arange(len(contigs), dtype=np.int32)
+contig_to_idx = dict(zip(contigs["contig"], contigs["idx"]))
+N = len(contigs)
+print(f"[info] contigs: {N:,}  barcodes: {B}")
+
+# Map events to indices and make (time, delta, bix, cix) tuples
+def to_tuples(df):
+    cix = df["contig"].map(contig_to_idx).values
+    bix = df["bix"].values
+    starts = np.stack([df["start_time"].values, np.ones_like(bix), bix, cix], axis=1)
+    ends   = np.stack([df["end_time"].values,  -np.ones_like(bix), bix, cix], axis=1)
+    return np.concatenate([starts, ends], axis=0)
+
+timeline = to_tuples(events).astype(np.float64)
+# sort by time
+timeline = timeline[np.argsort(timeline[:,0])]
+T0 = timeline[0,0]
+T1 = timeline[-1,0]
+
+# ----------------------------
+# Precompute static GPU buffers
+# ----------------------------
+pos = contigs[["tsne_x","tsne_y"]].to_numpy(np.float32)
+
+# Normalize positions to a nice viewport (VisPy handles transform; keep raw)
+# We'll use a PanZoomCamera
+
+# Colors per barcode from viridis
+cmap = mcm['viridis']                       # get the colormap object
+barcode_rgb = cmap(np.linspace(0, 1, B))[:, :3].astype(np.float32)   # (B,3), 0..1
+
+# State arrays
+counts = np.zeros((B, N), dtype=np.int16)   # active reads per (barcode, contig)
+glow   = np.zeros(N, dtype=np.float32)      # residual intensity 0..1
+rgb    = np.zeros((N, 3), dtype=np.float32) # current display color (0..1)
+#rgba   = np.empty((N, 4), dtype=np.uint8)   # upload buffer to GPU
+rgba   = np.empty((N, 4), dtype=np.float32)   # was uint8
+
+# initial colors faint gray
+rgb[:] = 0.7
+
+# timeline cursor
+cursor = 0
+
+# ----------------------------
+# Qt UI setup
+# ----------------------------
+class PlayerWidget(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Nanopore t-SNE Live Replay (VisPy)")
+        self.resize(1200, 900)
+
+        # VisPy canvas
+        self.canvas = scene.SceneCanvas(keys='interactive', size=(1100, 800), bgcolor='black', show=True)
+        self.view   = self.canvas.central_widget.add_view()
+        self.view.camera = scene.PanZoomCamera(aspect=1)
+        self.view.camera.set_range(x=(pos[:,0].min(), pos[:,0].max()),
+                                   y=(pos[:,1].min(), pos[:,1].max()))
+
+        # markers visual
+        self.markers = scene.visuals.Markers(parent=self.view.scene)
+        # initial RGBA
+        rgba = np.empty((N, 4), dtype=np.float32)
+        rgba[:, :3] = rgb                                # rgb already 0..1
+        rgba[:, 3]  = np.float32(BASE_ALPHA)             # scalar alpha in 0..1
+        self.markers = Markers(parent=self.view.scene)
+        self.markers.set_data(pos=pos, face_color=rgba, size=POINT_SIZE)
+
+        # UI controls
+        self.speed_label = QtWidgets.QLabel("Speed: 1.0×")
+        self.speed_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.speed_slider.setMinimum(1)    # 0.1×
+        self.speed_slider.setMaximum(80)   # 8×
+        self.speed_slider.setValue(10)
+        self.speed_slider.valueChanged.connect(self.on_speed_change)
+
+        self.time_label = QtWidgets.QLabel("t = 0.0 s")
+        self.active_label = QtWidgets.QLabel("active: 0 contigs (0 events)")
+        self.glow_btn = QtWidgets.QPushButton("Glow: normal (G)")
+        self.glow_btn.setCheckable(True)
+        self.glow_btn.clicked.connect(self.on_glow_toggle)
+
+        # layout
+        topbar = QtWidgets.QHBoxLayout()
+        topbar.addWidget(self.speed_label)
+        topbar.addWidget(self.speed_slider)
+        topbar.addStretch(1)
+        topbar.addWidget(self.time_label)
+        topbar.addWidget(self.glow_btn)
+        topbar.addWidget(self.active_label)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(self.canvas.native)
+        layout.addLayout(topbar)
+
+        # timers / playback
+        self.running = True
+        self.speed   = 1.0
+        self.t_vis   = T0  # virtual time (seconds)
+        self.last_wall = time.perf_counter()
+        self.decay_strong = False
+
+        # draw timer ~FPS_TARGET
+        self.timer = app.Timer(1.0 / FPS_TARGET, connect=self.on_timer, start=True)
+
+        # keyboard
+        self.canvas.events.key_press.connect(self.on_key)
+
+    def on_speed_change(self, value):
+        self.speed = value / 10.0
+        self.speed_label.setText(f"Speed: {self.speed:.1f}×")
+
+    def on_glow_toggle(self, checked):
+        self.decay_strong = checked
+        self.glow_btn.setText("Glow: strong (G)" if checked else "Glow: normal (G)")
+
+    def on_key(self, event):
+        if event.key == ' ':
+            self.running = not self.running
+        elif event.key == '+':
+            v = min(self.speed_slider.maximum(), self.speed_slider.value()+1)
+            self.speed_slider.setValue(v)
+        elif event.key == '-':
+            v = max(self.speed_slider.minimum(), self.speed_slider.value()-1)
+            self.speed_slider.setValue(v)
+        elif event.key == 'G':
+            self.glow_btn.toggle()
+        elif event.key == 'R':
+            self.reset()
+
+    def reset(self):
+        global cursor, counts, glow, rgb
+        cursor = 0
+        counts.fill(0)
+        glow.fill(0)
+        rgb[:] = 0.7
+        self.t_vis = T0
+
+    def on_timer(self, _):
+        global cursor, counts, glow, rgb
+
+        now = time.perf_counter()
+        dt_wall = now - self.last_wall
+        self.last_wall = now
+
+        if self.running:
+            # advance virtual time
+            self.t_vis = min(T1, self.t_vis + dt_wall * self.speed)
+
+            # apply events up to current time
+            # timeline row: [time, delta, bix, cix]
+            tl = timeline
+            while cursor < len(tl) and tl[cursor, 0] <= self.t_vis:
+                _, delta, bix, cix = tl[cursor]
+                bi = int(bix); ci = int(cix)
+                # clamp to avoid underflow/overflow on weird data
+                counts[bi, ci] = np.int16(max(0, counts[bi, ci] + int(delta)))
+                cursor += 1
+
+            # compute which contigs are active per barcode
+            active = counts > 0
+            n_active = active.sum(axis=0)            # (N,)
+            any_active = n_active > 0
+            n_active_contigs = int(active.any(axis=0).sum())
+            n_active_events  = int(active.sum())
+            self.active_label.setText(f"active: {n_active_contigs} contigs ({n_active_events} events)")
+
+
+            # optional: fast path if nothing is active this frame
+            # (still do decay)
+            # decay glow
+            decay = DECAY_PER_SEC_STRONG if self.decay_strong else DECAY_PER_SEC
+            if dt_wall > 0:
+                # convert per-wall-time decay to per-frame factor
+                decay_factor = decay ** dt_wall
+            else:
+                decay_factor = 1.0
+            glow *= decay_factor
+
+            if any_active.any():
+                # pick the barcode with the largest active count per contig
+                dom_idx = counts[:, any_active].argmax(axis=0)        # (num_active,)
+                rgb[any_active] = barcode_rgb[dom_idx]                # vivid, single color
+                glow[any_active] = np.minimum(1.0, glow[any_active] + PULSE_ADD * dt_wall * self.speed)
+
+#             if any_active.any():
+#                 # accumulate barcode colors for active contigs using matrix mult:
+#                 # (N,3) = (N,B) @ (B,3) but active is (B,N) -> transpose
+#                 # Use float32 for speed
+#                 act_f = active.astype(np.float32)
+# #                rgb_accum = (act_f.T @ (barcode_rgb.astype(np.float32) / 255.0))
+#                 rgb_accum = act_f.T @ barcode_rgb.astype(np.float32)
+#                 # average by number of active barcodes to keep within [0,1]
+#                 denom = np.maximum(1.0, n_active.astype(np.float32))[:, None]
+#                 rgb_new = rgb_accum / denom
+# 
+#                 # blend current rgb toward new where active
+#                 # simple exponential smoothing
+#                 alpha_col = 0.5  # 0..1, 1 = jump to new color immediately
+#                 rgb[any_active] = (1 - alpha_col) * rgb[any_active] + alpha_col * rgb_new[any_active]
+# 
+#                 # add glow for active contigs
+#                 glow[any_active] = np.minimum(1.0, glow[any_active] + PULSE_ADD * dt_wall * self.speed)
+
+            # compose RGBA for upload
+            # alpha from base + glow
+
+            a = np.clip(BASE_ALPHA + glow * (1.0 - BASE_ALPHA), 0.0, 1.0)
+            rgba[:, 0:3] = np.clip(rgb, 0.0, 1.0)
+            rgba[:, 3]   = np.clip(a,   0.0, 1.0)
+            self.markers.set_data(face_color=rgba, size=POINT_SIZE)  # don't resend pos
+
+            if self.t_vis >= T1 and self.running:
+                # reached end; stop advancing but keep showing
+                self.running = False
+
+        # UI update
+        self.time_label.setText(f"t = {self.t_vis - T0:,.1f} s  ({self.t_vis:,.1f})")
+
+        # request redraw (VisPy handles vsync)
+        self.canvas.update()
+
+def main():
+    app.use_app('pyside6')  # or 'pyqt5' if you installed PyQt5
+    qtapp = QtWidgets.QApplication(sys.argv)
+    w = PlayerWidget()
+    w.show()
+    qtapp.exec()
+
+if __name__ == "__main__":
+    main()
