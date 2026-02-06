@@ -1,454 +1,333 @@
-```
-╔═══════════════════════════════════════════════════════════════════════════╗
-║                                                                           ║
-║     🌊  REAL-TIME PROCESSING PIPELINE  🌊                                ║
-║                                                                           ║
-║            ⚡ LIVE ANALYSIS AT SEA ⚡                                     ║
-║                                                                           ║
-║     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~                   ║
-║        🐟     🦑      🐡     🦈      🐙     🐠                            ║
-║     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~                   ║
-║                                                                           ║
-║        Process DNA sequences as they stream from the sequencer!          ║
-║                                                                           ║
-╚═══════════════════════════════════════════════════════════════════════════╝
-```
+# Real-Time Processing Pipeline
 
-## 🎯 What's This Directory?
-
-This is your **MISSION CONTROL** for real-time metagenomic analysis during expeditions! 🚢
-
-While your sequencer is churning out reads, these scripts are:
-- 🔍 Classifying taxonomy in real-time
-- 💾 Storing results in lightning-fast DuckDB
-- 🗺️ Updating live dashboards
-- 🚨 Detecting harmful algae blooms
-- 📊 Generating quality metrics
-
-**Think of it as a metagenomic news ticker!** 📰
+Shipboard metagenomic analysis for Oxford Nanopore sequencing data.
 
 ---
 
-## 🌊 The Processing Pipeline
+## Overview
 
+This directory contains scripts for real-time taxonomic classification, gene annotation, and functional profiling during active sequencing runs. Results are integrated into DuckDB for immediate SQL-queryable analysis.
+
+**Pipeline Stages:**
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                                                                     │
-│  MinKNOW Sequencer → 📦 → 🧹 → 🏷️ → 📝 → 💾 → 📊 → 🗺️              │
-│                                                                     │
-│  Raw FASTQ      →  Preprocess  →  QC  →  Classify  →  Store  →  Viz│
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+MinKNOW Output → Validation → QC → Classification → Annotation → Database → Visualization
 ```
 
 ---
 
-## 📚 Workflow Overview
+## Script Organization
 
-### 📦 **10s: Preprocessing** - Wrangle that data!
+Scripts are organized by function in numbered groups:
 
-```
-    ╔════════════════════════════════╗
-    ║   📥 MINKNOW OUTPUT            ║
-    ║   ├─ FASTQ.gz files            ║
-    ║   ├─ Sometimes corrupted! 😱   ║
-    ║   └─ Need standardization      ║
-    ╚════════════════════════════════╝
-              ↓
-    ╔════════════════════════════════╗
-    ║   🔧 PREPROCESSING             ║
-    ╚════════════════════════════════╝
-```
+### 10s: Preprocessing
+MinKNOW output validation and format standardization
+- `10_preprocess_fastq.py` — Python preprocessing utilities
+- `11_minknow_copy.sh` — Copy files from MinKNOW output directory
+- `12_minknow_rename.sh` — Standardize file naming
 
-**Scripts:**
-- `10_preprocess_fastq.py` - 🐍 Python preprocessing utilities
-- `11_minknow_copy.sh` - 📋 Copy files from MinKNOW output
-- `12_minknow_rename.sh` - ✏️ Rename to standard format
+### 20s: Read Processing
+Primary analysis workflows
+- `20_process_reads_basic.sh` — Single-sample processing
+- `21_process_reads_barcode.sh` — Multiplexed barcode processing
+- `22_process_reads_fast.sh` — Rapid screening mode
+- `23_process_reads_fast2.sh` — Alternative fast processing
+- **`24_process_reads_optimized.sh`** — **Recommended production pipeline**
+- `25_process_reads_catchup.sh` — Batch processing of accumulated data
+- `26_process_reads_test.sh` — Development testing
+- `27_process_reads_fast_viz.r` — Quick visualization for fast mode
 
----
+### 30s: Parsing Utilities
+Data transformation and formatting
+- `30_kraken_parse.awk` — Kraken2 output parsing
+- `31_taxonomy_colors.awk` — Taxonomy color scheme generation
 
-### 🔄 **20s: Read Processing** - The main event!
+### 40s: Database Integration
+DuckDB data loading and management
+- `40_kraken_db.r` — Load Kraken2 classifications
+- `41_krakenreport_db.r` — Load Kraken2 summary reports
+- `42_prokka_db.r` — Load Prokka annotations
+- `43_sketch_db.r` — Load sendsketch profiles
+- `44_tetra_db.r` — Load tetranucleotide frequencies
+- `45_stats_db.r` — Load assembly statistics
+- `46_log_db.r` — Load processing logs
+- `47_merge_db.r` — Merge run databases
+- `48_merge_all_db.r` — Consolidate all expedition data
+- `49_kraken_table.r` — Generate summary tables
 
-```
-╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
-║  🧬 FASTQ READS → [MAGIC HAPPENS HERE] → 🏷️ TAXONOMY + 📝 GENES ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝
-```
+### 50s: Visualization
+Quality metrics and exploratory plots
+- `50_plot_nano_qscores.r` — Nanopore quality score distributions
+- `51_plot_general.r` — General plotting utilities
 
-**Choose your fighter:**
-
-| Script | Speed | Accuracy | Use Case | Emoji |
-|--------|-------|----------|----------|-------|
-| `20_process_reads_basic.sh` | 🐌 | ⭐⭐⭐⭐⭐ | Single samples, max quality | 🎯 |
-| `21_process_reads_barcode.sh` | 🐌 | ⭐⭐⭐⭐⭐ | Standard multiplexed | 📊 |
-| `22_process_reads_fast.sh` | 🚀 | ⭐⭐⭐ | URGENT! Need results NOW | ⚡ |
-| `23_process_reads_fast2.sh` | 🚀 | ⭐⭐⭐ | Alternative fast mode | ⚡⚡ |
-| `24_process_reads_optimized.sh` | 🏎️ | ⭐⭐⭐⭐⭐ | **RECOMMENDED!** AI-enhanced | 🏆 |
-| `25_process_reads_catchup.sh` | 🏎️ | ⭐⭐⭐⭐ | Batch accumulated samples | 📦 |
-| `26_process_reads_test.sh` | 🧪 | ⭐⭐⭐ | Testing new features | 🔬 |
-| `27_process_reads_fast_viz.r` | - | - | Quick plots for fast mode | 📈 |
-
-**🏆 TL;DR: Use `24_process_reads_optimized.sh` for most work!**
-
----
-
-#### 🔬 What Happens During Processing?
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                                                                  │
-│  Step 1: 🔍 FASTQ Validation & Repair                           │
-│          └─ Fix corrupted files, verify integrity               │
-│                                                                  │
-│  Step 2: 🧹 Quality Filtering                                    │
-│          ├─ BBDuk: Remove adapters, contaminants                │
-│          └─ Filtlong: Length & quality filtering                │
-│                                                                  │
-│  Step 3: 🏷️ Taxonomic Classification (Kraken2)                   │
-│          └─ What organisms are in here?                         │
-│                                                                  │
-│  Step 4: 📝 Gene Annotation (Prokka)                             │
-│          └─ What genes do we have?                              │
-│                                                                  │
-│  Step 5: 🎯 Taxonomic Profiling (sendsketch)                     │
-│          └─ Fast sketch-based classification                    │
-│                                                                  │
-│  Step 6: 🧮 Tetranucleotide Frequency (TNF)                      │
-│          └─ Composition signatures for binning                  │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
+### 60s: Interactive Dashboards
+Real-time geographic visualization
+- `60_edna_mapping_viz.r` — Interactive mapping with contamination filtering
 
 ---
 
-### 🔧 **30s: Parsing Utilities** - AWK magic!
+## Primary Workflow: 24_process_reads_optimized.sh
 
-```
-    ┌──────────────────┐
-    │  📄 Raw Output   │
-    └────────┬─────────┘
-             │
-       awk magic ✨
-             │
-             ▼
-    ┌──────────────────┐
-    │  📊 Clean Data   │
-    └──────────────────┘
+### Usage
+
+**Standard Pipeline:**
+```bash
+./24_process_reads_optimized.sh -i <input_dir> -K -P -S
 ```
 
-- `30_kraken_parse.awk` - 🔍 Parse Kraken2 output elegantly
-- `31_taxonomy_colors.awk` - 🎨 Generate taxonomy color schemes
+**With Functional Gene Profiling:**
+```bash
+./24_process_reads_optimized.sh -i <input_dir> -K -P --hmm /path/to/CANT-HYD.hmm
+```
+
+**Multiple HMM Databases:**
+```bash
+./24_process_reads_optimized.sh -i <input_dir> -P \
+  --hmm /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm,/path/to/NCycDB.hmm
+```
+
+### Flags
+
+| Flag | Function | Notes |
+|------|----------|-------|
+| `-i` | Input directory | Required; expects `fastq_pass/` subdirectory |
+| `-K` | Kraken2 classification | Memory-intensive (50-100GB RAM) |
+| `-P` | Prokka annotation | ORF prediction and functional annotation |
+| `-S` | Sendsketch profiling | Fast taxonomic sketching |
+| `-T` | Tetranucleotide freq | Composition analysis for binning |
+| `--hmm` | HMM search | Comma-delimited list of HMM database paths |
+| `--force` | Force rerun | Override resume logic |
+| `-d` | Debug mode | Verbose output for troubleshooting |
+
+### Processing Steps
+
+1. **FASTQ Validation**
+   - Verify gzip integrity (`gzip -t`)
+   - Repair corrupted files (BBMap `reformat.sh`)
+   - Cache validated files for resume performance
+
+2. **Quality Control**
+   - Adapter removal (BBDuk)
+   - Length filtering (≥1kb)
+   - Quality filtering (≥Q7 mean)
+   - Conversion to FASTA format
+
+3. **Taxonomic Classification** (if `-K`)
+   - Kraken2 k-mer classification
+   - Serialized execution to prevent memory exhaustion
+   - Output: `.tsv` (per-read), `.report` (summary)
+
+4. **Gene Annotation** (if `-P`)
+   - Prokka ORF prediction
+   - Functional annotation
+   - Output: GFF, FAA, FFN, TSV
+
+5. **Functional Profiling** (if `--hmm`)
+   - HMMER3 search against specified databases
+   - Trusted cutoff filtering (`--cut_tc`)
+   - Output: `.tsv` (hit table), `.tbl` (domain table)
+
+6. **Optional Profiling**
+   - Sendsketch taxonomic sketching (if `-S`)
+   - Tetranucleotide frequency calculation (if `-T`)
+
+### Critical: Kraken2 Memory Management
+
+**The `-K` flag MUST only be used with `24_process_reads_optimized.sh`.**
+
+Kraken2 loads entire database into memory (50-100GB). This script uses GNU semaphores to serialize Kraken2 calls while maintaining parallelism for other steps. Other scripts will spawn multiple instances simultaneously and crash the system.
+
+Implementation:
+```bash
+sem --id kraken_db_lock kraken2 [options]
+```
+
+### Resume Logic
+
+The pipeline implements stage-aware resume capability:
+
+- **Basic QC**: Skips if `.fa` file exists
+- **Kraken2**: Skips if `.tsv` exists (unless `--force`)
+- **Prokka**: Skips if `PROKKA_*.tsv` exists
+- **HMM**: Skips if `.tsv` exists for each database
+
+Atomic operations prevent corruption on interrupt:
+```bash
+process > output.tmp
+mv output.tmp output  # Atomic rename
+```
 
 ---
 
-### 💾 **40s: Database Integration** - DuckDB FTW!
+## Script Comparison
 
-```
-╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
-║  🦆 DUCKDB - The Secret Weapon for Real-Time Analysis 🦆      ║
-║                                                               ║
-║  Why DuckDB?                                                  ║
-║  ✅ FAST analytical queries (OLAP)                            ║
-║  ✅ Embedded database (no server needed!)                     ║
-║  ✅ Works great on laptops & ships                            ║
-║  ✅ SQL queries while sequencing! 🎉                          ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝
-```
+| Script | Parallelism | Kraken2 Safe | Use Case |
+|--------|-------------|--------------|----------|
+| 20_basic | Serial | ❌ | Single sample, maximum control |
+| 21_barcode | Parallel | ❌ | Standard workflow (no Kraken) |
+| 22_fast | Parallel | ❌ | Rapid screening |
+| **24_optimized** | **Parallel+Serial** | **✅** | **Production (Kraken OK)** |
+| 25_catchup | Parallel | ❌ | Batch accumulated data |
 
-**Database scripts:**
+---
 
-```
-40_kraken_db.r           →  🏷️ Taxonomy classifications
-41_krakenreport_db.r     →  📊 Summary reports
-42_prokka_db.r           →  🧬 Gene annotations
-43_sketch_db.r           →  🎯 Sketch profiles
-44_tetra_db.r            →  🧮 TNF signatures
-45_stats_db.r            →  📈 Assembly stats
-46_log_db.r              →  📝 Processing logs
-47_merge_db.r            →  🔗 Merge run databases
-48_merge_all_db.r        →  🌍 Merge EVERYTHING
-49_kraken_table.r        →  📋 Summary tables
-```
+## DuckDB Integration
 
-**Example workflow:**
+Real-time SQL queries on growing datasets:
+
 ```r
-# While at sea, query your growing database!
-library(duckdb)
-con <- dbConnect(duckdb(), "expedition_data.duckdb")
+library(DuckDB)
+con <- dbConnect(duckdb(), "expedition.duckdb")
 
-# How much Cyanobacteria do we have?
-dbGetQuery(con, "SELECT sample_id, COUNT(*) as cyano_reads
-                 FROM kraken_results
-                 WHERE taxonomy LIKE '%Cyanobacteria%'
-                 GROUP BY sample_id")
-
-# 🔥 Real-time science! 🔥
+# Query cyanobacteria abundance
+dbGetQuery(con, "
+  SELECT sample_id, COUNT(*) as cyano_reads
+  FROM kraken_results
+  WHERE taxonomy LIKE '%Cyanobacteria%'
+  GROUP BY sample_id
+  ORDER BY cyano_reads DESC
+")
 ```
 
 ---
 
-### 📊 **50s: Visualization** - Pretty plots!
+## Interactive Dashboard
 
+Launch geographic visualization:
+```bash
+Rscript 60_edna_mapping_viz.r
 ```
-    📊 ┌─────────────────┐
-       │  Quality Scores │
-       │    ╱╲    ╱╲     │  ← Your beautiful data
-       │   ╱  ╲  ╱  ╲    │
-       │  ╱    ╲╱    ╲   │
-       └─────────────────┘
-```
-
-- `50_plot_nano_qscores.r` - 📈 Quality score distributions
-- `51_plot_general.r` - 🎨 General plotting utilities
-
----
-
-### 🗺️ **60s: Interactive Dashboards** - The showstopper!
-
-```
-╔═══════════════════════════════════════════════════════════════════╗
-║                                                                   ║
-║             🗺️ EDNA GEOGRAPHIC MAPPING DASHBOARD 🗺️               ║
-║                                                                   ║
-║   ┌────────────────────────────────────────────────────────┐    ║
-║   │  🌍 Interactive Map                                     │    ║
-║   │                                                         │    ║
-║   │    🔴 Station 1: High Cyanobacteria                    │    ║
-║   │    🟡 Station 2: Moderate diversity                    │    ║
-║   │    🟢 Station 3: Clean water                           │    ║
-║   │                                                         │    ║
-║   │  Click markers for:                                    │    ║
-║   │  • Taxonomic breakdown                                 │    ║
-║   │  • Read counts                                         │    ║
-║   │  • Contamination flags                                 │    ║
-║   │  • Time series plots                                   │    ║
-║   │                                                         │    ║
-║   └────────────────────────────────────────────────────────┘    ║
-║                                                                   ║
-╚═══════════════════════════════════════════════════════════════════╝
-```
-
-**The crown jewel:**
-- `60_edna_mapping_viz.r` - 🗺️ Geographic mapping with contamination filtering
 
 **Features:**
-- 🌍 Interactive leaflet maps
-- 📍 GPS-tagged samples
-- 🔴 Real-time updates as data streams in
-- 🚨 Contamination alerts (human, plant, lab reagents)
-- 📊 Taxonomic pie charts per location
-- 🎨 Beautiful color-coded taxonomy
-- ⏱️ Time-series animations
+- Real-time updates as data accumulates
+- GPS-tagged sample locations
+- Taxonomic composition per site
+- Contamination filtering (human, plant, reagents)
+- Time-series visualization
+- Export capabilities
 
-**Run it:**
-```r
-# Fire up the dashboard!
-Rscript 60_edna_mapping_viz.r
+---
 
-# Opens in browser: http://localhost:8080
-# Watch your expedition data come alive! 🎉
+## Input Structure
+
+Expected directory organization:
+```
+input_dir/
+└── fastq_pass/
+    ├── barcode01/
+    │   └── *.fastq.gz
+    ├── barcode02/
+    │   └── *.fastq.gz
+    └── ...
 ```
 
 ---
 
-## 🔥 Key Features
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                                                              │
-│  ⚡ REAL-TIME PROCESSING                                     │
-│     └─ Process reads as they stream from sequencer          │
-│                                                              │
-│  🔄 INCREMENTAL UPDATES                                      │
-│     └─ Smart resume: only process new data                  │
-│                                                              │
-│  💾 DUCKDB BACKEND                                           │
-│     └─ Lightning-fast SQL queries during expeditions        │
-│                                                              │
-│  🎚️ MULTIPLE SPEED MODES                                     │
-│     └─ Trade speed vs accuracy based on your needs          │
-│                                                              │
-│  🧹 CONTAMINATION DETECTION                                  │
-│     └─ Flag human, plant, lab reagent DNA                   │
-│                                                              │
-│  📊 LIVE DASHBOARDS                                          │
-│     └─ Watch taxonomy appear in real-time on maps!          │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 🚀 Quick Start Guide
-
-### Basic Usage
-
-```bash
-# 1. 🏆 The recommended way (optimized, reliable)
-./24_process_reads_optimized.sh /path/to/barcode_dir
-
-# 2. ⚡ Need results in a hurry?
-./22_process_reads_fast.sh /path/to/barcode_dir
-
-# 3. 📊 Launch the dashboard (in another terminal)
-Rscript 60_edna_mapping_viz.r
-```
-
-### At-Sea Workflow
-
-```
-Day 1: 🚢 Board the vessel
-       └─ Set up MinKNOW sequencer
-       └─ Start dashboard: Rscript 60_edna_mapping_viz.r
-
-Day 2: 🧪 Collect first samples
-       └─ Load into sequencer
-       └─ Run: ./24_process_reads_optimized.sh barcode01
-       └─ Watch magic happen on dashboard! ✨
-
-Day 3+: 🔄 Continuous sampling
-       └─ Script auto-detects new data
-       └─ Dashboard updates automatically
-       └─ Monitor for HABs, pathogens, biodiversity
-
-End:   📊 Export DuckDB for post-expedition analysis
-       └─ Generate publication-ready figures
-```
-
----
-
-## 💡 Pro Tips
-
-### 🎯 Script Selection Guide
-
-**Use `24_process_reads_optimized.sh` when:**
-- ✅ You want the best quality + speed balance
-- ✅ Standard expedition workflow
-- ✅ You want AI-enhanced error handling
-- ✅ Resume capability is important
-
-**Use `22_process_reads_fast.sh` when:**
-- ⚡ You need results in <1 hour
-- ⚡ Initial screening for pathogens/HABs
-- ⚡ Real-time decision-making required
-- ⚡ Can re-run with full analysis later
-
-**Use `21_process_reads_barcode.sh` when:**
-- 🔬 Maximum quality is critical
-- 🔬 Publication-grade analysis
-- 🔬 Time is not a constraint
-
-### 🎚️ Speed vs Accuracy Trade-offs
-
-```
-🐌 ←─────────────────────────────────────────────────→ 🚀
-
-20_basic              24_optimized         22_fast
-   ⭐⭐⭐⭐⭐                  ⭐⭐⭐⭐⭐                ⭐⭐⭐
-   Slowest               BEST               Fastest
-   Most accurate        Great accuracy      Good enough
-```
-
-### 🧹 Contamination Filtering
-
-The scripts automatically flag:
-- 🧍 Human DNA (from handling)
-- 🌱 Plant DNA (pollen, terrestrial runoff)
-- 🧪 Lab reagents (from extraction kits)
-
-Check the dashboard for red flags! 🚩
-
-### 💾 Managing DuckDB Files
-
-```bash
-# Check database size
-ls -lh *.duckdb
-
-# Query from command line
-duckdb expedition.duckdb "SELECT COUNT(*) FROM kraken_results"
-
-# Export to CSV
-duckdb expedition.duckdb "COPY (SELECT * FROM kraken_results) TO 'results.csv'"
-```
-
----
-
-## 🎓 Understanding the Output
-
-### Directory Structure
+## Output Structure
 
 ```
 output/
-├── 📁 barcode01/
-│   ├── 📄 filtered_reads.fastq.gz        ← Quality-filtered reads
-│   ├── 📄 kraken_output.txt              ← Taxonomic classification
-│   ├── 📄 prokka/                        ← Gene annotations
-│   │   ├── annotations.gff
-│   │   ├── proteins.faa
-│   │   └── ...
-│   ├── 📄 sendsketch_results.txt         ← Taxonomic sketches
-│   └── 📄 tetra_frequencies.txt          ← TNF profiles
-│
-├── 📁 barcode02/
-│   └── ...
-│
-├── 💾 expedition.duckdb                  ← All results in one DB!
-└── 📊 logs/                              ← Processing logs
+├── FLOWCELL_ID/
+│   ├── barcode01/
+│   │   ├── fa/              Quality-filtered FASTA sequences
+│   │   ├── fq/              Intermediate FASTQ (BBDuk output)
+│   │   ├── kraken/          Taxonomic classifications
+│   │   │   ├── sample.tsv       Per-read assignments
+│   │   │   └── sample.report    Summary statistics
+│   │   ├── prokka/          Gene annotations (per-sample dirs)
+│   │   │   └── SAMPLE/
+│   │   │       ├── PROKKA_*.gff
+│   │   │       ├── PROKKA_*.faa    Protein sequences
+│   │   │       └── PROKKA_*.tsv    Feature table
+│   │   ├── hmm/             Functional gene search results
+│   │   │   ├── sample.DBNAME.tsv   Hit table
+│   │   │   └── sample.DBNAME.tbl   Domain table
+│   │   ├── sketch/          Sendsketch profiles
+│   │   ├── tetra/           Tetranucleotide frequencies
+│   │   └── log.txt          Processing log
+│   └── barcode02/
+│       └── ...
+├── expedition.duckdb        Integrated database
+└── failed_files.txt         Failure diagnostics
 ```
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-### Problem: Script says "No new data"
-```
-🔍 Cause: All data already processed
-✅ Solution: This is normal! Script is smart about skipping done work.
-```
+### No New Data Processed
 
-### Problem: MinKNOW files have weird names
-```
-🔍 Cause: MinKNOW output naming varies by version
-✅ Solution: Run `12_minknow_rename.sh` first
-```
+**Cause:** All files already processed (resume logic working correctly)
 
-### Problem: Dashboard won't load
-```
-🔍 Cause: Missing R packages or port conflict
-✅ Solution:
-   1. Install packages: install.packages(c("tidyverse", "leaflet", "DuckDB"))
-   2. Check port: Try http://localhost:8081 instead
-```
+**Solution:** Use `--force` to override, or process new data
 
-### Problem: Kraken2 says "database not found"
-```
-🔍 Cause: Database path incorrect
-✅ Solution: Edit script header to point to your Kraken2 DB
+### Kraken2 Memory Error
+
+**Cause:** Multiple Kraken2 instances running simultaneously
+
+**Solution:** Only use `-K` with `24_process_reads_optimized.sh`
+
+### Prokka Not Detecting Existing Output
+
+**Cause:** Missing `PROKKA_*.tsv` file in expected location
+
+**Check:**
+```bash
+ls output/*/barcode*/prokka/*/PROKKA_*.tsv
 ```
 
----
+### HMM Search Not Running
 
-## 📚 Further Reading
+**Cause:** Relative path to HMM file, or gzipped HMM
 
-- 📖 Kraken2 manual: [github.com/DerrickWood/kraken2](https://github.com/DerrickWood/kraken2)
-- 📖 Prokka docs: [github.com/tseemann/prokka](https://github.com/tseemann/prokka)
-- 📖 DuckDB docs: [duckdb.org](https://duckdb.org)
-- 📖 Oxford Nanopore: [nanoporetech.com](https://nanoporetech.com)
+**Solution:**
+- Use absolute paths: `/path/to/file.hmm`
+- Decompress: `gunzip file.hmm.gz`
+- Verify format: `head -1 file.hmm` (should show "HMMER3")
 
 ---
 
-```
-╔═══════════════════════════════════════════════════════════════╗
-║                                                               ║
-║           🌊 RIDE THE WAVE OF REAL-TIME GENOMICS 🌊           ║
-║                                                               ║
-║     ⚡ Fast processing • 💾 Smart storage • 🗺️ Live viz ⚡       ║
-║                                                               ║
-║                  Now go catch some microbes! 🦠               ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝
-```
+## Performance Optimization
+
+### Parallelism
+
+Default: 32 parallel workers processing 1 file each
+- Adjust with GNU parallel `-j` flag
+- Monitor CPU usage: `htop`
+- Monitor memory: `free -h`
+
+### Storage
+
+- Enable FASTQ caching for faster resume: `CACHE_FASTQ=/data/.fastq_pass`
+- Use SSD for output directory
+- Monitor space: `df -h`
+
+### Resource Requirements
+
+**Minimum (no Kraken):**
+- 16 cores
+- 32GB RAM
+- 500GB storage
+
+**Recommended (with Kraken):**
+- 32 cores
+- 128GB RAM
+- 1TB storage
+
+---
+
+## Technical Documentation
+
+Detailed implementation notes:
+- `CLAUDE.md` — Architecture and design decisions
+- `RESUME_LOGIC.md` — Stage-aware checkpoint system
+- `HMM_SEARCH_GUIDE.md` — Functional gene profiling details
+- `OUTPUT_FORMATS.md` — Progress line interpretation
+- `DEPLOYMENT_ISSUES.md` — Portability and hardcoded paths
+- `CRASH_SAFETY.md` — Atomic operations and data integrity
+- `BUGFIX_*.md` — Historical issue resolutions
+
+---
+
+## References
+
+See main repository `METHODS.md` and `CITATION.bib` for complete methodology and references.
