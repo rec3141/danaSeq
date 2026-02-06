@@ -139,9 +139,9 @@ while (( $# )); do
   esac
 done
 
-[[ -z "${INPUT}" ]] && { echo "[ERR] --input is required" >&2; echo "" >&2; print_help; exit 2; }
-[[ ! -d "${INPUT}" ]] && { echo "[ERR] input dir missing: ${INPUT}" >&2; exit 2; }
-[[ -n "${HMM_DATABASES}" && ${RUN_PROKKA} -eq 0 ]] && { echo "[ERR] --hmm requires -P (Prokka)" >&2; exit 2; }
+[[ -z "${INPUT}" ]] && { echo "[ERROR] --input is required" >&2; echo "" >&2; print_help; exit 2; }
+[[ ! -d "${INPUT}" ]] && { echo "[ERROR] Input directory does not exist: ${INPUT}" >&2; exit 2; }
+[[ -n "${HMM_DATABASES}" && ${RUN_PROKKA} -eq 0 ]] && { echo "[ERROR] --hmm requires -P (Prokka flag)" >&2; exit 2; }
 [[ -z "${OUTPUT}" ]] && OUTPUT="out_$(basename "${INPUT}")_$(date +%Y%m%d_%H%M%S)"
 
 # Create output directory with error checking
@@ -192,10 +192,12 @@ run_cmd() {
   fi
 }
 
+# Output debug message if DEBUG mode enabled
 debug_msg() {
   (( DEBUG )) && echo "[DEBUG] $*" >&2
 }
 
+# Output verbose message if VERBOSE or DEBUG mode enabled
 verbose_msg() {
   (( VERBOSE )) && echo "[VERBOSE] $*" >&2
 }
@@ -267,7 +269,7 @@ mapfile -d '' FILES < <(
 
 NUMFILES=${#FILES[@]}
 echo "[INFO] $(date +%H:%M:%S) Found ${NUMFILES} FASTQ files"
-(( NUMFILES == 0 )) && { echo "[WARN] No FASTQ files found"; exit 0; }
+(( NUMFILES == 0 )) && { echo "[WARNING] No FASTQ files found matching criteria" >&2; exit 0; }
 
 # Optional shuffled ordering for balanced batch processing
 # Uses MD5 hash of file path to create stable pseudo-random order
@@ -407,14 +409,14 @@ validate_fastq() {
       if gzip -t "$tmpfile" 2>/dev/null; then
         # Atomic move to cache
         mv -f "$tmpfile" "${cached}"
-        echo "[FIXED] $file" >&2
+        echo "[INFO] Repaired corrupted FASTQ: $file" >&2
         printf '%s\n' "${cached}"
         return 0
       fi
     fi
 
     # Cleanup happens via trap
-    echo "[BAD] Could not fix: $file" >&2
+    echo "[ERROR] Cannot repair corrupted FASTQ: $file" >&2
     return 1
   fi
 }
@@ -900,7 +902,7 @@ fi
 # Validated files are cached for fast subsequent access
 
 echo "[INFO] $(date +%H:%M:%S) Validating FASTQ files"
-printf '%s\0' "${FILES[@]}" | parallel --null -j "${THREADS}" --bar 'validate_fastq {} >/dev/null || echo "[BAD] {}" >&2'
+printf '%s\0' "${FILES[@]}" | parallel --null -j "${THREADS}" --bar 'validate_fastq {} >/dev/null || echo "[ERROR] Validation failed: {}" >&2'
 
 # Map original file paths to their cached/validated counterparts
 mapfile -t CACHED < <(
@@ -925,7 +927,7 @@ start_ts=$(date +%s)
 process_batch() {
   local elapsed=$(( $(date +%s) - start_ts ))
   if (( elapsed > MAX_DURATION )); then
-    echo "[WARN] Time limit reached: ${elapsed}s > ${MAX_DURATION}s"
+    echo "[WARNING] Time limit reached: ${elapsed}s > ${MAX_DURATION}s" >&2
     echo "[INFO] Stopping batch. Resume capability allows restarting from this point."
     return 0
   fi

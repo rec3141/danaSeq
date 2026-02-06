@@ -82,7 +82,7 @@ readonly NC='\033[0m' # No Color
 
 log_info()    { echo -e "${BLUE}[INFO]${NC}    $(date '+%H:%M:%S') | $*"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $(date '+%H:%M:%S') | $*"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${NC}    $(date '+%H:%M:%S') | $*"; }
+log_warn()    { echo -e "${YELLOW}[WARNING]${NC} $(date '+%H:%M:%S') | $*" >&2; }
 log_error()   { echo -e "${RED}[ERROR]${NC}   $(date '+%H:%M:%S') | $*" >&2; }
 log_step()    { echo -e "\n${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; 
                 echo -e "${PURPLE}  $*${NC}";
