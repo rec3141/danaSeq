@@ -325,10 +325,20 @@ run_metabat() {
     for bin_file in "${metabat_dir}"/bin*.fa; do
         [[ -e "$bin_file" ]] || continue
         local bin_name=$(basename "$bin_file")
-        grep '>' "$bin_file" | tr -d '>' | cut -f1 | while read -r contig; do
+
+        # Extract contig names from FASTA headers
+        if ! grep '>' "$bin_file" | tr -d '>' | cut -f1 | while read -r contig; do
             printf '%s\t%s\n' "$contig" "$bin_name" >> "$contig_bins"
-        done
+        done; then
+            log_error "Failed to process bin file: $bin_file"
+            return 1
+        fi
     done
+
+    # Verify contig_bins file was created and is not empty
+    if [[ ! -s "$contig_bins" ]]; then
+        log_warn "No bins produced by MetaBAT2"
+    fi
     
     log_success "MetaBAT2 complete!"
 }
@@ -364,10 +374,20 @@ run_dastool() {
         return 1
     fi
     mv "${OUTDIR}"/dastool*.* "$dastool_dir/" 2>/dev/null || true
-    
+
     # Create combined bins file
-    cat "${dastool_dir}"/*.fa > "${dastool_dir}/allbins.fa" 2>/dev/null || true
-    
+    log_info "Combining bin sequences..."
+    if ! cat "${dastool_dir}"/*.fa > "${dastool_dir}/allbins.fa" 2>/dev/null; then
+        log_warn "No bin files found to combine (this may be expected if no bins passed quality thresholds)"
+        # Create empty file to prevent downstream errors
+        touch "${dastool_dir}/allbins.fa"
+    fi
+
+    # Verify at least some output was produced
+    if [[ ! -s "${dastool_dir}/allbins.fa" ]]; then
+        log_warn "DAS_Tool produced no bins - check quality thresholds"
+    fi
+
     log_success "DAS_Tool complete!"
 }
 
@@ -384,34 +404,43 @@ run_taxonomy() {
     fi
     
     log_info "Running Kaiju classification..."
-    
+
     # Run Kaiju
-    conda run -n SemiBin --live-stream kaiju \
+    if ! conda run -n SemiBin --live-stream kaiju \
         -t "${kaiju_db}/nodes.dmp" \
         -f "${kaiju_db}/kaiju_db_progenomes.fmi" \
         -i "${dastool_dir}/allbins.fa" \
         -z "$THREADS" \
-        -o "${dastool_dir}/kaiju.allbins.tsv"
-    
+        -o "${dastool_dir}/kaiju.allbins.tsv"; then
+        log_error "Kaiju classification failed"
+        return 1
+    fi
+
     # Add taxonomic names
     log_info "Adding taxonomic names..."
-    conda run -n SemiBin --live-stream kaiju-addTaxonNames \
+    if ! conda run -n SemiBin --live-stream kaiju-addTaxonNames \
         -t "${kaiju_db}/nodes.dmp" \
         -n "${kaiju_db}/names.dmp" \
         -i "${dastool_dir}/kaiju.allbins.tsv" \
         -o "${dastool_dir}/kaiju.allbins-taxa.tsv" \
-        -r superkingdom,phylum,class,order,family,genus,species
-    
+        -r superkingdom,phylum,class,order,family,genus,species; then
+        log_error "Adding taxonomic names failed"
+        return 1
+    fi
+
     # Create summary (join with contig lengths and bins)
     log_info "Creating summary..."
-    join -t $'\t' \
+    if ! join -t $'\t' \
         <(sort -k1,1 "${dastool_dir}/dastool.seqlength") \
         <(paste \
             <(sort -k1,1 "${dastool_dir}/dastool_DASTool_contig2bin.tsv") \
             <(sort -k2,2 "${dastool_dir}/kaiju.allbins-taxa.tsv")) \
         | sort -k3,3 -k2,2rn \
-        > "$kaiju_summary"
-    
+        > "$kaiju_summary"; then
+        log_error "Creating summary table failed"
+        return 1
+    fi
+
     log_success "Taxonomic classification complete!"
 }
 
@@ -427,27 +456,60 @@ run_tetramer_analysis() {
     fi
     
     log_info "Calculating tetramer frequencies..."
-    ensure_dir "$tetra_dir"
-    
+
+    if ! ensure_dir "$tetra_dir"; then
+        log_error "Cannot create tetramer directory"
+        return 1
+    fi
+
     # Create annotation file
-    grep '>' "$ASSEMBLY" | sed 's/>//' | awk '{print $0"\t"$0"\t"$0}' > "${tetra_dir}/annotation.txt"
-    
+    log_info "Creating annotation file..."
+    if ! grep '>' "$ASSEMBLY" | sed 's/>//' | awk '{print $0"\t"$0"\t"$0}' > "${tetra_dir}/annotation.txt"; then
+        log_error "Failed to create annotation file"
+        return 1
+    fi
+
     # Run tetramer calculation
-    perl /work/apps/tetramer_freqs_esom.pl \
+    log_info "Running tetramer calculation (this may take several minutes)..."
+    if ! perl /work/apps/tetramer_freqs_esom.pl \
         -f "$ASSEMBLY" \
         -a "${tetra_dir}/annotation.txt" \
         -min 1500 \
-        -max 10000000
-    
+        -max 10000000; then
+        log_error "Tetramer calculation failed"
+        return 1
+    fi
+
+    # Verify tetramer output files exist
+    shopt -s nullglob
+    local tetra_lrn=(Tetra_*.lrn)
+    local tetra_names=(Tetra_*.names)
+
+    if (( ${#tetra_lrn[@]} == 0 )) || (( ${#tetra_names[@]} == 0 )); then
+        log_error "Tetramer calculation produced no output files"
+        return 1
+    fi
+
     # Process output
-    paste <(echo "seqid") <(head -n4 Tetra_*.lrn | tail -n1 | cut -f2-) > "$tnfs_file"
-    paste \
-        <(awk '$1 !~ /^%/' Tetra_*.names) \
-        <(awk '$1 !~ /^%/' Tetra_*.lrn) \
-        | cut -f3,5- > "${tetra_dir}/assembly.lrn"
-    
-    mv Tetra_* "$tetra_dir/"
-    
+    log_info "Processing tetramer output..."
+    if ! paste <(echo "seqid") <(head -n4 "${tetra_lrn[0]}" | tail -n1 | cut -f2-) > "$tnfs_file"; then
+        log_error "Failed to create tnfs header file"
+        return 1
+    fi
+
+    if ! paste \
+        <(awk '$1 !~ /^%/' "${tetra_names[0]}") \
+        <(awk '$1 !~ /^%/' "${tetra_lrn[0]}") \
+        | cut -f3,5- > "${tetra_dir}/assembly.lrn"; then
+        log_error "Failed to process tetramer results"
+        return 1
+    fi
+
+    # Move output files to tetra directory
+    if ! mv Tetra_* "$tetra_dir/" 2>/dev/null; then
+        log_warn "Some tetramer files may not have been moved"
+    fi
+
     log_success "Tetramer analysis complete!"
 }
 
@@ -465,9 +527,12 @@ run_bin_qc() {
         # Assembly stats
         if ! file_ready "$stats_file"; then
             log_info "Stats: $base"
-            stats.sh "$bin_file" out="$stats_file"
+            if ! stats.sh "$bin_file" out="$stats_file"; then
+                log_warn "Failed to calculate stats for $base"
+                continue
+            fi
         fi
-        
+
         # Sketch against databases (with idempotency)
         for db in refseq nt protein; do
             local sketch_file="${dastool_dir}/ss_${db}_${base}.tsv"
@@ -475,12 +540,16 @@ run_bin_qc() {
                 log_info "Sketching $base against $db..."
                 local address="$db"
                 [[ "$db" == "protein" ]] && address="protein" || true
-                sendsketch.sh \
+
+                if ! sendsketch.sh \
                     in="$bin_file" \
                     out="$sketch_file" \
                     level=3 \
                     format=3 \
-                    address="$address"
+                    address="$address"; then
+                    log_warn "Sketching failed for $base against $db"
+                    continue
+                fi
             fi
         done
     done
@@ -501,22 +570,35 @@ run_checkm() {
     fi
     
     log_info "Running CheckM2..."
-    
-    conda run -n checkm2 --live-stream checkm2 predict \
+
+    if ! conda run -n checkm2 --live-stream checkm2 predict \
         --threads "$THREADS" \
         --input "$dastool_dir" \
         -x fa \
-        --output-directory "$checkm_dir"
-    
+        --output-directory "$checkm_dir"; then
+        log_error "CheckM2 failed"
+        return 1
+    fi
+
+    # Verify output was created
+    if [[ ! -s "$checkm_report" ]]; then
+        log_error "CheckM2 produced no output report"
+        return 1
+    fi
+
     log_success "CheckM2 complete!"
 }
 
 run_visualization() {
     log_step "STEP 10: VISUALIZATION"
-    
+
     log_info "Generating plots..."
-    Rscript /data/dana/plot-bins.R "$OUTDIR" "$METAFILE"
-    
+
+    if ! Rscript /data/dana/plot-bins.R "$OUTDIR" "$METAFILE"; then
+        log_warn "Visualization failed (this is not critical)"
+        return 0  # Non-fatal - visualization is optional
+    fi
+
     log_success "Visualization complete!"
 }
 

@@ -293,8 +293,25 @@ fi
 # This mirrors the input structure for easy navigation
 
 echo "[INFO] $(date +%H:%M:%S) Creating directories"
-BARCODELIST=$(printf '%s\n' "${FILES[@]}" | xargs -n1 basename | cut -f3 -d'_' | sort -u)
-FCLIST=$(printf '%s\n' "${FILES[@]}" | xargs -n1 basename | cut -f1 -d'_' | sort -u)
+
+# Extract unique barcode and flowcell IDs from filenames
+# Expected filename format: FLOWCELL_pass_barcode01_*.fastq.gz
+if ! BARCODELIST=$(printf '%s\n' "${FILES[@]}" | xargs -n1 basename | cut -f3 -d'_' | sort -u); then
+  echo "[ERROR] Failed to extract barcode list from filenames" >&2
+  exit 1
+fi
+
+if ! FCLIST=$(printf '%s\n' "${FILES[@]}" | xargs -n1 basename | cut -f1 -d'_' | sort -u); then
+  echo "[ERROR] Failed to extract flowcell list from filenames" >&2
+  exit 1
+fi
+
+# Validate that we got some barcodes/flowcells
+if [[ -z "$BARCODELIST" ]] || [[ -z "$FCLIST" ]]; then
+  echo "[ERROR] No valid barcodes or flowcells found in filenames" >&2
+  echo "[ERROR] Expected format: FLOWCELL_pass_barcodeNN_*.fastq.gz" >&2
+  exit 1
+fi
 
 # Quote loop variables to prevent word splitting
 while IFS= read -r fc; do
