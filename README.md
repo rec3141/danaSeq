@@ -1,354 +1,275 @@
 # dānaSeq
 
-**Genomics-Based Ecosystem Service Assessment Tool**
+**Real-time Metagenomic Analysis for Ecosystem Service Assessment**
 
-"Ecosystem Services" are the benefits that accrue to humans from having a healthy ecosystem. When natural forces or human activities disturb the ecosystem, these benefits may diminish or change. This software takes its name from *dāna*, the Buddhist concept of selfless giving and generosity in service of others.
-
-dānaSeq conducts real-time analysis of Nanopore sequencing data to identify microbial communities, taxa and genes that affect Ecosystem Services using automated binning, genome assembly, and annotation of marker genes using a custom database of hidden markov models (HMMs) that build upon FOAM (Prestat et al. 2014), CANT-HYD (Khot et al. 2022), NCycDB (Tu et al. 2019), HADEG (Rojas-Vargas et al. 2023), HMDB (Wang et al. 2023), TASmania (Akarsu 2019), IDOPS (Díaz-Valerio et al. 2021).
+Named after the Buddhist concept of *dāna* (selfless giving), this pipeline conducts shipboard analysis of Oxford Nanopore sequencing data to assess microbial ecosystem services in aquatic environments.
 
 ---
 
-```
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║                                                                               ║
-║   ███╗   ███╗███████╗████████╗ █████╗  ██████╗ ███████╗███╗   ██╗ ██████╗   ║
-║   ████╗ ████║██╔════╝╚══██╔══╝██╔══██╗██╔════╝ ██╔════╝████╗  ██║██╔═══██╗  ║
-║   ██╔████╔██║█████╗     ██║   ███████║██║  ███╗█████╗  ██╔██╗ ██║██║   ██║  ║
-║   ██║╚██╔╝██║██╔══╝     ██║   ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║██║   ██║  ║
-║   ██║ ╚═╝ ██║███████╗   ██║   ██║  ██║╚██████╔╝███████╗██║ ╚████║╚██████╔╝  ║
-║   ╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝   ║
-║                                                                               ║
-║              🌊 OXFORD NANOPORE EDNA ANALYSIS PIPELINE 🌊                    ║
-║                                                                               ║
-║          Real-time metagenomic sequencing for oceanographic research         ║
-║                                                                               ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
-```
+## Overview
 
-```
-                     🦠      🧬      🦠      🧬      🦠
-                  ╔═══════════════════════════════════════╗
-                  ║  ATCGATCGATCGATCGATCGATCGATCGATCGATCG ║
-                  ║  TAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAG ║
-                  ╚═══════════════════════════════════════╝
-                     🔬   DECODE THE OCEANS   🔬
-```
+dānaSeq provides a complete workflow for real-time metagenomic analysis during oceanographic expeditions, from raw nanopore reads to high-quality metagenome-assembled genomes (MAGs) with functional annotation.
 
-## 🎯 What Is This?
+**Core Capabilities:**
+- Real-time taxonomic classification during sequencing
+- Automated quality control and preprocessing
+- Consensus genome binning (SemiBin2, MetaBAT2, MaxBin2)
+- Functional gene annotation using custom HMM databases
+- Interactive geographic visualization
+- MAG assembly and polishing to MIMAG standards
 
-A **LEGENDARY** bioinformatics pipeline for analyzing environmental DNA from the ocean in **REAL-TIME** during research expeditions. We're talking shipboard sequencing, live taxonomic classification, and MAG assembly while you're still at sea! 🚢
+**Functional Gene Databases:**
+FOAM (Prestat et al. 2014), CANT-HYD (Khot et al. 2022), NCycDB (Tu et al. 2019), HADEG (Rojas-Vargas et al. 2023), HMDB (Wang et al. 2023), TASmania (Akarsu 2019), IDOPS (Díaz-Valerio et al. 2021)
 
 ---
 
-## 📁 Project Structure
+## Architecture
 
 ```
-🌊 DANA METAGENOMIC PIPELINE
-│
-├─ 🏃 10_realtime_processing/     ⚡ LIVE ANALYSIS AT SEA
-│   ├─ 10s: 📦 Preprocessing (MinKNOW wrangling)
-│   ├─ 20s: 🔄 Read processing (6 flavors of awesome)
-│   ├─ 30s: 🔧 Parsing utilities (AWK magic)
-│   ├─ 40s: 💾 DuckDB integration (FAST queries)
-│   ├─ 50s: 📊 Visualization (plots galore)
-│   └─ 60s: 🗺️  Interactive dashboards (where's the cyano?)
-│
-├─ 🧬 20_mag_assembly/            🔬 MAG RECONSTRUCTION
-│   ├─ 10s: 🏗️  Assembly (Flye power)
-│   ├─ 20s: 📍 Mapping (minimap2 precision)
-│   ├─ 30s: 🗂️  Binning (3-tool consensus)
-│   ├─ 40s: ✨ Polishing (Racon + Medaka shine)
-│   ├─ 50s: 🏷️  Characterization (what IS this?)
-│   ├─ 60s: 🎼 Complete pipelines (one-stop shop)
-│   ├─ 70s: 🔄 Format conversion (Bandage ready)
-│   ├─ 80s: 📈 Visualization (t-SNE dreams)
-│   └─ 90s: 🌐 Integration (schema + ecosystem)
-│
-└─ 📦 30_archive/                 💀 THE GRAVEYARD
-    └─ Old experiments & deprecated code (RIP)
+dānaSeq Pipeline Structure
+
+10_realtime_processing/     Real-time analysis during sequencing
+├─ 10s  Preprocessing       MinKNOW output validation
+├─ 20s  Read processing     QC, classification, annotation
+├─ 30s  Parsing utilities   Data transformation
+├─ 40s  Database ops        DuckDB integration
+├─ 50s  Visualization       Quality metrics
+└─ 60s  Dashboards          Interactive mapping
+
+20_mag_assembly/            Post-expedition genome assembly
+├─ 10s  Assembly            Flye metagenomic assembly
+├─ 20s  Mapping             Read alignment and coverage
+├─ 30s  Binning             Multi-tool consensus binning
+├─ 40s  Polishing           Racon + Medaka refinement
+├─ 50s  Characterization    Taxonomy and quality assessment
+├─ 60s  Pipelines           End-to-end workflows
+├─ 70s  Format conversion   Interoperability
+├─ 80s  Visualization       Ordination and clustering
+└─ 90s  Integration         Ecosystem service prediction
+
+30_archive/                 Deprecated code
 ```
+
+**Numbering Convention:**
+Scripts are numbered in increments of 10 (10, 20, 30...) to allow insertion of intermediate steps without renumbering the entire pipeline.
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### ⚡ Real-Time Processing (shipboard/field)
+### Prerequisites
+
+Check installed dependencies:
+```bash
+./status.sh
+```
+
+### Real-Time Processing
+
+Recommended workflow for shipboard analysis:
 
 ```bash
 cd 10_realtime_processing
 
-# 🎯 The OPTIMIZED version (AI-enhanced, recommended!)
-./24_process_reads_optimized.sh -i <barcode_dir> -K -P -S
+# Standard pipeline (QC + taxonomy + annotation)
+./24_process_reads_optimized.sh -i <input_dir> -K -P -S
 
-# ⚡ Need SPEED? Go fast mode!
-./22_process_reads_fast.sh -i <barcode_dir> -P -S
+# With functional gene profiling
+./24_process_reads_optimized.sh -i <input_dir> -K -P --hmm /path/to/CANT-HYD.hmm
 
-# 📊 Watch it live on the dashboard
+# Launch interactive dashboard (separate terminal)
 Rscript 60_edna_mapping_viz.r
 ```
 
-> **⚠️ CRITICAL WARNING:** When using Kraken2 (`-K` flag), ONLY use `24_process_reads_optimized.sh`!
-> Kraken loads 50-100GB database into RAM. Other scripts will try to run multiple instances in parallel and **crash your system!** 💥
-> The optimized script uses semaphores to serialize only Kraken calls while keeping other steps parallel. See `CRITICAL_KRAKEN_BUG.md` for details.
+**Critical:** When using Kraken2 (`-K` flag), always use `24_process_reads_optimized.sh`. This script serializes Kraken2 calls to prevent memory exhaustion (Kraken2 loads 50-100GB into RAM). Other scripts will spawn multiple instances and crash the system.
 
-### 🧬 MAG Assembly (post-expedition)
+### MAG Assembly
+
+Complete assembly workflow:
 
 ```bash
 cd 20_mag_assembly
 
-# 🎼 Full orchestra - Assembly → Mapping → Binning → Polish
-./60_map_and_bin_optimized.sh
+# Automated pipeline: assembly → mapping → binning → polishing
+./61_map_and_bin_optimized.sh
 
-# 🎨 Visualize those beautiful bins
+# Visualization
 Rscript 80_plot_bins.R
+Rscript 82_inter_binning_analysis.r
 ```
 
 ---
 
-## 🛠️ Utility Scripts
+## Input/Output
 
-Before diving in, check out these helpful utilities:
-
-### 🎨 `banner.sh` - Welcome Banner
-Display a beautiful introduction to the pipeline!
-```bash
-./banner.sh
+**Input:**
+Oxford Nanopore directory structure with multiplexed barcodes:
 ```
-Perfect for showing off to collaborators or starting your terminal session with style! 🌊
-
-### 📊 `status.sh` - Dependency Checker
-Quickly check which tools are installed and what's missing:
-```bash
-./status.sh
-```
-Shows:
-- ✅ Installed tools (with versions!)
-- ❌ Missing dependencies
-- 💡 Installation recommendations
-- 📁 Directory structure verification
-
-**Pro tip:** Run `./status.sh` before starting an expedition to make sure everything's ready!
-
-### 🎭 `agents.sh` - Expert Advisors
-Get specialized guidance from domain experts:
-```bash
-./agents.sh
+input/fastq_pass/
+├── barcode01/*.fastq.gz
+├── barcode02/*.fastq.gz
+└── ...
 ```
 
-Meet your team:
-- 🌊 **The Oceanographer** - Sampling strategy, water masses, HABs
-- 💻 **The Bioinformatician** - Pipeline optimization, debugging, HPC
-- 🌊 **The Ocean** - Deep wisdom from the waters themselves
-- 🦠 **The Microbial Ecologist** - Community ecology, metabolic guilds
-
-Each agent provides:
-- 📚 Domain-specific knowledge
-- 💡 Best practices and tips
-- ⚠️ Common pitfalls to avoid
-- 🎯 Interpretation guidance
-- 📖 Recommended reading
-
-**Pro tip:** Consult the Oceanographer BEFORE sampling, the Bioinformatician DURING analysis!
-
----
-
-## 🎨 File Naming Convention
-
+**Output:**
 ```
-  10_step_name.sh       ← Nice round numbers
-     ↓
-  20_next_step.sh       ← Plenty of gaps
-     ↓
-  30_another.sh         ← Room to grow!
-     ↓
-  ...future steps...    ← Add whenever!
-```
-
-**The system:**
-- 🔟 **10s-20s:** Core processing (the essentials)
-- 🔧 **30s-40s:** Secondary analysis (getting fancy)
-- 🎯 **50s-60s:** Integration & pipelines (the big guns)
-- 📊 **70s+:** Visualization & reporting (make it pretty!)
-
----
-
-## ✨ Key Features
-
-```
-    ┌─────────────────────────────────────────────────────┐
-    │  ⚡ REAL-TIME      Process as sequencer streams!   │
-    │  🎯 MULTI-TOOL     3-way binning consensus         │
-    │  ✅ QUALITY        QC at every step                │
-    │  🚢 EXPEDITION     Shipboard-ready deployment      │
-    │  📊 VISUALIZATION  Interactive maps & clustering   │
-    │  🧬 MAG ASSEMBLY   High-quality genome bins        │
-    │  🌊 EDNA FOCUS     Marine & freshwater optimized   │
-    └─────────────────────────────────────────────────────┘
+output/
+├── <flowcell>/
+│   ├── <barcode>/
+│   │   ├── fa/              Final quality-filtered sequences
+│   │   ├── kraken/          Taxonomic classifications
+│   │   ├── prokka/          Gene annotations
+│   │   ├── hmm/             Functional gene matches
+│   │   └── log.txt          Processing log
+│   └── ...
+├── assembly/                Assembled contigs
+├── bins/                    MAG consensus bins
+├── polished/                Refined genomes
+├── checkm2/                 Quality metrics
+└── <database>.duckdb        Integrated results
 ```
 
 ---
 
-## 🎯 Target Applications
+## Methodology
 
-### 🌊 Marine & Freshwater Ecology
-Track microbial communities across oceanographic gradients
+### Real-Time Processing Workflow
 
-### 🦠 Harmful Algal Blooms
-Real-time monitoring of toxic cyanobacteria
+1. **Validation:** FASTQ integrity checking with automated repair (BBMap)
+2. **Quality Control:** Adapter removal (BBDuk) and length/quality filtering (Filtlong Q7+, >1kb)
+3. **Taxonomic Classification:** Kraken2 with custom marine databases
+4. **Gene Annotation:** Prokka for rapid ORF prediction
+5. **Functional Profiling:** HMMER search against ecosystem service gene databases
+6. **Data Integration:** DuckDB for SQL-queryable results during expeditions
 
-### 🚨 Pathogen Surveillance
-Waterborne pathogens & fecal indicators (E. coli, Vibrio, etc.)
+### MAG Assembly Workflow
 
-### 🌍 Biodiversity Assessments
-Who's out there? Full taxonomic profiling
+1. **Assembly:** Flye metagenomic mode with overlap-based consensus
+2. **Read Mapping:** minimap2 alignment for coverage calculation
+3. **Binning:** Consensus approach using:
+   - SemiBin2 (deep learning, trained on thousands of genomes)
+   - MetaBAT2 (tetranucleotide frequency + differential coverage)
+   - MaxBin2 (marker gene phylogeny)
+   - DAS Tool (automated selection of best bins)
+4. **Polishing:** Two rounds Racon + Medaka neural network correction
+5. **Quality Assessment:** CheckM2 for completeness/contamination (MIMAG standards)
+6. **Taxonomic Assignment:** Kaiju + GTDB-Tk classification
 
-### 🧬 Environmental DNA
-Complete eDNA metabarcoding workflow
+### Quality Standards
 
----
+MAGs are classified according to MIMAG (Minimum Information about MAGs) standards:
 
-## 🔬 The Pipeline Flow
-
-```
-┌─────────────────┐
-│ 🧪 SAMPLE       │  Collect water, filter, extract DNA
-│ COLLECTION      │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 🧬 NANOPORE     │  Load into MinION/GridION/PromethION
-│ SEQUENCING      │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────┐
-│ ⚡ REAL-TIME PROCESSING (10_realtime_processing/)   │
-├─────────────────────────────────────────────────────┤
-│  1. 📦 Validate & repair FASTQ                      │
-│  2. 🧹 Quality filter (BBDuk + Filtlong)            │
-│  3. 🏷️  Taxonomic classify (Kraken2)                │
-│  4. 📝 Annotate genes (Prokka)                      │
-│  5. 💾 Store in DuckDB                              │
-│  6. 🗺️  Update live dashboard                       │
-└────────┬────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────┐
-│ 🧬 MAG ASSEMBLY (20_mag_assembly/)                  │
-├─────────────────────────────────────────────────────┤
-│  1. 🏗️  Co-assemble with Flye                       │
-│  2. 📍 Map reads back (minimap2)                    │
-│  3. 🗂️  Bin contigs (SemiBin + MetaBAT + MaxBin)   │
-│  4. 🤝 Consensus binning (DAS Tool)                 │
-│  5. ✨ Polish bins (Racon + Medaka)                 │
-│  6. ✅ Quality check (CheckM2)                      │
-│  7. 🏷️  Taxonomic assign (Kaiju + GTDB)            │
-└────────┬────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 📊 RESULTS      │  High-quality MAGs, taxonomy, abundance
-│ & PUBLICATION   │  Interactive visualizations, reports
-└─────────────────┘
-```
+| Quality | Completeness | Contamination | Criteria |
+|---------|--------------|---------------|----------|
+| High | >90% | <5% | + 23S, 16S, 5S rRNA & ≥18 tRNAs |
+| Medium | >50% | <10% | - |
+| Low | <50% | <10% | - |
 
 ---
 
-## 🛠️ Dependencies
+## Dependencies
 
-### Core Bioinformatics Tools
+### Core Tools
 
-```
-┌──────────────────────┬─────────────────────────────────────┐
-│ 🧬 Sequencing        │ Oxford Nanopore MinKNOW             │
-│ 🏗️  Assembly          │ Flye (metagenomic mode)            │
-│ 📍 Mapping           │ minimap2                            │
-│ 🏷️  Taxonomy          │ Kraken2, Kaiju                      │
-│ 📝 Annotation        │ Prokka                              │
-│ 🗂️  Binning           │ SemiBin2, MetaBAT2, MaxBin2        │
-│ 🤝 Consensus         │ DAS Tool                            │
-│ ✅ Quality           │ CheckM2                             │
-│ 🧹 Preprocessing     │ BBTools, Filtlong                   │
-│ ✨ Polishing         │ Racon, Medaka                       │
-└──────────────────────┴─────────────────────────────────────┘
-```
+**Sequencing & Assembly:**
+Oxford Nanopore MinKNOW, Flye, minimap2
 
-### Analysis & Visualization
+**Preprocessing:**
+BBTools (BBDuk, BBMap), Filtlong
 
-```
-┌──────────────────────┬─────────────────────────────────────┐
-│ 📊 R packages        │ tidyverse, DuckDB, leaflet          │
-│ 🐍 Python            │ Python 3.x                          │
-│ 📈 Clustering        │ t-SNE, UMAP, graph-based            │
-└──────────────────────┴─────────────────────────────────────┘
-```
+**Classification:**
+Kraken2, Kaiju, GTDB-Tk
 
----
+**Annotation:**
+Prokka, HMMER3
 
-## 🌍 Active Expeditions
+**Binning:**
+SemiBin2, MetaBAT2, MaxBin2, DAS Tool
 
-### 🚢 CMO2025
-California to Mexico Oceanographic Survey
+**Quality Control:**
+CheckM2, Racon, Medaka
 
-### 🧊 QEI2025
-Queen Elizabeth Islands Arctic Expedition
+### Analysis Environment
 
-> **Note:** Scripts contain hardcoded paths for these expeditions.
-> Update paths before running on new projects!
+**Database:**
+DuckDB (embedded OLAP)
+
+**Statistics & Visualization:**
+R (tidyverse, leaflet, plotly), Python 3.9+
+
+**System:**
+GNU parallel, trash-cli (safer file operations)
 
 ---
 
-## 📚 Documentation
+## Utility Scripts
 
-Each directory contains detailed READMEs:
-- 📖 `10_realtime_processing/README.md` - Real-time workflow guide
-- 📖 `20_mag_assembly/README.md` - MAG assembly deep dive
-- 📖 `30_archive/README.md` - What's deprecated
-
----
-
-## 🎓 Citation
-
-If this pipeline helps your research, buy the developer a coffee ☕ and cite appropriately!
+**status.sh** — Dependency verification and version checking
+**banner.sh** — Pipeline information display
+**agents.sh** — Expert advisor system for domain-specific guidance
 
 ---
 
-## 💪 Power Tips
+## Active Deployments
 
-### 🔥 Optimized Scripts
-Scripts ending in `_optimized.sh` are AI-enhanced versions with:
-- Better error handling
-- Smarter resource usage
-- Progress tracking
-- Resume capability
+**CMO2025** — California-Mexico Oceanographic Survey
+**QEI2025** — Queen Elizabeth Islands Arctic Expedition
 
-### ⚡ Fast Mode
-When you need results NOW:
-- Use `22_process_reads_fast.sh`
-- Trade accuracy for speed
-- Perfect for initial screening
-
-### 🎯 Consensus > Single Tool
-Always use multi-tool binning:
-- SemiBin2 (deep learning)
-- MetaBAT2 (TNF + coverage)
-- MaxBin2 (marker genes)
-- DAS Tool (combines all three)
-
-### 📊 Live Dashboards
-Keep `60_edna_mapping_viz.r` running during expeditions to watch taxonomy appear in real-time on a map! 🗺️
+*Note:* Scripts contain deployment-specific paths. Update before use in new projects.
 
 ---
 
-```
-╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║           🌊 DECODE THE OCEANS, ONE READ AT A TIME 🌊        ║
-║                                                              ║
-║                    🦠 → 🧬 → 💻 → 📊 → 🌍                    ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
-```
+## Documentation
 
-**Now go forth and sequence! 🚀🔬🌊**
+**Repository Root:**
+- `CLAUDE.md` — AI assistant instructions and architecture notes
+- `CHANGELOG.md` — Version history and transformation log
+- `EPIC_TRANSFORMATION.md` — Development narrative
+
+**Subdirectories:**
+- `10_realtime_processing/CLAUDE.md` — Detailed real-time pipeline architecture
+- `10_realtime_processing/README.md` — Real-time processing guide
+- `20_mag_assembly/README.md` — MAG assembly methodology
+
+**Technical Notes:**
+- `RESUME_LOGIC.md` — Stage-aware checkpoint system
+- `HMM_SEARCH_GUIDE.md` — Functional gene profiling
+- `CRASH_SAFETY.md` — Atomic operations and data integrity
+- `DEPLOYMENT_ISSUES.md` — Portability and configuration
+
+---
+
+## Contributing
+
+This is research software under active development. For bug reports or feature requests, please open an issue on GitHub.
+
+**Development Guidelines:**
+- Use `trash` instead of `rm` for all file operations
+- Follow numbered naming convention (10s, 20s, 30s...)
+- Include resume logic for all long-running operations
+- Test on small datasets before expedition deployment
+- Document hardcoded paths in DEPLOYMENT_ISSUES.md
+
+---
+
+## Citation
+
+If this pipeline contributes to your research, please cite appropriately and consider contributing improvements back to the project.
+
+**Key References:**
+
+Prestat E, et al. (2014) FOAM: Functional Ontology Assignments for Metagenomes. *Nucleic Acids Research*.
+
+Khot V, et al. (2022) CANT-HYD: A Curated Database of Phylogeny-Derived Hidden Markov Models for Annotation of Marker Genes Involved in Hydrocarbon Degradation.
+
+Bowers RM, et al. (2017) Minimum information about a single amplified genome (MISAG) and a metagenome-assembled genome (MIMAG). *Nature Biotechnology* 35:725-731.
+
+---
+
+**Repository:** https://github.com/rec3141/danaSeq
+**License:** [To be specified]
+**Contact:** rec3141@gmail.com
+
+---
+
+*Decode the oceans, one read at a time.*
