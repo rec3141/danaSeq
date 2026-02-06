@@ -36,6 +36,27 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# Global cleanup on exit/interrupt
+# Ensures temporary files, locks, and semaphores are cleaned up even on crashes
+cleanup_on_exit() {
+  local exit_code=$?
+
+  # Clean up any orphaned lock directories
+  if [[ -n "${CACHE_FASTQ:-}" ]] && [[ -d "${CACHE_FASTQ}" ]]; then
+    find "${CACHE_FASTQ}" -maxdepth 1 -name '.lock.*' -type d -mmin +5 -exec rmdir {} \; 2>/dev/null || true
+  fi
+
+  # Note: GNU parallel and sem automatically clean up on exit
+  # Temp files created in validate_fastq() have their own trap handlers
+
+  exit $exit_code
+}
+
+trap cleanup_on_exit EXIT
+trap 'echo "[INTERRUPTED] Cleaning up..." >&2; exit 130' INT
+trap 'echo "[TERMINATED] Cleaning up..." >&2; exit 143' TERM
+trap 'echo "[HANGUP] Cleaning up..." >&2; exit 129' HUP
+
 # Defaults & Env
 THREADS=${THREADS:-$(nproc)}
 BBMAP=${BBMAP:-/work/apps/bbmap}
@@ -135,17 +156,29 @@ FAILURE_LOG="${OUTPUT}/failed_files.txt"
 # In normal mode: Only errors shown, all output logged to files
 # In verbose mode: Commands echoed to terminal and logged
 # In debug mode: Full command details shown with timing info
+#
+# SECURITY NOTE: This function uses bash -c for command execution.
+# Only call with TRUSTED INPUT from within this script.
+# Never pass user-controlled data to this function.
 run_cmd() {
   local cmd="$1"
   local logfile="$2"
 
+  # Validate logfile path to prevent directory traversal
+  if [[ "$logfile" =~ \.\. ]]; then
+    echo "[ERROR] Invalid logfile path: $logfile" >&2
+    return 1
+  fi
+
+  # Execute using bash -c for better isolation than eval
+  # Note: Still requires trusted input - do not pass user data
   if (( DEBUG )); then
     echo "[DEBUG] Running: $cmd" >&2
-    eval "$cmd" 2>&1 | tee -a "$logfile"
+    bash -c "$cmd" 2>&1 | tee -a "$logfile"
   elif (( VERBOSE )); then
-    eval "$cmd" 2>&1 | tee -a "$logfile"
+    bash -c "$cmd" 2>&1 | tee -a "$logfile"
   else
-    eval "$cmd" >>"$logfile" 2>&1
+    bash -c "$cmd" >>"$logfile" 2>&1
   fi
 }
 
@@ -279,8 +312,36 @@ validate_fastq() {
   local file="$1"
   local base="$(basename "$file")"
   local cached="${CACHE_FASTQ}/${base}"
+  local lockfile="${CACHE_FASTQ}/.lock.${base}"
 
-  # Return cached version if already validated
+  # Atomic lock acquisition using mkdir (atomic on all filesystems)
+  if ! mkdir "$lockfile" 2>/dev/null; then
+    # Another process is validating this file, wait for completion
+    debug_msg "Waiting for validation lock: $file"
+    local wait_count=0
+    while [[ -d "$lockfile" ]] && (( wait_count < 300 )); do
+      sleep 0.1
+      ((wait_count++))
+    done
+
+    # Check if other process succeeded
+    if [[ -s "${cached}" ]]; then
+      debug_msg "Using cached validation from parallel process: $file"
+      printf '%s\n' "${cached}"
+      return 0
+    fi
+
+    # Other process failed or timed out, try again
+    if ! mkdir "$lockfile" 2>/dev/null; then
+      echo "[ERROR] Cannot acquire validation lock: $file" >&2
+      return 1
+    fi
+  fi
+
+  # We own the lock - ensure cleanup on exit
+  trap "rmdir '$lockfile' 2>/dev/null" RETURN
+
+  # Double-check pattern: verify cached file doesn't exist
   if [[ -s "${cached}" ]]; then
     printf '%s\n' "${cached}"
     return 0
@@ -291,22 +352,37 @@ validate_fastq() {
   # Test gzip integrity
   if gzip -t "$file" 2>/dev/null; then
     debug_msg "Good file: $file"
-    ln -sf "$(realpath "$file")" "${cached}"
+
+    # Atomic cache creation: create temp symlink, then rename
+    local tmplink="${cached}.tmp.$$"
+    ln -sf "$(realpath "$file")" "$tmplink"
+    mv -f "$tmplink" "${cached}"  # Atomic rename
+
     printf '%s\n' "${cached}"
     return 0
   else
     # Attempt repair using BBMap's error-tolerant reader
     debug_msg "Bad file, attempting fix: $file"
-    local tmpfile=$(mktemp --suffix=.fastq.gz)
+
+    # Create temp file with trap for cleanup
+    local tmpfile
+    tmpfile=$(mktemp "${CACHE_FASTQ}/.repair-XXXXXXXXXX.fastq.gz") || {
+      echo "[ERROR] Cannot create temporary file" >&2
+      return 1
+    }
+    trap "rm -f '$tmpfile'; rmdir '$lockfile' 2>/dev/null" RETURN
+
     if "${BBMAP}/reformat.sh" in="$file" out="$tmpfile" ow >/dev/null 2>&1; then
       if gzip -t "$tmpfile" 2>/dev/null; then
-        mv "$tmpfile" "${cached}"
+        # Atomic move to cache
+        mv -f "$tmpfile" "${cached}"
         echo "[FIXED] $file" >&2
         printf '%s\n' "${cached}"
         return 0
       fi
     fi
-    rm -f "$tmpfile"
+
+    # Cleanup happens via trap
     echo "[BAD] Could not fix: $file" >&2
     return 1
   fi

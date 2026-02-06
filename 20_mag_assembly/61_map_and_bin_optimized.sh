@@ -45,6 +45,19 @@
 
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
+# Global cleanup on exit/interrupt
+cleanup_on_exit() {
+  local exit_code=$?
+  # Cleanup logic for any temporary files or locks would go here
+  # Currently handled by individual stage checkpoints
+  exit $exit_code
+}
+
+trap cleanup_on_exit EXIT
+trap 'echo "[INTERRUPTED] Pipeline interrupted, cleaning up..." >&2; exit 130' INT
+trap 'echo "[TERMINATED] Pipeline terminated, cleaning up..." >&2; exit 143' TERM
+trap 'echo "[HANGUP] Connection lost, cleaning up..." >&2; exit 129' HUP
+
 #-------------------------------------------------------------------------------
 #  CONFIGURATION
 #-------------------------------------------------------------------------------
@@ -78,6 +91,37 @@ log_step()    { echo -e "\n${PURPLE}━━━━━━━━━━━━━━�
 #-------------------------------------------------------------------------------
 #  UTILITY FUNCTIONS
 #-------------------------------------------------------------------------------
+
+# Validate and sanitize output directory path
+# Prevents path traversal attacks and ensures directory is within workspace
+validate_output_dir() {
+    local dir="$1"
+    local base_workspace="/data"
+
+    # Resolve to absolute path (creates parent dirs if needed)
+    local abs_dir
+    if ! abs_dir="$(realpath -m "$dir" 2>/dev/null)"; then
+        log_error "Cannot resolve path: $dir"
+        return 1
+    fi
+
+    # Check for path traversal attempts
+    if [[ "$abs_dir" =~ \.\. ]]; then
+        log_error "Path traversal detected: $dir"
+        return 1
+    fi
+
+    # Ensure path is within allowed workspace
+    if [[ "$abs_dir" != "$base_workspace"* ]]; then
+        log_error "Output directory must be under $base_workspace: $abs_dir"
+        return 1
+    fi
+
+    # Return validated path
+    echo "$abs_dir"
+    return 0
+}
+
 
 # Check if a file exists and is non-empty; optionally verify minimum size
 file_ready() {
@@ -447,9 +491,16 @@ print_summary() {
 #-------------------------------------------------------------------------------
 
 main() {
-    # Parse arguments
-    OUTDIR="${1:-${PROJECT_DIR}/map_and_bin_$(date +'%Y%m%d-%H%M%S')}"
-    
+    # Parse and validate arguments
+    local requested_outdir="${1:-${PROJECT_DIR}/map_and_bin_$(date +'%Y%m%d-%H%M%S')}"
+
+    OUTDIR="$(validate_output_dir "$requested_outdir")" || {
+        log_error "Invalid output directory: $requested_outdir"
+        exit 1
+    }
+
+    log_info "Validated output directory: $OUTDIR"
+
     # Derived paths
     readonly ASSEMBLY="${OUTDIR}/flye1000/assembly.fasta"
     readonly BAM_DIR="${OUTDIR}/bamdir"
