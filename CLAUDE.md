@@ -1,449 +1,658 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
-## ⚠️ CRITICAL SAFETY RULES ⚠️
+---
 
-**File Deletion Policy:**
-1. **ALWAYS use `trash` or `trash-put` instead of `rm`** - trash-cli is installed on this system
-2. Files can be recovered from trash with `trash-restore` or `trash-list`
-3. NEVER use `rm -rf` without explicit user confirmation
-4. Before any deletion, create a manifest: `ls -laR path/ > manifest_$(date +%Y%m%d_%H%M%S).txt`
-5. "Clean up" means organize/tidy, NOT delete - ask for clarification
-6. "Skip" means ignore/don't commit, NOT delete - ask for clarification
+## Critical Safety Rules
 
-**Examples:**
+### File Operations
+
+**ALWAYS use `trash-cli` instead of `rm`:**
 ```bash
-# Good - recoverable
+# Correct
 trash old_file.txt
 trash-put deprecated_directory/
 
-# Bad - permanent
-rm -rf directory/  # DON'T DO THIS
+# Incorrect - permanent deletion
+rm -rf directory/  # NEVER use this
 ```
+
+**Pre-deletion checklist:**
+1. Create manifest: `ls -laR path/ > manifest_$(date +%Y%m%d_%H%M%S).txt`
+2. Confirm with user if ambiguous
+3. Use `trash` for recoverability
+4. Document what was removed in commit message
+
+**Clarify ambiguous terms:**
+- "Clean up" → Ask: organize files or delete files?
+- "Skip" → Ask: ignore for now or permanently delete?
+- "Remove" → Ask: trash (recoverable) or delete (permanent)?
+
+### Recovery Operations
+
+```bash
+# List trashed files
+trash-list
+
+# Restore specific file
+trash-restore
+
+# Empty trash (use with extreme caution)
+trash-empty
+```
+
+---
 
 ## Project Overview
 
-**Dana Pipeline** - A real-time metagenomic analysis system for Oxford Nanopore sequencing on oceanographic expeditions. Processes DNA reads as they stream from the sequencer, providing live taxonomic classification, gene annotation, MAG (Metagenome-Assembled Genome) assembly, and interactive geographic visualization.
+**dānaSeq** is a production bioinformatics pipeline for real-time metagenomic analysis on oceanographic expeditions. It processes Oxford Nanopore sequencing data for taxonomic classification, functional gene profiling, and MAG assembly.
 
-This is a production bioinformatics pipeline used on research vessels and field stations for marine eDNA analysis.
+**Use Cases:**
+- Shipboard monitoring during research cruises
+- Real-time HAB (Harmful Algal Bloom) detection
+- Pathogen surveillance in aquatic environments
+- Publication-quality genome reconstruction
 
-## Repository Structure
+---
+
+## Repository Architecture
 
 ```
-danav2/
-├── 10_realtime_processing/   # Real-time analysis at sea (26 scripts)
-├── 20_mag_assembly/           # MAG reconstruction pipeline (26 scripts)
-├── 30_archive/                # Deprecated/experimental code
-├── agents/                    # Expert advisor scripts
-├── python_pipeline/           # Modern Python rewrite (in progress)
-├── banner.sh                  # Welcome screen utility
-├── status.sh                  # Dependency checker
-└── agents.sh                  # Agent launcher
+dānaSeq/
+├── 10_realtime_processing/   Real-time analysis (26 scripts)
+├── 20_mag_assembly/           MAG reconstruction (26 scripts)
+├── 30_archive/                Deprecated code
+├── agents/                    Expert advisor system
+├── METHODS.md                 Scientific methodology
+├── CONTRIBUTING.md            Development guidelines
+└── CITATION.bib               Reference database
 ```
 
-### Numbered Directory System
+### Numbered Naming Convention
 
-Scripts use a **numbered prefix with intentional gaps** (10, 20, 30...) allowing future expansion:
-- **10s-20s:** Core processing steps
+Scripts use incremental numbering (10, 20, 30...) with intentional gaps for future insertion:
+- **10s-20s:** Core processing
 - **30s-40s:** Secondary analysis
-- **50s-60s:** Integration & complete pipelines
-- **70s+:** Visualization & reporting
+- **50s-60s:** Integration pipelines
+- **70s+:** Visualization
 
-Example: `24_process_reads_optimized.sh` indicates step 24 in the processing workflow.
+**Example:** `24_process_reads_optimized.sh` ← step 24, allows insertion of 21-23, 25-29
 
-## Common Commands
+---
 
-### Real-Time Processing (Shipboard/Field)
+## Essential Commands
+
+### Real-Time Processing
 
 ```bash
 cd 10_realtime_processing
 
-# RECOMMENDED: Full pipeline with AI-enhanced processing
-./24_process_reads_optimized.sh -i /path/to/nanopore/data -K -P
+# Production pipeline (recommended)
+./24_process_reads_optimized.sh -i /path/to/data -K -P
 
-# Fast mode for urgent analysis (screening, initial assessment)
-./22_process_reads_fast.sh -i /path/to/barcode_dir -P -S
+# With functional gene profiling
+./24_process_reads_optimized.sh -i /path/to/data -P \
+  --hmm /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm
 
-# With HMM search for functional genes
-./24_process_reads_optimized.sh -i /path/to/data -P --hmm /path/to/CANT-HYD.hmm
+# Rapid screening mode
+./22_process_reads_fast.sh -i /path/to/data -P -S
 
-# Force re-run optional stages
-./24_process_reads_optimized.sh -i /path/to/data -P --hmm HMM.hmm --force
-
-# Launch interactive dashboard (separate terminal)
+# Interactive dashboard
 Rscript 60_edna_mapping_viz.r
 ```
 
-**Critical Flags:**
-- `-K`: Kraken2 taxonomic classification (ONLY use with `24_process_reads_optimized.sh`)
-- `-P`: Prokka gene annotation
-- `-S`: Sendsketch taxonomic profiling
-- `-T`: Tetranucleotide frequency calculation
-- `--hmm`: HMM search on predicted proteins
-- `--force`: Re-run optional stages even if output exists
+**Flag Reference:**
+- `-K` Kraken2 classification (ONLY with `24_process_reads_optimized.sh`)
+- `-P` Prokka gene annotation
+- `-S` Sendsketch taxonomic profiling
+- `-T` Tetranucleotide frequency
+- `--hmm` HMM functional gene search (comma-separated paths)
+- `--force` Override resume logic
 
-### MAG Assembly (Post-Expedition)
+### MAG Assembly
 
 ```bash
 cd 20_mag_assembly
 
-# RECOMMENDED: Complete pipeline (assembly → binning → polishing)
+# Complete automated pipeline
 ./61_map_and_bin_optimized.sh
 
-# Step-by-step approach (for more control):
-./10_assembly_flye.sh              # Assemble contigs
-./20_mapping.sh                    # Map reads to assembly
-./22_calculate_coverage.sh         # Calculate coverage
-./30_binning_semibin.sh            # Bin with SemiBin2
-./31_binning_metabat.sh            # Bin with MetaBAT2
-./32_binning_maxbin.sh             # Bin with MaxBin2
-# DAS Tool consensus runs automatically in binning scripts
-./40_polish_assemblies.sh          # Polish with Racon + Medaka
-./50_run_kraken_all.sh             # Classify bins taxonomically
-
-# Visualize results
+# Visualization
 Rscript 80_plot_bins.R
 Rscript 82_inter_binning_analysis.r
 ```
 
-### Utilities
+### Diagnostics
 
 ```bash
-# Check installed dependencies and versions
-./status.sh
-
-# Display welcome banner
-./banner.sh
-
-# Consult expert advisors
-./agents.sh
+./status.sh              # Dependency verification
+./banner.sh              # Pipeline information
+./agents.sh              # Expert advisors
 ```
 
-### Python Pipeline (Modern Rewrite - In Progress)
+---
+
+## Core Technical Concepts
+
+### 1. Critical: Kraken2 Memory Management
+
+**Problem:** Kraken2 loads 50-100GB database into RAM. Parallel execution crashes systems.
+
+**Solution:** Only `24_process_reads_optimized.sh` uses semaphores to serialize Kraken2:
+```bash
+sem --id kraken_db_lock kraken2 [options]
+```
+
+**Rule:** `-K` flag ONLY with `24_process_reads_optimized.sh`
+
+Documentation: `10_realtime_processing/CRITICAL_KRAKEN_BUG.md`
+
+### 2. Parallelization Model (32×1)
+
+- **32 workers** processing **1 file each** (GNU parallel)
+- **Parallel:** BBDuk, Filtlong, FASTA conversion, Prokka, HMM
+- **Serial:** Kraken2 (memory), DuckDB writes (locks)
+
+### 3. Resume Logic
+
+All scripts implement stage-aware checkpointing:
 
 ```bash
-cd python_pipeline
+# Check for existing output
+if [[ -f "$OUTPUT" ]] && (( ! FORCE )); then
+    echo "Output exists, skipping"
+    return 0
+fi
 
-# Install in development mode
-pip install -e .
-
-# With visualization extras
-pip install -e ".[viz]"
-
-# With development tools
-pip install -e ".[dev]"
-
-# Run tests (when implemented)
-pytest tests/
+# Atomic write
+process > "$OUTPUT.tmp"
+mv "$OUTPUT.tmp" "$OUTPUT"  # Atomic rename prevents corruption
 ```
 
-## Architecture & Key Concepts
+**Stages checked independently:**
+- Basic QC → `.fa` file
+- Kraken2 → `.tsv` file
+- Prokka → `PROKKA_*.tsv` files
+- HMM → `.tsv` per database
 
-### 1. Two-Pipeline Design
+### 4. MAG Binning Consensus
 
-**10_realtime_processing/** - Streaming analysis during sequencing
-- Input: Raw FASTQ from MinKNOW sequencer
-- Output: QC'd reads, taxonomic classifications, gene annotations, DuckDB database
-- Use case: Shipboard monitoring, HAB detection, real-time decisions
+Three complementary algorithms:
+- **SemiBin2:** Deep learning (best for complex communities)
+- **MetaBAT2:** TNF + coverage (fast, reliable)
+- **MaxBin2:** Marker genes (good for known taxa)
 
-**20_mag_assembly/** - Genome reconstruction post-expedition
-- Input: QC'd reads from realtime processing
-- Output: High-quality MAGs (bins), polished genomes, taxonomic assignments
-- Use case: Publication-quality genomes, comparative genomics
+**DAS Tool** integrates all three, selecting best bin for each contig.
 
-### 2. Critical Kraken2 Memory Issue
+**Never use single binner for publication.**
 
-**IMPORTANT:** Kraken2 loads 50-100GB database into RAM. The `24_process_reads_optimized.sh` script uses semaphores to serialize Kraken2 calls while keeping other steps parallel. Other scripts will spawn multiple Kraken2 instances and crash the system.
+### 5. Data Integrity
 
-**Rule:** When using `-K` flag, ONLY use `24_process_reads_optimized.sh`.
+**FASTQ Validation:**
+1. `gzip -t` integrity check
+2. BBMap `reformat.sh` repair if corrupted
+3. Cache validated files (`/data/.fastq_pass`)
 
-See `10_realtime_processing/CRITICAL_KRAKEN_BUG.md` for details.
+**Atomic Operations:**
+- Write to `.tmp` files
+- Atomic `mv` on completion
+- Prevents partial writes on interrupt
 
-### 3. Parallelization Strategy (32×1 Model)
+---
 
-Uses GNU parallel with 32 workers processing 1 file each:
-- Most steps: Fully parallel (BBDuk, Filtlong, FASTA conversion)
-- Kraken2: Serialized with `sem --id kraken_db_lock`
-- DuckDB writes: Serialized with `sem --id duckdb_lock`
+## Software Engineering Best Practices
 
-### 4. Resume Logic & Stage-Aware Processing
+### Code Style
 
-All scripts have intelligent resume capability:
-- Basic QC: Skips if `.fa` file exists
-- Optional stages (Prokka, HMM, Kraken): Each checks independently
-- Atomic operations: Uses `.tmp` and `.partial` files to prevent corruption on interrupt
-
-Example workflow:
+**Bash:**
 ```bash
-# Initial run with Prokka
-./24_process_reads_optimized.sh -i data -P
+#!/usr/bin/env bash
+set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
-# Later add HMM - only HMM runs, rest skipped
-./24_process_reads_optimized.sh -i data -P --hmm CANT-HYD.hmm
+# Variables: UPPER_CASE
+INPUT_DIR="/path/to/input"
+OUTPUT_FILE="${INPUT_DIR}/results.txt"
 
-# Force re-run of all optional stages
-./24_process_reads_optimized.sh -i data -P --hmm CANT-HYD.hmm --force
+# Functions: lowercase_with_underscores
+process_sample() {
+    local sample=$1
+    local output=$2
+
+    # Check inputs
+    [[ -f "$sample" ]] || { echo "Error: $sample not found" >&2; return 1; }
+
+    # Process with error handling
+    if ! tool --input "$sample" > "$output" 2>&1 | tee -a "$LOG"; then
+        log_error "Processing failed for $sample"
+        return 1
+    fi
+
+    return 0
+}
+
+# Prefer [[ ]] over [ ]
+[[ -f "$file" ]] && process_file "$file"
+
+# Quote all variables
+cp "$source_file" "$destination_dir/"
 ```
 
-See `10_realtime_processing/RESUME_LOGIC.md` for detailed scenarios.
+**R:**
+```r
+library(tidyverse)
 
-### 5. MAG Assembly: The Binning Trinity
+# snake_case for variables and functions
+process_coverage_data <- function(input_file, min_coverage = 10) {
+  # Explicit handling of missing data
+  data <- read_tsv(input_file, col_types = cols()) %>%
+    filter(!is.na(coverage), coverage >= min_coverage)
 
-Three binning tools provide consensus for best results:
-- **SemiBin2** (deep learning) - Best for complex communities
-- **MetaBAT2** (TNF + coverage) - Fast, reliable classic approach
-- **MaxBin2** (marker genes) - Good for known taxa
+  return(data)
+}
+```
 
-**DAS Tool** combines all three and selects the best bins. Always use all three binners for publication-quality results.
+**Python:**
+```python
+from pathlib import Path
+from typing import List, Optional
 
-### 6. FASTQ Validation & Caching
+def validate_fastq(
+    input_path: Path,
+    min_length: int = 1000,
+    min_quality: float = 7.0
+) -> bool:
+    """
+    Validate FASTQ file integrity and quality.
 
-Nanopore sequencers can produce corrupted gzip files. The pipeline:
-1. Validates with `gzip -t`
-2. Repairs with BBMap `reformat.sh` if needed
-3. Caches validated files in `/data/.fastq_pass` (configurable via `CACHE_FASTQ`)
+    Args:
+        input_path: Path to FASTQ file
+        min_length: Minimum read length in bp
+        min_quality: Minimum mean quality score
 
-### 7. DuckDB Integration
+    Returns:
+        True if valid, False otherwise
+    """
+    if not input_path.exists():
+        raise FileNotFoundError(f"FASTQ not found: {input_path}")
 
-R scripts (`4X_*_db.r`) integrate results into DuckDB for real-time SQL queries:
-- `40_kraken_db.r` - Kraken classifications
-- `42_prokka_db.r` - Prokka annotations
-- `43_sketch_db.r` - Sendsketch profiles
-- `44_tetra_db.r` - Tetranucleotide frequencies
+    # Implementation
+    pass
+```
 
-DuckDB enables SQL queries on growing datasets during expeditions without a database server.
+### Error Handling
 
-## Expected Input/Output Formats
+**Comprehensive error reporting:**
+```bash
+log_error() {
+    local message=$1
+    local file=$2
+    local stage=$3
 
-### Input Structure (Oxford Nanopore)
+    echo "ERROR [$(date +'%Y-%m-%d %H:%M:%S')] $stage failed for $file: $message" >&2
+    echo "$file,$stage,$message" >> failed_files.txt
+}
+
+# Usage
+if ! run_kraken "$sample"; then
+    log_error "Kraken classification failed" "$sample" "kraken2"
+    return 1
+fi
+```
+
+**User-friendly messages:**
+```bash
+# Bad
+echo "Error 127"
+
+# Good
+echo "ERROR: Kraken2 not found. Install with: conda install -c bioconda kraken2"
+echo "See DEPLOYMENT_ISSUES.md for full setup instructions"
+```
+
+### Testing Strategy
+
+**Before committing:**
+1. Test with small dataset (1K reads)
+2. Verify resume logic works
+3. Test failure recovery
+4. Check resource usage
+5. Validate output format
+
+**Test datasets:**
+```
+/data/test/
+├── small/    1K reads   (30s runtime)
+├── medium/   10K reads  (5min runtime)
+└── large/    100K reads (1hr runtime)
+```
+
+**Testing commands:**
+```bash
+# Dry run to see commands
+./24_process_reads_optimized.sh -i test_data --dry-run
+
+# Debug mode
+./24_process_reads_optimized.sh -i test_data -d
+
+# Check outputs
+ls -lh output/
+checksum validation here
+```
+
+### Performance Optimization
+
+**Profiling:**
+```bash
+# CPU usage
+time ./script.sh -i data
+htop  # Monitor during execution
+
+# Memory usage
+/usr/bin/time -v ./script.sh -i data
+
+# Disk I/O
+iotop  # Monitor during execution
+```
+
+**Optimization checklist:**
+- [ ] Minimize disk I/O (use tmpfs for intermediate files)
+- [ ] Avoid redundant processing (implement resume logic)
+- [ ] Parallelize independent operations
+- [ ] Serialize resource-intensive operations (Kraken2, DuckDB)
+- [ ] Use streaming where possible (avoid loading entire files)
+
+### Security Considerations
+
+**Never commit:**
+- API keys (use environment variables)
+- Passwords or tokens
+- Hardcoded credentials
+- Private data or results
+
+**Check before committing:**
+```bash
+# Scan for secrets
+git diff --cached | grep -iE '(password|api[_-]?key|token|secret)'
+
+# Remove if found
+git reset HEAD file_with_secret.txt
+# Edit to remove secret
+git add file_with_secret.txt
+```
+
+**Secure practices:**
+```bash
+# Use environment variables
+API_KEY="${OPENAI_API_KEY:-}"
+[[ -z "$API_KEY" ]] && { echo "Set OPENAI_API_KEY" >&2; exit 1; }
+
+# Never log secrets
+echo "Processing with API key: ${API_KEY:0:8}..." # Show only prefix
+```
+
+---
+
+## Code Review Checklist
+
+Before approving changes:
+
+**Functionality:**
+- [ ] Implements requested feature correctly
+- [ ] Handles edge cases (empty input, missing files, corrupted data)
+- [ ] Resume logic works correctly
+- [ ] Error messages are informative
+
+**Code Quality:**
+- [ ] Follows project naming conventions
+- [ ] Consistent indentation and style
+- [ ] No hardcoded paths (or documented in DEPLOYMENT_ISSUES.md)
+- [ ] Proper error handling with useful messages
+- [ ] Comments explain complex logic
+
+**Testing:**
+- [ ] Tested with small dataset
+- [ ] Tested resume from interruption
+- [ ] Resource usage is reasonable
+- [ ] No memory leaks or excessive disk usage
+
+**Documentation:**
+- [ ] README.md updated if user-facing change
+- [ ] METHODS.md updated if methodology changed
+- [ ] CLAUDE.md updated if architecture changed
+- [ ] Inline comments for complex sections
+- [ ] Script header complete and accurate
+
+**Safety:**
+- [ ] Uses `trash` instead of `rm`
+- [ ] No secrets committed
+- [ ] Atomic operations for data integrity
+- [ ] Appropriate use of `set -euo pipefail`
+
+---
+
+## Input/Output Specifications
+
+### Real-Time Processing Input
 
 ```
 input_dir/
 └── fastq_pass/
     ├── barcode01/
-    │   └── FLOWCELL_pass_barcode01_xxx.fastq.gz
-    ├── barcode02/
-    │   └── FLOWCELL_pass_barcode02_xxx.fastq.gz
-    └── ...
+    │   └── FLOWCELL_pass_barcode01_*.fastq.gz
+    └── barcode02/
+        └── FLOWCELL_pass_barcode02_*.fastq.gz
 ```
 
-### Output Structure
+### Real-Time Processing Output
 
 ```
 output/
-├── FLOWCELL/
+├── FLOWCELL_ID/
 │   ├── barcode01/
-│   │   ├── fa/           # Final QC'd FASTA sequences
-│   │   ├── fq/           # Intermediate FASTQ (BBDuk)
-│   │   ├── kraken/       # Kraken2 classifications (.tsv, .report)
-│   │   ├── prokka/       # Prokka annotations (per-sample dirs)
-│   │   ├── hmm/          # HMM search results (.tsv, .tbl)
-│   │   ├── sketch/       # Sendsketch profiles
-│   │   ├── tetra/        # Tetranucleotide frequencies
-│   │   └── log.txt       # Processing log
-│   └── barcode02/
-│       └── ...
-└── failed_files.txt      # Failure diagnostics
+│   │   ├── fa/              FASTA (final QC'd sequences)
+│   │   ├── fq/              FASTQ (BBDuk intermediate)
+│   │   ├── kraken/          *.tsv, *.report
+│   │   ├── prokka/          SAMPLE/PROKKA_*
+│   │   ├── hmm/             *.DBNAME.tsv, *.DBNAME.tbl
+│   │   └── log.txt
+│   └── ...
+├── expedition.duckdb        Integrated database
+└── failed_files.txt         Failure log
 ```
 
 ### MAG Assembly Output
 
 ```
-mag_assembly_output/
-├── assembly/
-│   └── assembly.fasta              # Assembled contigs
-├── mapping/
-│   ├── sample*.sorted.bam          # Read alignments
-│   └── coverage_table.txt          # Coverage per contig
-├── bins/
-│   ├── semibin/
-│   ├── metabat/
-│   ├── maxbin/
-│   └── das_tool_consensus/         # ← USE THESE! Best consensus bins
-│       ├── MAG_00001.fa
-│       └── ...
-├── polished/
-│   └── MAG_*.polished.fa           # Racon + Medaka polished
-├── checkm2/
-│   └── quality_report.tsv          # Completeness/contamination
-└── taxonomy/
-    └── taxonomy_assignments.txt     # Taxonomic classifications
+mag_output/
+├── assembly/assembly.fasta
+├── bins/das_tool_consensus/    ← Use these
+│   ├── MAG_00001.fa
+│   └── ...
+├── polished/MAG_*.polished.fa
+├── checkm2/quality_report.tsv
+└── taxonomy/assignments.txt
 ```
 
-## Environment & Dependencies
+---
 
-### Required Tools
+## Common Development Patterns
+
+### Adding New Analysis Step
+
+```bash
+# 1. Choose number (e.g., 35 between 30 and 40)
+# 2. Create script
+cat > 35_new_analysis.sh << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Script header (see existing scripts for template)
+
+# Parse arguments
+# Implement resume logic
+# Run analysis
+# Log results
+EOF
+
+chmod +x 35_new_analysis.sh
+
+# 3. Test
+./35_new_analysis.sh -i test_data/
+
+# 4. Update documentation
+vim README.md
+```
+
+### Implementing Resume Logic
+
+```bash
+run_analysis() {
+    local input=$1
+    local output=$2
+
+    # Resume check
+    if [[ -f "$output" ]] && (( ! FORCE )); then
+        log_info "Output exists: $output (skipping, use --force to override)"
+        return 0
+    fi
+
+    # Process to temporary file
+    if ! tool --input "$input" --output "$output.tmp" 2>&1 | tee -a "$LOG"; then
+        log_error "Tool failed" "$input" "tool"
+        rm -f "$output.tmp"  # Clean up on failure
+        return 1
+    fi
+
+    # Atomic rename
+    mv "$output.tmp" "$output"
+    log_info "Completed: $output"
+    return 0
+}
+```
+
+### Database Integration Pattern
+
+```r
+library(DuckDB)
+library(tidyverse)
+
+load_results_to_db <- function(results_dir, db_path) {
+  # Connect
+  con <- dbConnect(duckdb(), db_path)
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+
+  # Create table if needed
+  if (!dbExistsTable(con, "results")) {
+    dbExecute(con, "
+      CREATE TABLE results (
+        sample_id VARCHAR,
+        metric DOUBLE,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    ")
+  }
+
+  # Load data
+  files <- list.files(results_dir, pattern = "\\.tsv$", full.names = TRUE)
+  for (f in files) {
+    data <- read_tsv(f, col_types = cols()) %>%
+      mutate(sample_id = tools::file_path_sans_ext(basename(f)))
+
+    dbWriteTable(con, "results", data, append = TRUE)
+  }
+
+  message("Loaded ", length(files), " files to database")
+}
+```
+
+---
+
+## Troubleshooting Guide
+
+### Script Not Finding Dependencies
+
+**Symptom:** `command not found: kraken2`
+
+**Solution:**
+1. Check paths: `./status.sh`
+2. Verify installation: `which kraken2`
+3. Update script variables: Edit `KRAKEN2` path in script header
+4. See `DEPLOYMENT_ISSUES.md`
+
+### Resume Logic Not Working
+
+**Symptom:** Script re-processes existing files
+
+**Solution:**
+1. Check output file exists: `ls -lh output/sample.fa`
+2. Check file is non-empty: `[[ -s output/sample.fa ]] && echo "exists"`
+3. Use `--force` to intentionally override
+4. Check for `.tmp` or `.partial` files indicating interrupted run
+
+### Memory Exhaustion
+
+**Symptom:** System freeze, OOM killer, swap thrashing
+
+**Solution:**
+1. Kraken2: Only use `-K` with `24_process_reads_optimized.sh`
+2. Check parallel workers: Reduce `-j` parameter in script
+3. Monitor: `watch -n1 free -h`
+4. Increase swap: `sudo fallocate -l 128G /swapfile` (temporary fix)
+
+### DuckDB Lock Errors
+
+**Symptom:** `database is locked`
+
+**Solution:**
+1. Only one write process at a time
+2. Check for orphaned connections: `lsof expedition.duckdb`
+3. Scripts use semaphore: `sem --id duckdb_lock`
+4. If corrupted: Rebuild from source files
+
+---
+
+## Reference Documentation
+
+**Repository:**
+- `README.md` — Project overview
+- `METHODS.md` — Scientific methodology
+- `CONTRIBUTING.md` — Development guidelines
+- `CITATION.bib` — Reference database
 
 **Real-Time Processing:**
-- BBMap (`BBMAP=/work/apps/bbmap`)
-- Filtlong (`FILTLONG=/work/apps/Filtlong/bin/filtlong`)
-- GNU parallel (must be GNU version, not moreutils)
-
-**Optional (flag-dependent):**
-- Kraken2 (`KRAKEN2=/usr/bin/kraken2`, `KRAKEN_DB=/path/to/db`) - for `-K`
-- Prokka (`PROKKA_BIN=/work/apps/prokka/bin/prokka`) - for `-P`
-- HMMER (`HMMSEARCH=/usr/bin/hmmsearch`) - for `--hmm`
-- Perl with tetramer scripts (`APPS=/work/apps`) - for `-T`
+- `10_realtime_processing/README.md` — Workflow guide
+- `10_realtime_processing/CLAUDE.md` — Architecture details
+- `RESUME_LOGIC.md` — Checkpoint system
+- `HMM_SEARCH_GUIDE.md` — Functional profiling
+- `CRASH_SAFETY.md` — Data integrity
+- `CRITICAL_KRAKEN_BUG.md` — Memory management
 
 **MAG Assembly:**
-- Flye (metagenomic assembler)
-- minimap2 (read mapping)
-- SemiBin2, MetaBAT2, MaxBin2 (binning)
-- DAS Tool (consensus binning)
-- Racon, Medaka (polishing)
-- CheckM2 (quality assessment)
-- Kaiju (taxonomic classification)
+- `20_mag_assembly/README.md` — Assembly methodology
 
-**Analysis & Visualization:**
-- R with tidyverse, DuckDB, leaflet packages
-- Python 3.9+ (for Python pipeline)
+**Always consult relevant documentation before making changes.**
 
-### Hardcoded Paths
+---
 
-Scripts contain hardcoded paths for active expeditions:
-- CMO2025: California to Mexico Oceanographic Survey
-- QEI2025: Queen Elizabeth Islands Arctic Expedition
+## Quick Decision Tree
 
-**Update paths before running on new projects!** See `10_realtime_processing/DEPLOYMENT_ISSUES.md`.
+**User asks to "clean up" →** Ask: "Organize files or delete files?"
 
-## Common Development Tasks
+**User asks to "skip" →** Ask: "Ignore for now or permanently delete?"
 
-### Adding a New Processing Step
+**Adding new script →** Use next available number with gap (25, 35, 45...)
 
-1. Choose appropriate number in sequence (gaps allow insertion)
-2. Create script with numbered prefix: `25_new_step.sh`
-3. Add epic header following existing style
-4. Implement resume logic with file existence checks
-5. Update README.md in relevant directory
-6. Test with debug mode: `./script.sh -d`
+**Script fails →** Check: dependencies (`./status.sh`), logs (`tail -f log.txt`), failed files (`cat failed_files.txt`)
 
-### Debugging Processing Issues
+**Kraken2 OOM →** Verify: Only `24_process_reads_optimized.sh` uses `-K`
 
-```bash
-# Enable debug mode
-./24_process_reads_optimized.sh -i data -d
+**Need to delete files →** Use: `trash` (not `rm`)
 
-# Check status of all tools
-./status.sh
+**Committing changes →** Check: No secrets, documentation updated, tested on small dataset
 
-# View processing logs
-tail -f output/FLOWCELL/barcode01/log.txt
+---
 
-# Check failures
-cat output/failed_files.txt
-
-# Test single file
-parallel --dry-run ... # Shows commands without running
-```
-
-### Working with HMM Databases
-
-HMM databases must be:
-- HMMER3 format (`.hmm` files)
-- Uncompressed (not `.hmm.gz`)
-- Contain trusted cutoffs (TC scores)
-- Specified with **absolute paths** (not relative)
-
-See `10_realtime_processing/HMM_SEARCH_GUIDE.md` for details.
-
-### MAG Quality Standards (MIMAG)
-
-- **High Quality:** >90% complete, <5% contamination, rRNA + tRNAs present
-- **Medium Quality:** >50% complete, <10% contamination
-- **Low Quality:** <50% complete, <10% contamination
-- **Discard:** >10% contamination
-
-CheckM2 reports completeness/contamination based on single-copy marker genes.
-
-## Testing & Validation
-
-### Before Expeditions
-
-```bash
-# Check all dependencies
-./status.sh
-
-# Test with small dataset
-./24_process_reads_optimized.sh -i test_data/ -P
-
-# Verify dashboard loads
-Rscript 60_edna_mapping_viz.r
-```
-
-### During Expeditions
-
-Monitor:
-- Processing logs in real-time
-- Dashboard updates
-- Disk space (`df -h`)
-- Memory usage (`free -h`)
-- Failed files log
-
-### After Expeditions
-
-```bash
-# Run complete MAG pipeline
-cd 20_mag_assembly
-./61_map_and_bin_optimized.sh
-
-# Verify MAG quality
-cat checkm2/quality_report.tsv
-
-# Generate visualizations
-Rscript 80_plot_bins.R
-Rscript 82_inter_binning_analysis.r
-```
-
-## Important Documentation Files
-
-Each directory contains detailed documentation:
-
-**10_realtime_processing/:**
-- `README.md` - User-facing workflow guide
-- `CLAUDE.md` - Detailed architecture notes (for AI assistants)
-- `RESUME_LOGIC.md` - Stage-aware resume behavior
-- `HMM_SEARCH_GUIDE.md` - HMM integration details
-- `OUTPUT_FORMATS.md` - Progress line formats
-- `DEPLOYMENT_ISSUES.md` - Hardcoded paths, portability
-- `CRASH_SAFETY.md` - Atomic operations, resume guarantees
-- `CRITICAL_KRAKEN_BUG.md` - Memory management issue
-
-**20_mag_assembly/:**
-- `README.md` - Complete MAG assembly cookbook
-
-**Root level:**
-- `README.md` - Project overview with ASCII art
-- `EPIC_TRANSFORMATION.md` - Transformation history
-- `CHANGELOG.md` - Version history
-
-When helping users, **always check relevant documentation first** - files contain detailed implementation notes and known issues.
-
-## Common Pitfalls
-
-1. **Using Kraken2 with wrong script** - Only use `-K` with `24_process_reads_optimized.sh`
-2. **Relative paths for HMM files** - Must use absolute paths
-3. **Forgetting to check dependencies** - Run `./status.sh` first
-4. **Not using all three binners** - Use SemiBin2 + MetaBAT2 + MaxBin2 for best results
-5. **Skipping polishing step** - Always polish MAGs before publication
-6. **Insufficient coverage for binning** - Need 10-50x coverage and multiple samples with differential abundance
-7. **Co-assembly of incompatible samples** - Don't co-assemble vastly different environments
-
-## Script Selection Quick Reference
-
-**Real-Time Processing:**
-- Use `24_process_reads_optimized.sh` for most work (recommended)
-- Use `22_process_reads_fast.sh` for urgent screening
-- All other `2X_*.sh` scripts are legacy/experimental
-
-**MAG Assembly:**
-- Use `61_map_and_bin_optimized.sh` for complete pipeline
-- Use `60_map_and_bin_complete.sh` as alternative
-- Use individual scripts (10s, 20s, 30s...) for step-by-step control
-
-## Getting Help
-
-- Consult expert advisors: `./agents.sh`
-- Check documentation in directory READMEs
-- Review BUGFIX_*.md files for historical issue fixes
-- Run `./status.sh` to verify tool installation
+**Repository:** https://github.com/rec3141/danaSeq
+**License:** MIT (see LICENSE file)
+**Contact:** rec3141@gmail.com
