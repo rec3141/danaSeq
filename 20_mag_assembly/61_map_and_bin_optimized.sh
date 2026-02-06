@@ -148,7 +148,13 @@ run_if_missing() {
 # Ensure directory exists
 ensure_dir() {
     local dir="$1"
-    [[ -d "$dir" ]] || mkdir -p "$dir"
+    if [[ ! -d "$dir" ]]; then
+        if ! mkdir -p "$dir"; then
+            log_error "Cannot create directory: $dir"
+            return 1
+        fi
+    fi
+    return 0
 }
 
 #-------------------------------------------------------------------------------
@@ -194,11 +200,20 @@ run_mapping() {
         fi
         
         log_info "[$count/$total] Mapping $base..."
-        
-        minimap2 -a -x map-ont --secondary=no -t "$THREADS" "$ASSEMBLY" "$fq" \
-            | samtools sort -@ "$THREADS" -o "$bam" -
-        
-        samtools index -@ "$THREADS" "$bam"
+
+        # Map reads and sort to BAM
+        if ! minimap2 -a -x map-ont --secondary=no -t "$THREADS" "$ASSEMBLY" "$fq" \
+            | samtools sort -@ "$THREADS" -o "$bam" -; then
+            log_error "Mapping failed for $base"
+            continue
+        fi
+
+        # Index BAM file
+        if ! samtools index -@ "$THREADS" "$bam"; then
+            log_error "Indexing failed for $base"
+            continue
+        fi
+
         log_success "Mapped: $base"
     done
     
@@ -216,14 +231,17 @@ calculate_depths() {
     fi
     
     log_info "Calculating contig depths..."
-    
-    jgi_summarize_bam_contig_depths \
+
+    if ! jgi_summarize_bam_contig_depths \
         --outputDepth "$depths_file" \
         --percentIdentity 80 \
         --minMapQual 5 \
         --referenceFasta "$ASSEMBLY" \
-        "$BAM_DIR"/*.sorted.bam
-    
+        "$BAM_DIR"/*.sorted.bam; then
+        log_error "Depth calculation failed"
+        return 1
+    fi
+
     log_success "Depth calculation complete!"
 }
 
@@ -239,18 +257,32 @@ run_semibin() {
     fi
     
     log_info "Running SemiBin2..."
-    ensure_dir "$semibin_dir"
-    
-    conda run -n SemiBin --live-stream SemiBin2 single_easy_bin \
+
+    if ! ensure_dir "$semibin_dir"; then
+        log_error "Cannot create SemiBin2 directory"
+        return 1
+    fi
+
+    if ! conda run -n SemiBin --live-stream SemiBin2 single_easy_bin \
         -i "$ASSEMBLY" \
         -b "$BAM_DIR"/*.sorted.bam \
-        -o "$semibin_dir"
-    
+        -o "$semibin_dir"; then
+        log_error "SemiBin2 failed"
+        return 1
+    fi
+
     # Remove header line (SemiBin2 quirk)
     if [[ -f "$contig_bins" ]]; then
-        tail -n +2 "$contig_bins" > "${contig_bins}.tmp" && mv "${contig_bins}.tmp" "$contig_bins"
+        if ! tail -n +2 "$contig_bins" > "${contig_bins}.tmp"; then
+            log_error "Failed to process SemiBin2 output"
+            return 1
+        fi
+        if ! mv "${contig_bins}.tmp" "$contig_bins"; then
+            log_error "Failed to update contig_bins file"
+            return 1
+        fi
     fi
-    
+
     log_success "SemiBin2 complete!"
 }
 
@@ -266,18 +298,29 @@ run_metabat() {
     fi
     
     log_info "Running MetaBAT2..."
-    ensure_dir "$metabat_dir"
-    
-    metabat2 \
+
+    if ! ensure_dir "$metabat_dir"; then
+        log_error "Cannot create MetaBAT2 directory"
+        return 1
+    fi
+
+    if ! metabat2 \
         -i "$ASSEMBLY" \
         -o "${metabat_dir}/bin" \
         --saveCls \
         --minClsSize 50000 \
-        -a "${BAM_DIR}/depths_jgi.txt"
-    
+        -a "${BAM_DIR}/depths_jgi.txt"; then
+        log_error "MetaBAT2 failed"
+        return 1
+    fi
+
     # Convert MetaBAT2 output to contig_bins.tsv format
     log_info "Converting MetaBAT2 output format..."
-    : > "$contig_bins"  # Truncate or create
+
+    if ! : > "$contig_bins"; then
+        log_error "Cannot create contig_bins file"
+        return 1
+    fi
     
     for bin_file in "${metabat_dir}"/bin*.fa; do
         [[ -e "$bin_file" ]] || continue
@@ -302,18 +345,24 @@ run_dastool() {
     fi
     
     log_info "Running DAS_Tool..."
-    
-    conda run -n SemiBin --live-stream DAS_Tool \
+
+    if ! conda run -n SemiBin --live-stream DAS_Tool \
         -i "${OUTDIR}/semibin2/contig_bins.tsv,${OUTDIR}/metabat2/contig_bins.tsv" \
         -l semibin2,metabat2 \
         -c "$ASSEMBLY" \
         -o "${OUTDIR}/dastool" \
         --threads "$THREADS" \
         --write_bin_evals \
-        --write_bins
-    
+        --write_bins; then
+        log_error "DAS_Tool failed"
+        return 1
+    fi
+
     # Consolidate output
-    ensure_dir "$dastool_dir"
+    if ! ensure_dir "$dastool_dir"; then
+        log_error "Cannot create DAS_Tool directory"
+        return 1
+    fi
     mv "${OUTDIR}"/dastool*.* "$dastool_dir/" 2>/dev/null || true
     
     # Create combined bins file

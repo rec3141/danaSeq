@@ -144,9 +144,19 @@ done
 [[ -n "${HMM_DATABASES}" && ${RUN_PROKKA} -eq 0 ]] && { echo "[ERR] --hmm requires -P (Prokka)" >&2; exit 2; }
 [[ -z "${OUTPUT}" ]] && OUTPUT="out_$(basename "${INPUT}")_$(date +%Y%m%d_%H%M%S)"
 
-mkdir -p "${OUTPUT}"
+# Create output directory with error checking
+if ! mkdir -p "${OUTPUT}"; then
+  echo "[ERROR] Cannot create output directory: ${OUTPUT}" >&2
+  exit 1
+fi
+
+# Create cache directory with error checking
 CACHE_FASTQ="/data/.fastq_pass"
-mkdir -p "${CACHE_FASTQ}"
+if ! mkdir -p "${CACHE_FASTQ}"; then
+  echo "[ERROR] Cannot create cache directory: ${CACHE_FASTQ}" >&2
+  echo "[ERROR] Check permissions on /data/" >&2
+  exit 1
+fi
 
 # Failure tracking
 FAILURE_LOG="${OUTPUT}/failed_files.txt"
@@ -286,13 +296,17 @@ echo "[INFO] $(date +%H:%M:%S) Creating directories"
 BARCODELIST=$(printf '%s\n' "${FILES[@]}" | xargs -n1 basename | cut -f3 -d'_' | sort -u)
 FCLIST=$(printf '%s\n' "${FILES[@]}" | xargs -n1 basename | cut -f1 -d'_' | sort -u)
 
-for fc in $FCLIST; do
-  for barcode in $BARCODELIST; do
+# Quote loop variables to prevent word splitting
+while IFS= read -r fc; do
+  while IFS= read -r barcode; do
     if [[ "$barcode" =~ ^barcode[0-9]+$ ]]; then
-      mkdir -p "${OUTPUT}/$fc/$barcode"/{fa,fq,sketch,prokka,tetra,stats,kraken}
+      if ! mkdir -p "${OUTPUT}/${fc}/${barcode}"/{fa,fq,sketch,prokka,tetra,stats,kraken}; then
+        echo "[ERROR] Cannot create output subdirectories for ${fc}/${barcode}" >&2
+        exit 1
+      fi
     fi
-  done
-done
+  done <<< "$BARCODELIST"
+done <<< "$FCLIST"
 
 # ============================================================================
 # FASTQ Validation & Caching System
@@ -659,7 +673,12 @@ process_one() {
       fi
 
       debug_msg "Running prokka on $base"
-      mkdir -p "$prokdir"
+      if ! mkdir -p "$prokdir"; then
+        echo "[ERROR] Cannot create Prokka directory: $prokdir" >&2
+        log_failure "$file" "Prokka" "mkdir failed"
+        return 1
+      fi
+
       if run_cmd "${PROKKA_BIN} --metagenome --fast --cpus $PROKKA_THREADS --evalue 1e-20 --outdir $prokdir --force --quiet $(pwd)/$fafile" "$logfile"; then
         rm -f "$prokdir"/*.{err,fna,fsa,gbk,log,sqn,txt} 2>/dev/null || true
         # Serialize DB writes to avoid lock conflicts
@@ -679,7 +698,12 @@ process_one() {
   if [[ -n "${HMM_DATABASES}" ]]; then
     local prokdir="$bcdir/prokka/$base"
     local hmmdir="$bcdir/hmm"
-    mkdir -p "$hmmdir"
+
+    if ! mkdir -p "$hmmdir"; then
+      echo "[ERROR] Cannot create HMM directory: $hmmdir" >&2
+      log_failure "$file" "HMM" "mkdir failed"
+      return 1
+    fi
 
     # Find Prokka's protein file (.faa), excluding temporary files
     shopt -s nullglob
@@ -765,7 +789,13 @@ process_one() {
   # Complementary to coverage-based binning methods
   if (( RUN_TETRA )); then
     local lrn="$bcdir/tetra/$base.lrn"
-    mkdir -p "$bcdir/tetra"
+
+    if ! mkdir -p "$bcdir/tetra"; then
+      echo "[ERROR] Cannot create tetra directory: $bcdir/tetra" >&2
+      log_failure "$file" "Tetra" "mkdir failed"
+      return 1
+    fi
+
     # Run if --force is set OR if no output exists
     if (( FORCE )) || [[ ! -s "$lrn" ]]; then
       echo -n "TETRA "
