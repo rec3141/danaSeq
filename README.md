@@ -212,7 +212,7 @@ GNU parallel, trash-cli (safer file operations)
 
 ## Active Deployments
 
-**CMO2025** — California-Mexico Oceanographic Survey
+**CMO2025** — Churchill Marine Observatory Mesocosms
 **QEI2025** — Queen Elizabeth Islands Arctic Expedition
 
 *Note:* Scripts contain deployment-specific paths. Update before use in new projects.
