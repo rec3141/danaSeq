@@ -12,6 +12,9 @@ nextflow.enable.dsl = 2
 // Usage:
 //   nextflow run main.nf --input /path/to/data --run_kraken --run_prokka -resume
 //
+// Watch mode for live sequencing:
+//   nextflow run main.nf --input /path/to/data --watch --run_db_integration -resume
+//
 // ============================================================================
 
 // Import modules
@@ -25,6 +28,7 @@ include { SENDSKETCH }        from './modules/sketch'
 include { HMM_SEARCH }        from './modules/hmm'
 include { TETRAMER_FREQ }     from './modules/tetramer'
 include { DB_INTEGRATION }    from './modules/db_integration'
+include { DB_SYNC }           from './modules/db_integration'
 
 // ============================================================================
 // Input channel: discover FASTQ files from Nanopore output structure
@@ -33,8 +37,15 @@ include { DB_INTEGRATION }    from './modules/db_integration'
 // Extracts metadata (flowcell, barcode) from filename, carried through entire DAG
 
 def create_fastq_channel() {
-    Channel
-        .fromPath("${params.input}/**/fastq_pass/barcode*/*.fastq.gz", checkIfExists: true)
+    def pattern = "${params.input}/**/fastq_pass/barcode*/*.fastq.gz"
+
+    // watchPath monitors for new files during live sequencing runs;
+    // 'create' event fires when MinKNOW atomically moves completed files into barcode dirs
+    def ch_raw = params.watch
+        ? Channel.watchPath(pattern, 'create')
+        : Channel.fromPath(pattern, checkIfExists: true)
+
+    ch_raw
         .filter { it.size() >= params.min_file_size }
         .map { fastq ->
             def name = fastq.baseName.replace('.fastq', '')
@@ -119,17 +130,33 @@ workflow {
     // Collects all published output directories and loads into DuckDB
     // Uses string paths since R scripts operate on the host filesystem
     if (params.run_db_integration) {
-        // Gather unique barcode directory paths from FASTA outputs
-        ch_barcode_dirs = ch_fasta
-            .map { meta, fasta ->
-                "${params.outdir}/${meta.flowcell}/${meta.barcode}"
-            }
-            .unique()
-            // Wait for all processing to complete before DB loading
-            .collect()
-            .flatMap { it }
+        def abs_outdir = file(params.outdir).toAbsolutePath().toString()
 
-        DB_INTEGRATION(ch_barcode_dirs)
+        if (params.watch) {
+            // Watch mode: channel never closes so .collect() would block forever.
+            // Instead, use a periodic timer to scan output dirs and sync DB.
+            // R scripts are idempotent (import_log tracks what's loaded).
+            ch_timer = Channel.interval(params.db_sync_minutes * 60 * 1000)
+            DB_SYNC(ch_timer, abs_outdir, params.danadir)
+        } else {
+            // Batch mode: barrier approach — wait for all processes to finish
+            // .collect() blocks until ALL mixed channels are drained
+            ch_done = ch_fasta.map { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }
+            if (params.run_kraken)  { ch_done = ch_done.mix(KRAKEN2_CLASSIFY.out.parsed.map  { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
+            if (params.run_sketch)  { ch_done = ch_done.mix(SENDSKETCH.out.sketch.map        { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
+            if (params.run_tetra)   { ch_done = ch_done.mix(TETRAMER_FREQ.out.lrn.map        { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
+            if (params.run_prokka)  { ch_done = ch_done.mix(PROKKA_ANNOTATE.out.tsv.map      { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
+            if (params.run_prokka && params.hmm_databases) {
+                ch_done = ch_done.mix(HMM_SEARCH.out.tsv.map { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" })
+            }
+
+            // Wait for everything, then deduplicate to unique barcode dirs
+            ch_barcode_dirs = ch_done
+                .collect()
+                .flatMap { it.unique() }
+
+            DB_INTEGRATION(ch_barcode_dirs)
+        }
     }
 }
 
