@@ -7,7 +7,7 @@
 process DB_INTEGRATION {
     tag "${barcode_dir}"
     label 'process_medium'
-    conda "${projectDir}/envs/tools.yml"
+    conda "${projectDir}/conda-envs/dana-tools"
     maxForks 1
     executor 'local'
 

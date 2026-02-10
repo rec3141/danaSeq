@@ -4,7 +4,7 @@
 process KRAKEN2_CLASSIFY {
     tag "${meta.id}"
     label 'process_kraken'
-    conda "${projectDir}/envs/tools.yml"
+    conda "${projectDir}/conda-envs/dana-tools"
     maxForks 1
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/kraken", mode: 'copy'
 

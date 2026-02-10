@@ -3,7 +3,7 @@
 process QC_BBDUK {
     tag "${meta.id}"
     label 'process_medium'
-    conda "${projectDir}/envs/bbmap.yml"
+    conda "${projectDir}/conda-envs/dana-bbmap"
 
     input:
     tuple val(meta), path(fastq)
@@ -12,8 +12,10 @@ process QC_BBDUK {
     tuple val(meta), path("${meta.id}.bbduk.fastq.gz"), emit: trimmed
 
     script:
+    def mem_mb = task.memory ? (task.memory.toMega() * 85 / 100).intValue() : 3400
     """
     bbduk.sh \
+        -Xmx${mem_mb}m \
         in="${fastq}" \
         out="${meta.id}.bbduk.fastq.gz" \
         ref=adapters,artifacts,phix,lambda \
@@ -25,7 +27,7 @@ process QC_BBDUK {
 process QC_FILTLONG {
     tag "${meta.id}"
     label 'process_low'
-    conda "${projectDir}/envs/tools.yml"
+    conda "${projectDir}/conda-envs/dana-tools"
 
     input:
     tuple val(meta), path(fastq)
@@ -51,7 +53,7 @@ process QC_FILTLONG {
 process CONVERT_TO_FASTA {
     tag "${meta.id}"
     label 'process_low'
-    conda "${projectDir}/envs/bbmap.yml"
+    conda "${projectDir}/conda-envs/dana-bbmap"
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/fa", mode: 'copy'
 
     input:
@@ -61,8 +63,10 @@ process CONVERT_TO_FASTA {
     tuple val(meta), path("${meta.id}.fa"), emit: fasta
 
     script:
+    def mem_mb = task.memory ? (task.memory.toMega() * 85 / 100).intValue() : 1700
     """
     reformat.sh \
+        -Xmx${mem_mb}m \
         in="${fastq}" \
         out=stdout.fa \
         fastawrap=0 \

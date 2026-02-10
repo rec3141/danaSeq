@@ -4,7 +4,7 @@
 process HMM_SEARCH {
     tag "${meta.id}_${dbname}"
     label 'process_low'
-    conda "${projectDir}/envs/tools.yml"
+    conda "${projectDir}/conda-envs/dana-tools"
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/hmm", mode: 'copy'
 
     input:
