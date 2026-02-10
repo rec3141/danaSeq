@@ -30,7 +30,9 @@ process DB_INTEGRATION {
     run_r_script() {
         local script="\$1"; shift
         local patched=\$(mktemp)
-        sed 's|source("/work/apps/dana/log-db.r")|source("'${params.danadir}'/46_log_db.r")|' "\$script" > "\$patched"
+        sed -e 's|source("/work/apps/dana/log-db.r")|source("'${params.danadir}'/46_log_db.r")|' \
+            -e 's|library(tidyverse)|library(stringr); library(dplyr); library(tidyr); library(tibble)|' \
+            "\$script" > "\$patched"
         Rscript "\$patched" "\$@" || true
         rm -f "\$patched"
     }
@@ -83,7 +85,9 @@ process DB_SYNC {
     run_r_script() {
         local script="\$1"; shift
         local patched=\$(mktemp)
-        sed 's|source("/work/apps/dana/log-db.r")|source("'${danadir}'/46_log_db.r")|' "\$script" > "\$patched"
+        sed -e 's|source("/work/apps/dana/log-db.r")|source("'${danadir}'/46_log_db.r")|' \
+            -e 's|library(tidyverse)|library(stringr); library(dplyr); library(tidyr); library(tibble)|' \
+            "\$script" > "\$patched"
         Rscript "\$patched" "\$@" || true
         rm -f "\$patched"
     }
