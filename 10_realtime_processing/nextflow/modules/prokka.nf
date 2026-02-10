@@ -3,6 +3,7 @@
 process PROKKA_ANNOTATE {
     tag "${meta.id}"
     label 'process_medium'
+    conda 'bioconda::prokka'
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/prokka", mode: 'copy'
 
     input:
@@ -16,7 +17,7 @@ process PROKKA_ANNOTATE {
 
     script:
     """
-    ${params.prokka_bin} \
+    prokka \
         --metagenome \
         --fast \
         --cpus 1 \

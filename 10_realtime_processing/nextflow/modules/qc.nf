@@ -3,6 +3,7 @@
 process QC_BBDUK {
     tag "${meta.id}"
     label 'process_medium'
+    conda 'bioconda::bbmap'
 
     input:
     tuple val(meta), path(fastq)
@@ -12,7 +13,7 @@ process QC_BBDUK {
 
     script:
     """
-    ${params.bbmap}/bbduk.sh \
+    bbduk.sh \
         in="${fastq}" \
         out="${meta.id}.bbduk.fastq.gz" \
         ref=adapters,artifacts,phix,lambda \
@@ -24,6 +25,7 @@ process QC_BBDUK {
 process QC_FILTLONG {
     tag "${meta.id}"
     label 'process_low'
+    conda 'bioconda::filtlong'
 
     input:
     tuple val(meta), path(fastq)
@@ -33,7 +35,7 @@ process QC_FILTLONG {
 
     script:
     """
-    ${params.filtlong} \
+    filtlong \
         --min_length ${params.min_readlen} \
         --keep_percent ${params.keep_percent} \
         "${fastq}" > "${meta.id}.filtlong.fastq"
@@ -49,6 +51,7 @@ process QC_FILTLONG {
 process CONVERT_TO_FASTA {
     tag "${meta.id}"
     label 'process_low'
+    conda 'bioconda::bbmap'
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/fa", mode: 'copy'
 
     input:
@@ -59,7 +62,7 @@ process CONVERT_TO_FASTA {
 
     script:
     """
-    ${params.bbmap}/reformat.sh \
+    reformat.sh \
         in="${fastq}" \
         out=stdout.fa \
         fastawrap=0 \

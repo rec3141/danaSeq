@@ -3,6 +3,7 @@
 process SENDSKETCH {
     tag "${meta.id}"
     label 'process_medium'
+    conda 'bioconda::bbmap'
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/sketch", mode: 'copy'
 
     input:
@@ -13,7 +14,7 @@ process SENDSKETCH {
 
     script:
     """
-    ${params.bbmap}/sendsketch.sh \
+    sendsketch.sh \
         in="${fasta}" \
         address=nt \
         out="${meta.id}.txt" \

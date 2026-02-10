@@ -4,6 +4,7 @@
 process HMM_SEARCH {
     tag "${meta.id}_${dbname}"
     label 'process_low'
+    conda 'bioconda::hmmer'
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/hmm", mode: 'copy'
 
     input:
@@ -15,7 +16,7 @@ process HMM_SEARCH {
 
     script:
     """
-    ${params.hmmsearch} \
+    hmmsearch \
         --cut_tc \
         --cpu 1 \
         --tblout "${meta.id}.${dbname}.tbl" \

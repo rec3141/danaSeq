@@ -4,6 +4,7 @@
 process KRAKEN2_CLASSIFY {
     tag "${meta.id}"
     label 'process_kraken'
+    conda 'bioconda::kraken2 conda-forge::gawk'
     maxForks 1
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/kraken", mode: 'copy'
 
@@ -16,7 +17,7 @@ process KRAKEN2_CLASSIFY {
 
     script:
     """
-    ${params.kraken2} \
+    kraken2 \
         --db ${params.kraken_db} \
         --use-names \
         --threads 1 \

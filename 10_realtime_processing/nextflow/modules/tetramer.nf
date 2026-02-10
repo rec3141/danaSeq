@@ -1,8 +1,10 @@
 // Tetranucleotide frequency analysis for ESOM clustering
+// tetramer_freqs_esom.pl is not available via conda; downloaded from GitHub at build time
 
 process TETRAMER_FREQ {
     tag "${meta.id}"
     label 'process_low'
+    conda 'conda-forge::perl'
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/tetra", mode: 'copy'
 
     input:
@@ -13,11 +15,18 @@ process TETRAMER_FREQ {
 
     script:
     """
+    # Use tetramer_freqs_esom.pl from PATH (Docker/install.sh) or download it
+    if ! command -v tetramer_freqs_esom.pl &>/dev/null && [ ! -f tetramer_freqs_esom.pl ]; then
+        curl -fsSL https://raw.githubusercontent.com/tetramerFreqs/Binning/master/tetramer_freqs_esom.pl \
+            -o tetramer_freqs_esom.pl
+        chmod +x tetramer_freqs_esom.pl
+    fi
+
     # Create annotation file from FASTA headers
     grep '>' "${fasta}" | sed 's/>//' | paste - - - > annotation.txt
 
     # Calculate tetranucleotide frequencies
-    perl ${params.apps}/tetramer_freqs_esom.pl \
+    perl tetramer_freqs_esom.pl \
         -f "${fasta}" \
         -a annotation.txt \
         -min ${params.min_readlen} \

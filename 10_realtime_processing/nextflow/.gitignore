@@ -1,0 +1,7 @@
+# Nextflow runtime
+.nextflow/
+.nextflow.log*
+work/
+conda-envs/
+results/
+test_results/

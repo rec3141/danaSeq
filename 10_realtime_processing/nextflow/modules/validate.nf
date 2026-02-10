@@ -4,6 +4,7 @@
 process VALIDATE_FASTQ {
     tag "${meta.id}"
     label 'process_low'
+    conda 'bioconda::bbmap'
     errorStrategy 'ignore'
 
     input:
@@ -17,7 +18,7 @@ process VALIDATE_FASTQ {
     if gzip -t "${fastq}" 2>/dev/null; then
         ln -s "${fastq}" "${meta.id}.validated.fastq.gz"
     else
-        ${params.bbmap}/reformat.sh in="${fastq}" out="${meta.id}.validated.fastq.gz" ow 2>&1
+        reformat.sh in="${fastq}" out="${meta.id}.validated.fastq.gz" ow 2>&1
         if ! gzip -t "${meta.id}.validated.fastq.gz" 2>/dev/null; then
             echo "[ERROR] Cannot repair corrupted FASTQ: ${fastq}" >&2
             exit 1
