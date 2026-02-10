@@ -1,5 +1,5 @@
 // Kraken2 taxonomic classification
-// maxForks=1 ensures only one instance runs at a time (database loads 50-100GB into RAM)
+// maxForks=1 ensures only one instance runs at a time (database is loaded into RAM)
 
 process KRAKEN2_CLASSIFY {
     tag "${meta.id}"

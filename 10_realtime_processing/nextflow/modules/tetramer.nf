@@ -15,18 +15,20 @@ process TETRAMER_FREQ {
 
     script:
     """
-    # Use tetramer_freqs_esom.pl from PATH (Docker/install.sh) or download it
-    if ! command -v tetramer_freqs_esom.pl &>/dev/null && [ ! -f tetramer_freqs_esom.pl ]; then
+    # Resolve tetramer_freqs_esom.pl: use from PATH, or download as fallback
+    TETRA_SCRIPT="\$(command -v tetramer_freqs_esom.pl 2>/dev/null || true)"
+    if [ -z "\$TETRA_SCRIPT" ]; then
         curl -fsSL https://raw.githubusercontent.com/tetramerFreqs/Binning/master/tetramer_freqs_esom.pl \
             -o tetramer_freqs_esom.pl
         chmod +x tetramer_freqs_esom.pl
+        TETRA_SCRIPT="./tetramer_freqs_esom.pl"
     fi
 
     # Create annotation file from FASTA headers
     grep '>' "${fasta}" | sed 's/>//' | paste - - - > annotation.txt
 
     # Calculate tetranucleotide frequencies
-    perl tetramer_freqs_esom.pl \
+    perl "\$TETRA_SCRIPT" \
         -f "${fasta}" \
         -a annotation.txt \
         -min ${params.min_readlen} \

@@ -10,7 +10,7 @@ process PROKKA_ANNOTATE {
     tuple val(meta), path(fasta)
 
     output:
-    tuple val(meta), path("${meta.id}/*.faa"),  emit: proteins
+    tuple val(meta), path("${meta.id}/PROKKA_*.faa"),  emit: proteins
     tuple val(meta), path("${meta.id}/*.tsv"),  emit: tsv
     tuple val(meta), path("${meta.id}/*.gff"),  emit: gff
     tuple val(meta), path("${meta.id}"),        emit: prokka_dir
@@ -29,5 +29,7 @@ process PROKKA_ANNOTATE {
 
     # Clean up unnecessary Prokka outputs to save space
     rm -f "${meta.id}"/*.{err,fna,fsa,gbk,log,sqn,txt} 2>/dev/null || true
+    # Remove temp files that can interfere with downstream glob matching
+    rm -f "${meta.id}"/*.tmp.*.faa 2>/dev/null || true
     """
 }
