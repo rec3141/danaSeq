@@ -3,7 +3,7 @@
 process SENDSKETCH {
     tag "${meta.id}"
     label 'process_medium'
-    conda 'bioconda::bbmap'
+    conda "${projectDir}/envs/bbmap.yml"
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/sketch", mode: 'copy'
 
     input:

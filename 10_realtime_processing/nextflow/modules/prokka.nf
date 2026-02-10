@@ -3,7 +3,7 @@
 process PROKKA_ANNOTATE {
     tag "${meta.id}"
     label 'process_medium'
-    conda 'bioconda::prokka'
+    conda "${projectDir}/envs/prokka.yml"
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/prokka", mode: 'copy'
 
     input:

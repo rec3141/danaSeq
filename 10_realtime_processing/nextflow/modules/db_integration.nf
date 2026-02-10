@@ -7,7 +7,7 @@
 process DB_INTEGRATION {
     tag "${barcode_dir}"
     label 'process_medium'
-    conda 'conda-forge::r-base conda-forge::r-dbi conda-forge::r-duckdb conda-forge::r-readr'
+    conda "${projectDir}/envs/tools.yml"
     maxForks 1
     executor 'local'
 

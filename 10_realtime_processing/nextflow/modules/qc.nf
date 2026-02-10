@@ -3,7 +3,7 @@
 process QC_BBDUK {
     tag "${meta.id}"
     label 'process_medium'
-    conda 'bioconda::bbmap'
+    conda "${projectDir}/envs/bbmap.yml"
 
     input:
     tuple val(meta), path(fastq)
@@ -25,7 +25,7 @@ process QC_BBDUK {
 process QC_FILTLONG {
     tag "${meta.id}"
     label 'process_low'
-    conda 'bioconda::filtlong'
+    conda "${projectDir}/envs/tools.yml"
 
     input:
     tuple val(meta), path(fastq)
@@ -51,7 +51,7 @@ process QC_FILTLONG {
 process CONVERT_TO_FASTA {
     tag "${meta.id}"
     label 'process_low'
-    conda 'bioconda::bbmap'
+    conda "${projectDir}/envs/bbmap.yml"
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/fa", mode: 'copy'
 
     input:

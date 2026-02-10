@@ -1,0 +1,6 @@
+name: dana-bbmap
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bbmap=39.52

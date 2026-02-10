@@ -5,9 +5,17 @@ set -euo pipefail
 # Dana Pipeline - Conda Environment Installer
 # ============================================================================
 #
-# Creates isolated conda environments for each pipeline tool without
-# modifying the host's base environment. All envs are stored under
-# ./conda-envs/ (or a custom path via --prefix).
+# Creates isolated conda environments for the pipeline without modifying
+# the host's base environment. All envs are prefix-installed under
+# ./conda-envs/ (not in ~/.conda/envs/) so they never collide with
+# existing environments.
+#
+# Three environments are needed because of dependency conflicts:
+#   dana-bbmap   - BBMap (samtools/libdeflate conflicts with R)
+#   dana-prokka  - Prokka (BioPerl pins perl to 5.26, conflicts with others)
+#   dana-tools   - Everything else (filtlong, kraken2, hmmer, R/DuckDB, perl)
+#
+# Each is built from a pinned YAML file in envs/ for reproducibility.
 #
 # Usage:
 #   ./install.sh              # Install all environments
@@ -20,6 +28,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_DIR="${SCRIPT_DIR}/conda-envs"
+ENVS_YAML_DIR="${SCRIPT_DIR}/envs"
 TETRAMER_URL="https://raw.githubusercontent.com/tetramerFreqs/Binning/master/tetramer_freqs_esom.pl"
 
 # Detect conda/mamba
@@ -50,31 +59,30 @@ while (( $# )); do
 done
 
 # ============================================================================
-# Environment definitions: name -> conda packages
+# Environment definitions
 # ============================================================================
-# Each maps to one or more Nextflow processes. Separate environments prevent
-# dependency conflicts between tools with incompatible requirements.
 
-declare -A ENVS=(
-    [dana-bbmap]="bioconda::bbmap"
-    [dana-filtlong]="bioconda::filtlong"
-    [dana-kraken2]="bioconda::kraken2 conda-forge::gawk"
-    [dana-prokka]="bioconda::prokka"
-    [dana-hmmer]="bioconda::hmmer"
-    [dana-tetramer]="conda-forge::perl conda-forge::curl"
-    [dana-r-duckdb]="conda-forge::r-base conda-forge::r-dbi conda-forge::r-duckdb conda-forge::r-readr"
+# Ordered list of YAML files to install
+ENV_YAMLS=(
+    bbmap.yml
+    prokka.yml
+    tools.yml
 )
 
 # Which tool binary to check for each environment
 declare -A ENV_CHECK=(
     [dana-bbmap]="bbduk.sh"
-    [dana-filtlong]="filtlong"
-    [dana-kraken2]="kraken2"
     [dana-prokka]="prokka"
-    [dana-hmmer]="hmmsearch"
-    [dana-tetramer]="perl"
-    [dana-r-duckdb]="Rscript"
+    [dana-tools]="filtlong"
 )
+
+# Additional binaries to verify in dana-tools
+TOOLS_CHECK=(filtlong kraken2 hmmsearch gawk perl Rscript)
+
+yaml_to_envname() {
+    local yaml="$1"
+    echo "dana-${yaml%.yml}"
+}
 
 # ============================================================================
 # Actions
@@ -82,42 +90,56 @@ declare -A ENV_CHECK=(
 
 do_install() {
     mkdir -p "${ENV_DIR}"
-    local total=${#ENVS[@]}
+    local total=${#ENV_YAMLS[@]}
     local count=0
     local failed=0
 
     echo ""
     echo "Installing ${total} conda environments into: ${ENV_DIR}"
+    echo "Using pinned YAML files from: ${ENVS_YAML_DIR}"
     echo ""
 
-    for env_name in $(printf '%s\n' "${!ENVS[@]}" | sort); do
-        ((count++))
-        local packages="${ENVS[$env_name]}"
+    for yaml in "${ENV_YAMLS[@]}"; do
+        count=$((count + 1))
+        local env_name
+        env_name=$(yaml_to_envname "$yaml")
         local env_path="${ENV_DIR}/${env_name}"
+        local yaml_path="${ENVS_YAML_DIR}/${yaml}"
 
-        echo "[$count/$total] ${env_name}"
+        echo "[$count/$total] ${env_name} (from ${yaml})"
 
-        if [[ -d "${env_path}" ]] && [[ -f "${env_path}/bin/activate" ]]; then
+        if [[ ! -f "${yaml_path}" ]]; then
+            echo "  [ERROR] YAML file not found: ${yaml_path}" >&2
+            failed=$((failed + 1))
+            continue
+        fi
+
+        if [[ -d "${env_path}/conda-meta" ]]; then
             echo "  Already exists, skipping (use --clean to rebuild)"
             continue
         fi
 
-        echo "  Creating: ${CONDA_CMD} create -y -p ${env_path} ${packages}"
-        if ! ${CONDA_CMD} create -y -p "${env_path}" -c conda-forge -c bioconda ${packages} 2>&1 \
-            | while IFS= read -r line; do echo "  $line"; done; then
+        echo "  Creating environment from ${yaml}..."
+        local log_file
+        log_file=$(mktemp)
+        if ! ${CONDA_CMD} env create -y -p "${env_path}" -f "${yaml_path}" \
+            > "${log_file}" 2>&1; then
             echo "  [ERROR] Failed to create ${env_name}" >&2
-            ((failed++))
+            sed 's/^/  /' "${log_file}" >&2
+            rm -f "${log_file}"
+            failed=$((failed + 1))
             continue
         fi
+        rm -f "${log_file}"
 
         echo "  Done"
     done
 
-    # Download tetramer_freqs_esom.pl into the tetramer environment
+    # Download tetramer_freqs_esom.pl into the tools environment
     echo ""
     echo "Downloading tetramer_freqs_esom.pl..."
-    local tetra_bin="${ENV_DIR}/dana-tetramer/bin/tetramer_freqs_esom.pl"
-    if [[ -d "${ENV_DIR}/dana-tetramer" ]]; then
+    local tetra_bin="${ENV_DIR}/dana-tools/bin/tetramer_freqs_esom.pl"
+    if [[ -d "${ENV_DIR}/dana-tools" ]]; then
         curl -fsSL "${TETRAMER_URL}" -o "${tetra_bin}"
         chmod +x "${tetra_bin}"
         echo "  Installed to: ${tetra_bin}"
@@ -145,7 +167,10 @@ do_check() {
     local ok=0
     local missing=0
 
-    for env_name in $(printf '%s\n' "${!ENVS[@]}" | sort); do
+    # Check each environment's primary binary
+    for yaml in "${ENV_YAMLS[@]}"; do
+        local env_name
+        env_name=$(yaml_to_envname "$yaml")
         local env_path="${ENV_DIR}/${env_name}"
         local check_bin="${ENV_CHECK[$env_name]}"
 
@@ -153,7 +178,7 @@ do_check() {
 
         if [[ ! -d "${env_path}" ]]; then
             echo "MISSING (not installed)"
-            ((missing++))
+            missing=$((missing + 1))
             continue
         fi
 
@@ -161,27 +186,39 @@ do_check() {
             local version
             version=$("${env_path}/bin/${check_bin}" --version 2>&1 | head -1) || version="(installed)"
             echo "OK  ${version}"
-            ((ok++))
+            ok=$((ok + 1))
         else
             echo "BROKEN (${check_bin} not found in env)"
-            ((missing++))
+            missing=$((missing + 1))
         fi
     done
 
-    # Special check for tetramer script
-    printf "  %-20s" "tetramer_freqs"
-    if [[ -x "${ENV_DIR}/dana-tetramer/bin/tetramer_freqs_esom.pl" ]]; then
+    # Detailed check of dana-tools binaries
+    echo ""
+    echo "  dana-tools contents:"
+    for bin in "${TOOLS_CHECK[@]}"; do
+        printf "    %-20s" "${bin}"
+        if [[ -x "${ENV_DIR}/dana-tools/bin/${bin}" ]]; then
+            echo "OK"
+        else
+            echo "MISSING"
+            missing=$((missing + 1))
+        fi
+    done
+
+    # Check tetramer script
+    printf "    %-20s" "tetramer_freqs"
+    if [[ -x "${ENV_DIR}/dana-tools/bin/tetramer_freqs_esom.pl" ]]; then
         echo "OK"
-        ((ok++))
     else
         echo "MISSING (run install.sh to download)"
-        ((missing++))
+        missing=$((missing + 1))
     fi
 
     echo ""
-    echo "Result: ${ok} OK, ${missing} missing"
+    echo "Result: ${ok} envs OK, ${missing} issue(s)"
 
-    # Also check Nextflow
+    # Check Nextflow
     echo ""
     printf "  %-20s" "nextflow"
     if command -v nextflow &>/dev/null; then
@@ -203,10 +240,12 @@ do_clean() {
     echo ""
 
     local total=0
-    for env_name in "${!ENVS[@]}"; do
+    for yaml in "${ENV_YAMLS[@]}"; do
+        local env_name
+        env_name=$(yaml_to_envname "$yaml")
         if [[ -d "${ENV_DIR}/${env_name}" ]]; then
             echo "  ${env_name}"
-            ((total++))
+            total=$((total + 1))
         fi
     done
 
@@ -218,7 +257,9 @@ do_clean() {
     echo ""
     read -rp "Remove ${total} environments? [y/N] " confirm
     if [[ "${confirm}" =~ ^[Yy] ]]; then
-        for env_name in "${!ENVS[@]}"; do
+        for yaml in "${ENV_YAMLS[@]}"; do
+            local env_name
+            env_name=$(yaml_to_envname "$yaml")
             if [[ -d "${ENV_DIR}/${env_name}" ]]; then
                 echo "  Removing ${env_name}..."
                 rm -rf "${ENV_DIR}/${env_name}"

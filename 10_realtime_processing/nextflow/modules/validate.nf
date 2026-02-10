@@ -4,7 +4,7 @@
 process VALIDATE_FASTQ {
     tag "${meta.id}"
     label 'process_low'
-    conda 'bioconda::bbmap'
+    conda "${projectDir}/envs/bbmap.yml"
     errorStrategy 'ignore'
 
     input:

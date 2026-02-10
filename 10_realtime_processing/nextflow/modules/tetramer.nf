@@ -4,7 +4,7 @@
 process TETRAMER_FREQ {
     tag "${meta.id}"
     label 'process_low'
-    conda 'conda-forge::perl'
+    conda "${projectDir}/envs/tools.yml"
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/tetra", mode: 'copy'
 
     input:
