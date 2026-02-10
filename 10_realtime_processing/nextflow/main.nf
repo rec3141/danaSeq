@@ -12,8 +12,10 @@ nextflow.enable.dsl = 2
 // Usage:
 //   nextflow run main.nf --input /path/to/data --run_kraken --run_prokka -resume
 //
-// Watch mode for live sequencing:
-//   nextflow run main.nf --input /path/to/data --watch --run_db_integration -resume
+// Watch mode for live sequencing (--input = parent of run directory):
+//   nextflow run main.nf --input /path/to/runs --watch --run_db_integration
+//   # Or point --input at the run dir with a shallower glob:
+//   nextflow run main.nf --input /path/to/run_dir --watch --watch_glob 'fastq_pass/barcode*/*.fastq.gz'
 //
 // ============================================================================
 
@@ -37,13 +39,14 @@ include { DB_SYNC }           from './modules/db_integration'
 // Extracts metadata (flowcell, barcode) from filename, carried through entire DAG
 
 def create_fastq_channel() {
-    def pattern = "${params.input}/**/fastq_pass/barcode*/*.fastq.gz"
-
-    // watchPath monitors for new files during live sequencing runs;
-    // 'create' event fires when MinKNOW atomically moves completed files into barcode dirs
+    // Batch mode uses ** recursive glob (fromPath handles this natively).
+    // Watch mode uses a flat glob (watch_glob param) because Java's WatchService
+    // cannot recursively monitor subdirectories via **.  Default watch_glob is
+    // '*/fastq_pass/barcode*/*.fastq.gz' — set --input to the parent of the run
+    // directory, or override --watch_glob to match your directory depth.
     def ch_raw = params.watch
-        ? Channel.watchPath(pattern, 'create')
-        : Channel.fromPath(pattern, checkIfExists: true)
+        ? Channel.watchPath("${params.input}/${params.watch_glob}", 'create')
+        : Channel.fromPath("${params.input}/**/fastq_pass/barcode*/*.fastq.gz", checkIfExists: true)
 
     ch_raw
         .filter { it.size() >= params.min_file_size }
@@ -134,10 +137,11 @@ workflow {
 
         if (params.watch) {
             // Watch mode: channel never closes so .collect() would block forever.
-            // Instead, use a periodic timer to scan output dirs and sync DB.
+            // Instead, DB_SYNC runs as a long-lived process with an internal
+            // sleep loop that periodically scans output dirs and syncs DB.
             // R scripts are idempotent (import_log tracks what's loaded).
-            ch_timer = Channel.interval(params.db_sync_minutes * 60 * 1000)
-            DB_SYNC(ch_timer, abs_outdir, params.danadir)
+            def sync_secs = params.db_sync_minutes * 60
+            DB_SYNC(abs_outdir, params.danadir, sync_secs)
         } else {
             // Batch mode: barrier approach — wait for all processes to finish
             // .collect() blocks until ALL mixed channels are drained

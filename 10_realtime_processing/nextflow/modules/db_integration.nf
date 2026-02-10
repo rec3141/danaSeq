@@ -60,25 +60,24 @@ process DB_INTEGRATION {
     """
 }
 
-// Timer-driven DB sync for watch mode.
-// Scans the output directory for all barcode subdirectories and runs R scripts
-// on each. The R scripts are idempotent (they use import_log to track what's
-// already been loaded), so repeated invocations on the same data are safe.
+// Periodic DB sync for watch mode.
+// Runs as a long-lived process with an internal sleep loop — in watch mode the
+// pipeline never completes (watchPath keeps the DAG alive), so this process
+// runs indefinitely alongside it.  Scans the output directory for barcode
+// subdirectories and loads results into DuckDB.  The R scripts are idempotent
+// (they use import_log to track what's already been loaded).
 
 process DB_SYNC {
-    tag "sync-${tick}"
+    tag "db-sync"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-tools"
     maxForks 1
     executor 'local'
 
     input:
-    val tick           // from Channel.interval()
     val outdir         // absolute path to output directory
     val danadir        // path to R scripts directory
-
-    output:
-    val tick
+    val sync_seconds   // sleep interval between sync cycles
 
     script:
     """
@@ -92,33 +91,38 @@ process DB_SYNC {
         rm -f "\$patched"
     }
 
-    echo "[INFO] DB_SYNC tick=${tick}: scanning ${outdir} for barcode directories"
+    tick=0
+    while true; do
+        echo "[INFO] DB_SYNC tick=\${tick}: scanning ${outdir} for barcode directories"
 
-    # Find all barcode directories (outdir/flowcell/barcodeNN)
-    for barcode_dir in \$(find ${outdir} -mindepth 2 -maxdepth 2 -type d -name 'barcode*' | sort); do
-        echo "[INFO] DB_SYNC: processing \${barcode_dir}"
+        # Find all barcode directories (outdir/flowcell/barcodeNN)
+        for barcode_dir in \$(find ${outdir} -mindepth 2 -maxdepth 2 -type d -name 'barcode*' 2>/dev/null | sort); do
+            echo "[INFO] DB_SYNC: processing \${barcode_dir}"
 
-        if [ -d "\${barcode_dir}/kraken" ] && ls "\${barcode_dir}"/kraken/*.tsv >/dev/null 2>&1; then
-            run_r_script ${danadir}/40_kraken_db.r "\${barcode_dir}"
-            run_r_script ${danadir}/41_krakenreport_db.r "\${barcode_dir}"
-        fi
-
-        if [ -d "\${barcode_dir}/prokka" ]; then
-            run_r_script ${danadir}/42_prokka_db.r "\${barcode_dir}"
-        fi
-
-        if [ -d "\${barcode_dir}/sketch" ] && ls "\${barcode_dir}"/sketch/*.txt >/dev/null 2>&1; then
-            run_r_script ${danadir}/43_sketch_db.r "\${barcode_dir}"
-        fi
-
-        if [ -d "\${barcode_dir}/tetra" ] && ls "\${barcode_dir}"/tetra/*.lrn >/dev/null 2>&1; then
-            if [ ! -s "\${barcode_dir}/tnfs.txt" ]; then
-                printf '${TETRA_COLS}\\n' > "\${barcode_dir}/tnfs.txt"
+            if [ -d "\${barcode_dir}/kraken" ] && ls "\${barcode_dir}"/kraken/*.tsv >/dev/null 2>&1; then
+                run_r_script ${danadir}/40_kraken_db.r "\${barcode_dir}"
+                run_r_script ${danadir}/41_krakenreport_db.r "\${barcode_dir}"
             fi
-            run_r_script ${danadir}/44_tetra_db.r "\${barcode_dir}"
-        fi
-    done
 
-    echo "[INFO] DB_SYNC tick=${tick}: complete"
+            if [ -d "\${barcode_dir}/prokka" ]; then
+                run_r_script ${danadir}/42_prokka_db.r "\${barcode_dir}"
+            fi
+
+            if [ -d "\${barcode_dir}/sketch" ] && ls "\${barcode_dir}"/sketch/*.txt >/dev/null 2>&1; then
+                run_r_script ${danadir}/43_sketch_db.r "\${barcode_dir}"
+            fi
+
+            if [ -d "\${barcode_dir}/tetra" ] && ls "\${barcode_dir}"/tetra/*.lrn >/dev/null 2>&1; then
+                if [ ! -s "\${barcode_dir}/tnfs.txt" ]; then
+                    printf '${TETRA_COLS}\\n' > "\${barcode_dir}/tnfs.txt"
+                fi
+                run_r_script ${danadir}/44_tetra_db.r "\${barcode_dir}"
+            fi
+        done
+
+        echo "[INFO] DB_SYNC tick=\${tick}: complete, sleeping ${sync_seconds}s"
+        tick=\$((tick + 1))
+        sleep ${sync_seconds}
+    done
     """
 }
