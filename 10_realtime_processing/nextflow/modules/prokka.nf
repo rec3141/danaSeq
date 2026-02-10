@@ -17,6 +17,14 @@ process PROKKA_ANNOTATE {
 
     script:
     """
+    # Stub out tbl2asn -- it hangs on large metagenomes and we don't use its output
+    # Prokka checks version via: tbl2asn - | grep '^tbl2asn' then matches /tbl2asn\\s+(\\d+\\.\\d+)/
+    # Prokka also runs tbl2asn for annotation and expects .gbf output file (sed .gbf -> .gbk)
+    mkdir -p .local/bin
+    printf '%s\\n' '#!/bin/sh' 'echo "tbl2asn 25.8"' 'for a in "\$@"; do case "\$p" in -i) f="\$a";; -Z) touch "\$a";; esac; p="\$a"; done' '[ -n "\$f" ] && touch "\${f%.fsa}.gbf"' 'exit 0' > .local/bin/tbl2asn
+    chmod +x .local/bin/tbl2asn
+    export PATH="\$PWD/.local/bin:\$PATH"
+
     prokka \
         --metagenome \
         --fast \
