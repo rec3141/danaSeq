@@ -43,63 +43,40 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 
 ## Running the Pipeline
 
-### Nextflow (primary)
-
 ```bash
-# Install conda environments
 cd nextflow
+
+# Install conda environments
 ./install.sh
 ./install.sh --check
 
 # Basic run
-mamba run -p conda-envs/dana-mag-flye \
-    nextflow run main.nf --input /path/to/reads -resume
+./run-mag.sh --input /path/to/reads --outdir /path/to/output
 
 # With Filtlong pre-filtering, no MaxBin2
-mamba run -p conda-envs/dana-mag-flye \
-    nextflow run main.nf --input /path/to/reads \
-        --filtlong_size 40000000000 --run_maxbin false -resume
+./run-mag.sh --input /path/to/reads --outdir /path/to/output \
+    --filtlong_size 40000000000 --run_maxbin false
 
 # Kitchen sink — all options with defaults
-mamba run -p conda-envs/dana-mag-flye \
-    nextflow run main.nf --input /path/to/reads --outdir results \
-        --dedupe \
-        --filtlong_size 40000000000 \
-        --min_overlap 1000 \
-        --run_maxbin true \
-        --metabat_min_cls 50000 \
-        --assembly_cpus 24 \
-        --assembly_memory '64 GB' \
-        -resume
-
-# Quick test with bundled data
-mamba run -p conda-envs/dana-mag-flye \
-    nextflow run main.nf --input test-data -profile test -resume
-
-# Show all options
-mamba run -p conda-envs/dana-mag-flye \
-    nextflow run main.nf --help
-```
-
-### Launcher script
-
-```bash
-cd nextflow
-
-# Local conda (default)
-./run-mag.sh --input /path/to/reads --outdir /path/to/output
+./run-mag.sh --input /path/to/reads --outdir /path/to/output \
+    --dedupe \
+    --filtlong_size 40000000000 \
+    --min_overlap 1000 \
+    --run_maxbin true \
+    --metabat_min_cls 50000 \
+    --assembly_cpus 24 \
+    --assembly_memory '64 GB'
 
 # Docker mode
 docker build -t danaseq-mag .
 ./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
 
-# Manual docker run
-docker run --user $(id -u):$(id -g) \
-    -v /path/to/reads:/data/input:ro \
-    -v /path/to/output:/data/output \
-    danaseq-mag \
-    run /pipeline/main.nf \
-        --input /data/input --outdir /data/output -resume
+# Quick test with bundled data (direct nextflow)
+mamba run -p conda-envs/dana-mag-flye \
+    nextflow run main.nf --input test-data -profile test -resume
+
+# Show all options
+./run-mag.sh --help
 ```
 
 ## Pipeline Architecture

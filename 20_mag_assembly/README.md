@@ -4,8 +4,6 @@ Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads
 
 ## Quick Start
 
-### Nextflow (recommended)
-
 ```bash
 cd nextflow
 
@@ -13,26 +11,15 @@ cd nextflow
 ./install.sh
 ./install.sh --check
 
-# Run the pipeline
-mamba run -p conda-envs/dana-mag-flye \
-    nextflow run main.nf --input /path/to/reads -resume
-
-# Show all options
-mamba run -p conda-envs/dana-mag-flye \
-    nextflow run main.nf --help
-```
-
-### Launcher script
-
-```bash
-cd nextflow
-
-# Local conda (default)
+# Run (local conda, handles activation automatically)
 ./run-mag.sh --input /path/to/reads --outdir /path/to/output
 
-# Docker mode
+# Or with Docker
 docker build -t danaseq-mag .
 ./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
+
+# Show all options
+./run-mag.sh --help
 ```
 
 ### Kitchen sink — all options with defaults

@@ -13,16 +13,14 @@ Both pipelines are implemented in Nextflow DSL2 and run via conda or Docker with
 ```bash
 git clone https://github.com/rec3141/danaSeq.git
 cd danaSeq/10_realtime_processing/nextflow
-
-# Option A: Conda
 ./install.sh && ./install.sh --check
-conda activate conda-envs/dana-tools
-nextflow run main.nf --input /path/to/nanopore/run \
-    --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka --run_sketch --run_tetra \
-    -resume
 
-# Option B: Docker
+# Run (local conda, handles activation automatically)
+./run-realtime.sh --input /path/to/nanopore/run --outdir /path/to/output \
+    --run_kraken --kraken_db /path/to/krakendb \
+    --run_prokka --run_sketch --run_tetra
+
+# Or with Docker
 docker build -t danaseq-realtime .
 ./run-realtime.sh --docker --input /path/to/nanopore/run --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
@@ -33,13 +31,12 @@ docker build -t danaseq-realtime .
 
 ```bash
 cd danaSeq/20_mag_assembly/nextflow
-
-# Option A: Conda
 ./install.sh && ./install.sh --check
-mamba run -p conda-envs/dana-mag-flye \
-    nextflow run main.nf --input /path/to/reads -resume
 
-# Option B: Docker
+# Run (local conda, handles activation automatically)
+./run-mag.sh --input /path/to/reads --outdir /path/to/output
+
+# Or with Docker
 docker build -t danaseq-mag .
 ./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
 ```

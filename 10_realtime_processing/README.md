@@ -4,8 +4,6 @@ Shipboard metagenomic analysis for Oxford Nanopore sequencing data. Processes re
 
 ## Quick Start
 
-### Nextflow (recommended)
-
 ```bash
 cd nextflow
 
@@ -13,30 +11,14 @@ cd nextflow
 ./install.sh
 ./install.sh --check
 
-# Activate and run
-conda activate conda-envs/dana-tools
-nextflow run main.nf --input /path/to/nanopore/run \
-    --run_kraken --kraken_db /path/to/db \
-    --run_prokka --run_sketch --run_tetra \
-    -resume
-
-# Show all options
-nextflow run main.nf --help
-```
-
-### Launcher script
-
-```bash
-cd nextflow
-
-# Local conda (default)
-./run-realtime.sh --input /path/to/data --outdir /path/to/output \
+# Run (local conda, handles activation automatically)
+./run-realtime.sh --input /path/to/nanopore/run --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka
+    --run_prokka --run_sketch --run_tetra
 
-# Docker mode
+# Or with Docker
 docker build -t danaseq-realtime .
-./run-realtime.sh --docker --input /path/to/data --outdir /path/to/output \
+./run-realtime.sh --docker --input /path/to/nanopore/run --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
     --run_prokka
 

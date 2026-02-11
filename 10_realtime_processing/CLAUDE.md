@@ -53,34 +53,29 @@ dānaSeq/
 
 ## Running the Pipeline
 
-### Nextflow (primary)
-
 ```bash
-# Activate conda environment
-conda activate nextflow/conda-envs/dana-tools
+cd nextflow
 
 # Basic QC only
-nextflow run nextflow/main.nf --input /path/to/data -resume
+./run-realtime.sh --input /path/to/data --outdir /path/to/output
 
-# Full pipeline
-nextflow run nextflow/main.nf --input /path/to/data \
+# Full pipeline with Kraken2
+./run-realtime.sh --input /path/to/data --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/db \
-    --run_prokka --run_sketch --run_tetra \
-    -resume
+    --run_prokka --run_sketch --run_tetra
 
 # With HMM functional gene profiling
-nextflow run nextflow/main.nf --input /path/to/data \
-    --run_prokka --hmm_databases /path/to/CANT-HYD.hmm \
-    -resume
+./run-realtime.sh --input /path/to/data --outdir /path/to/output \
+    --run_prokka --hmm_databases /path/to/CANT-HYD.hmm
 
 # Watch mode for live sequencing
-nextflow run nextflow/main.nf --input /path/to/runs \
+./run-realtime.sh --input /path/to/runs --outdir /path/to/output \
     --watch --db_sync_minutes 10 \
     --run_kraken --kraken_db /path/to/db \
     --run_prokka --run_db_integration
 
 # Kitchen sink — all modules, all options with defaults
-nextflow run nextflow/main.nf --input /path/to/data --outdir results \
+./run-realtime.sh --input /path/to/data --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/db \
     --run_prokka \
     --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \
@@ -90,11 +85,10 @@ nextflow run nextflow/main.nf --input /path/to/data --outdir results \
     --cleanup \
     --min_readlen 1500 \
     --keep_percent 80 \
-    --min_file_size 1000000 \
-    -resume
+    --min_file_size 1000000
 
 # Kitchen sink — watch mode for live sequencing
-nextflow run nextflow/main.nf --input /path/to/runs --outdir results \
+./run-realtime.sh --input /path/to/runs --outdir /path/to/output \
     --watch --db_sync_minutes 10 \
     --run_kraken --kraken_db /path/to/db \
     --run_prokka \
@@ -103,39 +97,18 @@ nextflow run nextflow/main.nf --input /path/to/runs --outdir results \
     --run_tetra \
     --run_db_integration
 
-# Quick test with bundled data
-nextflow run nextflow/main.nf --input nextflow/test-data -profile test -resume
-
-# Show all options
-nextflow run nextflow/main.nf --help
-```
-
-### Launcher script
-
-```bash
-cd nextflow
-
-# Local conda (default)
-./run-realtime.sh --input /path/to/data --outdir /path/to/output \
-    --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka
-
 # Docker mode
 docker build -t danaseq-realtime .
 ./run-realtime.sh --docker --input /path/to/data --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
     --run_prokka
 
-# Manual docker run
-docker run --user $(id -u):$(id -g) \
-    -v /path/to/data:/data/input:ro \
-    -v /path/to/output:/data/output \
-    -v /path/to/krakendb:/kraken_db:ro \
-    danaseq-realtime \
-    run /pipeline/main.nf \
-        --input /data/input --outdir /data/output \
-        --kraken_db /kraken_db \
-        --run_kraken --run_prokka -resume
+# Quick test with bundled data (direct nextflow)
+conda activate nextflow/conda-envs/dana-tools
+nextflow run nextflow/main.nf --input nextflow/test-data -profile test -resume
+
+# Show all options
+./run-realtime.sh --help
 ```
 
 ## Pipeline Architecture
