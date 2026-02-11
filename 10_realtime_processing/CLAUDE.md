@@ -43,7 +43,7 @@ dānaSeq/
 │   │   └── ...
 │   ├── CLAUDE.md                # This file
 │   └── README.md                # User-facing documentation
-├── 20_mag_assembly/             # Post-expedition MAG reconstruction (bash)
+├── 20_mag_assembly/             # Post-expedition MAG reconstruction (Nextflow)
 ├── 30_archive/                  # Archived root-level scripts and docs
 ├── tests/                       # Pipeline tests
 ├── README.md                    # Project overview and quick start
@@ -233,11 +233,13 @@ These are not actively maintained. Use the Nextflow pipeline for all new work.
 
 ### MAG Assembly (20_mag_assembly/)
 
-The MAG assembly stage still uses standalone bash scripts. It runs post-expedition (not real-time) and includes:
-- Flye metagenomic assembly
+The MAG assembly stage is a separate Nextflow DSL2 pipeline in `20_mag_assembly/nextflow/`. It runs post-expedition (not real-time) and includes:
+- Flye metagenomic co-assembly
+- CoverM depth calculation (replaces jgi_summarize_bam_contig_depths)
 - Consensus binning (SemiBin2 + MetaBAT2 + MaxBin2 + DAS Tool)
-- Polishing (Racon + Medaka)
-- Quality assessment (CheckM2)
+- Dynamic binner architecture for future extensibility
+
+See `20_mag_assembly/CLAUDE.md` for full details.
 
 ## Common Issues
 
