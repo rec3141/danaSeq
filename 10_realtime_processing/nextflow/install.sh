@@ -13,7 +13,7 @@ set -euo pipefail
 # Three environments are needed because of dependency conflicts:
 #   dana-bbmap   - BBMap (samtools/libdeflate conflicts with R)
 #   dana-prokka  - Prokka (BioPerl pins perl to 5.26, conflicts with others)
-#   dana-tools   - Everything else (filtlong, kraken2, hmmer, R/DuckDB, perl)
+#   dana-tools   - Everything else (nextflow, openjdk, filtlong, kraken2, hmmer, R/DuckDB, perl)
 #
 # Each is built from a pinned YAML file in envs/ for reproducibility.
 #
@@ -77,7 +77,7 @@ declare -A ENV_CHECK=(
 )
 
 # Additional binaries to verify in dana-tools
-TOOLS_CHECK=(filtlong kraken2 hmmsearch gawk perl Rscript)
+TOOLS_CHECK=(nextflow java filtlong kraken2 hmmsearch gawk perl Rscript)
 
 yaml_to_envname() {
     local yaml="$1"
@@ -153,8 +153,9 @@ do_install() {
     else
         echo "[SUCCESS] All ${total} environments installed to: ${ENV_DIR}"
         echo ""
-        echo "Nextflow will auto-detect these environments via conda.cacheDir."
-        echo "Run the pipeline with:"
+        echo "Nextflow and Java are included in the dana-tools environment."
+        echo "Activate it and run the pipeline:"
+        echo "  conda activate ${ENV_DIR}/dana-tools"
         echo "  nextflow run main.nf --input /path/to/data -resume"
     fi
 }
@@ -218,13 +219,15 @@ do_check() {
     echo ""
     echo "Result: ${ok} envs OK, ${missing} issue(s)"
 
-    # Check Nextflow
+    # Verify Nextflow+Java inside dana-tools
     echo ""
     printf "  %-20s" "nextflow"
-    if command -v nextflow &>/dev/null; then
-        echo "OK  $(nextflow -version 2>&1 | grep 'version' | head -1)"
+    if [[ -x "${ENV_DIR}/dana-tools/bin/nextflow" ]]; then
+        local nf_ver
+        nf_ver=$("${ENV_DIR}/dana-tools/bin/nextflow" -version 2>&1 | grep 'version' | head -1) || nf_ver="(installed)"
+        echo "OK  ${nf_ver}"
     else
-        echo "MISSING (install: curl -s https://get.nextflow.io | bash)"
+        echo "MISSING (should be installed via tools.yml)"
     fi
 
     (( missing == 0 )) && return 0 || return 1

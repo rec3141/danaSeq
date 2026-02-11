@@ -60,6 +60,67 @@ process DB_INTEGRATION {
     """
 }
 
+// Post-DB cleanup: compress or delete source files after DuckDB import confirms
+// results are loaded.  Runs after DB_INTEGRATION in batch mode.
+// Strategy: gzip fa/ in place, delete kraken/sketch/tetra (data in DuckDB),
+// delete prokka TSVs, gzip prokka .gff/.faa/.ffn.  Per-file approach is safe
+// for watch mode where new files arrive between cleanup cycles.
+// maxForks=1 since cleanup is I/O-bound and sequential is fine.
+
+process CLEANUP {
+    tag "${barcode_dir}"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-tools"
+    maxForks 1
+    executor 'local'
+
+    input:
+    val barcode_dir
+
+    script:
+    """
+    DB="${barcode_dir}/dana.duckdb"
+    if [ ! -f "\$DB" ]; then
+        echo "[WARNING] No DuckDB at \$DB, skipping cleanup"
+        exit 0
+    fi
+
+    imported_count=\$(Rscript -e "
+        library(DBI); library(duckdb)
+        con <- dbConnect(duckdb(), '\$DB')
+        cat(dbGetQuery(con, 'SELECT count(*) FROM import_log')[[1]])
+        dbDisconnect(con, shutdown=TRUE)
+    " 2>/dev/null || echo 0)
+
+    if [ "\$imported_count" -eq 0 ] 2>/dev/null; then
+        echo "[WARNING] import_log empty for ${barcode_dir}, skipping cleanup"
+        exit 0
+    fi
+
+    echo "[INFO] CLEANUP: \$imported_count files in import_log for ${barcode_dir}"
+    before=\$(du -sh "${barcode_dir}" | cut -f1)
+
+    # fa/: gzip FASTA files in place (not in DuckDB, keep as compressed backup)
+    find "${barcode_dir}/fa" -name '*.fa' -exec gzip {} \\; 2>/dev/null || true
+    echo "[INFO] Compressed fa/*.fa in place"
+
+    # kraken/, sketch/, tetra/: delete files already loaded into DuckDB
+    for subdir in kraken sketch tetra; do
+        [ ! -d "${barcode_dir}/\$subdir" ] && continue
+        find "${barcode_dir}/\$subdir" -type f -delete 2>/dev/null || true
+        echo "[INFO] Deleted files in \$subdir/"
+    done
+
+    # prokka/: delete loaded TSVs, compress annotation files in place
+    find "${barcode_dir}/prokka" -name 'PROKKA_*.tsv' -delete 2>/dev/null || true
+    find "${barcode_dir}/prokka" \\( -name '*.gff' -o -name '*.faa' -o -name '*.ffn' \\) ! -name '*.gz' -exec gzip {} \\; 2>/dev/null || true
+    echo "[INFO] Deleted prokka TSVs, compressed .gff/.faa/.ffn"
+
+    after=\$(du -sh "${barcode_dir}" | cut -f1)
+    echo "[INFO] Space: \$before -> \$after"
+    """
+}
+
 // Periodic DB sync for watch mode.
 // Runs as a long-lived process with an internal sleep loop — in watch mode the
 // pipeline never completes (watchPath keeps the DAG alive), so this process
@@ -75,9 +136,10 @@ process DB_SYNC {
     executor 'local'
 
     input:
-    val outdir         // absolute path to output directory
-    val danadir        // path to R scripts directory
-    val sync_seconds   // sleep interval between sync cycles
+    val outdir           // absolute path to output directory
+    val danadir          // path to R scripts directory
+    val sync_seconds     // sleep interval between sync cycles
+    val cleanup_enabled  // "true" or "false"
 
     script:
     """
@@ -89,6 +151,41 @@ process DB_SYNC {
             "\$script" > "\$patched"
         Rscript "\$patched" "\$@" || true
         rm -f "\$patched"
+    }
+
+    run_cleanup() {
+        local bdir="\$1"
+        local DB="\${bdir}/dana.duckdb"
+        [ ! -f "\$DB" ] && return 0
+
+        local imported_count
+        imported_count=\$(Rscript -e "
+            library(DBI); library(duckdb)
+            con <- dbConnect(duckdb(), '\$DB')
+            cat(dbGetQuery(con, 'SELECT count(*) FROM import_log')[[1]])
+            dbDisconnect(con, shutdown=TRUE)
+        " 2>/dev/null || echo 0)
+
+        [ "\$imported_count" -eq 0 ] 2>/dev/null && return 0
+
+        echo "[INFO] CLEANUP: \$imported_count files in import_log for \$bdir"
+        local before=\$(du -sh "\$bdir" | cut -f1)
+
+        # fa/: gzip in place (not in DuckDB, keep as compressed backup)
+        find "\${bdir}/fa" -name '*.fa' -exec gzip {} \\; 2>/dev/null || true
+
+        # kraken/, sketch/, tetra/: delete files (data lives in DuckDB)
+        for subdir in kraken sketch tetra; do
+            [ ! -d "\${bdir}/\$subdir" ] && continue
+            find "\${bdir}/\$subdir" -type f -delete 2>/dev/null || true
+        done
+
+        # prokka/: delete loaded TSVs, compress annotation files
+        find "\${bdir}/prokka" -name 'PROKKA_*.tsv' -delete 2>/dev/null || true
+        find "\${bdir}/prokka" \\( -name '*.gff' -o -name '*.faa' -o -name '*.ffn' \\) ! -name '*.gz' -exec gzip {} \\; 2>/dev/null || true
+
+        local after=\$(du -sh "\$bdir" | cut -f1)
+        echo "[INFO] CLEANUP \$bdir: \$before -> \$after"
     }
 
     tick=0
@@ -117,6 +214,11 @@ process DB_SYNC {
                     printf '${TETRA_COLS}\\n' > "\${barcode_dir}/tnfs.txt"
                 fi
                 run_r_script ${danadir}/44_tetra_db.r "\${barcode_dir}"
+            fi
+
+            # Post-sync cleanup if enabled
+            if [ "${cleanup_enabled}" = "true" ]; then
+                run_cleanup "\${barcode_dir}"
             fi
         done
 

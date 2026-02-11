@@ -19,6 +19,105 @@ nextflow.enable.dsl = 2
 //
 // ============================================================================
 
+// ============================================================================
+// Help message
+// ============================================================================
+
+def helpMessage() {
+    log.info """
+    =========================================
+     Dana Pipeline - Real-Time Nanopore Processing
+     https://github.com/rec3141/danaSeq
+    =========================================
+
+    Usage:
+      nextflow run main.nf --input /path/to/data [options] -resume
+
+    Required:
+      --input DIR        Path to directory CONTAINING fastq_pass/
+                         (e.g. /data/run1, where /data/run1/fastq_pass/barcode01/ exists)
+      --outdir DIR       Output directory [default: results]
+
+    Analysis flags:
+      --run_kraken       Kraken2 taxonomic classification (requires --kraken_db)
+      --run_prokka       Prokka gene annotation
+      --run_sketch       Sendsketch taxonomic profiling
+      --run_tetra        Tetranucleotide frequency analysis
+      --hmm_databases    Comma-separated HMM file paths (requires --run_prokka)
+
+    Database paths:
+      --kraken_db DIR    Path to Kraken2 database directory
+      --danadir DIR      Path to R scripts for DuckDB integration
+
+    Integration:
+      --run_db_integration  Load results into DuckDB after processing
+      --cleanup             Compress/delete source files after DuckDB import
+
+    Watch mode (live sequencing):
+      --watch               Monitor for new FASTQ files continuously
+      --db_sync_minutes N   DB sync interval in minutes [default: 10]
+
+    QC parameters:
+      --min_readlen N    Minimum read length in bp [default: 1500]
+      --keep_percent N   Filtlong keep percent [default: 80]
+      --min_file_size N  Minimum FASTQ size in bytes [default: 1000000]
+
+    Examples:
+      # Basic QC only
+      nextflow run main.nf --input /data/run1 -resume
+
+      # Full pipeline with Kraken2
+      nextflow run main.nf --input /data/run1 \\
+          --run_kraken --kraken_db /path/to/krakendb \\
+          --run_prokka --run_sketch --run_tetra -resume
+
+      # Docker with Kraken2 database
+      docker run --user \$(id -u):\$(id -g) \\
+          -v /data/run1:/data/input:ro \\
+          -v /data/output:/data/output \\
+          -v /path/to/krakendb:/kraken_db:ro \\
+          danaseq-realtime run /pipeline/main.nf \\
+              --input /data/input --outdir /data/output \\
+              --run_kraken --kraken_db /kraken_db \\
+              --run_prokka -resume
+
+      # Quick test with bundled test data
+      nextflow run main.nf --input test-data -profile test -resume
+
+    Input structure:
+      --input must point to a directory CONTAINING fastq_pass/:
+        /data/run1/                  <-- use this as --input
+        └── fastq_pass/
+            ├── barcode01/
+            │   └── FLOWCELL_pass_barcode01_*.fastq.gz
+            └── barcode02/
+                └── ...
+
+    """.stripIndent()
+}
+
+if (params.help) {
+    helpMessage()
+    System.exit(0)
+}
+
+// ============================================================================
+// Parameter validation
+// ============================================================================
+
+if (!params.input) {
+    log.error "ERROR: --input is required. Provide path to directory containing fastq_pass/. Run with --help for usage."
+    System.exit(1)
+}
+if (params.run_kraken && !params.kraken_db) {
+    log.error "ERROR: --kraken_db is required when using --run_kraken. Provide path to Kraken2 database directory."
+    System.exit(1)
+}
+if (params.run_db_integration && !params.danadir) {
+    log.error "ERROR: --danadir is required when using --run_db_integration. Provide path to R scripts directory."
+    System.exit(1)
+}
+
 // Import modules
 include { VALIDATE_FASTQ }   from './modules/validate'
 include { QC_BBDUK }         from './modules/qc'
@@ -31,6 +130,7 @@ include { HMM_SEARCH }        from './modules/hmm'
 include { TETRAMER_FREQ }     from './modules/tetramer'
 include { DB_INTEGRATION }    from './modules/db_integration'
 include { DB_SYNC }           from './modules/db_integration'
+include { CLEANUP }           from './modules/db_integration'
 
 // ============================================================================
 // Input channel: discover FASTQ files from Nanopore output structure
@@ -44,9 +144,41 @@ def create_fastq_channel() {
     // cannot recursively monitor subdirectories via **.  Default watch_glob is
     // '*/fastq_pass/barcode*/*.fastq.gz' — set --input to the parent of the run
     // directory, or override --watch_glob to match your directory depth.
-    def ch_raw = params.watch
-        ? Channel.watchPath("${params.input}/${params.watch_glob}", 'create')
-        : Channel.fromPath("${params.input}/**/fastq_pass/barcode*/*.fastq.gz", checkIfExists: true)
+
+    def glob_pattern = "${params.input}/**/fastq_pass/barcode*/*.fastq.gz"
+    def ch_raw
+    if (params.watch) {
+        ch_raw = Channel.watchPath("${params.input}/${params.watch_glob}", 'create')
+    } else {
+        // Validate input before creating channel
+        def input_dir = file(params.input)
+        if (!input_dir.isDirectory()) {
+            error "ERROR: --input directory does not exist: ${params.input}\nRun with --help for usage."
+        }
+
+        // Try to find files and give targeted advice on failure
+        def found = file("${params.input}/fastq_pass/barcode*/*.fastq.gz")
+        if (!found) {
+            found = file("${params.input}/*/fastq_pass/barcode*/*.fastq.gz")
+        }
+        if (!found) {
+            def has_fastq_pass = file("${params.input}/fastq_pass").isDirectory()
+            def has_barcode_dirs = file("${params.input}/barcode*/*.fastq.gz")
+
+            def hint = ""
+            if (has_fastq_pass) {
+                hint = "    ${params.input} contains fastq_pass/ but no barcode*/*.fastq.gz files inside it.\n    Check: ls ${params.input}/fastq_pass/barcode*/*.fastq.gz"
+            } else if (has_barcode_dirs) {
+                hint = "    It looks like --input points at fastq_pass/ itself.\n    Point --input one level UP:\n      --input ${input_dir.getParent()}"
+            } else {
+                hint = "    Expected structure:\n      <input>/fastq_pass/barcode01/*.fastq.gz\n    Point --input at the directory CONTAINING fastq_pass/."
+            }
+
+            error "ERROR: No FASTQ files found.\n\n    Searched: ${glob_pattern}\n${hint}\n\n    Run with --help for full usage information."
+        }
+
+        ch_raw = Channel.fromPath(glob_pattern)
+    }
 
     ch_raw
         .filter { it.size() >= params.min_file_size }
@@ -140,8 +272,10 @@ workflow {
             // Instead, DB_SYNC runs as a long-lived process with an internal
             // sleep loop that periodically scans output dirs and syncs DB.
             // R scripts are idempotent (import_log tracks what's loaded).
+            // Cleanup runs inline after each sync cycle if enabled.
             def sync_secs = params.db_sync_minutes * 60
-            DB_SYNC(abs_outdir, params.danadir, sync_secs)
+            def cleanup_flag = params.cleanup ? "true" : "false"
+            DB_SYNC(abs_outdir, params.danadir, sync_secs, cleanup_flag)
         } else {
             // Batch mode: barrier approach — wait for all processes to finish
             // .collect() blocks until ALL mixed channels are drained
@@ -160,6 +294,11 @@ workflow {
                 .flatMap { it.unique() }
 
             DB_INTEGRATION(ch_barcode_dirs)
+
+            // Post-DB cleanup: gzip fa/, delete kraken/sketch/tetra, compress prokka
+            if (params.cleanup) {
+                CLEANUP(DB_INTEGRATION.out)
+            }
         }
     }
 }
