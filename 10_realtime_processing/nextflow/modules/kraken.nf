@@ -12,8 +12,8 @@ process KRAKEN2_CLASSIFY {
     tuple val(meta), path(fasta)
 
     output:
-    tuple val(meta), path("${meta.id}.tsv"),    emit: parsed
-    tuple val(meta), path("${meta.id}.report"), emit: report
+    tuple val(meta), path("${meta.id}.tsv"),    emit: parsed,  optional: true
+    tuple val(meta), path("${meta.id}.report"), emit: report,  optional: true
 
     script:
     """
