@@ -26,32 +26,34 @@ FOAM (Prestat et al. 2014), CANT-HYD (Khot et al. 2022), NCycDB (Tu et al. 2019)
 ## Architecture
 
 ```
-dānaSeq Pipeline Structure
-
-10_realtime_processing/     Real-time analysis during sequencing
-├─ 10s  Preprocessing       MinKNOW output validation
-├─ 20s  Read processing     QC, classification, annotation
-├─ 30s  Parsing utilities   Data transformation
-├─ 40s  Database ops        DuckDB integration
-├─ 50s  Visualization       Quality metrics
-└─ 60s  Dashboards          Interactive mapping
-
-20_mag_assembly/            Post-expedition genome assembly
-├─ 10s  Assembly            Flye metagenomic assembly
-├─ 20s  Mapping             Read alignment and coverage
-├─ 30s  Binning             Multi-tool consensus binning
-├─ 40s  Polishing           Racon + Medaka refinement
-├─ 50s  Characterization    Taxonomy and quality assessment
-├─ 60s  Pipelines           End-to-end workflows
-├─ 70s  Format conversion   Interoperability
-├─ 80s  Visualization       Ordination and clustering
-└─ 90s  Integration         Ecosystem service prediction
-
-30_archive/                 Deprecated code
+dānaSeq/
+├── 10_realtime_processing/        Real-time analysis during sequencing
+│   ├── nextflow/                  Primary pipeline (Nextflow DSL2)
+│   │   ├── main.nf               Pipeline entry point
+│   │   ├── modules/              Process definitions (8 modules)
+│   │   ├── bin/                  Helper scripts (AWK, R)
+│   │   ├── conda-envs/           Pre-built conda environments
+│   │   ├── envs/                 Conda YAML specs
+│   │   ├── Dockerfile            Self-contained Docker image
+│   │   ├── run-docker.sh         Docker convenience wrapper
+│   │   ├── install.sh            Conda env installer
+│   │   └── test-data/            Bundled test data
+│   └── archive/                  Legacy bash scripts (reference only)
+│
+├── 20_mag_assembly/               Post-expedition genome assembly
+│   ├── 10s  Assembly              Flye metagenomic assembly
+│   ├── 20s  Mapping               Read alignment and coverage
+│   ├── 30s  Binning               Multi-tool consensus binning
+│   ├── 40s  Polishing             Racon + Medaka refinement
+│   ├── 50s  Characterization      Taxonomy and quality assessment
+│   ├── 60s  Pipelines             End-to-end workflows
+│   ├── 70s  Format conversion     Interoperability
+│   ├── 80s  Visualization         Ordination and clustering
+│   └── 90s  Integration           Ecosystem service prediction
+│
+├── 30_archive/                    Archived scripts and documentation
+└── tests/                         Pipeline tests
 ```
-
-**Numbering Convention:**
-Scripts are numbered in increments of 10 (10, 20, 30...) to allow insertion of intermediate steps without renumbering the entire pipeline.
 
 ---
 
@@ -137,30 +139,27 @@ nextflow run main.nf --input /path/to/data \
 
 Requires: [Miniforge](https://github.com/conda-forge/miniforge) (conda/mamba) on PATH.
 
-### Option 3: Bash pipeline (advanced)
+### Watch Mode (live sequencing)
 
-For direct control without Nextflow, use the production bash script:
+Monitor a directory for new FASTQ files during active sequencing:
 
 ```bash
-cd 10_realtime_processing
-
-# Standard pipeline (QC + taxonomy + annotation)
-./24_process_reads_optimized.sh -i <input_dir> -K -P -S
-
-# With functional gene profiling
-./24_process_reads_optimized.sh -i <input_dir> -K -P --hmm /path/to/CANT-HYD.hmm
+nextflow run main.nf --input /path/to/runs \
+    --watch --db_sync_minutes 10 \
+    --run_kraken --kraken_db /path/to/db \
+    --run_prokka \
+    --run_db_integration --danadir /path/to/r_scripts
 ```
 
-Requires all tools installed manually. Check dependencies with `./status.sh`.
-
-**Critical:** When using Kraken2 (`-K` flag), always use `24_process_reads_optimized.sh`. This script serializes Kraken2 calls to prevent memory exhaustion (Kraken2 loads 50-100GB into RAM). Other scripts will spawn multiple instances and crash the system.
+In watch mode, `DB_SYNC` runs as a long-lived process that periodically scans
+output directories and loads new results into DuckDB.
 
 ### MAG Assembly (post-expedition)
 
 ```bash
 cd 20_mag_assembly
 
-# Automated pipeline: assembly → mapping → binning → polishing
+# Automated pipeline: assembly -> mapping -> binning -> polishing
 ./61_map_and_bin_optimized.sh
 
 # Visualization
@@ -183,7 +182,7 @@ input/fastq_pass/
 
 **Output:**
 ```
-output/
+results/
 ├── <flowcell>/
 │   ├── <barcode>/
 │   │   ├── fa/              Final quality-filtered sequences
@@ -192,11 +191,11 @@ output/
 │   │   ├── hmm/             Functional gene matches
 │   │   └── log.txt          Processing log
 │   └── ...
+├── dana.duckdb             Integrated results database
 ├── assembly/                Assembled contigs
 ├── bins/                    MAG consensus bins
 ├── polished/                Refined genomes
-├── checkm2/                 Quality metrics
-└── <database>.duckdb        Integrated results
+└── checkm2/                 Quality metrics
 ```
 
 ---
@@ -231,13 +230,15 @@ MAGs are classified according to MIMAG (Minimum Information about MAGs) standard
 
 | Quality | Completeness | Contamination | Criteria |
 |---------|--------------|---------------|----------|
-| High | >90% | <5% | + 23S, 16S, 5S rRNA & ≥18 tRNAs |
+| High | >90% | <5% | + 23S, 16S, 5S rRNA & >=18 tRNAs |
 | Medium | >50% | <10% | - |
 | Low | <50% | <10% | - |
 
 ---
 
 ## Dependencies
+
+All dependencies are managed automatically via conda environments or Docker. Manual installation is not required for most users.
 
 ### Core Tools
 
@@ -267,45 +268,29 @@ DuckDB (embedded OLAP)
 **Statistics & Visualization:**
 R (tidyverse, leaflet, plotly), Python 3.9+
 
-**System:**
-GNU parallel, trash-cli (safer file operations)
-
----
-
-## Utility Scripts
-
-**status.sh** — Dependency verification and version checking
-**banner.sh** — Pipeline information display
-**agents.sh** — Expert advisor system for domain-specific guidance
-
 ---
 
 ## Active Deployments
 
-**CMO2025** — Churchill Marine Observatory Mesocosms
-**QEI2025** — Queen Elizabeth Islands Arctic Expedition
+**CMO2025** -- Churchill Marine Observatory Mesocosms
+**QEI2025** -- Queen Elizabeth Islands Arctic Expedition
 
-*Note:* Scripts contain deployment-specific paths. Update before use in new projects.
+*Note:* Some scripts contain deployment-specific paths. Update before use in new projects.
 
 ---
 
 ## Documentation
 
-**Repository Root:**
-- `CLAUDE.md` — AI assistant instructions and architecture notes
-- `CHANGELOG.md` — Version history and transformation log
-- `EPIC_TRANSFORMATION.md` — Development narrative
+- `10_realtime_processing/CLAUDE.md` -- Pipeline architecture and development guide
+- `10_realtime_processing/README.md` -- Real-time processing details
+- `20_mag_assembly/README.md` -- MAG assembly methodology
+- `CITATION.bib` -- Reference database
 
-**Subdirectories:**
-- `10_realtime_processing/CLAUDE.md` — Detailed real-time pipeline architecture
-- `10_realtime_processing/README.md` — Real-time processing guide
-- `20_mag_assembly/README.md` — MAG assembly methodology
-
-**Technical Notes:**
-- `RESUME_LOGIC.md` — Stage-aware checkpoint system
-- `HMM_SEARCH_GUIDE.md` — Functional gene profiling
-- `CRASH_SAFETY.md` — Atomic operations and data integrity
-- `DEPLOYMENT_ISSUES.md` — Portability and configuration
+Historical documentation (archived in `30_archive/`):
+- `METHODS.md` -- Scientific methodology
+- `CONTRIBUTING.md` -- Development guidelines
+- `CHANGELOG.md` -- Version history
+- `SECURITY_AUDIT.md` -- Security review notes
 
 ---
 
@@ -315,10 +300,9 @@ This is research software under active development. For bug reports or feature r
 
 **Development Guidelines:**
 - Use `trash` instead of `rm` for all file operations
-- Follow numbered naming convention (10s, 20s, 30s...)
+- New real-time analysis steps should be Nextflow modules (see `10_realtime_processing/CLAUDE.md`)
 - Include resume logic for all long-running operations
 - Test on small datasets before expedition deployment
-- Document hardcoded paths in DEPLOYMENT_ISSUES.md
 
 ---
 
@@ -337,7 +321,7 @@ Bowers RM, et al. (2017) Minimum information about a single amplified genome (MI
 ---
 
 **Repository:** https://github.com/rec3141/danaSeq
-**License:** [To be specified]
+**License:** MIT (see LICENSE)
 **Contact:** rec3141@gmail.com
 
 ---
