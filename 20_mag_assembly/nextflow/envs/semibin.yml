@@ -1,0 +1,7 @@
+name: dana-mag-semibin
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - semibin=2.1.0
+  - pytorch-gpu           # GPU-accelerated training (falls back to CPU if no GPU)

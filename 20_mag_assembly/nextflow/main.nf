@@ -1,0 +1,203 @@
+#!/usr/bin/env nextflow
+nextflow.enable.dsl = 2
+
+// ============================================================================
+// Dana MAG Assembly Pipeline - Nextflow DSL2
+// ============================================================================
+//
+// Nextflow implementation of the MAG assembly and binning workflow.
+// Co-assembles all reads with Flye, maps reads back, runs three binners
+// (SemiBin2, MetaBAT2, MaxBin2) in parallel, and integrates with DAS_Tool.
+//
+// Usage:
+//   nextflow run main.nf --input /path/to/reads -resume
+//
+// ============================================================================
+
+// ============================================================================
+// Help message
+// ============================================================================
+
+def helpMessage() {
+    log.info """
+    =========================================
+     Dana MAG Assembly Pipeline
+     https://github.com/rec3141/danaSeq
+    =========================================
+
+    Usage:
+      nextflow run main.nf --input /path/to/reads [options] -resume
+
+    Required:
+      --input DIR        Directory containing *.fastq.gz read files
+      --outdir DIR       Output directory [default: results]
+
+    Assembly:
+      --min_overlap N    Flye --min-overlap [default: 1000]
+      --dedupe           Enable BBDuk deduplication before assembly
+      --filtlong_size N  Filtlong target bases (e.g. 40000000000); skip if not set
+
+    Binning:
+      --run_maxbin       Include MaxBin2 in consensus binning [default: true]
+      --metabat_min_cls N MetaBAT2 minimum cluster size [default: 50000]
+
+    Resources:
+      --assembly_cpus N     CPUs for assembly [default: 24]
+      --assembly_memory STR Memory for assembly [default: '64 GB']
+
+    Examples:
+      # Basic run with all defaults
+      nextflow run main.nf --input /data/reads -resume
+
+      # With Filtlong pre-filtering and no MaxBin2
+      nextflow run main.nf --input /data/reads \\
+          --filtlong_size 40000000000 --run_maxbin false -resume
+
+      # Quick test with bundled test data
+      nextflow run main.nf --input test-data -profile test -resume
+
+      # Docker
+      ./run-docker.sh --input /data/reads --outdir /data/output
+
+    Input:
+      --input must point to a directory containing *.fastq.gz files.
+      All files are co-assembled into a single metagenome.
+
+    Output:
+      results/
+      ├── assembly/
+      │   └── assembly.fasta
+      ├── mapping/
+      │   ├── *.sorted.bam
+      │   └── depths.txt
+      ├── binning/
+      │   ├── semibin/contig_bins.tsv
+      │   ├── metabat/contig_bins.tsv
+      │   ├── maxbin/contig_bins.tsv
+      │   └── consensus/
+      │       ├── bins/*.fa
+      │       ├── contig2bin.tsv
+      │       ├── allbins.fa
+      │       └── scores.tsv
+      └── pipeline_info/
+
+    """.stripIndent()
+}
+
+if (params.help) {
+    helpMessage()
+    System.exit(0)
+}
+
+// ============================================================================
+// Parameter validation
+// ============================================================================
+
+if (!params.input) {
+    log.error "ERROR: --input is required. Provide path to directory containing *.fastq.gz files. Run with --help for usage."
+    System.exit(1)
+}
+
+// Import modules
+include { ASSEMBLY_FLYE }       from './modules/assembly'
+include { MAP_READS }           from './modules/mapping'
+include { CALCULATE_DEPTHS }    from './modules/mapping'
+include { BIN_SEMIBIN2 }        from './modules/binning'
+include { BIN_METABAT2 }        from './modules/binning'
+include { BIN_MAXBIN2 }         from './modules/binning'
+include { DASTOOL_CONSENSUS }   from './modules/binning'
+
+// ============================================================================
+// Main workflow
+// ============================================================================
+
+workflow {
+
+    // 1. Discover input reads
+    def input_dir = file(params.input)
+    if (!input_dir.isDirectory()) {
+        error "ERROR: --input directory does not exist: ${params.input}\nRun with --help for usage."
+    }
+
+    def found = file("${params.input}/*.fastq.gz")
+    if (!found) {
+        error "ERROR: No *.fastq.gz files found in ${params.input}\nRun with --help for usage."
+    }
+
+    ch_reads = Channel.fromPath("${params.input}/*.fastq.gz")
+        .map { fastq ->
+            def name = fastq.baseName.replace('.fastq', '')
+            def meta = [id: name]
+            [meta, fastq]
+        }
+
+    // 2. Co-assembly: fan-in all reads into one Flye assembly
+    ch_all_reads = ch_reads.map { meta, fastq -> fastq }.collect()
+    ASSEMBLY_FLYE(ch_all_reads)
+
+    // 3. Map each sample back to assembly: fan-out
+    ch_map_input = ch_reads.combine(ASSEMBLY_FLYE.out.assembly)
+    MAP_READS(ch_map_input)
+
+    // 4. Calculate depths from all BAMs: fan-in
+    // Collect BAMs and BAIs together so they're staged in the same directory
+    ch_bam_files = MAP_READS.out.bam
+        .flatMap { meta, bam, bai -> [bam, bai] }
+        .collect()
+    CALCULATE_DEPTHS(ch_bam_files, ASSEMBLY_FLYE.out.assembly)
+
+    // 5. Binners run in parallel; each emits [label, contig_bins.tsv]
+    // New binners can be added by appending to ch_binner_results
+
+    // SemiBin2 (BAM-based)
+    BIN_SEMIBIN2(ASSEMBLY_FLYE.out.assembly, ch_bam_files)
+    ch_binner_results = BIN_SEMIBIN2.out.bins.map { ['semibin', it] }
+
+    // MetaBAT2 (depth-based)
+    BIN_METABAT2(ASSEMBLY_FLYE.out.assembly, CALCULATE_DEPTHS.out.jgi_depth)
+    ch_binner_results = ch_binner_results.mix(
+        BIN_METABAT2.out.bins.map { ['metabat', it] }
+    )
+
+    // MaxBin2 (optional, depth-based)
+    if (params.run_maxbin) {
+        BIN_MAXBIN2(ASSEMBLY_FLYE.out.assembly, CALCULATE_DEPTHS.out.jgi_depth)
+        ch_binner_results = ch_binner_results.mix(
+            BIN_MAXBIN2.out.bins.map { ['maxbin', it] }
+        )
+    }
+
+    // 6. DAS Tool consensus -- collects all binner outputs dynamically
+    ch_bin_labels = ch_binner_results.collect { it[0] }
+    ch_bin_files  = ch_binner_results.collect { it[1] }
+
+    DASTOOL_CONSENSUS(
+        ASSEMBLY_FLYE.out.assembly,
+        ch_bin_files,
+        ch_bin_labels
+    )
+}
+
+// ============================================================================
+// Pipeline completion handler
+// ============================================================================
+
+workflow.onComplete {
+    def msg = """\
+        Pipeline completed at : ${workflow.complete}
+        Duration              : ${workflow.duration}
+        Success               : ${workflow.success}
+        Exit status           : ${workflow.exitStatus}
+        Output directory      : ${params.outdir}
+        """.stripIndent()
+
+    println msg
+
+    if (!workflow.success) {
+        println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+    }
+}
+
+workflow.onError {
+    println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
+}

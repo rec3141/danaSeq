@@ -1,0 +1,12 @@
+# Pre-built local conda environments (Docker builds its own)
+conda-envs/
+
+# Nextflow work and output directories
+work/
+test_results/
+results/
+.nextflow/
+.nextflow.log*
+
+# Docker context bloat
+*.log

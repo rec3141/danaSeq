@@ -1,0 +1,9 @@
+name: dana-mag-flye
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - flye=2.9.5
+  - filtlong=0.3.1
+  - nextflow>=24.04
+  - openjdk>=17

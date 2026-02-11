@@ -1,0 +1,7 @@
+# Runtime artifacts
+conda-envs/
+work/
+test_results/
+results/
+.nextflow/
+.nextflow.log*

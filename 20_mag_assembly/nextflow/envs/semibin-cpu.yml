@@ -1,0 +1,7 @@
+name: dana-mag-semibin
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - semibin=2.1.0
+  - pytorch-cpu           # CPU-only PyTorch (~500MB vs ~5GB for GPU)
