@@ -32,6 +32,7 @@ cd nextflow
     --min_overlap 1000 \
     --run_maxbin true \
     --metabat_min_cls 50000 \
+    --checkm2_db /path/to/checkm2_db \
     --assembly_cpus 24 \
     --assembly_memory '64 GB'
 ```
@@ -55,7 +56,9 @@ Sample FASTQs (N files)
          |
    DASTOOL_CONSENSUS        Best bin per contig
          |
-   results/binning/consensus/
+   CHECKM2                  Quality assessment (optional, needs --checkm2_db)
+         |
+   results/binning/
 ```
 
 ## Output
@@ -72,11 +75,14 @@ results/
 │   ├── semibin/contig_bins.tsv   SemiBin2 assignments
 │   ├── metabat/contig_bins.tsv   MetaBAT2 assignments
 │   ├── maxbin/contig_bins.tsv    MaxBin2 assignments
-│   └── consensus/
-│       ├── bins/*.fa             Final consensus MAG FASTAs
-│       ├── contig2bin.tsv        Contig-to-bin assignments
-│       ├── allbins.fa            All bins concatenated
-│       └── scores.tsv            Per-bin quality scores
+│   ├── dastool/
+│   │   ├── bins/*.fa             Final consensus MAG FASTAs
+│   │   ├── contig2bin.tsv        Contig-to-bin assignments
+│   │   ├── allbins.fa            All bins concatenated
+│   │   ├── bin_quality.tsv       DAS Tool SCG-based quality scores
+│   │   └── summary.tsv           Consensus winners with scores
+│   └── checkm2/
+│       └── quality_report.tsv    CheckM2 completeness/contamination (if --checkm2_db)
 └── pipeline_info/
     ├── timeline.html
     ├── report.html
@@ -94,6 +100,7 @@ results/
 | `--filtlong_size` | (skip) | Filtlong target bases (e.g. `40000000000`) |
 | `--run_maxbin` | `true` | Include MaxBin2 in consensus |
 | `--metabat_min_cls` | `50000` | MetaBAT2 minimum cluster size |
+| `--checkm2_db` | (skip) | Path to CheckM2 DIAMOND database |
 | `--assembly_cpus` | `24` | CPUs for assembly |
 | `--assembly_memory` | `64 GB` | Memory for assembly |
 

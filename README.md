@@ -68,6 +68,7 @@ cd danaSeq/20_mag_assembly/nextflow
     --min_overlap 1000 \
     --run_maxbin true \
     --metabat_min_cls 50000 \
+    --checkm2_db /path/to/checkm2_db \
     --assembly_cpus 24 \
     --assembly_memory '64 GB'
 ```
@@ -103,7 +104,7 @@ dānaSeq/
 │   ├── nextflow/                 Nextflow DSL2 pipeline
 │   │   ├── main.nf              Entry point (7 processes)
 │   │   ├── modules/             assembly, mapping, binning
-│   │   ├── envs/                Conda YAML specs (5 environments)
+│   │   ├── envs/                Conda YAML specs (6 environments)
 │   │   ├── Dockerfile           Self-contained Docker image
 │   │   └── test-data/           Bundled test data
 │   ├── 40s-90s scripts          Polishing, taxonomy, visualization (not yet ported)
@@ -152,9 +153,12 @@ Sample FASTQs → Flye co-assembly → minimap2 mapping → CoverM depths
                                                           └── MaxBin2
                                                                 ↓
                                                           DAS Tool consensus
+                                                                ↓
+                                                          CheckM2 quality (optional)
 ```
 
 Key features:
+- CheckM2 quality assessment (completeness/contamination per MIMAG standards)
 - CoverM for depth calculation (avoids MetaBAT2 integer overflow bug)
 - Supplementary alignment filtering (`-F 0x904`) for long reads
 - Dynamic binner architecture (add new binners with one line)
@@ -205,6 +209,7 @@ MAGs are classified per MIMAG (Bowers et al. 2017):
 - SemiBin2: Pan et al., Nature Communications 2023
 - MetaBAT2: Kang et al., PeerJ 2019
 - DAS Tool: Sieber et al., Nature Microbiology 2018
+- CheckM2: Chklovski et al., Nature Methods 2023
 - CoverM: [github.com/wwood/CoverM](https://github.com/wwood/CoverM)
 - MIMAG: Bowers et al., Nature Biotechnology 2017
 - FOAM: Prestat et al., Nucleic Acids Research 2014
