@@ -57,7 +57,7 @@ def helpMessage() {
       nextflow run main.nf --input test-data -profile test -resume
 
       # Docker
-      ./run-docker.sh --input /data/reads --outdir /data/output
+      ./run-mag.sh --docker --input /data/reads --outdir /data/output
 
     Input:
       --input can be either:

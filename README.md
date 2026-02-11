@@ -24,9 +24,9 @@ nextflow run main.nf --input /path/to/nanopore/run \
 
 # Option B: Docker
 docker build -t danaseq-realtime .
-./run-docker.sh --input /path/to/nanopore/run --outdir /path/to/output \
+./run-realtime.sh --docker --input /path/to/nanopore/run --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka -resume
+    --run_prokka
 ```
 
 ### MAG assembly (post-expedition)
@@ -41,7 +41,7 @@ mamba run -p conda-envs/dana-mag-flye \
 
 # Option B: Docker
 docker build -t danaseq-mag .
-./run-docker.sh --input /path/to/reads --outdir /path/to/output -resume
+./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
 ```
 
 ### Test with bundled data

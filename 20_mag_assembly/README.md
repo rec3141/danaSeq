@@ -22,12 +22,17 @@ mamba run -p conda-envs/dana-mag-flye \
     nextflow run main.nf --help
 ```
 
-### Docker
+### Launcher script
 
 ```bash
 cd nextflow
+
+# Local conda (default)
+./run-mag.sh --input /path/to/reads --outdir /path/to/output
+
+# Docker mode
 docker build -t danaseq-mag .
-./run-docker.sh --input /path/to/reads --outdir /path/to/output -resume
+./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
 ```
 
 ## Pipeline Overview

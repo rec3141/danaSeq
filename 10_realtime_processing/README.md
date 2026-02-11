@@ -24,19 +24,24 @@ nextflow run main.nf --input /path/to/nanopore/run \
 nextflow run main.nf --help
 ```
 
-### Docker
+### Launcher script
 
 ```bash
 cd nextflow
-docker build -t danaseq-realtime .
 
-# Using helper script (recommended)
-./run-docker.sh --input /path/to/data --outdir /path/to/output \
+# Local conda (default)
+./run-realtime.sh --input /path/to/data --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka -resume
+    --run_prokka
+
+# Docker mode
+docker build -t danaseq-realtime .
+./run-realtime.sh --docker --input /path/to/data --outdir /path/to/output \
+    --run_kraken --kraken_db /path/to/krakendb \
+    --run_prokka
 
 # Show all options
-./run-docker.sh --help
+./run-realtime.sh --help
 ```
 
 <details>
@@ -122,7 +127,7 @@ Monitor a directory for new FASTQ files during active sequencing:
 nextflow run main.nf --input /path/to/runs \
     --watch --db_sync_minutes 10 \
     --run_kraken --kraken_db /path/to/db \
-    --run_prokka --run_db_integration --danadir /path/to/r_scripts
+    --run_prokka --run_db_integration
 ```
 
 `DB_SYNC` runs as a long-lived process that periodically loads new results into DuckDB. R scripts are idempotent and track imports via `import_log`.

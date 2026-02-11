@@ -33,7 +33,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   ├── install.sh              Conda environment builder
 │   ├── Dockerfile              Docker image (CPU-only SemiBin2)
 │   ├── entrypoint.sh           Docker entrypoint
-│   ├── run-docker.sh           Docker convenience wrapper
+│   ├── run-mag.sh              Pipeline launcher (local/Docker)
 │   ├── .dockerignore           Excludes conda-envs/, work/ from image
 │   └── .gitignore              Excludes runtime artifacts
 ├── CLAUDE.md                   This file
@@ -69,14 +69,17 @@ mamba run -p conda-envs/dana-mag-flye \
     nextflow run main.nf --help
 ```
 
-### Docker
+### Launcher script
 
 ```bash
 cd nextflow
-docker build -t danaseq-mag .
 
-# Using helper script (recommended)
-./run-docker.sh --input /path/to/reads --outdir /path/to/output -resume
+# Local conda (default)
+./run-mag.sh --input /path/to/reads --outdir /path/to/output
+
+# Docker mode
+docker build -t danaseq-mag .
+./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
 
 # Manual docker run
 docker run --user $(id -u):$(id -g) \

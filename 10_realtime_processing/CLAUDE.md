@@ -35,7 +35,7 @@ dānaSeq/
 │   │   ├── envs/                # Conda YAML specs
 │   │   ├── Dockerfile           # Self-contained Docker image
 │   │   ├── entrypoint.sh        # Docker entrypoint
-│   │   ├── run-docker.sh        # Docker convenience wrapper
+│   │   ├── run-realtime.sh      # Pipeline launcher (local/Docker)
 │   │   ├── install.sh           # Conda env installer
 │   │   └── test-data/           # Bundled test data
 │   ├── archive/                 # Legacy bash scripts (reference only)
@@ -77,7 +77,7 @@ nextflow run nextflow/main.nf --input /path/to/data \
 nextflow run nextflow/main.nf --input /path/to/runs \
     --watch --db_sync_minutes 10 \
     --run_kraken --kraken_db /path/to/db \
-    --run_prokka --run_db_integration --danadir /path/to/r_scripts
+    --run_prokka --run_db_integration
 
 # Quick test with bundled data
 nextflow run nextflow/main.nf --input nextflow/test-data -profile test -resume
@@ -86,16 +86,21 @@ nextflow run nextflow/main.nf --input nextflow/test-data -profile test -resume
 nextflow run nextflow/main.nf --help
 ```
 
-### Docker
+### Launcher script
 
 ```bash
 cd nextflow
-docker build -t danaseq-realtime .
 
-# Using helper script (recommended)
-./run-docker.sh --input /path/to/data --outdir /path/to/output \
+# Local conda (default)
+./run-realtime.sh --input /path/to/data --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka -resume
+    --run_prokka
+
+# Docker mode
+docker build -t danaseq-realtime .
+./run-realtime.sh --docker --input /path/to/data --outdir /path/to/output \
+    --run_kraken --kraken_db /path/to/krakendb \
+    --run_prokka
 
 # Manual docker run
 docker run --user $(id -u):$(id -g) \
