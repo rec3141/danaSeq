@@ -57,16 +57,89 @@ Scripts are numbered in increments of 10 (10, 20, 30...) to allow insertion of i
 
 ## Quick Start
 
-### Prerequisites
+### Option 1: Docker (recommended for new users)
 
-Check installed dependencies:
+No dependencies required beyond Docker. Build once, runs anywhere:
+
 ```bash
-./status.sh
+git clone https://github.com/rec3141/danaSeq.git
+cd danaSeq/10_realtime_processing/nextflow
+
+# Build the container (~15-20 min first time)
+docker build -t danaseq-realtime .
+
+# Quick test with bundled test data
+./run-docker.sh --input test-data --outdir /tmp/test-output -profile test
+
+# Run on your own data with Kraken2
+./run-docker.sh --input /path/to/nanopore/run --outdir /path/to/output \
+    --run_kraken --kraken_db /path/to/krakendb \
+    --run_prokka --run_sketch --run_tetra
+
+# With HMM functional gene profiling (e.g. CANT-HYD hydrocarbon degradation)
+./run-docker.sh --input /path/to/nanopore/run --outdir /path/to/output \
+    --run_kraken --kraken_db /path/to/krakendb \
+    --run_prokka --hmm_databases /path/to/CANT-HYD.hmm \
+    --run_sketch --run_tetra
 ```
 
-### Real-Time Processing
+The `run-docker.sh` helper validates all paths, creates the output directory,
+sets up volume mounts, and runs as your user automatically. Run `./run-docker.sh --help`
+for all options, or `./run-docker.sh --help-pipeline` for Nextflow flags.
 
-Recommended workflow for shipboard analysis:
+<details>
+<summary>Manual docker run (without helper script)</summary>
+
+```bash
+mkdir -p /path/to/output
+docker run --user $(id -u):$(id -g) \
+    -v /path/to/nanopore/run:/data/input:ro \
+    -v /path/to/output:/data/output \
+    -v /path/to/krakendb:/kraken_db:ro \
+    danaseq-realtime \
+    run /pipeline/main.nf \
+        --input /data/input --outdir /data/output \
+        --run_kraken --kraken_db /kraken_db \
+        --run_prokka --run_sketch --run_tetra \
+        -resume
+```
+
+**Notes for manual usage:**
+- `--input` must point to the directory **containing** `fastq_pass/`, not `fastq_pass/` itself
+- Always use `--user $(id -u):$(id -g)` so output files are owned by your user
+- Create the output directory on the host first (`mkdir -p`) to avoid root-owned dirs
+- Mount HMM files individually: `-v /path/to/A.hmm:/hmm/A.hmm:ro`
+
+</details>
+
+### Option 2: Conda
+
+Install the pipeline tools into isolated conda environments:
+
+```bash
+git clone https://github.com/rec3141/danaSeq.git
+cd danaSeq/10_realtime_processing/nextflow
+
+# Install conda environments (~15-20 min first time)
+./install.sh
+
+# Verify installation
+./install.sh --check
+
+# Activate and run
+conda activate conda-envs/dana-tools
+nextflow run main.nf --input /path/to/data \
+    --run_kraken --kraken_db /path/to/krakendb \
+    --run_prokka --hmm_databases /path/to/CANT-HYD.hmm \
+    --run_sketch --run_tetra \
+    -resume
+```
+
+Requires: [Miniforge](https://github.com/conda-forge/miniforge) (conda/mamba) on PATH.
+
+### Option 3: Bash pipeline (advanced)
+
+For direct control without Nextflow, use the production bash script:
 
 ```bash
 cd 10_realtime_processing
@@ -76,16 +149,13 @@ cd 10_realtime_processing
 
 # With functional gene profiling
 ./24_process_reads_optimized.sh -i <input_dir> -K -P --hmm /path/to/CANT-HYD.hmm
-
-# Launch interactive dashboard (separate terminal)
-Rscript 60_edna_mapping_viz.r
 ```
+
+Requires all tools installed manually. Check dependencies with `./status.sh`.
 
 **Critical:** When using Kraken2 (`-K` flag), always use `24_process_reads_optimized.sh`. This script serializes Kraken2 calls to prevent memory exhaustion (Kraken2 loads 50-100GB into RAM). Other scripts will spawn multiple instances and crash the system.
 
-### MAG Assembly
-
-Complete assembly workflow:
+### MAG Assembly (post-expedition)
 
 ```bash
 cd 20_mag_assembly

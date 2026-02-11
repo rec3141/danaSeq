@@ -170,6 +170,53 @@ R scripts (`4X_*_db.r`) integrate results into DuckDB:
 
 See `DEPLOYMENT_ISSUES.md` for comprehensive setup guidance.
 
+### Nextflow Pipeline
+
+A DSL2 Nextflow implementation lives in `nextflow/`. It uses three conda
+environments under `nextflow/conda-envs/` (built from YAML specs in `nextflow/envs/`):
+- **dana-bbmap** - BBMap (samtools conflicts with R)
+- **dana-prokka** - Prokka (BioPerl pins perl 5.26)
+- **dana-tools** - Filtlong, Kraken2, HMMER, R/DuckDB, Nextflow, OpenJDK
+
+Nextflow and Java are bundled in the dana-tools env. Users activate it to run:
+```bash
+conda activate nextflow/conda-envs/dana-tools
+nextflow run nextflow/main.nf --input /path/to/data -resume
+```
+
+Key features beyond the bash pipeline:
+- **Watch mode** (`--watch`): Monitors for new FASTQ files during live sequencing;
+  `DB_SYNC` periodically loads results into DuckDB
+- **Post-DB cleanup** (`--cleanup`): After confirming DuckDB import via `import_log`,
+  gzips fa/ in place, deletes kraken/sketch/tetra files (data in DB), deletes
+  prokka TSVs, gzips prokka .gff/.faa/.ffn. Per-file operation is safe for watch mode
+- Native `-resume` via Nextflow's caching (no manual checkpoint logic)
+- **Docker**: Self-contained image; supports `--user` for non-root execution.
+  `bin/30_kraken_parse.awk` is bundled (the `../` parent path doesn't exist in containers)
+
+### Docker Usage
+
+```bash
+# Build
+cd nextflow && docker build -t danaseq-realtime .
+
+# Run as current user (output files owned by you, not root)
+docker run --user $(id -u):$(id -g) \
+    -v /path/to/data:/data/input:ro \
+    -v /path/to/output:/data/output \
+    -v /path/to/krakendb:/kraken_db:ro \
+    danaseq-realtime \
+    run /pipeline/main.nf \
+        --input /data/input --outdir /data/output \
+        --kraken_db /kraken_db \
+        --run_kraken --run_prokka --run_sketch --run_tetra \
+        --cleanup -resume
+```
+
+The container uses `/home/dana` as a writable HOME for Nextflow metadata.
+Each conda env has its own JDK; wrapper scripts prepend the correct env's
+`bin/` to PATH so BBMap, Prokka, and Nextflow each find their own java.
+
 ## Common Issues & Solutions
 
 ### Prokka Not Detecting Existing Output

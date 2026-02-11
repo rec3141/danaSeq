@@ -170,6 +170,114 @@ mv output.tmp output  # Atomic rename
 
 ---
 
+## Nextflow Pipeline
+
+A Nextflow DSL2 implementation of the same workflow with DAG-based parallelism,
+native `-resume`, and resource-aware scheduling.
+
+### Installation
+
+```bash
+cd nextflow
+./install.sh          # Creates 3 conda environments under conda-envs/
+./install.sh --check  # Verify all tools installed
+```
+
+Nextflow and Java are included in the `dana-tools` conda environment. Activate
+it before running:
+
+```bash
+conda activate nextflow/conda-envs/dana-tools
+```
+
+### Batch Mode
+
+Process all files then exit:
+
+```bash
+nextflow run nextflow/main.nf \
+  --input /path/to/data \
+  --run_kraken --kraken_db /path/to/db \
+  --run_prokka --run_sketch --run_tetra \
+  --run_db_integration --danadir /path/to/r_scripts \
+  -resume
+```
+
+### Watch Mode
+
+Monitor a directory for new FASTQ files during live sequencing:
+
+```bash
+nextflow run nextflow/main.nf \
+  --input /path/to/runs \
+  --watch --db_sync_minutes 10 \
+  --run_kraken --kraken_db /path/to/db \
+  --run_prokka \
+  --run_db_integration --danadir /path/to/r_scripts
+```
+
+In watch mode, `DB_SYNC` runs as a long-lived process that periodically scans
+output directories and loads new results into DuckDB. The R scripts are
+idempotent (they track imported files via `import_log`).
+
+### Post-DB Cleanup
+
+On long sequencing runs, source files become redundant after loading into
+DuckDB. The `--cleanup` flag compresses or deletes them after DB import:
+
+```bash
+nextflow run nextflow/main.nf --input /data/run \
+  --run_db_integration --danadir /path/to/r_scripts \
+  --cleanup
+```
+
+**What gets cleaned per barcode directory:**
+
+| Directory/Files | Action |
+|----------------|--------|
+| `fa/*.fa` | Gzip in place (not in DuckDB, kept as compressed backup) |
+| `kraken/`, `sketch/`, `tetra/` | Delete files (data lives in DuckDB) |
+| `prokka/*/PROKKA_*.tsv` | Delete (already loaded into DuckDB) |
+| `prokka/*/PROKKA_*.gff`, `.faa`, `.ffn` | Compress in place (gzip) |
+| `hmm/`, `dana.duckdb`, `log.txt` | Kept (not cleaned) |
+
+Cleanup operates on individual files, not whole directories, so it's safe for
+watch mode where new files arrive between sync cycles. Only runs after verifying
+`import_log` has entries in the barcode's DuckDB.
+
+### Docker
+
+A self-contained Docker image bundles all three conda environments. No host
+dependencies required beyond Docker itself.
+
+**Build:**
+```bash
+cd nextflow
+docker build -t danaseq-realtime .
+```
+
+**Run (as current user):**
+```bash
+docker run --user $(id -u):$(id -g) \
+    -v /path/to/data:/data/input:ro \
+    -v /path/to/output:/data/output \
+    -v /path/to/krakendb:/kraken_db:ro \
+    danaseq-realtime \
+    run /pipeline/main.nf \
+        --input /data/input --outdir /data/output \
+        --kraken_db /kraken_db \
+        --run_kraken --run_prokka --run_sketch --run_tetra \
+        --cleanup -resume
+```
+
+**Notes:**
+- Always use `--user $(id -u):$(id -g)` so output files are owned by your user
+- Mount the Kraken2 database directory as a read-only volume (`/kraken_db:ro`)
+- The container uses `/home/dana` as a writable HOME for Nextflow metadata
+- Each tool wrapper prepends its conda env to PATH, ensuring correct JDK isolation
+
+---
+
 ## DuckDB Integration
 
 Real-time SQL queries on growing datasets:
