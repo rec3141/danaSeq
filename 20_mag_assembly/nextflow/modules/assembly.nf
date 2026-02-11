@@ -1,4 +1,4 @@
-// Co-assembly: concatenate all reads, optional dedupe/filtlong, Flye metagenomic assembly
+// Co-assembly: concatenate all reads, optional filtlong, Flye metagenomic assembly
 
 process ASSEMBLY_FLYE {
     tag "co-assembly"
@@ -13,14 +13,6 @@ process ASSEMBLY_FLYE {
     path("assembly.fasta"), emit: assembly
 
     script:
-    def dedupe_cmd = ""
-    if (params.dedupe) {
-        dedupe_cmd = """
-        dedupe.sh in=all_reads.fastq.gz out=all_reads_deduped.fastq.gz
-        mv all_reads_deduped.fastq.gz all_reads.fastq.gz
-        """
-    }
-
     def filtlong_cmd = ""
     if (params.filtlong_size) {
         filtlong_cmd = """
@@ -32,8 +24,6 @@ process ASSEMBLY_FLYE {
     """
     # Concatenate all input reads
     cat ${reads} > all_reads.fastq.gz
-
-    ${dedupe_cmd}
 
     ${filtlong_cmd}
 

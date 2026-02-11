@@ -29,7 +29,7 @@ def helpMessage() {
       nextflow run main.nf --input /path/to/reads [options] -resume
 
     Required:
-      --input DIR        Directory containing *.fastq.gz read files
+      --input DIR        Input directory (see Input section below)
       --outdir DIR       Output directory [default: results]
 
     Assembly:
@@ -60,8 +60,11 @@ def helpMessage() {
       ./run-docker.sh --input /data/reads --outdir /data/output
 
     Input:
-      --input must point to a directory containing *.fastq.gz files.
-      All files are co-assembled into a single metagenome.
+      --input can be either:
+        (a) Directory with *.fastq.gz files (one per sample)
+        (b) Nanopore run or project directory containing fastq_pass/barcode*/
+            at any depth. Files are concatenated per barcode automatically.
+            Example: --input /data/Ebb_Flow  (finds all runs underneath)
 
     Output:
       results/
@@ -99,6 +102,7 @@ if (!params.input) {
 }
 
 // Import modules
+include { CONCAT_READS }        from './modules/preprocess'
 include { ASSEMBLY_FLYE }       from './modules/assembly'
 include { MAP_READS }           from './modules/mapping'
 include { CALCULATE_DEPTHS }    from './modules/mapping'
@@ -113,23 +117,48 @@ include { DASTOOL_CONSENSUS }   from './modules/binning'
 
 workflow {
 
-    // 1. Discover input reads
+    // 1. Discover input reads — auto-detect nanopore barcode vs flat directory
     def input_dir = file(params.input)
     if (!input_dir.isDirectory()) {
         error "ERROR: --input directory does not exist: ${params.input}\nRun with --help for usage."
     }
 
-    def found = file("${params.input}/*.fastq.gz")
-    if (!found) {
-        error "ERROR: No *.fastq.gz files found in ${params.input}\nRun with --help for usage."
-    }
+    // Check for nanopore barcode structure at any depth
+    def barcode_dirs = file("${params.input}/**/fastq_pass/barcode*", type: 'dir')
+    def flat_fastqs  = file("${params.input}/*.fastq.gz")
 
-    ch_reads = Channel.fromPath("${params.input}/*.fastq.gz")
-        .map { fastq ->
-            def name = fastq.baseName.replace('.fastq', '')
-            def meta = [id: name]
-            [meta, fastq]
-        }
+    if (barcode_dirs) {
+        // Nanopore barcode structure detected — concat per barcode
+        log.info "Detected nanopore barcode structure: ${barcode_dirs.size()} barcode directories"
+        ch_barcode_raw = Channel.fromPath("${params.input}/**/fastq_pass/barcode*", type: 'dir')
+            .flatMap { dir ->
+                def barcode = dir.name
+                // Extract flowcell ID from MinKNOW run dir name
+                // e.g. 20251021_1541_X1_FAZ84459_9acd0eaa -> FAZ84459
+                def run_name = dir.parent.parent.name
+                def parts = run_name.tokenize('_')
+                def flowcell = parts.size() >= 4 ? parts[3] : run_name
+                def sample_id = "${flowcell}_${barcode}"
+                file("${dir}/*.fastq.gz").collect { fq -> [sample_id, fq] }
+            }
+            .groupTuple()
+            .map { sample_id, fastqs -> [[id: sample_id], fastqs] }
+            .filter { meta, fastqs -> fastqs.size() > 0 }
+
+        CONCAT_READS(ch_barcode_raw)
+        ch_reads = CONCAT_READS.out.reads
+            .filter { meta, fastq -> fastq.size() > 1024 }  // skip empty/tiny outputs
+    } else if (flat_fastqs) {
+        // Flat directory of FASTQ files — existing behavior
+        log.info "Detected flat FASTQ directory: ${flat_fastqs.size()} files"
+        ch_reads = Channel.fromPath("${params.input}/*.fastq.gz")
+            .map { fastq ->
+                def name = fastq.baseName.replace('.fastq', '')
+                [[id: name], fastq]
+            }
+    } else {
+        error "ERROR: No FASTQ files found in ${params.input}. Expected either *.fastq.gz or fastq_pass/barcode*/ structure.\nRun with --help for usage."
+    }
 
     // 2. Co-assembly: fan-in all reads into one Flye assembly
     ch_all_reads = ch_reads.map { meta, fastq -> fastq }.collect()
