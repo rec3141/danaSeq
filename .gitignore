@@ -21,6 +21,9 @@
 *.out
 *.err
 
+# Data directories
+data/
+
 # Data files (too large for git)
 *.fastq
 *.fastq.gz
@@ -56,9 +59,8 @@ taxonomy/
 kraken_db/
 kraken2_db/
 
-# HMM databases (except CANT-HYD.hmm which is included)
+# HMM databases
 *.hmm
-!CANT-HYD.hmm
 
 # Prokka output
 prokka/
