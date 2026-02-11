@@ -33,6 +33,29 @@ set -euo pipefail
 #       --run_prokka --run_sketch --run_tetra \
 #       --run_db_integration
 #
+#   # Kitchen sink — all modules, all options with defaults
+#   ./run-realtime.sh --input /data/run1 --outdir /data/output \
+#       --run_kraken --kraken_db /path/to/krakendb \
+#       --run_prokka \
+#       --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \
+#       --run_sketch \
+#       --run_tetra \
+#       --run_db_integration \
+#       --cleanup \
+#       --min_readlen 1500 \
+#       --keep_percent 80 \
+#       --min_file_size 1000000
+#
+#   # Kitchen sink — watch mode for live sequencing
+#   ./run-realtime.sh --input /data/runs --outdir /data/output \
+#       --watch --db_sync_minutes 10 \
+#       --run_kraken --kraken_db /path/to/krakendb \
+#       --run_prokka \
+#       --hmm_databases /path/to/CANT-HYD.hmm \
+#       --run_sketch \
+#       --run_tetra \
+#       --run_db_integration
+#
 #   # Docker mode
 #   ./run-realtime.sh --docker --input /data/run1 --outdir /data/output \
 #       --run_kraken --kraken_db /path/to/krakendb \
@@ -64,8 +87,33 @@ usage() {
     echo "  --kraken_db DIR      Kraken2 database directory"
     echo "  --hmm_databases LIST Comma-separated HMM file paths"
     echo ""
-    echo "All other flags are passed to Nextflow (--run_prokka, --run_sketch, etc.)"
-    echo "Run '$0 --help-pipeline' to see Nextflow pipeline options."
+    echo "Pipeline flags (passed to Nextflow):"
+    echo "  --run_kraken         Kraken2 taxonomic classification (requires --kraken_db)"
+    echo "  --run_prokka         Prokka gene annotation"
+    echo "  --run_sketch         Sendsketch taxonomic profiling"
+    echo "  --run_tetra          Tetranucleotide frequency analysis"
+    echo "  --run_db_integration Load results into DuckDB"
+    echo "  --cleanup            Compress/delete source files after DuckDB import"
+    echo "  --watch              Monitor for new FASTQ files (live sequencing)"
+    echo "  --db_sync_minutes N  DB sync interval in watch mode [default: 10]"
+    echo "  --min_readlen N      Minimum read length in bp [default: 1500]"
+    echo "  --keep_percent N     Filtlong keep percent [default: 80]"
+    echo "  --min_file_size N    Minimum FASTQ size in bytes [default: 1000000]"
+    echo ""
+    echo "Kitchen sink example (all modules, all options with defaults):"
+    echo "  $0 --input /data/run1 --outdir /data/output \\"
+    echo "      --run_kraken --kraken_db /path/to/krakendb \\"
+    echo "      --run_prokka \\"
+    echo "      --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \\"
+    echo "      --run_sketch \\"
+    echo "      --run_tetra \\"
+    echo "      --run_db_integration \\"
+    echo "      --cleanup \\"
+    echo "      --min_readlen 1500 \\"
+    echo "      --keep_percent 80 \\"
+    echo "      --min_file_size 1000000"
+    echo ""
+    echo "Run '$0 --help-pipeline' to see full Nextflow help."
     exit 0
 }
 

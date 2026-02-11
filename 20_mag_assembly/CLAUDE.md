@@ -60,6 +60,18 @@ mamba run -p conda-envs/dana-mag-flye \
     nextflow run main.nf --input /path/to/reads \
         --filtlong_size 40000000000 --run_maxbin false -resume
 
+# Kitchen sink — all options with defaults
+mamba run -p conda-envs/dana-mag-flye \
+    nextflow run main.nf --input /path/to/reads --outdir results \
+        --dedupe \
+        --filtlong_size 40000000000 \
+        --min_overlap 1000 \
+        --run_maxbin true \
+        --metabat_min_cls 50000 \
+        --assembly_cpus 24 \
+        --assembly_memory '64 GB' \
+        -resume
+
 # Quick test with bundled data
 mamba run -p conda-envs/dana-mag-flye \
     nextflow run main.nf --input test-data -profile test -resume

@@ -44,6 +44,37 @@ docker build -t danaseq-mag .
 ./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
 ```
 
+### Kitchen sink — all modules (real-time)
+
+```bash
+cd danaSeq/10_realtime_processing/nextflow
+./run-realtime.sh --input /data/run1 --outdir /data/output \
+    --run_kraken --kraken_db /path/to/krakendb \
+    --run_prokka \
+    --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \
+    --run_sketch \
+    --run_tetra \
+    --run_db_integration \
+    --cleanup \
+    --min_readlen 1500 \
+    --keep_percent 80 \
+    --min_file_size 1000000
+```
+
+### Kitchen sink — all options (MAG)
+
+```bash
+cd danaSeq/20_mag_assembly/nextflow
+./run-mag.sh --input /data/reads --outdir /data/output \
+    --dedupe \
+    --filtlong_size 40000000000 \
+    --min_overlap 1000 \
+    --run_maxbin true \
+    --metabat_min_cls 50000 \
+    --assembly_cpus 24 \
+    --assembly_memory '64 GB'
+```
+
 ### Test with bundled data
 
 ```bash

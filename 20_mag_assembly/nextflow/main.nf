@@ -53,11 +53,23 @@ def helpMessage() {
       nextflow run main.nf --input /data/reads \\
           --filtlong_size 40000000000 --run_maxbin false -resume
 
+      # Kitchen sink — all options with defaults
+      nextflow run main.nf --input /data/reads --outdir results \\
+          --dedupe \\
+          --filtlong_size 40000000000 \\
+          --min_overlap 1000 \\
+          --run_maxbin true \\
+          --metabat_min_cls 50000 \\
+          --assembly_cpus 24 \\
+          --assembly_memory '64 GB' \\
+          -resume
+
+      # Using launcher script (local conda or Docker)
+      ./run-mag.sh --input /data/reads --outdir /data/output
+      ./run-mag.sh --docker --input /data/reads --outdir /data/output
+
       # Quick test with bundled test data
       nextflow run main.nf --input test-data -profile test -resume
-
-      # Docker
-      ./run-mag.sh --docker --input /data/reads --outdir /data/output
 
     Input:
       --input can be either:

@@ -79,6 +79,30 @@ nextflow run nextflow/main.nf --input /path/to/runs \
     --run_kraken --kraken_db /path/to/db \
     --run_prokka --run_db_integration
 
+# Kitchen sink — all modules, all options with defaults
+nextflow run nextflow/main.nf --input /path/to/data --outdir results \
+    --run_kraken --kraken_db /path/to/db \
+    --run_prokka \
+    --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \
+    --run_sketch \
+    --run_tetra \
+    --run_db_integration \
+    --cleanup \
+    --min_readlen 1500 \
+    --keep_percent 80 \
+    --min_file_size 1000000 \
+    -resume
+
+# Kitchen sink — watch mode for live sequencing
+nextflow run nextflow/main.nf --input /path/to/runs --outdir results \
+    --watch --db_sync_minutes 10 \
+    --run_kraken --kraken_db /path/to/db \
+    --run_prokka \
+    --hmm_databases /path/to/CANT-HYD.hmm \
+    --run_sketch \
+    --run_tetra \
+    --run_db_integration
+
 # Quick test with bundled data
 nextflow run nextflow/main.nf --input nextflow/test-data -profile test -resume
 

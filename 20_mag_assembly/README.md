@@ -35,6 +35,20 @@ docker build -t danaseq-mag .
 ./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
 ```
 
+### Kitchen sink — all options with defaults
+
+```bash
+cd nextflow
+./run-mag.sh --input /data/reads --outdir /data/output \
+    --dedupe \
+    --filtlong_size 40000000000 \
+    --min_overlap 1000 \
+    --run_maxbin true \
+    --metabat_min_cls 50000 \
+    --assembly_cpus 24 \
+    --assembly_memory '64 GB'
+```
+
 ## Pipeline Overview
 
 ```

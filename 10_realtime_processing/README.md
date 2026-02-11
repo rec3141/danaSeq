@@ -44,6 +44,35 @@ docker build -t danaseq-realtime .
 ./run-realtime.sh --help
 ```
 
+### Kitchen sink — all modules, all options with defaults
+
+```bash
+cd nextflow
+
+# All analysis modules enabled, QC defaults shown explicitly
+./run-realtime.sh --input /data/run1 --outdir /data/output \
+    --run_kraken --kraken_db /path/to/krakendb \
+    --run_prokka \
+    --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \
+    --run_sketch \
+    --run_tetra \
+    --run_db_integration \
+    --cleanup \
+    --min_readlen 1500 \
+    --keep_percent 80 \
+    --min_file_size 1000000
+
+# Watch mode — all modules, live sequencing
+./run-realtime.sh --input /data/runs --outdir /data/output \
+    --watch --db_sync_minutes 10 \
+    --run_kraken --kraken_db /path/to/krakendb \
+    --run_prokka \
+    --hmm_databases /path/to/CANT-HYD.hmm \
+    --run_sketch \
+    --run_tetra \
+    --run_db_integration
+```
+
 <details>
 <summary>Manual docker run (without helper script)</summary>
 

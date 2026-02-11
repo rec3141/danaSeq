@@ -71,15 +71,35 @@ def helpMessage() {
           --run_kraken --kraken_db /path/to/krakendb \\
           --run_prokka --run_sketch --run_tetra -resume
 
-      # Docker with Kraken2 database
-      docker run --user \$(id -u):\$(id -g) \\
-          -v /data/run1:/data/input:ro \\
-          -v /data/output:/data/output \\
-          -v /path/to/krakendb:/kraken_db:ro \\
-          danaseq-realtime run /pipeline/main.nf \\
-              --input /data/input --outdir /data/output \\
-              --run_kraken --kraken_db /kraken_db \\
-              --run_prokka -resume
+      # Kitchen sink — all modules, all options with defaults
+      nextflow run main.nf --input /data/run1 --outdir results \\
+          --run_kraken --kraken_db /path/to/krakendb \\
+          --run_prokka \\
+          --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \\
+          --run_sketch \\
+          --run_tetra \\
+          --run_db_integration \\
+          --cleanup \\
+          --min_readlen 1500 \\
+          --keep_percent 80 \\
+          --min_file_size 1000000 \\
+          -resume
+
+      # Kitchen sink — watch mode for live sequencing
+      nextflow run main.nf --input /data/runs --outdir results \\
+          --watch --db_sync_minutes 10 \\
+          --run_kraken --kraken_db /path/to/krakendb \\
+          --run_prokka \\
+          --hmm_databases /path/to/CANT-HYD.hmm \\
+          --run_sketch \\
+          --run_tetra \\
+          --run_db_integration
+
+      # Using launcher script (local conda or Docker)
+      ./run-realtime.sh --input /data/run1 --outdir /data/output \\
+          --run_kraken --kraken_db /path/to/krakendb --run_prokka
+      ./run-realtime.sh --docker --input /data/run1 --outdir /data/output \\
+          --run_kraken --kraken_db /path/to/krakendb --run_prokka
 
       # Quick test with bundled test data
       nextflow run main.nf --input test-data -profile test -resume
