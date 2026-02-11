@@ -41,6 +41,9 @@ def helpMessage() {
       --run_maxbin       Include MaxBin2 in consensus binning [default: true]
       --metabat_min_cls N MetaBAT2 minimum cluster size [default: 50000]
 
+    Quality:
+      --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
+
     Resources:
       --assembly_cpus N     CPUs for assembly [default: 24]
       --assembly_memory STR Memory for assembly [default: '64 GB']
@@ -60,6 +63,7 @@ def helpMessage() {
           --min_overlap 1000 \\
           --run_maxbin true \\
           --metabat_min_cls 50000 \\
+          --checkm2_db /path/to/checkm2_db \\
           --assembly_cpus 24 \\
           --assembly_memory '64 GB' \\
           -resume
@@ -89,11 +93,14 @@ def helpMessage() {
       │   ├── semibin/contig_bins.tsv
       │   ├── metabat/contig_bins.tsv
       │   ├── maxbin/contig_bins.tsv
-      │   └── consensus/
-      │       ├── bins/*.fa
-      │       ├── contig2bin.tsv
-      │       ├── allbins.fa
-      │       └── scores.tsv
+      │   ├── dastool/
+      │   │   ├── bins/*.fa
+      │   │   ├── contig2bin.tsv
+      │   │   ├── allbins.fa
+      │   │   ├── bin_quality.tsv
+      │   │   └── summary.tsv
+      │   └── checkm2/
+      │       └── quality_report.tsv  (if --checkm2_db set)
       └── pipeline_info/
 
     """.stripIndent()
@@ -122,6 +129,7 @@ include { BIN_SEMIBIN2 }        from './modules/binning'
 include { BIN_METABAT2 }        from './modules/binning'
 include { BIN_MAXBIN2 }         from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
+include { CHECKM2 }             from './modules/binning'
 
 // ============================================================================
 // Main workflow
@@ -217,6 +225,20 @@ workflow {
         ch_bin_files,
         ch_bin_labels
     )
+
+    // 7. Quality assessment with CheckM2 (optional — requires database path)
+    if (params.checkm2_db) {
+        ch_all_bins = BIN_SEMIBIN2.out.fastas
+            .mix(BIN_METABAT2.out.fastas)
+        if (params.run_maxbin) {
+            ch_all_bins = ch_all_bins.mix(BIN_MAXBIN2.out.fastas)
+        }
+        ch_all_bins = ch_all_bins
+            .mix(DASTOOL_CONSENSUS.out.bins)
+            .collect()
+
+        CHECKM2(ch_all_bins)
+    }
 }
 
 // ============================================================================

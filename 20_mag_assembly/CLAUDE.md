@@ -21,13 +21,14 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── assembly.nf         ASSEMBLY_FLYE
 │   │   ├── mapping.nf          MAP_READS, CALCULATE_DEPTHS
 │   │   └── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
-│   │                           DASTOOL_CONSENSUS
+│   │                           DASTOOL_CONSENSUS, CHECKM2
 │   ├── envs/                   Conda YAML specs
 │   │   ├── flye.yml            Flye, Filtlong, Nextflow, OpenJDK
 │   │   ├── mapping.yml         minimap2, samtools, CoverM
 │   │   ├── semibin.yml         SemiBin2, PyTorch GPU
 │   │   ├── semibin-cpu.yml     SemiBin2, PyTorch CPU (for Docker)
 │   │   ├── binning.yml         MetaBAT2, MaxBin2, DAS_Tool
+│   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── conda-envs/             Pre-built envs (created by install.sh)
 │   ├── install.sh              Conda environment builder
@@ -64,6 +65,7 @@ cd nextflow
     --min_overlap 1000 \
     --run_maxbin true \
     --metabat_min_cls 50000 \
+    --checkm2_db /path/to/checkm2_db \
     --assembly_cpus 24 \
     --assembly_memory '64 GB'
 
@@ -96,6 +98,8 @@ Sample FASTQs (N files)
  SemiBin2 MetaBAT2 MaxBin2   Parallel binning
     └────┼────┘
    DASTOOL_CONSENSUS      Consensus integration
+         │ collect()
+   CHECKM2                Quality assessment (optional, needs --checkm2_db)
 ```
 
 ### Key Design Decisions
@@ -114,7 +118,7 @@ Sample FASTQs (N files)
 
 ### Conda Environments
 
-Five isolated environments avoid dependency conflicts:
+Six isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
@@ -122,6 +126,7 @@ Five isolated environments avoid dependency conflicts:
 | `dana-mag-mapping` | minimap2, samtools, CoverM | Universal mapping tools |
 | `dana-mag-semibin` | SemiBin2, PyTorch GPU | ML dependencies isolated |
 | `dana-mag-binning` | MetaBAT2, MaxBin2, DAS_Tool | Binning suite |
+| `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
 ### Nextflow Config Profiles
@@ -159,11 +164,14 @@ results/
 │   ├── semibin/contig_bins.tsv
 │   ├── metabat/contig_bins.tsv
 │   ├── maxbin/contig_bins.tsv
-│   └── consensus/
-│       ├── bins/*.fa           Final consensus MAG FASTAs
-│       ├── contig2bin.tsv      Contig-to-bin assignments
-│       ├── allbins.fa          All bins concatenated
-│       └── scores.tsv          Per-bin quality scores
+│   ├── dastool/
+│   │   ├── bins/*.fa           Final consensus MAG FASTAs
+│   │   ├── contig2bin.tsv      Contig-to-bin assignments
+│   │   ├── allbins.fa          All bins concatenated
+│   │   ├── bin_quality.tsv     Per-bin SCG completeness/redundancy (all binners)
+│   │   └── summary.tsv         DAS_Tool consensus winners with scores
+│   └── checkm2/
+│       └── quality_report.tsv  CheckM2 quality (if --checkm2_db set)
 └── pipeline_info/
     ├── timeline.html
     ├── report.html

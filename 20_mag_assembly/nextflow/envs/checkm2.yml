@@ -1,0 +1,6 @@
+name: dana-mag-checkm2
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - checkm2

@@ -67,6 +67,7 @@ ENV_YAMLS=(
     mapping.yml
     semibin.yml
     binning.yml
+    checkm2.yml
     bbmap.yml
 )
 
@@ -76,6 +77,7 @@ declare -A ENV_CHECK=(
     [dana-mag-mapping]="minimap2"
     [dana-mag-semibin]="SemiBin2"
     [dana-mag-binning]="metabat2"
+    [dana-mag-checkm2]="checkm2"
     [dana-bbmap]="bbduk.sh"
 )
 

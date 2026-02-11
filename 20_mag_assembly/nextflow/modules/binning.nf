@@ -4,7 +4,7 @@ process BIN_SEMIBIN2 {
     tag "semibin2"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-semibin"
-    publishDir "${params.outdir}/binning/semibin", mode: 'copy', saveAs: { "contig_bins.tsv" }
+    publishDir "${params.outdir}/binning/semibin", mode: 'copy', saveAs: { fn -> fn == 'semibin_bins.tsv' ? 'contig_bins.tsv' : fn }
 
     input:
     path(assembly)
@@ -12,16 +12,20 @@ process BIN_SEMIBIN2 {
 
     output:
     path("semibin_bins.tsv"), emit: bins
+    path("bins/"),            emit: fastas
 
     script:
     """
+    mkdir -p bins
+
     # SemiBin2 can crash on very small datasets (0 bins → empty ORFs → hmmsearch fail)
     # Catch failures and produce an empty output so the pipeline can continue
     set +e
     SemiBin2 single_easy_bin \\
         -i "${assembly}" \\
         -b *.sorted.bam \\
-        -o semibin_out
+        -o semibin_out \\
+        --sequencing-type long_read
     semibin_exit=\$?
     set -e
 
@@ -30,7 +34,17 @@ process BIN_SEMIBIN2 {
         touch semibin_bins.tsv
     elif [ -f semibin_out/contig_bins.tsv ]; then
         # SemiBin2 outputs a header line -- remove it for DAS_Tool compatibility
-        tail -n +2 semibin_out/contig_bins.tsv > semibin_bins.tsv
+        tail -n +2 semibin_out/contig_bins.tsv | \
+            awk -F'\\t' '{printf "%s\\tsemibin_%03d\\n", \$1, \$2+1}' > semibin_bins.tsv
+
+        # Rename intermediate bin FASTAs to standardized names
+        # SemiBin2 outputs gzipped bins (.fa.gz)
+        bin_num=0
+        for bin_file in semibin_out/output_bins/*.fa.gz; do
+            [ -e "\$bin_file" ] || continue
+            bin_num=\$((bin_num + 1))
+            zcat "\$bin_file" > "bins/\$(printf 'semibin_%03d.fa' \$bin_num)"
+        done
     else
         echo "[WARNING] SemiBin2 produced no contig_bins.tsv" >&2
         touch semibin_bins.tsv
@@ -46,7 +60,7 @@ process BIN_METABAT2 {
     tag "metabat2"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/metabat", mode: 'copy', saveAs: { "contig_bins.tsv" }
+    publishDir "${params.outdir}/binning/metabat", mode: 'copy', saveAs: { fn -> fn == 'metabat_bins.tsv' ? 'contig_bins.tsv' : fn }
 
     input:
     path(assembly)
@@ -54,9 +68,12 @@ process BIN_METABAT2 {
 
     output:
     path("metabat_bins.tsv"), emit: bins
+    path("bins/"),            emit: fastas
 
     script:
     """
+    mkdir -p bins
+
     metabat2 \\
         -i "${assembly}" \\
         -o metabat_out/bin \\
@@ -66,9 +83,12 @@ process BIN_METABAT2 {
 
     # Convert MetaBAT2 FASTA bins to contig_bins.tsv format
     > metabat_bins.tsv
+    bin_num=0
     for bin_file in metabat_out/bin*.fa; do
         [ -e "\$bin_file" ] || continue
-        bin_name=\$(basename "\$bin_file")
+        bin_num=\$((bin_num + 1))
+        bin_name=\$(printf 'metabat_%03d' \$bin_num)
+        cp "\$bin_file" "bins/\${bin_name}.fa"
         grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
             printf '%s\\t%s\\n' "\$contig" "\$bin_name"
         done >> metabat_bins.tsv
@@ -84,7 +104,7 @@ process BIN_MAXBIN2 {
     tag "maxbin2"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/maxbin", mode: 'copy', saveAs: { "contig_bins.tsv" }
+    publishDir "${params.outdir}/binning/maxbin", mode: 'copy', saveAs: { fn -> fn == 'maxbin_bins.tsv' ? 'contig_bins.tsv' : fn }
 
     input:
     path(assembly)
@@ -92,9 +112,12 @@ process BIN_MAXBIN2 {
 
     output:
     path("maxbin_bins.tsv"), emit: bins
+    path("bins/"),           emit: fastas
 
     script:
     """
+    mkdir -p bins
+
     # Extract coverage column from JGI depth table for MaxBin2 format
     # JGI format: contigName contigLen totalAvgDepth sample1.var sample2 ...
     # MaxBin2 wants: contigName avgDepth
@@ -109,9 +132,12 @@ process BIN_MAXBIN2 {
 
     # Convert MaxBin2 FASTA bins to contig_bins.tsv format
     > maxbin_bins.tsv
+    bin_num=0
     for bin_file in maxbin_out/bin*.fasta; do
         [ -e "\$bin_file" ] || continue
-        bin_name=\$(basename "\$bin_file")
+        bin_num=\$((bin_num + 1))
+        bin_name=\$(printf 'maxbin_%03d' \$bin_num)
+        cp "\$bin_file" "bins/\${bin_name}.fa"
         grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
             printf '%s\\t%s\\n' "\$contig" "\$bin_name"
         done >> maxbin_bins.tsv
@@ -127,7 +153,7 @@ process DASTOOL_CONSENSUS {
     tag "dastool"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/consensus", mode: 'copy'
+    publishDir "${params.outdir}/binning/dastool", mode: 'copy'
 
     input:
     path(assembly)
@@ -135,10 +161,11 @@ process DASTOOL_CONSENSUS {
     val(bin_labels)
 
     output:
-    path("bins/"),           emit: bins
-    path("contig2bin.tsv"),  emit: contig2bin
-    path("scores.tsv"),     emit: scores
-    path("allbins.fa"),     emit: allbins
+    path("bins/"),             emit: bins
+    path("contig2bin.tsv"),    emit: contig2bin
+    path("allbins.fa"),       emit: allbins
+    path("bin_quality.tsv"),  emit: bin_quality
+    path("summary.tsv"),     emit: summary
 
     script:
     // Build comma-separated file and label lists from collected inputs
@@ -165,7 +192,7 @@ process DASTOOL_CONSENSUS {
     if [ -z "\$FILTERED_FILES" ]; then
         echo "[WARNING] All binners produced empty output -- skipping DAS_Tool" >&2
         mkdir -p bins
-        touch contig2bin.tsv scores.tsv allbins.fa
+        touch contig2bin.tsv allbins.fa bin_quality.tsv summary.tsv
         exit 0
     fi
 
@@ -190,8 +217,17 @@ process DASTOOL_CONSENSUS {
         echo "[WARNING] DAS_Tool exited with code \$dastool_exit (no bins above score threshold)" >&2
     fi
 
-    if [ -d dastool_out/dastool_DASTool_bins ]; then
-        cp dastool_out/dastool_DASTool_bins/*.fa bins/ 2>/dev/null || true
+    # ---- Collect DAS_Tool evaluation and summary files ----
+    if [ -f dastool_out/dastool_allBins.eval ]; then
+        cp dastool_out/dastool_allBins.eval bin_quality.tsv
+    else
+        touch bin_quality.tsv
+    fi
+
+    if [ -f dastool_out/dastool_DASTool_summary.tsv ]; then
+        cp dastool_out/dastool_DASTool_summary.tsv summary.tsv
+    else
+        touch summary.tsv
     fi
 
     if [ -f dastool_out/dastool_DASTool_contig2bin.tsv ]; then
@@ -200,10 +236,21 @@ process DASTOOL_CONSENSUS {
         touch contig2bin.tsv
     fi
 
-    if [ -f dastool_out/dastool_DASTool_scores.tsv ]; then
-        cp dastool_out/dastool_DASTool_scores.tsv scores.tsv
-    else
-        touch scores.tsv
+    if [ -d dastool_out/dastool_DASTool_bins ]; then
+        for f in dastool_out/dastool_DASTool_bins/*.fa; do
+            [ -e "\$f" ] || continue
+            cp "\$f" "bins/dastool-\$(basename "\$f")"
+        done
+    fi
+
+    # Prefix bin names in contig2bin.tsv and summary.tsv so they match the
+    # dastool- prefixed FASTA filenames
+    if [ -s contig2bin.tsv ]; then
+        sed -i 's/\\t/\\tdastool-/' contig2bin.tsv
+    fi
+    if [ -s summary.tsv ]; then
+        # Skip header line, prefix bin name in first column
+        sed -i '2,\$s/^/dastool-/' summary.tsv
     fi
 
     # Combine all bin FASTAs
@@ -213,5 +260,44 @@ process DASTOOL_CONSENSUS {
         echo "[WARNING] DAS_Tool produced no consensus bins" >&2
         touch allbins.fa
     fi
+    """
+}
+
+process CHECKM2 {
+    tag "checkm2"
+    label 'process_high'
+    conda "${projectDir}/conda-envs/dana-mag-checkm2"
+    publishDir "${params.outdir}/binning/checkm2", mode: 'copy'
+
+    input:
+    path(bins_dirs)   // collected list of bins/ directories
+
+    output:
+    path("quality_report.tsv"), emit: report
+
+    script:
+    """
+    # Merge all bin directories into one flat directory
+    # Nextflow stages collected path("bins/") as bins, bins_2, bins_3, ...
+    mkdir -p all_bins
+    for d in bins*; do
+        [ -d "\$d" ] || continue
+        cp "\$d"/*.fa all_bins/ 2>/dev/null || true
+    done
+
+    if [ -z "\$(ls all_bins/*.fa 2>/dev/null)" ]; then
+        echo "[WARNING] No bin FASTAs found -- skipping CheckM2" >&2
+        printf 'Name\\tCompleteness\\tContamination\\n' > quality_report.tsv
+        exit 0
+    fi
+
+    checkm2 predict \\
+        --threads ${task.cpus} \\
+        --input all_bins \\
+        --output-directory checkm2_out \\
+        -x fa \\
+        --database_path ${params.checkm2_db}
+
+    cp checkm2_out/quality_report.tsv .
     """
 }
