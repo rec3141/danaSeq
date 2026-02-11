@@ -10,7 +10,9 @@ process ASSEMBLY_FLYE {
     path(reads)
 
     output:
-    path("assembly.fasta"), emit: assembly
+    path("assembly.fasta"),      emit: assembly
+    path("assembly_info.txt"),   emit: info
+    path("assembly_graph.gfa"),  emit: graph
 
     script:
     def filtlong_cmd = ""
@@ -49,6 +51,8 @@ process ASSEMBLY_FLYE {
     fi
 
     cp flye_out/assembly.fasta assembly.fasta
+    cp flye_out/assembly_info.txt assembly_info.txt
+    cp flye_out/assembly_graph.gfa assembly_graph.gfa
 
     # Cleanup intermediate files
     rm -f all_reads.fastq.gz
