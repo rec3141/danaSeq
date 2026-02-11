@@ -270,7 +270,7 @@ process CHECKM2 {
     publishDir "${params.outdir}/binning/checkm2", mode: 'copy'
 
     input:
-    path(bins_dirs)   // collected list of bins/ directories
+    path(bins_dirs, stageAs: 'bins_?')   // collected list of bins/ directories
 
     output:
     path("quality_report.tsv"), emit: report
@@ -278,9 +278,9 @@ process CHECKM2 {
     script:
     """
     # Merge all bin directories into one flat directory
-    # Nextflow stages collected path("bins/") as bins, bins_2, bins_3, ...
+    # stageAs: 'bins_?' resolves the name collision (bins_1, bins_2, ...)
     mkdir -p all_bins
-    for d in bins*; do
+    for d in bins_*; do
         [ -d "\$d" ] || continue
         cp "\$d"/*.fa all_bins/ 2>/dev/null || true
     done
