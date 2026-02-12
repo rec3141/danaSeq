@@ -5,3 +5,6 @@ channels:
 dependencies:
   - semibin=2.1.0
   - pytorch-gpu           # GPU-accelerated training (falls back to CPU if no GPU)
+  - biopython             # LorBin dependency (hmmer, prodigal, bedtools already in SemiBin2)
+  - pip:
+    - lorbin @ git+https://github.com/LorMeBioAI/LorBin.git

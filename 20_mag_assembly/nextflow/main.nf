@@ -6,8 +6,8 @@ nextflow.enable.dsl = 2
 // ============================================================================
 //
 // Nextflow implementation of the MAG assembly and binning workflow.
-// Co-assembles all reads with Flye, maps reads back, runs three binners
-// (SemiBin2, MetaBAT2, MaxBin2) in parallel, and integrates with DAS_Tool.
+// Co-assembles all reads with Flye, maps reads back, runs five binners
+// (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin) in parallel, and integrates with DAS_Tool.
 //
 // Usage:
 //   nextflow run main.nf --input /path/to/reads -resume
@@ -34,12 +34,16 @@ def helpMessage() {
 
     Assembly:
       --min_overlap N    Flye --min-overlap [default: 1000]
+      --polish           Enable Flye polishing iterations [default: true]
       --dedupe           Enable BBDuk deduplication before assembly
       --filtlong_size N  Filtlong target bases (e.g. 40000000000); skip if not set
 
     Binning:
       --run_maxbin       Include MaxBin2 in consensus binning [default: true]
-      --metabat_min_cls N MetaBAT2 minimum cluster size [default: 50000]
+      --run_lorbin       Include LorBin in consensus binning [default: true]
+      --run_comebin      Include COMEBin in consensus binning [default: true]
+      --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 50000]
+      --lorbin_min_length N LorBin minimum bin size in bp [default: 80000]
 
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
@@ -93,6 +97,8 @@ def helpMessage() {
       │   ├── semibin/contig_bins.tsv
       │   ├── metabat/contig_bins.tsv
       │   ├── maxbin/contig_bins.tsv
+      │   ├── lorbin/contig_bins.tsv
+      │   ├── comebin/contig_bins.tsv
       │   ├── dastool/
       │   │   ├── bins/*.fa
       │   │   ├── contig2bin.tsv
@@ -128,6 +134,8 @@ include { CALCULATE_DEPTHS }    from './modules/mapping'
 include { BIN_SEMIBIN2 }        from './modules/binning'
 include { BIN_METABAT2 }        from './modules/binning'
 include { BIN_MAXBIN2 }         from './modules/binning'
+include { BIN_LORBIN }          from './modules/binning'
+include { BIN_COMEBIN }         from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
 
@@ -197,10 +205,15 @@ workflow {
 
     // 5. Binners run in parallel; each emits [label, contig_bins.tsv]
     // New binners can be added by appending to ch_binner_results
+    ch_binner_results = Channel.empty()
 
-    // SemiBin2 (BAM-based)
-    BIN_SEMIBIN2(ASSEMBLY_FLYE.out.assembly, ch_bam_files)
-    ch_binner_results = BIN_SEMIBIN2.out.bins.map { ['semibin', it] }
+    // SemiBin2 (optional, BAM-based)
+    if (params.run_semibin) {
+        BIN_SEMIBIN2(ASSEMBLY_FLYE.out.assembly, ch_bam_files)
+        ch_binner_results = ch_binner_results.mix(
+            BIN_SEMIBIN2.out.bins.map { ['semibin', it] }
+        )
+    }
 
     // MetaBAT2 (depth-based)
     BIN_METABAT2(ASSEMBLY_FLYE.out.assembly, CALCULATE_DEPTHS.out.jgi_depth)
@@ -216,6 +229,22 @@ workflow {
         )
     }
 
+    // LorBin (optional, BAM-based — deep learning binner for long reads)
+    if (params.run_lorbin) {
+        BIN_LORBIN(ASSEMBLY_FLYE.out.assembly, ch_bam_files)
+        ch_binner_results = ch_binner_results.mix(
+            BIN_LORBIN.out.bins.map { ['lorbin', it] }
+        )
+    }
+
+    // COMEBin (optional, BAM-based — contrastive multi-view deep learning binner)
+    if (params.run_comebin) {
+        BIN_COMEBIN(ASSEMBLY_FLYE.out.assembly, ch_bam_files)
+        ch_binner_results = ch_binner_results.mix(
+            BIN_COMEBIN.out.bins.map { ['comebin', it] }
+        )
+    }
+
     // 6. DAS Tool consensus -- collects all binner outputs dynamically
     ch_bin_labels = ch_binner_results.collect { it[0] }
     ch_bin_files  = ch_binner_results.collect { it[1] }
@@ -228,10 +257,18 @@ workflow {
 
     // 7. Quality assessment with CheckM2 (optional — requires database path)
     if (params.checkm2_db) {
-        ch_all_bins = BIN_SEMIBIN2.out.fastas
-            .mix(BIN_METABAT2.out.fastas)
+        ch_all_bins = BIN_METABAT2.out.fastas
+        if (params.run_semibin) {
+            ch_all_bins = ch_all_bins.mix(BIN_SEMIBIN2.out.fastas)
+        }
         if (params.run_maxbin) {
             ch_all_bins = ch_all_bins.mix(BIN_MAXBIN2.out.fastas)
+        }
+        if (params.run_lorbin) {
+            ch_all_bins = ch_all_bins.mix(BIN_LORBIN.out.fastas)
+        }
+        if (params.run_comebin) {
+            ch_all_bins = ch_all_bins.mix(BIN_COMEBIN.out.fastas)
         }
         ch_all_bins = ch_all_bins
             .mix(DASTOOL_CONSENSUS.out.bins)

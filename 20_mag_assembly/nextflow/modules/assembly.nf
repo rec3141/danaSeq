@@ -33,6 +33,7 @@ process ASSEMBLY_FLYE {
     flye \\
         --meta \\
         --min-overlap ${params.min_overlap} \\
+        ${params.polish ? '' : '--iterations 0'} \\
         --nano-hq all_reads.fastq.gz \\
         --out-dir flye_out \\
         --threads ${task.cpus}

@@ -1,4 +1,4 @@
-// Binning: SemiBin2, MetaBAT2, MaxBin2, DAS_Tool consensus
+// Binning: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, DAS_Tool consensus
 
 process BIN_SEMIBIN2 {
     tag "semibin2"
@@ -145,6 +145,122 @@ process BIN_MAXBIN2 {
 
     if [ ! -s maxbin_bins.tsv ]; then
         echo "[WARNING] MaxBin2 produced no bins" >&2
+    fi
+    """
+}
+
+process BIN_LORBIN {
+    tag "lorbin"
+    label 'process_high'
+    conda "${projectDir}/conda-envs/dana-mag-semibin"
+    publishDir "${params.outdir}/binning/lorbin", mode: 'copy', saveAs: { fn -> fn == 'lorbin_bins.tsv' ? 'contig_bins.tsv' : fn }
+
+    input:
+    path(assembly)
+    path(bams)
+
+    output:
+    path("lorbin_bins.tsv"), emit: bins
+    path("bins/"),            emit: fastas
+
+    script:
+    """
+    mkdir -p bins
+
+    # LorBin can fail on very small or unusual datasets
+    # Note: --multi is only for concatenated per-sample assemblies (LorBin concat)
+    # where contig names have a sample prefix delimited by '-'.
+    # Co-assemblies (Flye) use plain contig names, so we omit --multi.
+    set +e
+    LorBin bin \\
+        -o lorbin_out \\
+        -fa "${assembly}" \\
+        -b *.sorted.bam \\
+        --num_process ${task.cpus} \\
+        --bin_length ${params.lorbin_min_length}
+    lorbin_exit=\$?
+    set -e
+
+    if [ \$lorbin_exit -ne 0 ]; then
+        echo "[WARNING] LorBin exited with code \$lorbin_exit (dataset may be too small)" >&2
+        touch lorbin_bins.tsv
+    elif [ -d lorbin_out/output_bins ]; then
+        # Convert LorBin FASTA bins to DAS_Tool format TSV (contig\\tbin)
+        > lorbin_bins.tsv
+        bin_num=0
+        for bin_file in lorbin_out/output_bins/bin.*.fa; do
+            [ -e "\$bin_file" ] || continue
+            bin_num=\$((bin_num + 1))
+            bin_name=\$(printf 'lorbin_%03d' \$bin_num)
+            cp "\$bin_file" "bins/\${bin_name}.fa"
+            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+                printf '%s\\t%s\\n' "\$contig" "\$bin_name"
+            done >> lorbin_bins.tsv
+        done
+    else
+        echo "[WARNING] LorBin produced no output_bins directory" >&2
+        touch lorbin_bins.tsv
+    fi
+
+    if [ ! -s lorbin_bins.tsv ]; then
+        echo "[WARNING] LorBin produced no bins" >&2
+    fi
+    """
+}
+
+process BIN_COMEBIN {
+    tag "comebin"
+    label 'process_high'
+    conda "${projectDir}/conda-envs/dana-mag-comebin"
+    publishDir "${params.outdir}/binning/comebin", mode: 'copy', saveAs: { fn -> fn == 'comebin_bins.tsv' ? 'contig_bins.tsv' : fn }
+
+    input:
+    path(assembly)
+    path(bams)
+
+    output:
+    path("comebin_bins.tsv"), emit: bins
+    path("bins/"),            emit: fastas
+
+    script:
+    """
+    mkdir -p bins
+
+    # COMEBin (contrastive multi-view binning) — deep learning binner
+    # run_comebin.sh wraps the two-step generate_coverage + run_comebin workflow
+    # -p . because BAMs are staged in the working directory
+    set +e
+    run_comebin.sh \\
+        -a "${assembly}" \\
+        -o comebin_out \\
+        -p . \\
+        -t ${task.cpus}
+    comebin_exit=\$?
+    set -e
+
+    if [ \$comebin_exit -ne 0 ]; then
+        echo "[WARNING] COMEBin exited with code \$comebin_exit (dataset may be too small)" >&2
+        touch comebin_bins.tsv
+    elif [ -d comebin_out/comebin_res/comebin_res_bins ]; then
+        # Convert COMEBin FASTA bins to DAS_Tool format TSV (contig\\tbin)
+        > comebin_bins.tsv
+        bin_num=0
+        for bin_file in comebin_out/comebin_res/comebin_res_bins/*.fa; do
+            [ -e "\$bin_file" ] || continue
+            bin_num=\$((bin_num + 1))
+            bin_name=\$(printf 'comebin_%03d' \$bin_num)
+            cp "\$bin_file" "bins/\${bin_name}.fa"
+            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+                printf '%s\\t%s\\n' "\$contig" "\$bin_name"
+            done >> comebin_bins.tsv
+        done
+    else
+        echo "[WARNING] COMEBin produced no comebin_res_bins directory" >&2
+        touch comebin_bins.tsv
+    fi
+
+    if [ ! -s comebin_bins.tsv ]; then
+        echo "[WARNING] COMEBin produced no bins" >&2
     fi
     """
 }
