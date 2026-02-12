@@ -59,3 +59,26 @@ process ASSEMBLY_FLYE {
     rm -f all_reads.fastq.gz
     """
 }
+
+process CALCULATE_TNF {
+    tag "tnf"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-flye"
+    publishDir "${params.outdir}/assembly", mode: 'copy'
+
+    input:
+    path(assembly)
+
+    output:
+    path("tnf.tsv"), emit: tnf
+
+    script:
+    """
+    tetramer_freqs.py -f ${assembly} -min 0 -max 999999999 -o tnf.tsv
+
+    if [ ! -s tnf.tsv ]; then
+        echo "[ERROR] TNF calculation produced empty output" >&2
+        exit 1
+    fi
+    """
+}

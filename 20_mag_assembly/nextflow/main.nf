@@ -129,6 +129,7 @@ if (!params.input) {
 // Import modules
 include { CONCAT_READS }        from './modules/preprocess'
 include { ASSEMBLY_FLYE }       from './modules/assembly'
+include { CALCULATE_TNF }       from './modules/assembly'
 include { MAP_READS }           from './modules/mapping'
 include { CALCULATE_DEPTHS }    from './modules/mapping'
 include { BIN_SEMIBIN2 }        from './modules/binning'
@@ -191,6 +192,9 @@ workflow {
     // 2. Co-assembly: fan-in all reads into one Flye assembly
     ch_all_reads = ch_reads.map { meta, fastq -> fastq }.collect()
     ASSEMBLY_FLYE(ch_all_reads)
+
+    // 2b. Tetranucleotide frequencies from assembly
+    CALCULATE_TNF(ASSEMBLY_FLYE.out.assembly)
 
     // 3. Map each sample back to assembly: fan-out
     ch_map_input = ch_reads.combine(ASSEMBLY_FLYE.out.assembly)

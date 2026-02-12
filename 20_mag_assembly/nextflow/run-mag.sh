@@ -173,6 +173,10 @@ if [[ "$USE_DOCKER" == true ]]; then
     echo "[INFO] Running: ${DOCKER_CMD[*]}"
     echo ""
 
+    # Save exact command for re-running with -resume
+    mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
+    printf '%s\n' "${DOCKER_CMD[*]}" > "${OUTDIR_HOST}/pipeline_info/run_command.sh"
+
     exec "${DOCKER_CMD[@]}"
 fi
 
@@ -199,5 +203,9 @@ echo "[INFO] Input:  $INPUT_HOST"
 echo "[INFO] Output: $OUTDIR_HOST"
 echo "[INFO] Running: ${LOCAL_CMD[*]}"
 echo ""
+
+# Save exact command for re-running with -resume
+mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
+printf '%s\n' "${LOCAL_CMD[*]}" > "${OUTDIR_HOST}/pipeline_info/run_command.sh"
 
 exec "${LOCAL_CMD[@]}"

@@ -33,9 +33,10 @@ process BIN_SEMIBIN2 {
         echo "[WARNING] SemiBin2 exited with code \$semibin_exit (dataset may be too small)" >&2
         touch semibin_bins.tsv
     elif [ -f semibin_out/contig_bins.tsv ]; then
-        # SemiBin2 outputs a header line -- remove it for DAS_Tool compatibility
+        # SemiBin2 outputs a header line and uses -1 for unbinned contigs
+        # Filter out unbinned (-1) before renumbering
         tail -n +2 semibin_out/contig_bins.tsv | \
-            awk -F'\\t' '{printf "%s\\tsemibin_%03d\\n", \$1, \$2+1}' > semibin_bins.tsv
+            awk -F'\\t' '\$2 != -1 {printf "%s\\tsemibin_%03d\\n", \$1, \$2+1}' > semibin_bins.tsv
 
         # Rename intermediate bin FASTAs to standardized names
         # SemiBin2 outputs gzipped bins (.fa.gz)
@@ -82,10 +83,14 @@ process BIN_METABAT2 {
         -a "${jgi_depth}"
 
     # Convert MetaBAT2 FASTA bins to contig_bins.tsv format
+    # Skip unbinned/tooShort/lowDepth catch-all files from --saveCls
     > metabat_bins.tsv
     bin_num=0
     for bin_file in metabat_out/bin*.fa; do
         [ -e "\$bin_file" ] || continue
+        case "\$(basename "\$bin_file")" in
+            *unbinned*|*tooShort*|*lowDepth*) continue ;;
+        esac
         bin_num=\$((bin_num + 1))
         bin_name=\$(printf 'metabat_%03d' \$bin_num)
         cp "\$bin_file" "bins/\${bin_name}.fa"

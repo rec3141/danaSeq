@@ -18,7 +18,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   ├── main.nf                 Pipeline entry point
 │   ├── nextflow.config         Params, profiles, resources
 │   ├── modules/
-│   │   ├── assembly.nf         ASSEMBLY_FLYE
+│   │   ├── assembly.nf         ASSEMBLY_FLYE, CALCULATE_TNF
 │   │   ├── mapping.nf          MAP_READS, CALCULATE_DEPTHS
 │   │   └── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
 │   │                           BIN_LORBIN, BIN_COMEBIN,
@@ -33,6 +33,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── binning.yml         MetaBAT2, MaxBin2, DAS_Tool
 │   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
+│   ├── bin/                    Pipeline scripts (tetramer_freqs.py)
 │   ├── conda-envs/             Pre-built envs (created by install.sh)
 │   ├── install.sh              Conda environment builder
 │   ├── Dockerfile              Docker image (CPU-only SemiBin2)
@@ -87,6 +88,32 @@ mamba run -p conda-envs/dana-mag-flye \
 ./run-mag.sh --help
 ```
 
+### Re-running a Pipeline with -resume
+
+Nextflow's `-resume` requires the **exact same parameters** as the original run, or it will
+re-compute cached tasks instead of reusing them. Every run saves its exact command to:
+
+```
+<outdir>/pipeline_info/run_command.sh
+```
+
+To re-run (e.g. after adding a new process or fixing a bug):
+
+```bash
+cd nextflow
+# Copy the saved command (already includes -resume)
+bash <outdir>/pipeline_info/run_command.sh
+```
+
+If `run_command.sh` doesn't exist (older runs), find the command in the Nextflow log:
+
+```bash
+grep '\-\-input' .nextflow.log.1   # check the most recent rotated log
+```
+
+**Common pitfall:** changing `--input` path, `--assembly_cpus`, or other params will
+invalidate the task hash and force a full re-run. Always use the saved command.
+
 ## Pipeline Architecture
 
 ### Processing DAG (fan-in → fan-out → fan-in)
@@ -95,8 +122,8 @@ mamba run -p conda-envs/dana-mag-flye \
 Sample FASTQs (N files)
          │ collect()
    ASSEMBLY_FLYE          Fan-in: all reads → 1 co-assembly
-         │
-   MAP_READS (×N)         Fan-out: assembly × each sample → N BAMs
+         ├──────────────────────┐
+   MAP_READS (×N)          CALCULATE_TNF    Tetranucleotide freqs (parallel)
          │ collect()
    CALCULATE_DEPTHS       Fan-in: all BAMs → depth table (CoverM)
          │
@@ -162,7 +189,8 @@ input_dir/
 ```
 results/
 ├── assembly/
-│   └── assembly.fasta         Co-assembly
+│   ├── assembly.fasta         Co-assembly
+│   └── tnf.tsv                Tetranucleotide frequencies (136 features)
 ├── mapping/
 │   ├── *.sorted.bam           Per-sample alignments
 │   ├── *.sorted.bam.bai       BAM indices
@@ -182,6 +210,7 @@ results/
 │   └── checkm2/
 │       └── quality_report.tsv  CheckM2 quality (if --checkm2_db set)
 └── pipeline_info/
+    ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html
     ├── report.html
     └── trace.txt
