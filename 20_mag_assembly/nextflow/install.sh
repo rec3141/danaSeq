@@ -12,7 +12,7 @@ set -euo pipefail
 #   dana-mag-flye    - Flye + Filtlong (Python version conflicts)
 #   dana-mag-mapping - minimap2, samtools (universal, no conflicts)
 #   dana-mag-semibin - SemiBin2 (ML dependencies: PyTorch/TF isolated)
-#   dana-mag-comebin - COMEBin (Python 3.7 + old numpy/torch, cannot co-install)
+#   dana-mag-comebin - COMEBin (cloned from fork; modern Python 3.11 + numpy/torch)
 #   dana-mag-binning - MetaBAT2, MaxBin2, DAS_Tool (binning suite)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
@@ -151,6 +151,51 @@ do_install() {
             continue
         fi
         rm -f "${log_file}"
+
+        # Post-install: ensure conda is on PATH for Nextflow env activation.
+        # Nextflow's .command.run calls `conda info --json` to activate prefix envs.
+        # The flye env hosts Nextflow and its bin/ is on PATH for all spawned processes.
+        if [[ "${env_name}" == "dana-mag-flye" ]]; then
+            local conda_bin
+            conda_bin=$(which conda 2>/dev/null || echo "")
+            if [[ -n "${conda_bin}" && ! -e "${env_path}/bin/conda" ]]; then
+                ln -sf "${conda_bin}" "${env_path}/bin/conda"
+                echo "  Symlinked conda into flye env for Nextflow activation"
+            fi
+        fi
+
+        # Post-install: clone COMEBin fork and wire up bin/ scripts
+        if [[ "${env_name}" == "dana-mag-comebin" ]]; then
+            echo "  Installing COMEBin from fork..."
+            local comebin_repo="https://github.com/rec3141/COMEBin.git"
+            local comebin_branch="codex/recent-dependencies-fix"
+            local comebin_dir="${env_path}/share/COMEBin"
+            git clone --depth 1 -b "${comebin_branch}" "${comebin_repo}" "${comebin_dir}" \
+                > /dev/null 2>&1
+            # Create wrapper that cd's into the COMEBin source dir and runs the
+            # inner run_comebin.sh (which uses pwd-relative paths to ../auxiliary/).
+            cat > "${env_path}/bin/run_comebin.sh" <<'WRAPPER'
+#!/usr/bin/env bash
+# Resolve path args (-a/-o/-p) in caller's CWD before cd into source tree
+COMEBIN_ROOT="$(dirname "$(dirname "$(readlink -f "$0")")")/share/COMEBin/COMEBin"
+ORIG_CWD="$(pwd)"
+RESOLVED_ARGS=()
+while (( $# )); do
+    case "$1" in
+        -a|-o|-p) RESOLVED_ARGS+=("$1"); shift
+                  RESOLVED_ARGS+=("$(cd "${ORIG_CWD}" && realpath "$1")"); shift ;;
+        *) RESOLVED_ARGS+=("$1"); shift ;;
+    esac
+done
+cd "${COMEBIN_ROOT}" && exec bash run_comebin.sh "${RESOLVED_ARGS[@]}"
+WRAPPER
+            chmod +x "${env_path}/bin/run_comebin.sh"
+            if [[ -f "${comebin_dir}/COMEBin/scripts/gen_cov_file.sh" ]]; then
+                ln -sf "${comebin_dir}/COMEBin/scripts/gen_cov_file.sh" "${env_path}/bin/gen_cov_file.sh"
+                chmod +x "${env_path}/bin/gen_cov_file.sh"
+            fi
+            echo "  COMEBin installed from ${comebin_repo}@${comebin_branch}"
+        fi
 
         echo "  Done"
     done

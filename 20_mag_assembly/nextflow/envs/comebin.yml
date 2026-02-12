@@ -2,5 +2,42 @@ name: dana-mag-comebin
 channels:
   - conda-forge
   - bioconda
+  - pytorch
+  - defaults
 dependencies:
-  - comebin=1.0.4
+  - python>=3.10,<3.12
+  - pip>=24
+  - setuptools>=69,<81
+  - numpy>=1.26,<2.0
+  - pandas>=2.1
+  - scipy>=1.11
+  - scikit-learn>=1.4
+  - pytorch-gpu
+  - tensorboard>=2.15
+  - biopython>=1.83
+  - click>=8.1
+  - pyyaml>=6
+  - ruamel.yaml>=0.17
+  - atomicwrites>=1.4
+  - tqdm>=4.66
+  - wget
+  - bedtools>=2.31
+  - biolib>=0.1.9
+  - bwa>=0.7.17
+  - checkm-genome>=1.2
+  - fraggenescan>=1.31
+  - hmmer>=3.3
+  - pplacer=1.1.alpha19
+  - prodigal>=2.6
+  - samtools>=1.18
+  - matplotlib-base>=3.8
+  - networkx>=3.2
+  - numba>=0.59
+  - joblib>=1.3
+  - seaborn>=0.13
+  - statsmodels>=0.14
+  - hnswlib>=0.8.0
+  - python-igraph>=0.11
+  - leidenalg>=0.10
+  - scanpy>=1.10
+  - git

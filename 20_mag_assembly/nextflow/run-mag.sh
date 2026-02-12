@@ -171,6 +171,11 @@ fi
 # Local mode (default) — run via conda
 # ============================================================================
 
+# Nextflow's conda activation calls `conda info --json` to find the base prefix.
+# Ensure conda/mamba base bin/ is on PATH so this works inside `mamba run`.
+CONDA_BASE_BIN="$(dirname "$(which mamba 2>/dev/null || which conda)")"
+export PATH="${CONDA_BASE_BIN}:${PATH}"
+
 LOCAL_CMD=(
     mamba run -p "${SCRIPT_DIR}/conda-envs/dana-mag-flye"
     nextflow run "${SCRIPT_DIR}/main.nf"
