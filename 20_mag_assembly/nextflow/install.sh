@@ -8,12 +8,13 @@ set -euo pipefail
 # Creates isolated conda environments for the MAG assembly pipeline.
 # All envs are prefix-installed under ./conda-envs/.
 #
-# Five environments are needed because of dependency conflicts:
+# Seven environments are needed because of dependency conflicts:
 #   dana-mag-flye    - Flye + Filtlong (Python version conflicts)
 #   dana-mag-mapping - minimap2, samtools (universal, no conflicts)
-#   dana-mag-semibin - SemiBin2 (ML dependencies: PyTorch/TF isolated)
+#   dana-mag-semibin - SemiBin2, LorBin (ML dependencies: PyTorch isolated)
 #   dana-mag-comebin - COMEBin (cloned from fork; modern Python 3.11 + numpy/torch)
 #   dana-mag-binning - MetaBAT2, MaxBin2, DAS_Tool (binning suite)
+#   dana-mag-checkm2 - CheckM2 (quality assessment)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
 # symlinked YAML; its env is named dana-bbmap.

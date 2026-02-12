@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**dānaSeq MAG Assembly** is a post-expedition metagenome-assembled genome (MAG) reconstruction pipeline. It co-assembles nanopore reads with Flye, maps reads back, runs three binning algorithms in parallel, and integrates results with DAS Tool consensus.
+**dānaSeq MAG Assembly** is a metagenome-assembled genome (MAG) reconstruction pipeline that runs alongside the real-time processing pipeline. It co-assembles nanopore reads with Flye, maps reads back, runs five binning algorithms in parallel (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus.
 
 The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scripts are preserved in the parent directory for reference but are not actively maintained.
 
@@ -21,12 +21,15 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── assembly.nf         ASSEMBLY_FLYE
 │   │   ├── mapping.nf          MAP_READS, CALCULATE_DEPTHS
 │   │   └── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
+│   │                           BIN_LORBIN, BIN_COMEBIN,
 │   │                           DASTOOL_CONSENSUS, CHECKM2
 │   ├── envs/                   Conda YAML specs
 │   │   ├── flye.yml            Flye, Filtlong, Nextflow, OpenJDK
 │   │   ├── mapping.yml         minimap2, samtools, CoverM
-│   │   ├── semibin.yml         SemiBin2, PyTorch GPU
-│   │   ├── semibin-cpu.yml     SemiBin2, PyTorch CPU (for Docker)
+│   │   ├── semibin.yml         SemiBin2, LorBin, PyTorch GPU
+│   │   ├── semibin-cpu.yml     SemiBin2, LorBin, PyTorch CPU (for Docker)
+│   │   ├── comebin.yml         COMEBin (rec3141 fork, PyTorch GPU)
+│   │   ├── comebin-cpu.yml     COMEBin (CPU-only, for Docker)
 │   │   ├── binning.yml         MetaBAT2, MaxBin2, DAS_Tool
 │   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
@@ -64,6 +67,9 @@ cd nextflow
     --filtlong_size 40000000000 \
     --min_overlap 1000 \
     --run_maxbin true \
+    --run_lorbin true \
+    --run_comebin true \
+    --lorbin_min_length 80000 \
     --metabat_min_cls 50000 \
     --checkm2_db /path/to/checkm2_db \
     --assembly_cpus 24 \
@@ -94,9 +100,9 @@ Sample FASTQs (N files)
          │ collect()
    CALCULATE_DEPTHS       Fan-in: all BAMs → depth table (CoverM)
          │
-    ┌────┼────┐
- SemiBin2 MetaBAT2 MaxBin2   Parallel binning
-    └────┼────┘
+    ┌────┼────┬────┬────┐
+ SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Parallel binning
+    └────┼────┴────┴────┘
    DASTOOL_CONSENSUS      Consensus integration
          │ collect()
    CHECKM2                Quality assessment (optional, needs --checkm2_db)
@@ -112,19 +118,20 @@ Sample FASTQs (N files)
 
 **Graceful failure handling:** SemiBin2 catches crashes on small datasets (0 bins → empty ORFs → hmmsearch fail) and produces an empty output file. DAS_Tool filters out empty binner inputs and handles the "no bins above score threshold" case. The pipeline completes successfully even when individual binners fail.
 
-**GPU vs CPU PyTorch:** The local conda env (`semibin.yml`) includes `pytorch-gpu` for GPU-accelerated SemiBin2. The Docker image uses `semibin-cpu.yml` (~500MB vs ~5GB) since most deployments won't have `--gpus`.
+**GPU vs CPU PyTorch:** The local conda envs (`semibin.yml`, `comebin.yml`) include `pytorch-gpu` for GPU-accelerated SemiBin2, LorBin, and COMEBin. The Docker image uses the `-cpu.yml` variants since most deployments won't have `--gpus`.
 
 **Resume:** Nextflow's built-in `-resume` uses task hashing. No manual checkpoint logic needed.
 
 ### Conda Environments
 
-Six isolated environments avoid dependency conflicts:
+Eight isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
 | `dana-mag-flye` | Flye, Filtlong, Nextflow, OpenJDK | Python version conflicts; also hosts Nextflow runtime |
 | `dana-mag-mapping` | minimap2, samtools, CoverM | Universal mapping tools |
-| `dana-mag-semibin` | SemiBin2, PyTorch GPU | ML dependencies isolated |
+| `dana-mag-semibin` | SemiBin2, LorBin, PyTorch GPU | ML dependencies isolated; LorBin shares PyTorch |
+| `dana-mag-comebin` | COMEBin (rec3141 fork), PyTorch GPU | Contrastive learning binner; cloned from fork at install |
 | `dana-mag-binning` | MetaBAT2, MaxBin2, DAS_Tool | Binning suite |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
@@ -164,6 +171,8 @@ results/
 │   ├── semibin/contig_bins.tsv
 │   ├── metabat/contig_bins.tsv
 │   ├── maxbin/contig_bins.tsv
+│   ├── lorbin/contig_bins.tsv
+│   ├── comebin/contig_bins.tsv
 │   ├── dastool/
 │   │   ├── bins/*.fa           Final consensus MAG FASTAs
 │   │   ├── contig2bin.tsv      Contig-to-bin assignments

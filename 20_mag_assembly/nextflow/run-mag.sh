@@ -28,6 +28,9 @@ set -euo pipefail
 #       --filtlong_size 40000000000 \
 #       --min_overlap 1000 \
 #       --run_maxbin true \
+#       --run_lorbin true \
+#       --run_comebin true \
+#       --lorbin_min_length 80000 \
 #       --metabat_min_cls 50000 \
 #       --assembly_cpus 24 \
 #       --assembly_memory '64 GB'
@@ -60,6 +63,9 @@ usage() {
     echo "  --filtlong_size N    Filtlong target bases (e.g. 40000000000); skip if not set"
     echo "  --min_overlap N      Flye --min-overlap [default: 1000]"
     echo "  --run_maxbin BOOL    Include MaxBin2 in consensus [default: true]"
+    echo "  --run_lorbin BOOL    Include LorBin in consensus [default: true]"
+    echo "  --run_comebin BOOL   Include COMEBin in consensus [default: true]"
+    echo "  --lorbin_min_length N LorBin minimum bin size in bp [default: 80000]"
     echo "  --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 50000]"
     echo "  --assembly_cpus N    CPUs for assembly [default: 24]"
     echo "  --assembly_memory S  Memory for assembly [default: '64 GB']"
@@ -70,6 +76,9 @@ usage() {
     echo "      --filtlong_size 40000000000 \\"
     echo "      --min_overlap 1000 \\"
     echo "      --run_maxbin true \\"
+    echo "      --run_lorbin true \\"
+    echo "      --run_comebin true \\"
+    echo "      --lorbin_min_length 80000 \\"
     echo "      --metabat_min_cls 50000 \\"
     echo "      --assembly_cpus 24 \\"
     echo "      --assembly_memory '64 GB'"

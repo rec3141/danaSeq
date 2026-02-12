@@ -1,6 +1,6 @@
 # MAG Assembly Pipeline
 
-Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs three binning algorithms in parallel (SemiBin2, MetaBAT2, MaxBin2), and integrates results with DAS Tool consensus.
+Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms in parallel (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus.
 
 ## Quick Start
 
@@ -31,6 +31,9 @@ cd nextflow
     --filtlong_size 40000000000 \
     --min_overlap 1000 \
     --run_maxbin true \
+    --run_lorbin true \
+    --run_comebin true \
+    --lorbin_min_length 80000 \
     --metabat_min_cls 50000 \
     --checkm2_db /path/to/checkm2_db \
     --assembly_cpus 24 \
@@ -48,11 +51,11 @@ Sample FASTQs (N files)
          |  collect()
    CALCULATE_DEPTHS         Coverage depth table (CoverM)
          |
-    +---------+---------+
-    |         |         |
- SemiBin2  MetaBAT2  MaxBin2   Three binners in parallel
-    |         |         |
-    +---------+---------+
+    +---------+---------+---------+---------+
+    |         |         |         |         |
+ SemiBin2  MetaBAT2  MaxBin2  LorBin   COMEBin   Five binners in parallel
+    |         |         |         |         |
+    +---------+---------+---------+---------+
          |
    DASTOOL_CONSENSUS        Best bin per contig
          |
@@ -75,6 +78,8 @@ results/
 │   ├── semibin/contig_bins.tsv   SemiBin2 assignments
 │   ├── metabat/contig_bins.tsv   MetaBAT2 assignments
 │   ├── maxbin/contig_bins.tsv    MaxBin2 assignments
+│   ├── lorbin/contig_bins.tsv    LorBin assignments
+│   ├── comebin/contig_bins.tsv   COMEBin assignments
 │   ├── dastool/
 │   │   ├── bins/*.fa             Final consensus MAG FASTAs
 │   │   ├── contig2bin.tsv        Contig-to-bin assignments
@@ -99,6 +104,9 @@ results/
 | `--dedupe` | `false` | BBDuk deduplication before assembly |
 | `--filtlong_size` | (skip) | Filtlong target bases (e.g. `40000000000`) |
 | `--run_maxbin` | `true` | Include MaxBin2 in consensus |
+| `--run_lorbin` | `true` | Include LorBin in consensus (deep learning, long-read) |
+| `--run_comebin` | `true` | Include COMEBin in consensus (contrastive learning) |
+| `--lorbin_min_length` | `80000` | LorBin `--bin_length` minimum (bp) |
 | `--metabat_min_cls` | `50000` | MetaBAT2 minimum cluster size |
 | `--checkm2_db` | (skip) | Path to CheckM2 DIAMOND database |
 | `--assembly_cpus` | `24` | CPUs for assembly |
@@ -120,7 +128,7 @@ results/
 
 **Dynamic binner architecture.** Each binner emits `[label, file]` tuples that are mixed and collected for DAS Tool. Adding a new binner requires only a process definition and one line in `main.nf`.
 
-**GPU-accelerated SemiBin2.** The local conda env includes `pytorch-gpu` for GPU acceleration. The Docker image uses CPU-only PyTorch to keep the image small (~7 GB vs ~12 GB).
+**GPU-accelerated ML binners.** The local conda envs include `pytorch-gpu` for GPU-accelerated SemiBin2, LorBin, and COMEBin. The Docker image uses CPU-only PyTorch to keep the image small.
 
 **Graceful failure handling.** SemiBin2 and DAS Tool handle edge cases (0 bins, no bins above score threshold) without crashing the pipeline.
 
@@ -197,6 +205,8 @@ These scripts have not yet been ported to Nextflow and remain as standalone tool
 - Flye: Kolmogorov et al., Nature Biotechnology 2019
 - SemiBin2: Pan et al., Nature Communications 2023
 - MetaBAT2: Kang et al., PeerJ 2019
+- LorBin: Gao et al., Briefings in Bioinformatics 2024
+- COMEBin: Xie et al., Nature Communications 2024
 - DAS Tool: Sieber et al., Nature Microbiology 2018
 - CheckM2: Chklovski et al., Nature Methods 2023
 - MIMAG: Bowers et al., Nature Biotechnology 2017

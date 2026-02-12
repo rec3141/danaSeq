@@ -27,7 +27,7 @@ docker build -t danaseq-realtime .
     --run_prokka
 ```
 
-### MAG assembly (post-expedition)
+### MAG assembly
 
 ```bash
 cd danaSeq/20_mag_assembly/nextflow
@@ -67,6 +67,9 @@ cd danaSeq/20_mag_assembly/nextflow
     --filtlong_size 40000000000 \
     --min_overlap 1000 \
     --run_maxbin true \
+    --run_lorbin true \
+    --run_comebin true \
+    --lorbin_min_length 80000 \
     --metabat_min_cls 50000 \
     --checkm2_db /path/to/checkm2_db \
     --assembly_cpus 24 \
@@ -100,11 +103,11 @@ dānaSeq/
 │   │   └── test-data/           Bundled test data
 │   └── archive/                 Legacy bash scripts (reference only)
 │
-├── 20_mag_assembly/              Post-expedition genome reconstruction
+├── 20_mag_assembly/              Metagenome-assembled genome reconstruction
 │   ├── nextflow/                 Nextflow DSL2 pipeline
 │   │   ├── main.nf              Entry point (7 processes)
 │   │   ├── modules/             assembly, mapping, binning
-│   │   ├── envs/                Conda YAML specs (6 environments)
+│   │   ├── envs/                Conda YAML specs (8 environments)
 │   │   ├── Dockerfile           Self-contained Docker image
 │   │   └── test-data/           Bundled test data
 │   ├── 40s-90s scripts          Polishing, taxonomy, visualization (not yet ported)
@@ -144,13 +147,15 @@ See `10_realtime_processing/README.md` for full details.
 
 ### MAG assembly (20_mag_assembly/)
 
-Reconstructs metagenome-assembled genomes from collected reads:
+Reconstructs metagenome-assembled genomes alongside real-time processing:
 
 ```
 Sample FASTQs → Flye co-assembly → minimap2 mapping → CoverM depths
                                                           ├── SemiBin2
                                                           ├── MetaBAT2
-                                                          └── MaxBin2
+                                                          ├── MaxBin2
+                                                          ├── LorBin
+                                                          └── COMEBin
                                                                 ↓
                                                           DAS Tool consensus
                                                                 ↓
@@ -209,6 +214,8 @@ MAGs are classified per MIMAG (Bowers et al. 2017):
 - SemiBin2: Pan et al., Nature Communications 2023
 - MetaBAT2: Kang et al., PeerJ 2019
 - DAS Tool: Sieber et al., Nature Microbiology 2018
+- LorBin: Gao et al., Briefings in Bioinformatics 2024
+- COMEBin: Xie et al., Nature Communications 2024
 - CheckM2: Chklovski et al., Nature Methods 2023
 - CoverM: [github.com/wwood/CoverM](https://github.com/wwood/CoverM)
 - MIMAG: Bowers et al., Nature Biotechnology 2017
