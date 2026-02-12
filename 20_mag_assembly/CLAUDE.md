@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**dānaSeq MAG Assembly** is a metagenome-assembled genome (MAG) reconstruction pipeline that runs alongside the real-time processing pipeline. It co-assembles nanopore reads with Flye, maps reads back, runs five binning algorithms in parallel (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus.
+**dānaSeq MAG Assembly** is a metagenome-assembled genome (MAG) reconstruction pipeline that runs alongside the real-time processing pipeline. It co-assembles nanopore reads with Flye, maps reads back, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus.
 
 The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scripts are preserved in the parent directory for reference but are not actively maintained.
 
@@ -101,7 +101,7 @@ Sample FASTQs (N files)
    CALCULATE_DEPTHS       Fan-in: all BAMs → depth table (CoverM)
          │
     ┌────┼────┬────┬────┐
- SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Parallel binning
+ SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (serial)
     └────┼────┴────┴────┘
    DASTOOL_CONSENSUS      Consensus integration
          │ collect()

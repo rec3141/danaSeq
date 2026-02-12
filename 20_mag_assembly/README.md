@@ -1,6 +1,6 @@
 # MAG Assembly Pipeline
 
-Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms in parallel (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus.
+Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus.
 
 ## Quick Start
 
@@ -53,7 +53,7 @@ Sample FASTQs (N files)
          |
     +---------+---------+---------+---------+
     |         |         |         |         |
- SemiBin2  MetaBAT2  MaxBin2  LorBin   COMEBin   Five binners in parallel
+ SemiBin2  MetaBAT2  MaxBin2  LorBin   COMEBin   Five binners (serial)
     |         |         |         |         |
     +---------+---------+---------+---------+
          |

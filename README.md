@@ -166,7 +166,7 @@ Key features:
 - CheckM2 quality assessment (completeness/contamination per MIMAG standards)
 - CoverM for depth calculation (avoids MetaBAT2 integer overflow bug)
 - Supplementary alignment filtering (`-F 0x904`) for long reads
-- Dynamic binner architecture (add new binners with one line)
+- Dynamic binner architecture (add new binners with one line, run serially)
 - Graceful failure handling for small/empty datasets
 - GPU-accelerated SemiBin2 (local), CPU-only in Docker
 
