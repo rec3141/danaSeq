@@ -7,7 +7,8 @@ nextflow.enable.dsl = 2
 //
 // Nextflow implementation of the MAG assembly and binning workflow.
 // Co-assembles all reads with Flye, maps reads back, runs five binners
-// (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin) in parallel, and integrates with DAS_Tool.
+// (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin) in parallel, integrates with DAS_Tool,
+// and detects mobile genetic elements (viruses, plasmids, proviruses) with geNomad + CheckV.
 //
 // Usage:
 //   nextflow run main.nf --input /path/to/reads -resume
@@ -47,6 +48,12 @@ def helpMessage() {
 
     Annotation:
       --run_prokka       Run Prokka gene annotation on co-assembly [default: true]
+
+    Mobile Genetic Elements:
+      --run_genomad      Run geNomad virus + plasmid detection [default: true]
+      --genomad_db PATH  Path to geNomad database; null = skip geNomad
+      --run_checkv       Run CheckV viral quality assessment [default: true]
+      --checkv_db PATH   Path to CheckV database; null = skip CheckV
 
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
@@ -110,6 +117,17 @@ def helpMessage() {
       │   │   └── summary.tsv
       │   └── checkm2/
       │       └── quality_report.tsv  (if --checkm2_db set)
+      ├── mge/                         (if --genomad_db set)
+      │   ├── genomad/
+      │   │   ├── virus_summary.tsv
+      │   │   ├── plasmid_summary.tsv
+      │   │   ├── virus.fna
+      │   │   ├── plasmid.fna
+      │   │   └── genomad_summary.tsv
+      │   └── checkv/                  (if --checkv_db set)
+      │       ├── quality_summary.tsv
+      │       ├── viruses.fna
+      │       └── proviruses.fna
       └── pipeline_info/
 
     """.stripIndent()
@@ -143,6 +161,8 @@ include { BIN_COMEBIN }         from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
+include { GENOMAD_CLASSIFY }    from './modules/mge'
+include { CHECKV_QUALITY }      from './modules/mge'
 
 // ============================================================================
 // Main workflow
@@ -203,6 +223,15 @@ workflow {
     // 2c. Prokka gene annotation on co-assembly (optional)
     if (params.run_prokka) {
         PROKKA_ANNOTATE(ASSEMBLY_FLYE.out.assembly)
+    }
+
+    // 2d. Mobile genetic element detection (geNomad + CheckV)
+    if (params.run_genomad && params.genomad_db) {
+        GENOMAD_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+
+        if (params.run_checkv && params.checkv_db) {
+            CHECKV_QUALITY(GENOMAD_CLASSIFY.out.virus_fasta)
+        }
     }
 
     // 3. Map each sample back to assembly: fan-out

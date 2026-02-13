@@ -1,0 +1,6 @@
+name: dana-mag-genomad
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - genomad

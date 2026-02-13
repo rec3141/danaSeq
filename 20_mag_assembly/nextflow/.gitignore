@@ -1,5 +1,6 @@
 # Runtime artifacts
 conda-envs/
+databases/
 work/
 test_results/
 results/

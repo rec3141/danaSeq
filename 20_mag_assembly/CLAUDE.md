@@ -20,9 +20,10 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   ├── modules/
 │   │   ├── assembly.nf         ASSEMBLY_FLYE, CALCULATE_TNF
 │   │   ├── mapping.nf          MAP_READS, CALCULATE_DEPTHS
-│   │   └── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
-│   │                           BIN_LORBIN, BIN_COMEBIN,
-│   │                           DASTOOL_CONSENSUS, CHECKM2
+│   │   ├── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
+│   │   │                       BIN_LORBIN, BIN_COMEBIN,
+│   │   │                       DASTOOL_CONSENSUS, CHECKM2
+│   │   └── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY
 │   ├── envs/                   Conda YAML specs
 │   │   ├── flye.yml            Flye, Filtlong, Nextflow, OpenJDK
 │   │   ├── mapping.yml         minimap2, samtools, CoverM
@@ -31,6 +32,8 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── comebin.yml         COMEBin (rec3141 fork, PyTorch GPU)
 │   │   ├── comebin-cpu.yml     COMEBin (CPU-only, for Docker)
 │   │   ├── binning.yml         MetaBAT2, MaxBin2, DAS_Tool
+│   │   ├── genomad.yml          geNomad (virus + plasmid detection)
+│   │   ├── checkv.yml           CheckV (viral quality assessment)
 │   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py)
@@ -39,6 +42,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   ├── Dockerfile              Docker image (CPU-only SemiBin2)
 │   ├── entrypoint.sh           Docker entrypoint
 │   ├── run-mag.sh              Pipeline launcher (local/Docker)
+│   ├── download-databases.sh   Database downloader (geNomad, CheckV, CheckM2)
 │   ├── .dockerignore           Excludes conda-envs/, work/ from image
 │   └── .gitignore              Excludes runtime artifacts
 ├── CLAUDE.md                   This file
@@ -54,6 +58,9 @@ cd nextflow
 # Install conda environments
 ./install.sh
 ./install.sh --check
+
+# Download databases (interactive menu or specify --genomad, --checkv, --checkm2, --all)
+./download-databases.sh
 
 # Basic run
 ./run-mag.sh --input /path/to/reads --outdir /path/to/output
@@ -73,6 +80,8 @@ cd nextflow
     --lorbin_min_length 80000 \
     --metabat_min_cls 50000 \
     --checkm2_db /path/to/checkm2_db \
+    --genomad_db /path/to/genomad_db \
+    --checkv_db /path/to/checkv_db \
     --assembly_cpus 24 \
     --assembly_memory '64 GB'
 
@@ -122,10 +131,10 @@ invalidate the task hash and force a full re-run. Always use the saved command.
 Sample FASTQs (N files)
          │ collect()
    ASSEMBLY_FLYE          Fan-in: all reads → 1 co-assembly
-         ├──────────────────────┐
-   MAP_READS (×N)          CALCULATE_TNF    Tetranucleotide freqs (parallel)
-         │ collect()
-   CALCULATE_DEPTHS       Fan-in: all BAMs → depth table (CoverM)
+         ├──────────────────────┬─────────────────────┐
+   MAP_READS (×N)     CALCULATE_TNF    GENOMAD_CLASSIFY  Virus+plasmid detection
+         │ collect()                          │
+   CALCULATE_DEPTHS                    CHECKV_QUALITY    Viral QA (optional)
          │
     ┌────┼────┬────┬────┐
  SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (serial)
@@ -151,7 +160,7 @@ Sample FASTQs (N files)
 
 ### Conda Environments
 
-Eight isolated environments avoid dependency conflicts:
+Ten isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
@@ -160,6 +169,8 @@ Eight isolated environments avoid dependency conflicts:
 | `dana-mag-semibin` | SemiBin2, LorBin, PyTorch GPU | ML dependencies isolated; LorBin shares PyTorch |
 | `dana-mag-comebin` | COMEBin (rec3141 fork), PyTorch GPU | Contrastive learning binner; cloned from fork at install |
 | `dana-mag-binning` | MetaBAT2, MaxBin2, DAS_Tool | Binning suite |
+| `dana-mag-genomad` | geNomad | Virus + plasmid + provirus detection (neural network) |
+| `dana-mag-checkv` | CheckV | Viral genome quality assessment |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
@@ -209,6 +220,17 @@ results/
 │   │   └── summary.tsv         DAS_Tool consensus winners with scores
 │   └── checkm2/
 │       └── quality_report.tsv  CheckM2 quality (if --checkm2_db set)
+├── mge/                           MGE detection (if --genomad_db set)
+│   ├── genomad/
+│   │   ├── virus_summary.tsv      Virus contigs with scores + taxonomy
+│   │   ├── plasmid_summary.tsv    Plasmid contigs with scores
+│   │   ├── virus.fna              Viral contig sequences
+│   │   ├── plasmid.fna            Plasmid contig sequences
+│   │   └── genomad_summary.tsv    Per-contig classification scores
+│   └── checkv/                    Viral QA (if --checkv_db set)
+│       ├── quality_summary.tsv    Completeness + contamination
+│       ├── viruses.fna            Host-trimmed viral sequences
+│       └── proviruses.fna         Extracted provirus sequences
 └── pipeline_info/
     ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html

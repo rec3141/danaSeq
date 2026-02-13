@@ -1,0 +1,6 @@
+name: dana-mag-checkv
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - checkv
