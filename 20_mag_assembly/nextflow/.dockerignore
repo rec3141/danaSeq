@@ -5,8 +5,12 @@ conda-envs/
 work/
 test_results/
 results/
+results_*/
 .nextflow/
 .nextflow.log*
+
+# Downloaded databases (large, user mounts separately)
+databases/
 
 # Docker context bloat
 *.log
