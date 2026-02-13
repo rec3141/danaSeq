@@ -54,6 +54,7 @@ def helpMessage() {
       --genomad_db PATH  Path to geNomad database; null = skip geNomad
       --run_checkv       Run CheckV viral quality assessment [default: true]
       --checkv_db PATH   Path to CheckV database; null = skip CheckV
+      --run_integronfinder  Run IntegronFinder integron detection [default: true]
 
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
@@ -123,11 +124,21 @@ def helpMessage() {
       │   │   ├── plasmid_summary.tsv
       │   │   ├── virus.fna
       │   │   ├── plasmid.fna
+      │   │   ├── virus_proteins.faa
+      │   │   ├── plasmid_proteins.faa
+      │   │   ├── virus_genes.tsv
+      │   │   ├── plasmid_genes.tsv
+      │   │   ├── provirus.tsv
+      │   │   ├── provirus.fna
+      │   │   ├── taxonomy.tsv
       │   │   └── genomad_summary.tsv
-      │   └── checkv/                  (if --checkv_db set)
-      │       ├── quality_summary.tsv
-      │       ├── viruses.fna
-      │       └── proviruses.fna
+      │   ├── checkv/                  (if --checkv_db set)
+      │   │   ├── quality_summary.tsv
+      │   │   ├── viruses.fna
+      │   │   └── proviruses.fna
+      │   └── integrons/               (if --run_integronfinder)
+      │       ├── integrons.tsv
+      │       └── summary.tsv
       └── pipeline_info/
 
     """.stripIndent()
@@ -163,6 +174,7 @@ include { CHECKM2 }             from './modules/binning'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
+include { INTEGRONFINDER }      from './modules/mge'
 
 // ============================================================================
 // Main workflow
@@ -232,6 +244,11 @@ workflow {
         if (params.run_checkv && params.checkv_db) {
             CHECKV_QUALITY(GENOMAD_CLASSIFY.out.virus_fasta)
         }
+    }
+
+    // 2e. Integron detection (IntegronFinder)
+    if (params.run_integronfinder) {
+        INTEGRONFINDER(ASSEMBLY_FLYE.out.assembly)
     }
 
     // 3. Map each sample back to assembly: fan-out

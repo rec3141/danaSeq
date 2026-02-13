@@ -1,0 +1,6 @@
+name: dana-mag-integron
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - integron_finder

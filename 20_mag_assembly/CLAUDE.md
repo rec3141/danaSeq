@@ -23,7 +23,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
-│   │   └── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY
+│   │   └── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER
 │   ├── envs/                   Conda YAML specs
 │   │   ├── flye.yml            Flye, Filtlong, Nextflow, OpenJDK
 │   │   ├── mapping.yml         minimap2, samtools, CoverM
@@ -34,6 +34,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── binning.yml         MetaBAT2, MaxBin2, DAS_Tool
 │   │   ├── genomad.yml          geNomad (virus + plasmid detection)
 │   │   ├── checkv.yml           CheckV (viral quality assessment)
+│   │   ├── integron.yml        IntegronFinder (integron detection)
 │   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py)
@@ -131,10 +132,10 @@ invalidate the task hash and force a full re-run. Always use the saved command.
 Sample FASTQs (N files)
          │ collect()
    ASSEMBLY_FLYE          Fan-in: all reads → 1 co-assembly
-         ├──────────────────────┬─────────────────────┐
-   MAP_READS (×N)     CALCULATE_TNF    GENOMAD_CLASSIFY  Virus+plasmid detection
-         │ collect()                          │
-   CALCULATE_DEPTHS                    CHECKV_QUALITY    Viral QA (optional)
+         ├──────────────────────┬──────────────────────┬──────────────────┐
+   MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY   INTEGRONFINDER
+         │ collect()                         │
+   CALCULATE_DEPTHS                   CHECKV_QUALITY
          │
     ┌────┼────┬────┬────┐
  SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (serial)
@@ -160,7 +161,7 @@ Sample FASTQs (N files)
 
 ### Conda Environments
 
-Ten isolated environments avoid dependency conflicts:
+Eleven isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
@@ -171,6 +172,7 @@ Ten isolated environments avoid dependency conflicts:
 | `dana-mag-binning` | MetaBAT2, MaxBin2, DAS_Tool | Binning suite |
 | `dana-mag-genomad` | geNomad | Virus + plasmid + provirus detection (neural network) |
 | `dana-mag-checkv` | CheckV | Viral genome quality assessment |
+| `dana-mag-integron` | IntegronFinder | Integron + gene cassette detection (attC/attI + HMM) |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
@@ -226,11 +228,21 @@ results/
 │   │   ├── plasmid_summary.tsv    Plasmid contigs with scores
 │   │   ├── virus.fna              Viral contig sequences
 │   │   ├── plasmid.fna            Plasmid contig sequences
+│   │   ├── virus_proteins.faa     Virus protein sequences
+│   │   ├── plasmid_proteins.faa   Plasmid protein sequences
+│   │   ├── virus_genes.tsv        Per-gene annotations (markers, AMR, taxonomy)
+│   │   ├── plasmid_genes.tsv      Per-gene annotations (markers, conjugation, AMR)
+│   │   ├── provirus.tsv           Provirus boundaries + integrase calls
+│   │   ├── provirus.fna           Excised provirus sequences
+│   │   ├── taxonomy.tsv           Per-contig taxonomy assignments
 │   │   └── genomad_summary.tsv    Per-contig classification scores
-│   └── checkv/                    Viral QA (if --checkv_db set)
-│       ├── quality_summary.tsv    Completeness + contamination
-│       ├── viruses.fna            Host-trimmed viral sequences
-│       └── proviruses.fna         Extracted provirus sequences
+│   ├── checkv/                    Viral QA (if --checkv_db set)
+│   │   ├── quality_summary.tsv    Completeness + contamination
+│   │   ├── viruses.fna            Host-trimmed viral sequences
+│   │   └── proviruses.fna         Extracted provirus sequences
+│   └── integrons/                 Integron detection (if --run_integronfinder)
+│       ├── integrons.tsv          Per-element annotations (integrase, attC, attI, cassettes)
+│       └── summary.tsv            Counts of complete/In0/CALIN integrons per contig
 └── pipeline_info/
     ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html

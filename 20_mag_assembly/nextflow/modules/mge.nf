@@ -1,4 +1,5 @@
-// Mobile genetic element detection: geNomad (virus + plasmid), CheckV (viral QA)
+// Mobile genetic element detection: geNomad (virus + plasmid), CheckV (viral QA),
+// IntegronFinder (integron + gene cassette detection)
 
 process GENOMAD_CLASSIFY {
     tag "genomad"
@@ -10,20 +11,27 @@ process GENOMAD_CLASSIFY {
     path(assembly)
 
     output:
-    path("virus_summary.tsv"),   emit: virus_summary
-    path("plasmid_summary.tsv"), emit: plasmid_summary
-    path("virus.fna"),           emit: virus_fasta
-    path("plasmid.fna"),         emit: plasmid_fasta
-    path("genomad_summary.tsv"), emit: summary
+    path("virus_summary.tsv"),     emit: virus_summary
+    path("plasmid_summary.tsv"),   emit: plasmid_summary
+    path("virus.fna"),             emit: virus_fasta
+    path("plasmid.fna"),           emit: plasmid_fasta
+    path("virus_proteins.faa"),    emit: virus_proteins
+    path("plasmid_proteins.faa"),  emit: plasmid_proteins
+    path("virus_genes.tsv"),       emit: virus_genes
+    path("plasmid_genes.tsv"),     emit: plasmid_genes
+    path("provirus.tsv"),          emit: provirus_coords
+    path("provirus.fna"),          emit: provirus_fasta
+    path("taxonomy.tsv"),          emit: taxonomy
+    path("genomad_summary.tsv"),   emit: summary
 
     script:
     def db_path = params.genomad_db
     """
     # geNomad end-to-end: marker gene annotation → neural network classification
     # Detects viruses, plasmids, and proviruses in a single pass
+    # Note: no --cleanup so intermediate files (annotate, find_proviruses) are preserved
     set +e
     genomad end-to-end \\
-        --cleanup \\
         --splits ${task.cpus} \\
         "${assembly}" \\
         genomad_out \\
@@ -31,52 +39,41 @@ process GENOMAD_CLASSIFY {
     genomad_exit=\$?
     set -e
 
+    # geNomad names output files based on the input filename
+    input_base=\$(basename "${assembly}" | sed 's/\\.[^.]*\$//')
+
     if [ \$genomad_exit -ne 0 ]; then
         echo "[WARNING] geNomad exited with code \$genomad_exit" >&2
-        touch virus_summary.tsv plasmid_summary.tsv virus.fna plasmid.fna genomad_summary.tsv
+        touch virus_summary.tsv plasmid_summary.tsv virus.fna plasmid.fna \\
+              virus_proteins.faa plasmid_proteins.faa virus_genes.tsv plasmid_genes.tsv \\
+              provirus.tsv provirus.fna taxonomy.tsv genomad_summary.tsv
         exit 0
     fi
 
-    # geNomad names output files based on the input filename
-    # Find the actual output directory
-    input_base=\$(basename "${assembly}" | sed 's/\\.[^.]*\$//')
+    # Helper: copy file if exists, else touch empty
+    copy_or_touch() {
+        if [ -f "\$1" ]; then cp "\$1" "\$2"; else touch "\$2"; fi
+    }
 
-    # Copy virus results
-    if [ -f "genomad_out/\${input_base}_summary/\${input_base}_virus_summary.tsv" ]; then
-        cp "genomad_out/\${input_base}_summary/\${input_base}_virus_summary.tsv" virus_summary.tsv
-    else
-        echo "[WARNING] No virus summary found" >&2
-        touch virus_summary.tsv
-    fi
+    # Summary outputs (virus/plasmid summaries, sequences, proteins, gene annotations)
+    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_virus_summary.tsv"     virus_summary.tsv
+    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_plasmid_summary.tsv"   plasmid_summary.tsv
+    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_virus.fna"             virus.fna
+    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_plasmid.fna"           plasmid.fna
+    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_virus_proteins.faa"    virus_proteins.faa
+    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_plasmid_proteins.faa"  plasmid_proteins.faa
+    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_virus_genes.tsv"       virus_genes.tsv
+    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_plasmid_genes.tsv"     plasmid_genes.tsv
 
-    # Copy plasmid results
-    if [ -f "genomad_out/\${input_base}_summary/\${input_base}_plasmid_summary.tsv" ]; then
-        cp "genomad_out/\${input_base}_summary/\${input_base}_plasmid_summary.tsv" plasmid_summary.tsv
-    else
-        echo "[WARNING] No plasmid summary found" >&2
-        touch plasmid_summary.tsv
-    fi
+    # Provirus detection results
+    copy_or_touch "genomad_out/\${input_base}_find_proviruses/\${input_base}_provirus.tsv"  provirus.tsv
+    copy_or_touch "genomad_out/\${input_base}_find_proviruses/\${input_base}_provirus.fna"  provirus.fna
 
-    # Copy virus FASTA
-    if [ -f "genomad_out/\${input_base}_summary/\${input_base}_virus.fna" ]; then
-        cp "genomad_out/\${input_base}_summary/\${input_base}_virus.fna" virus.fna
-    else
-        touch virus.fna
-    fi
+    # Per-contig taxonomy from annotation step
+    copy_or_touch "genomad_out/\${input_base}_annotate/\${input_base}_taxonomy.tsv"         taxonomy.tsv
 
-    # Copy plasmid FASTA
-    if [ -f "genomad_out/\${input_base}_summary/\${input_base}_plasmid.fna" ]; then
-        cp "genomad_out/\${input_base}_summary/\${input_base}_plasmid.fna" plasmid.fna
-    else
-        touch plasmid.fna
-    fi
-
-    # Copy main summary (aggregated scores per contig)
-    if [ -f "genomad_out/\${input_base}_aggregated_classification/\${input_base}_aggregated_classification.tsv" ]; then
-        cp "genomad_out/\${input_base}_aggregated_classification/\${input_base}_aggregated_classification.tsv" genomad_summary.tsv
-    else
-        touch genomad_summary.tsv
-    fi
+    # Aggregated classification scores (all contigs)
+    copy_or_touch "genomad_out/\${input_base}_aggregated_classification/\${input_base}_aggregated_classification.tsv" genomad_summary.tsv
     """
 }
 
@@ -141,6 +138,67 @@ process CHECKV_QUALITY {
         cp checkv_out/proviruses.fna .
     else
         touch proviruses.fna
+    fi
+    """
+}
+
+process INTEGRONFINDER {
+    tag "integronfinder"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-integron"
+    publishDir "${params.outdir}/mge/integrons", mode: 'copy'
+
+    input:
+    path(assembly)
+
+    output:
+    path("integrons.tsv"),     emit: integrons
+    path("summary.tsv"),       emit: summary
+
+    script:
+    """
+    # IntegronFinder: detect integrons (integrase + attC/attI sites + gene cassettes)
+    # --local-max:     thorough local detection of attC sites (more sensitive)
+    # --func-annot:    annotate gene cassettes with Resfams HMM profiles (AMR)
+    # --promoter-attI: also search for Pc promoter and attI recombination sites
+    # --linear:        contigs from Flye assembly are linear, not circular replicons
+    # --cpu:           threading for INFERNAL (cmsearch) and HMMER (hmmsearch)
+
+    set +e
+    integron_finder \\
+        --local-max \\
+        --func-annot \\
+        --promoter-attI \\
+        --linear \\
+        --cpu ${task.cpus} \\
+        --outdir integron_out \\
+        "${assembly}"
+    if_exit=\$?
+    set -e
+
+    # IntegronFinder output directory: integron_out/Results_Integron_Finder_<basename>/
+    input_base=\$(basename "${assembly}" | sed 's/\\.[^.]*\$//')
+    results_dir="integron_out/Results_Integron_Finder_\${input_base}"
+
+    if [ \$if_exit -ne 0 ] || [ ! -d "\${results_dir}" ]; then
+        echo "[WARNING] IntegronFinder exited with code \$if_exit" >&2
+        printf 'ID_integron\\tID_replicon\\telement\\tpos_beg\\tpos_end\\tstrand\\tevalue\\ttype_elt\\tmodel\\ttype\\tannotation\\n' > integrons.tsv
+        printf 'ID_replicon\\tComplete\\tIn0\\tCALIN\\n' > summary.tsv
+        exit 0
+    fi
+
+    # Main results: per-element annotations (integrase, attC, attI, gene cassettes)
+    if [ -f "\${results_dir}/\${input_base}.integrons" ]; then
+        cp "\${results_dir}/\${input_base}.integrons" integrons.tsv
+    else
+        printf 'ID_integron\\tID_replicon\\telement\\tpos_beg\\tpos_end\\tstrand\\tevalue\\ttype_elt\\tmodel\\ttype\\tannotation\\n' > integrons.tsv
+    fi
+
+    # Summary: counts of complete integrons, In0, and CALIN per replicon
+    if [ -f "\${results_dir}/\${input_base}.summary" ]; then
+        cp "\${results_dir}/\${input_base}.summary" summary.tsv
+    else
+        printf 'ID_replicon\\tComplete\\tIn0\\tCALIN\\n' > summary.tsv
     fi
     """
 }
