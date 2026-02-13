@@ -279,7 +279,7 @@ if (length(bin_keep) >= 1) {
     }
 
     # Background (unassigned) contigs
-    plot(tsne_xy, pch = 16, cex = 0.15, col = alpha("white", 1),
+    plot(tsne_xy, pch = 16, cex = 0.15, col = alpha("white", 0.5),
          axes = FALSE, xlab = "", ylab = "",
          main = paste0(bname, " (", n_bins, " bins)"))
 

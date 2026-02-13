@@ -45,6 +45,9 @@ def helpMessage() {
       --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 50000]
       --lorbin_min_length N LorBin minimum bin size in bp [default: 80000]
 
+    Annotation:
+      --run_prokka       Run Prokka gene annotation on co-assembly [default: true]
+
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
 
@@ -139,6 +142,7 @@ include { BIN_LORBIN }          from './modules/binning'
 include { BIN_COMEBIN }         from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
+include { PROKKA_ANNOTATE }     from './modules/annotation'
 
 // ============================================================================
 // Main workflow
@@ -195,6 +199,11 @@ workflow {
 
     // 2b. Tetranucleotide frequencies from assembly
     CALCULATE_TNF(ASSEMBLY_FLYE.out.assembly)
+
+    // 2c. Prokka gene annotation on co-assembly (optional)
+    if (params.run_prokka) {
+        PROKKA_ANNOTATE(ASSEMBLY_FLYE.out.assembly)
+    }
 
     // 3. Map each sample back to assembly: fan-out
     ch_map_input = ch_reads.combine(ASSEMBLY_FLYE.out.assembly)
