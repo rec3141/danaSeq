@@ -5,7 +5,7 @@
 # Self-contained image with all MAG assembly tools pre-installed in isolated
 # conda environments. Uses Miniforge for conda package management.
 #
-# Eleven environments match the local install (install.sh):
+# Twelve environments match the local install (install.sh):
 #   dana-mag-flye     - Flye, Filtlong, Nextflow, OpenJDK
 #   dana-mag-mapping  - minimap2, samtools, CoverM
 #   dana-mag-semibin  - SemiBin2, LorBin (CPU-only PyTorch)
@@ -14,8 +14,9 @@
 #   dana-mag-prokka   - Prokka gene annotation
 #   dana-mag-genomad  - geNomad (virus + plasmid + provirus detection)
 #   dana-mag-checkv   - CheckV (viral quality assessment)
-#   dana-mag-integron - IntegronFinder (integron + gene cassette detection)
-#   dana-mag-checkm2  - CheckM2 (MAG quality assessment)
+#   dana-mag-integron   - IntegronFinder (integron + gene cassette detection)
+#   dana-mag-islandpath - IslandPath-DIMOB (genomic island detection)
+#   dana-mag-checkm2    - CheckM2 (MAG quality assessment)
 #   dana-bbmap        - BBMap (optional dedupe)
 #
 # Build:
@@ -60,8 +61,9 @@ RUN mamba env create -y -p /opt/conda/envs/dana-mag-binning  -f /tmp/envs/binnin
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-prokka   -f /tmp/envs/prokka.yml       && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-genomad  -f /tmp/envs/genomad.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkv   -f /tmp/envs/checkv.yml       && mamba clean -afy
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-integron -f /tmp/envs/integron.yml     && mamba clean -afy
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkm2  -f /tmp/envs/checkm2.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-integron   -f /tmp/envs/integron.yml     && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-islandpath -f /tmp/envs/islandpath.yml  && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkm2   -f /tmp/envs/checkm2.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-bbmap        -f /tmp/envs/bbmap.yml         && mamba clean -afy
 
 # Nextflow + OpenJDK are in the flye env (via flye.yml)
@@ -113,6 +115,11 @@ RUN mkdir -p /usr/local/bin/dana-tools \
     done \
     && for tool in integron_finder; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-integron/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in Dimob.pl; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-islandpath/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \

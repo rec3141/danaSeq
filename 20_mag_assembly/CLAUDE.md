@@ -23,7 +23,8 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
-│   │   └── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER
+│   │   └── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
+│   │                           ISLANDPATH_DIMOB
 │   ├── envs/                   Conda YAML specs
 │   │   ├── flye.yml            Flye, Filtlong, Nextflow, OpenJDK
 │   │   ├── mapping.yml         minimap2, samtools, CoverM
@@ -35,6 +36,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── genomad.yml          geNomad (virus + plasmid detection)
 │   │   ├── checkv.yml           CheckV (viral quality assessment)
 │   │   ├── integron.yml        IntegronFinder (integron detection)
+│   │   ├── islandpath.yml     IslandPath-DIMOB (genomic island detection)
 │   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py)
@@ -134,8 +136,10 @@ Sample FASTQs (N files)
    ASSEMBLY_FLYE          Fan-in: all reads → 1 co-assembly
          ├──────────────────────┬──────────────────────┬──────────────────┐
    MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY   INTEGRONFINDER
-         │ collect()                         │
-   CALCULATE_DEPTHS                   CHECKV_QUALITY
+         │ collect()        │                │
+   CALCULATE_DEPTHS   PROKKA_ANNOTATE CHECKV_QUALITY
+                            │
+                      ISLANDPATH_DIMOB
          │
     ┌────┼────┬────┬────┐
  SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (serial)
@@ -161,7 +165,7 @@ Sample FASTQs (N files)
 
 ### Conda Environments
 
-Eleven isolated environments avoid dependency conflicts:
+Twelve isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
@@ -173,6 +177,7 @@ Eleven isolated environments avoid dependency conflicts:
 | `dana-mag-genomad` | geNomad | Virus + plasmid + provirus detection (neural network) |
 | `dana-mag-checkv` | CheckV | Viral genome quality assessment |
 | `dana-mag-integron` | IntegronFinder | Integron + gene cassette detection (attC/attI + HMM) |
+| `dana-mag-islandpath` | IslandPath-DIMOB | Genomic island detection via dinucleotide bias |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
@@ -240,9 +245,11 @@ results/
 │   │   ├── quality_summary.tsv    Completeness + contamination
 │   │   ├── viruses.fna            Host-trimmed viral sequences
 │   │   └── proviruses.fna         Extracted provirus sequences
-│   └── integrons/                 Integron detection (if --run_integronfinder)
-│       ├── integrons.tsv          Per-element annotations (integrase, attC, attI, cassettes)
-│       └── summary.tsv            Counts of complete/In0/CALIN integrons per contig
+│   ├── integrons/                 Integron detection (if --run_integronfinder)
+│   │   ├── integrons.tsv          Per-element annotations (integrase, attC, attI, cassettes)
+│   │   └── summary.tsv            Counts of complete/In0/CALIN integrons per contig
+│   └── genomic_islands/           Genomic island detection (if --run_islandpath)
+│       └── genomic_islands.tsv    Island coordinates (id, start, end)
 └── pipeline_info/
     ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html

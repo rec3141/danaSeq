@@ -1,5 +1,6 @@
 // Mobile genetic element detection: geNomad (virus + plasmid), CheckV (viral QA),
-// IntegronFinder (integron + gene cassette detection)
+// IntegronFinder (integron + gene cassette detection),
+// IslandPath-DIMOB (genomic island detection via dinucleotide bias)
 
 process GENOMAD_CLASSIFY {
     tag "genomad"
@@ -199,6 +200,46 @@ process INTEGRONFINDER {
         cp "\${results_dir}/\${input_base}.summary" summary.tsv
     else
         printf 'ID_replicon\\tComplete\\tIn0\\tCALIN\\n' > summary.tsv
+    fi
+    """
+}
+
+process ISLANDPATH_DIMOB {
+    tag "islandpath"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-islandpath"
+    publishDir "${params.outdir}/mge/genomic_islands", mode: 'copy'
+
+    input:
+    path(gbk)
+
+    output:
+    path("genomic_islands.tsv"), emit: islands
+
+    script:
+    """
+    # IslandPath-DIMOB: detect genomic islands via dinucleotide bias + mobility genes
+    # Reference-free method — no database download needed (HMM profiles bundled)
+    # Single-threaded Perl; runs in minutes per genome
+    # Input: GenBank format from Prokka annotation
+
+    set +e
+    Dimob.pl "${gbk}" raw_islands.tsv
+    dimob_exit=\$?
+    set -e
+
+    if [ \$dimob_exit -ne 0 ] || [ ! -f raw_islands.tsv ]; then
+        echo "[WARNING] IslandPath-DIMOB exited with code \$dimob_exit" >&2
+        printf 'island_id\\tstart\\tend\\n' > genomic_islands.tsv
+        exit 0
+    fi
+
+    # Add header to raw output (Dimob outputs bare 3-column TSV: id, start, end)
+    if [ -s raw_islands.tsv ]; then
+        printf 'island_id\\tstart\\tend\\n' > genomic_islands.tsv
+        cat raw_islands.tsv >> genomic_islands.tsv
+    else
+        printf 'island_id\\tstart\\tend\\n' > genomic_islands.tsv
     fi
     """
 }

@@ -55,6 +55,7 @@ def helpMessage() {
       --run_checkv       Run CheckV viral quality assessment [default: true]
       --checkv_db PATH   Path to CheckV database; null = skip CheckV
       --run_integronfinder  Run IntegronFinder integron detection [default: true]
+      --run_islandpath    Run IslandPath-DIMOB genomic island detection [default: true]
 
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
@@ -136,9 +137,11 @@ def helpMessage() {
       │   │   ├── quality_summary.tsv
       │   │   ├── viruses.fna
       │   │   └── proviruses.fna
-      │   └── integrons/               (if --run_integronfinder)
-      │       ├── integrons.tsv
-      │       └── summary.tsv
+      │   ├── integrons/               (if --run_integronfinder)
+      │   │   ├── integrons.tsv
+      │   │   └── summary.tsv
+      │   └── genomic_islands/        (if --run_islandpath)
+      │       └── genomic_islands.tsv
       └── pipeline_info/
 
     """.stripIndent()
@@ -175,6 +178,7 @@ include { PROKKA_ANNOTATE }     from './modules/annotation'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
 include { INTEGRONFINDER }      from './modules/mge'
+include { ISLANDPATH_DIMOB }    from './modules/mge'
 
 // ============================================================================
 // Main workflow
@@ -249,6 +253,11 @@ workflow {
     // 2e. Integron detection (IntegronFinder)
     if (params.run_integronfinder) {
         INTEGRONFINDER(ASSEMBLY_FLYE.out.assembly)
+    }
+
+    // 2f. Genomic island detection (IslandPath-DIMOB, requires Prokka .gbk)
+    if (params.run_islandpath && params.run_prokka) {
+        ISLANDPATH_DIMOB(PROKKA_ANNOTATE.out.gbk)
     }
 
     // 3. Map each sample back to assembly: fan-out

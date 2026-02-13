@@ -12,6 +12,7 @@ process PROKKA_ANNOTATE {
     output:
     path("prokka_out/*.faa"),  emit: proteins
     path("prokka_out/*.gff"),  emit: gff
+    path("prokka_out/*.gbk"),  emit: gbk
     path("prokka_out/*.tsv"),  emit: tsv
 
     script:
@@ -34,7 +35,7 @@ process PROKKA_ANNOTATE {
         "${assembly}"
 
     # Clean up unnecessary outputs
-    rm -f prokka_out/*.{err,fna,fsa,gbk,log,sqn,txt} 2>/dev/null || true
+    rm -f prokka_out/*.{err,fna,fsa,log,sqn,txt} 2>/dev/null || true
     rm -f prokka_out/*.tmp.*.faa 2>/dev/null || true
 
     if [ ! -s prokka_out/PROKKA_*.faa ]; then

@@ -1,0 +1,6 @@
+name: dana-mag-islandpath
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - islandpath=1.0.6
