@@ -130,6 +130,43 @@ grep '\-\-input' .nextflow.log.1   # check the most recent rotated log
 **Common pitfall:** changing `--input` path, `--assembly_cpus`, or other params will
 invalidate the task hash and force a full re-run. Always use the saved command.
 
+**Resuming a specific session:** When you modify pipeline code (e.g. add a new process or
+fix a bug in `main.nf`/`modules/*.nf`), Nextflow creates a new session on the next run.
+Plain `-resume` will not find cached tasks from the old session. To reuse the old cache,
+resume from the specific session ID:
+
+```bash
+# Find the session ID from the previous run
+nextflow log | head -5                    # shows recent session IDs
+# Or look in pipeline_info/
+cat <outdir>/pipeline_info/run_command.sh  # shows the session used
+
+# Resume from that exact session
+nextflow run main.nf <same params> -resume <session-id>
+```
+
+Only the processes whose script block changed will re-run; all others will be cached.
+
+### Verifying Process Output (Testing)
+
+When testing a new or modified Nextflow process, **always check the raw output in the work
+directory** before trusting the published results. Published files go through `publishDir`
+copy/link logic which can silently produce empty or incomplete outputs.
+
+```bash
+# Find the work directory from the Nextflow log
+grep 'PROCESS_NAME' .nextflow.log | tail -1   # shows [ab/cd1234] hash
+
+# Check the actual outputs in the work directory
+ls -la work/ab/cd1234*/                         # list all files
+cat work/ab/cd1234*/.command.log                # stdout
+cat work/ab/cd1234*/.command.err                # stderr
+wc -l work/ab/cd1234*/*.tsv                     # line counts of output files
+```
+
+If published results are empty but work directory has data, the bug is in the `publishDir`
+directive or in the output file copy logic (e.g. wrong filename pattern in the script block).
+
 ## Pipeline Architecture
 
 ### Processing DAG (fan-in → fan-out → fan-in)

@@ -365,21 +365,25 @@ process DEFENSEFINDER {
         exit 0
     fi
 
-    # Copy outputs (DefenseFinder produces defense_finder_*.tsv in output dir)
-    if [ -f df_out/defense_finder_systems.tsv ]; then
-        cp df_out/defense_finder_systems.tsv systems.tsv
+    # Copy outputs (DefenseFinder prefixes files with the input basename:
+    #   <base>_defense_finder_systems.tsv, <base>_defense_finder_genes.tsv, etc.)
+    sys_file=\$(ls df_out/*_defense_finder_systems.tsv 2>/dev/null | head -1)
+    if [ -n "\$sys_file" ]; then
+        cp "\$sys_file" systems.tsv
     else
         printf 'sys_id\\ttype\\tsubtype\\tprotein_in_syst\\tgenes_count\\tspec\\n' > systems.tsv
     fi
 
-    if [ -f df_out/defense_finder_genes.tsv ]; then
-        cp df_out/defense_finder_genes.tsv genes.tsv
+    gene_file=\$(ls df_out/*_defense_finder_genes.tsv 2>/dev/null | head -1)
+    if [ -n "\$gene_file" ]; then
+        cp "\$gene_file" genes.tsv
     else
         printf 'replicon\\thit_id\\tgene_name\\n' > genes.tsv
     fi
 
-    if [ -f df_out/defense_finder_hmmer.tsv ]; then
-        cp df_out/defense_finder_hmmer.tsv hmmer.tsv
+    hmmer_file=\$(ls df_out/*_defense_finder_hmmer.tsv 2>/dev/null | head -1)
+    if [ -n "\$hmmer_file" ]; then
+        cp "\$hmmer_file" hmmer.tsv
     else
         printf 'hit_id\\treplicon\\tposition_hit\\thit_sequence_length\\n' > hmmer.tsv
     fi
