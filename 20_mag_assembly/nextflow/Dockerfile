@@ -5,13 +5,14 @@
 # Self-contained image with all MAG assembly tools pre-installed in isolated
 # conda environments. Uses Miniforge for conda package management.
 #
-# Fifteen environments match the local install (install.sh):
+# Sixteen environments match the local install (install.sh):
 #   dana-mag-flye          - Flye, Filtlong, Nextflow, OpenJDK
 #   dana-mag-mapping       - minimap2, samtools, CoverM
 #   dana-mag-semibin       - SemiBin2, LorBin (CPU-only PyTorch)
 #   dana-mag-comebin       - COMEBin (CPU-only PyTorch)
 #   dana-mag-binning       - MetaBAT2, MaxBin2, DAS_Tool
 #   dana-mag-prokka        - Prokka gene annotation
+#   dana-mag-bakta         - Bakta gene annotation (alternative to Prokka)
 #   dana-mag-kaiju         - Kaiju (protein-level taxonomy)
 #   dana-mag-genomad       - geNomad (virus + plasmid + provirus detection)
 #   dana-mag-checkv        - CheckV (viral quality assessment)
@@ -62,6 +63,7 @@ RUN mamba env create -y -p /opt/conda/envs/dana-mag-semibin  -f /tmp/envs/semibi
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-comebin  -f /tmp/envs/comebin-cpu.yml  && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-binning  -f /tmp/envs/binning.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-prokka   -f /tmp/envs/prokka.yml       && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-bakta    -f /tmp/envs/bakta.yml        && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-kaiju    -f /tmp/envs/kaiju.yml        && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-genomad  -f /tmp/envs/genomad.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkv   -f /tmp/envs/checkv.yml       && mamba clean -afy
@@ -106,6 +108,11 @@ RUN mkdir -p /usr/local/bin/dana-tools \
     done \
     && for tool in prokka; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-prokka/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in bakta; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-bakta/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \

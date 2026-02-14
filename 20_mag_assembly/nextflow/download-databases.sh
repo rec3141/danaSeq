@@ -18,6 +18,7 @@ set -euo pipefail
 #   ./download-databases.sh --kaiju            # Download Kaiju RefSeq database only
 #   ./download-databases.sh --macsyfinder      # Download MacSyFinder models (TXSScan + CONJScan)
 #   ./download-databases.sh --defensefinder    # Download DefenseFinder models (~100 MB)
+#   ./download-databases.sh --bakta            # Download Bakta annotation database (~37 GB)
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -35,6 +36,7 @@ DOWNLOAD_CHECKM2=false
 DOWNLOAD_KAIJU=false
 DOWNLOAD_MACSYFINDER=false
 DOWNLOAD_DEFENSEFINDER=false
+DOWNLOAD_BAKTA=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -49,6 +51,7 @@ while (( $# )); do
         --kaiju)     DOWNLOAD_KAIJU=true; INTERACTIVE=false; shift ;;
         --macsyfinder) DOWNLOAD_MACSYFINDER=true; INTERACTIVE=false; shift ;;
         --defensefinder) DOWNLOAD_DEFENSEFINDER=true; INTERACTIVE=false; shift ;;
+        --bakta)     DOWNLOAD_BAKTA=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -64,6 +67,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_KAIJU=true
     DOWNLOAD_MACSYFINDER=true
     DOWNLOAD_DEFENSEFINDER=true
+    DOWNLOAD_BAKTA=true
 fi
 
 # ============================================================================
@@ -82,6 +86,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "kaiju"    "~47 GB"  "Kaiju RefSeq protein db (contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "macsyfinder" "~50 MB" "MacSyFinder models: TXSScan + CONJScan (secretion + conjugation)"
     printf "  %-12s %-8s  %s\n" "defensefinder" "~100 MB" "DefenseFinder models: ~280 defense system HMM profiles"
+    printf "  %-12s %-8s  %s\n" "bakta"    "~37 GB"  "Bakta annotation db (UniProt, AMRFinderPlus, Pfam, etc.)"
     echo ""
     echo "Default download directory: ${DB_DIR}"
     echo ""
@@ -92,6 +97,7 @@ show_databases() {
     echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
     echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
     echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
+    echo "  --bakta_db   ${DB_DIR}/bakta_db"
     echo ""
 }
 
@@ -113,9 +119,10 @@ if $INTERACTIVE; then
     echo "  4) kaiju     - Kaiju RefSeq proteins (contig taxonomy, ~47 GB)"
     echo "  5) macsyfinder - MacSyFinder models: TXSScan + CONJScan (~50 MB)"
     echo "  6) defensefinder - DefenseFinder models: anti-phage defense (~100 MB)"
-    echo "  7) all       - All databases"
+    echo "  7) bakta     - Bakta annotation database (~37 GB)"
+    echo "  8) all       - All databases"
     echo ""
-    read -rp "Choice [1-7, or names]: " choice
+    read -rp "Choice [1-8, or names]: " choice
 
     case "$choice" in
         1|genomad)  DOWNLOAD_GENOMAD=true ;;
@@ -124,7 +131,8 @@ if $INTERACTIVE; then
         4|kaiju)    DOWNLOAD_KAIJU=true ;;
         5|macsyfinder) DOWNLOAD_MACSYFINDER=true ;;
         6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
-        7|all)      DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true ;;
+        7|bakta)    DOWNLOAD_BAKTA=true ;;
+        8|all)      DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -135,14 +143,15 @@ if $INTERACTIVE; then
                     4|kaiju)    DOWNLOAD_KAIJU=true ;;
                     5|macsyfinder) DOWNLOAD_MACSYFINDER=true ;;
                     6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
-                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true ;;
+                    7|bakta)    DOWNLOAD_BAKTA=true ;;
+                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -324,6 +333,30 @@ download_defensefinder() {
     echo "  Use with: --defensefinder_models ${db_path}"
 }
 
+download_bakta() {
+    local db_path="${DB_DIR}/bakta_db"
+    if [ -d "${db_path}" ] && [ -f "${db_path}/version.json" ]; then
+        echo "[INFO] Bakta database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading Bakta database (~37 GB full, or ~1.4 GB light)..."
+    echo "  Destination: ${db_path}"
+
+    local bakta_bin="${ENV_DIR}/dana-mag-bakta/bin/bakta_db"
+    if [ ! -x "${bakta_bin}" ]; then
+        echo "[ERROR] Bakta not installed. Run ./install.sh first." >&2
+        return 1
+    fi
+
+    mkdir -p "${db_path}"
+    "${bakta_bin}" download --output "${db_path}" --type full
+    echo "[SUCCESS] Bakta database downloaded to ${db_path}"
+    echo "  Use with: --bakta_db ${db_path}/db"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -357,6 +390,10 @@ if $DOWNLOAD_DEFENSEFINDER; then
     download_defensefinder || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_BAKTA; then
+    download_bakta || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -371,4 +408,5 @@ else
     $DOWNLOAD_KAIJU   && echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
     $DOWNLOAD_MACSYFINDER && echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
     $DOWNLOAD_DEFENSEFINDER && echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
+    $DOWNLOAD_BAKTA   && echo "  --bakta_db   ${DB_DIR}/bakta_db/db"
 fi

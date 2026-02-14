@@ -10,9 +10,10 @@ set -euo pipefail
 # ./conda-envs/ (not in ~/.conda/envs/) so they never collide with
 # existing environments.
 #
-# Three environments are needed because of dependency conflicts:
+# Four environments are needed because of dependency conflicts:
 #   dana-bbmap   - BBMap (samtools/libdeflate conflicts with R)
 #   dana-prokka  - Prokka (BioPerl pins perl to 5.26, conflicts with others)
+#   dana-bakta   - Bakta (modern alternative to Prokka, different Python deps)
 #   dana-tools   - Everything else (nextflow, openjdk, filtlong, kraken2, hmmer, R/DuckDB, perl)
 #
 # Each is built from a pinned YAML file in envs/ for reproducibility.
@@ -66,6 +67,7 @@ done
 ENV_YAMLS=(
     bbmap.yml
     prokka.yml
+    bakta.yml
     tools.yml
 )
 
@@ -73,6 +75,7 @@ ENV_YAMLS=(
 declare -A ENV_CHECK=(
     [dana-bbmap]="bbduk.sh"
     [dana-prokka]="prokka"
+    [dana-bakta]="bakta"
     [dana-tools]="filtlong"
 )
 

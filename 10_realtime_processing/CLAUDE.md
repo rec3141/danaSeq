@@ -21,7 +21,8 @@ dānaSeq/
 │   │   │   ├── validate.nf      #   FASTQ integrity checks
 │   │   │   ├── qc.nf            #   BBDuk, Filtlong, FASTA conversion
 │   │   │   ├── kraken.nf        #   Kraken2 classification
-│   │   │   ├── prokka.nf        #   Gene annotation
+│   │   │   ├── prokka.nf        #   Prokka gene annotation
+│   │   │   ├── bakta.nf         #   Bakta gene annotation (alternative to Prokka)
 │   │   │   ├── hmm.nf           #   HMM functional gene search
 │   │   │   ├── sketch.nf        #   Sendsketch profiling
 │   │   │   ├── tetramer.nf      #   Tetranucleotide frequency
@@ -120,7 +121,7 @@ nextflow run nextflow/main.nf --input nextflow/test-data -profile test -resume
 3. **QC_FILTLONG** -- Length filtering (>=1500bp), quality filtering (Q7+, top 80%)
 4. **CONVERT_TO_FASTA** -- FASTQ to FASTA with header cleanup
 5. **KRAKEN2_CLASSIFY** -- Taxonomic classification (maxForks=1, serialized)
-6. **PROKKA_ANNOTATE** -- ORF prediction and functional annotation
+6. **PROKKA_ANNOTATE / BAKTA_ANNOTATE** -- ORF prediction and functional annotation (selectable via `--annotator`)
 7. **HMM_SEARCH** -- HMMER3 search against user-supplied HMM databases
 8. **SENDSKETCH** -- Rapid taxonomic sketching
 9. **TETRAMER_FREQ** -- Tetranucleotide composition for binning
@@ -141,12 +142,13 @@ nextflow run nextflow/main.nf --input nextflow/test-data -profile test -resume
 
 ### Conda Environments
 
-Three isolated environments avoid dependency conflicts:
+Four isolated environments avoid dependency conflicts:
 - **dana-bbmap** -- BBMap (samtools conflicts with R)
 - **dana-prokka** -- Prokka (BioPerl pins perl 5.26)
+- **dana-bakta** -- Bakta (modern alternative to Prokka, different Python deps)
 - **dana-tools** -- Filtlong, Kraken2, HMMER, R/DuckDB, Nextflow, OpenJDK
 
-Each env has its own JDK; wrapper scripts prepend the correct `bin/` to PATH so BBMap, Prokka, and Nextflow each find their own java.
+Each env has its own JDK; wrapper scripts prepend the correct `bin/` to PATH so BBMap, Prokka, Bakta, and Nextflow each find their own java.
 
 ### Nextflow Config Profiles
 

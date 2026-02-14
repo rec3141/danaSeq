@@ -43,3 +43,36 @@ process PROKKA_ANNOTATE {
     fi
     """
 }
+
+// Gene annotation: Bakta on co-assembly (modern alternative to Prokka)
+
+process BAKTA_ANNOTATE {
+    tag "bakta"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-bakta"
+    publishDir "${params.outdir}/annotation/bakta", mode: 'copy'
+
+    input:
+    path(assembly)
+
+    output:
+    path("bakta_out/*.faa"),  emit: proteins
+    path("bakta_out/*.gff3"), emit: gff
+    path("bakta_out/*.tsv"),  emit: tsv
+
+    script:
+    """
+    bakta \
+        --db "${params.bakta_db}" \
+        --meta \
+        --threads ${task.cpus} \
+        --output bakta_out \
+        --prefix annotation \
+        --force \
+        "${assembly}"
+
+    if [ ! -s bakta_out/annotation.faa ]; then
+        echo "[WARNING] Bakta produced no protein output" >&2
+    fi
+    """
+}

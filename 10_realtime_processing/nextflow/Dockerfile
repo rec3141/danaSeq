@@ -5,9 +5,10 @@
 # Self-contained image with all pipeline tools pre-installed in isolated
 # conda environments. Uses Miniforge for conda package management.
 #
-# Three environments are needed due to dependency conflicts:
+# Four environments are needed due to dependency conflicts:
 #   dana-bbmap   - BBMap (samtools/libdeflate conflicts with R)
 #   dana-prokka  - Prokka (BioPerl pins perl to 5.26)
+#   dana-bakta   - Bakta (modern alternative to Prokka)
 #   dana-tools   - Everything else (nextflow, openjdk, filtlong, kraken2, hmmer, R/DuckDB, perl)
 #
 # Build:
@@ -45,6 +46,7 @@ COPY envs/ /tmp/envs/
 
 RUN mamba env create -y -p /opt/conda/envs/dana-bbmap    -f /tmp/envs/bbmap.yml    && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-prokka   -f /tmp/envs/prokka.yml   && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-bakta    -f /tmp/envs/bakta.yml    && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-tools    -f /tmp/envs/tools.yml    && mamba clean -afy
 
 # Download tetramer_freqs_esom.pl (not available via conda)
@@ -65,6 +67,11 @@ RUN mkdir -p /usr/local/bin/dana-tools \
     done \
     && for tool in prokka; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-prokka/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in bakta; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-bakta/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \

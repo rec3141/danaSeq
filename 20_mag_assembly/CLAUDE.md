@@ -23,6 +23,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
+│   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_ANNOTATE
 │   │   └── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
 │   │                           ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
 │   ├── envs/                   Conda YAML specs
@@ -39,6 +40,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── islandpath.yml     IslandPath-DIMOB (genomic island detection)
 │   │   ├── macsyfinder.yml    MacSyFinder (secretion systems + conjugation)
 │   │   ├── defensefinder.yml  DefenseFinder (anti-phage defense systems)
+│   │   ├── bakta.yml          Bakta (modern alternative to Prokka)
 │   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py)
@@ -178,7 +180,7 @@ Sample FASTQs (N files)
          ├──────────────────────┬──────────────────────┬──────────────────┐
    MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY   INTEGRONFINDER
          │ collect()        │                │
-   CALCULATE_DEPTHS   PROKKA_ANNOTATE CHECKV_QUALITY
+   CALCULATE_DEPTHS   PROKKA|BAKTA    CHECKV_QUALITY
                             │
                       ISLANDPATH_DIMOB
          │
@@ -206,7 +208,7 @@ Sample FASTQs (N files)
 
 ### Conda Environments
 
-Twelve isolated environments avoid dependency conflicts:
+Thirteen isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|

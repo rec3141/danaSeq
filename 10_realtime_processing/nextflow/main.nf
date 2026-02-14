@@ -40,7 +40,10 @@ def helpMessage() {
 
     Analysis flags:
       --run_kraken       Kraken2 taxonomic classification (requires --kraken_db)
-      --run_prokka       Prokka gene annotation
+      --annotator STR    Annotator: 'prokka', 'bakta', or 'none' [default: none]
+      --bakta_db PATH    Path to Bakta database (required when using Bakta)
+      --run_prokka       (deprecated) Prokka annotation — use --annotator prokka
+      --run_bakta        (deprecated) Bakta annotation — use --annotator bakta
       --run_sketch       Sendsketch taxonomic profiling
       --run_tetra        Tetranucleotide frequency analysis
       --hmm_databases    Comma-separated HMM file paths (requires --run_prokka)
@@ -138,6 +141,15 @@ if (params.run_db_integration && !params.danadir) {
     System.exit(1)
 }
 
+// Resolve annotator: --annotator overrides legacy --run_prokka/--run_bakta flags
+def effective_annotator = params.annotator ?:
+    (params.run_bakta ? 'bakta' : (params.run_prokka ? 'prokka' : 'none'))
+
+if (effective_annotator == 'bakta' && !params.bakta_db) {
+    log.error "ERROR: --bakta_db is required when using Bakta annotation. Provide path to Bakta database."
+    System.exit(1)
+}
+
 // Import modules
 include { VALIDATE_FASTQ }   from './modules/validate'
 include { QC_BBDUK }         from './modules/qc'
@@ -145,6 +157,7 @@ include { QC_FILTLONG }      from './modules/qc'
 include { CONVERT_TO_FASTA } from './modules/qc'
 include { KRAKEN2_CLASSIFY }  from './modules/kraken'
 include { PROKKA_ANNOTATE }   from './modules/prokka'
+include { BAKTA_ANNOTATE }    from './modules/bakta'
 include { SENDSKETCH }        from './modules/sketch'
 include { HMM_SEARCH }        from './modules/hmm'
 include { TETRAMER_FREQ }     from './modules/tetramer'
@@ -254,11 +267,22 @@ workflow {
         TETRAMER_FREQ(ch_fasta)
     }
 
-    // Prokka annotation
-    if (params.run_prokka) {
-        PROKKA_ANNOTATE(ch_fasta)
+    // Gene annotation (prokka, bakta, or none)
+    ch_annotation_proteins = Channel.empty()
+    ch_annotation_tsv      = Channel.empty()
 
-        // HMM search on Prokka proteins (requires Prokka output)
+    if (effective_annotator == 'prokka') {
+        PROKKA_ANNOTATE(ch_fasta)
+        ch_annotation_proteins = PROKKA_ANNOTATE.out.proteins
+        ch_annotation_tsv      = PROKKA_ANNOTATE.out.tsv
+    } else if (effective_annotator == 'bakta') {
+        BAKTA_ANNOTATE(ch_fasta)
+        ch_annotation_proteins = BAKTA_ANNOTATE.out.proteins
+        ch_annotation_tsv      = BAKTA_ANNOTATE.out.tsv
+    }
+
+    if (effective_annotator != 'none') {
+        // HMM search on annotation proteins (requires annotation output)
         if (params.hmm_databases) {
             // Build channel of HMM database files
             ch_hmm_dbs = Channel
@@ -271,7 +295,7 @@ workflow {
                 }
 
             // Cartesian product: each protein file x each HMM database
-            ch_hmm_input = PROKKA_ANNOTATE.out.proteins
+            ch_hmm_input = ch_annotation_proteins
                 .combine(ch_hmm_dbs)
                 .map { meta, faa, dbname, hmm_db ->
                     [ meta, faa, dbname, hmm_db ]
@@ -303,8 +327,8 @@ workflow {
             if (params.run_kraken)  { ch_done = ch_done.mix(KRAKEN2_CLASSIFY.out.parsed.map  { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
             if (params.run_sketch)  { ch_done = ch_done.mix(SENDSKETCH.out.sketch.map        { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
             if (params.run_tetra)   { ch_done = ch_done.mix(TETRAMER_FREQ.out.lrn.map        { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
-            if (params.run_prokka)  { ch_done = ch_done.mix(PROKKA_ANNOTATE.out.tsv.map      { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
-            if (params.run_prokka && params.hmm_databases) {
+            if (effective_annotator != 'none') { ch_done = ch_done.mix(ch_annotation_tsv.map      { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
+            if (effective_annotator != 'none' && params.hmm_databases) {
                 ch_done = ch_done.mix(HMM_SEARCH.out.tsv.map { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" })
             }
 

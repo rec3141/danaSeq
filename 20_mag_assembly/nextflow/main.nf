@@ -48,7 +48,10 @@ def helpMessage() {
       --lorbin_min_length N LorBin minimum bin size in bp [default: 80000]
 
     Annotation:
-      --run_prokka       Run Prokka gene annotation on co-assembly [default: true]
+      --annotator STR    Annotator to use: 'prokka', 'bakta', or 'none' [default: prokka]
+      --bakta_db PATH    Path to Bakta database (required when using Bakta)
+      --run_prokka       (deprecated) Run Prokka — use --annotator instead [default: true]
+      --run_bakta        (deprecated) Run Bakta — use --annotator instead [default: false]
 
     Taxonomy:
       --run_kaiju        Run Kaiju protein-level taxonomy on Prokka proteins [default: true]
@@ -198,6 +201,19 @@ if (!params.input) {
     System.exit(1)
 }
 
+// Resolve annotator: --annotator overrides legacy --run_prokka/--run_bakta flags
+def effective_annotator = params.annotator ?:
+    (params.run_bakta ? 'bakta' : (params.run_prokka ? 'prokka' : 'none'))
+
+if (effective_annotator == 'bakta' && !params.bakta_db) {
+    log.error "ERROR: --bakta_db is required when using Bakta annotation. Provide path to Bakta database."
+    System.exit(1)
+}
+
+if (effective_annotator != 'none') {
+    log.info "Annotator: ${effective_annotator}"
+}
+
 // Import modules
 include { CONCAT_READS }        from './modules/preprocess'
 include { ASSEMBLY_FLYE }       from './modules/assembly'
@@ -212,6 +228,7 @@ include { BIN_COMEBIN }         from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
+include { BAKTA_ANNOTATE }      from './modules/annotation'
 include { KAIJU_CLASSIFY }      from './modules/taxonomy'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
@@ -280,14 +297,23 @@ workflow {
     // 2b. Tetranucleotide frequencies from assembly
     CALCULATE_TNF(ASSEMBLY_FLYE.out.assembly)
 
-    // 2c. Prokka gene annotation on co-assembly (optional)
-    if (params.run_prokka) {
+    // 2c. Gene annotation on co-assembly (optional: prokka, bakta, or none)
+    ch_proteins = Channel.empty()
+    ch_gff      = Channel.empty()
+
+    if (effective_annotator == 'prokka') {
         PROKKA_ANNOTATE(ASSEMBLY_FLYE.out.assembly)
+        ch_proteins = PROKKA_ANNOTATE.out.proteins
+        ch_gff      = PROKKA_ANNOTATE.out.gff
+    } else if (effective_annotator == 'bakta') {
+        BAKTA_ANNOTATE(ASSEMBLY_FLYE.out.assembly)
+        ch_proteins = BAKTA_ANNOTATE.out.proteins
+        ch_gff      = BAKTA_ANNOTATE.out.gff
     }
 
-    // 2c2. Kaiju protein-level taxonomy (requires Prokka .faa + .gff)
-    if (params.run_kaiju && params.kaiju_db && params.run_prokka) {
-        KAIJU_CLASSIFY(PROKKA_ANNOTATE.out.proteins, PROKKA_ANNOTATE.out.gff)
+    // 2c2. Kaiju protein-level taxonomy (requires annotation .faa + .gff)
+    if (params.run_kaiju && params.kaiju_db && effective_annotator != 'none') {
+        KAIJU_CLASSIFY(ch_proteins, ch_gff)
     }
 
     // 2d. Mobile genetic element detection (geNomad + CheckV)
@@ -304,19 +330,19 @@ workflow {
         INTEGRONFINDER(ASSEMBLY_FLYE.out.assembly)
     }
 
-    // 2f. Genomic island detection (IslandPath-DIMOB, requires Prokka .gff + .faa + assembly)
-    if (params.run_islandpath && params.run_prokka) {
-        ISLANDPATH_DIMOB(ASSEMBLY_FLYE.out.assembly, PROKKA_ANNOTATE.out.gff, PROKKA_ANNOTATE.out.proteins)
+    // 2f. Genomic island detection (IslandPath-DIMOB, requires annotation .gff + .faa + assembly)
+    if (params.run_islandpath && effective_annotator != 'none') {
+        ISLANDPATH_DIMOB(ASSEMBLY_FLYE.out.assembly, ch_gff, ch_proteins)
     }
 
-    // 2g. Secretion system + conjugation detection (MacSyFinder, requires Prokka .faa)
-    if (params.run_macsyfinder && params.run_prokka && params.macsyfinder_models) {
-        MACSYFINDER(PROKKA_ANNOTATE.out.proteins)
+    // 2g. Secretion system + conjugation detection (MacSyFinder, requires .faa)
+    if (params.run_macsyfinder && effective_annotator != 'none' && params.macsyfinder_models) {
+        MACSYFINDER(ch_proteins)
     }
 
-    // 2h. Anti-phage defense system detection (DefenseFinder, requires Prokka .faa)
-    if (params.run_defensefinder && params.run_prokka) {
-        DEFENSEFINDER(PROKKA_ANNOTATE.out.proteins)
+    // 2h. Anti-phage defense system detection (DefenseFinder, requires .faa)
+    if (params.run_defensefinder && effective_annotator != 'none') {
+        DEFENSEFINDER(ch_proteins)
     }
 
     // 3. Map each sample back to assembly: fan-out
