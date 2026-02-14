@@ -306,6 +306,20 @@ download_defensefinder() {
 
     mkdir -p "${db_path}"
     "${df_bin}" update --models-dir "${db_path}"
+    # Workaround: CasFinder 3.1.1 has model definition version 2.1 which is
+    # incompatible with macsyfinder 2.1.4 bundled with defense-finder 2.0.1
+    # (https://github.com/mdmparis/defense-finder/issues/91)
+    # Downgrade to 3.1.0 which uses compatible model definition version 2.0
+    local msf_data_bin="${ENV_DIR}/dana-mag-defensefinder/bin/macsydata"
+    if [ -x "${msf_data_bin}" ]; then
+        local cf_ver
+        cf_ver=$(cat "${db_path}/CasFinder/metadata.yml" 2>/dev/null | grep -oP 'vers: \K.*' | head -1)
+        if [ "${cf_ver}" = "3.1.1" ]; then
+            echo "  Downgrading CasFinder 3.1.1 → 3.1.0 (model version compatibility fix)"
+            rm -rf "${db_path}/CasFinder"
+            "${msf_data_bin}" install --target "${db_path}" CasFinder==3.1.0
+        fi
+    fi
     echo "[SUCCESS] DefenseFinder models downloaded to ${db_path}"
     echo "  Use with: --defensefinder_models ${db_path}"
 }
