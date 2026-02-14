@@ -1,6 +1,6 @@
 # MAG Assembly Pipeline
 
-Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes mobile genetic element detection, gene annotation, contig-level taxonomy, and anti-phage defense system detection.
+Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes mobile genetic element detection, gene annotation, contig-level taxonomy, anti-phage defense system detection, and metabolic profiling (KofamScan, eggNOG-mapper, dbCAN3).
 
 ## Quick Start
 
@@ -44,6 +44,10 @@ cd nextflow
     --kaiju_db /path/to/kaiju_db \
     --macsyfinder_models /path/to/macsyfinder_models \
     --defensefinder_models /path/to/defensefinder_models \
+    --run_metabolism true \
+    --kofam_db /path/to/kofam_db \
+    --eggnog_db /path/to/eggnog_db \
+    --dbcan_db /path/to/dbcan_db \
     --assembly_cpus 24 \
     --assembly_memory '64 GB'
 ```
@@ -77,6 +81,16 @@ Sample FASTQs (N files)
       +-- ISLANDPATH_DIMOB  Genomic island detection (dinucleotide bias)
       +-- MACSYFINDER       Secretion + conjugation systems
       +-- DEFENSEFINDER     Anti-phage defense systems (CRISPR, R-M, BREX)
+      +-- KOFAMSCAN         KEGG Orthology (adaptive HMM thresholds)
+      +-- EMAPPER           COG/GO/EC/KEGG/Pfam (eggNOG-mapper)
+      +-- DBCAN             CAZyme annotation (3-method consensus)
+      |   |   |
+      +---+---+
+      MERGE_ANNOTATIONS     Unified per-protein annotation table
+      |
+      MAP_TO_BINS           Per-MAG annotation tables (via contig2bin)
+      |
+      KEGG_MODULES          Module completeness scoring + heatmap
 
    GENOMAD_CLASSIFY          Virus + plasmid + provirus detection
       |
@@ -146,6 +160,22 @@ results/
 │       ├── systems.tsv           Detected defense systems (CRISPR, R-M, BREX, etc.)
 │       ├── genes.tsv             Per-gene assignments within systems
 │       └── hmmer.tsv             Raw HMM hits across all models
+├── metabolism/                    Metabolic profiling (if --run_metabolism)
+│   ├── kofamscan/
+│   │   └── kofamscan_results.tsv  Per-protein KO assignments (adaptive threshold)
+│   ├── emapper/
+│   │   └── emapper_results.emapper.annotations  COG/GO/EC/KEGG/Pfam
+│   ├── dbcan/
+│   │   └── overview.txt           CAZyme consensus (>=2/3 methods agree)
+│   ├── merged/
+│   │   └── merged_annotations.tsv Unified per-protein annotation table
+│   ├── per_mag/
+│   │   └── *.tsv                  Per-MAG annotation tables
+│   ├── modules/
+│   │   ├── module_completeness.tsv  MAG x module completeness matrix
+│   │   └── module_heatmap.svg       Clustered heatmap visualization
+│   └── community/
+│       └── community_annotations.tsv  All proteins with bin_id column
 └── pipeline_info/
     ├── run_command.sh            Exact re-runnable command (for -resume)
     ├── timeline.html
@@ -199,6 +229,15 @@ results/
 | `--run_defensefinder` | `true` | Run DefenseFinder anti-phage defense detection (requires Prokka) |
 | `--defensefinder_models` | (skip) | Path to DefenseFinder models; null = auto-download |
 
+### Metabolic Profiling
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--run_metabolism` | `false` | Run metabolic profiling (KofamScan + eggNOG + dbCAN) |
+| `--kofam_db` | (skip) | Path to KOfam profiles dir (contains `profiles/` + `ko_list`) |
+| `--eggnog_db` | (skip) | Path to eggNOG-mapper database dir |
+| `--dbcan_db` | (skip) | Path to dbCAN database dir |
+
 ### Quality & Resources
 
 | Parameter | Default | Description |
@@ -232,6 +271,9 @@ cd nextflow
 ./download-databases.sh --kaiju            # ~47 GB  (protein-level taxonomy)
 ./download-databases.sh --macsyfinder      # ~50 MB  (secretion + conjugation models)
 ./download-databases.sh --defensefinder    # ~100 MB (anti-phage defense models)
+./download-databases.sh --kofam            # ~4 GB   (KEGG Orthology HMM profiles)
+./download-databases.sh --eggnog           # ~12 GB  (eggNOG-mapper DIAMOND db)
+./download-databases.sh --dbcan            # ~2 GB   (dbCAN HMM + DIAMOND db)
 ./download-databases.sh --all              # All databases
 ```
 
@@ -247,7 +289,7 @@ cd nextflow
 
 **Graceful failure handling.** All processes handle edge cases (empty input, tool crashes, 0 bins) without crashing the pipeline. DefenseFinder and MacSyFinder produce empty TSVs with headers on failure.
 
-**Thirteen isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
+**Sixteen isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
 
 ## Conda Environments
 
@@ -264,6 +306,9 @@ cd nextflow
 | `dana-mag-islandpath` | Python + HMMER (genomic island detection) |
 | `dana-mag-macsyfinder` | MacSyFinder v2 |
 | `dana-mag-defensefinder` | DefenseFinder |
+| `dana-mag-kofamscan` | KofamScan, HMMER (KEGG Orthology) |
+| `dana-mag-emapper` | eggNOG-mapper, DIAMOND (COG/GO/EC/Pfam) |
+| `dana-mag-dbcan` | run_dbcan, HMMER, DIAMOND (CAZyme) |
 | `dana-mag-checkm2` | CheckM2 |
 | `dana-mag-kaiju` | Kaiju |
 | `dana-bbmap` | BBMap (optional dedupe) |
@@ -293,5 +338,8 @@ cd nextflow
 - DefenseFinder: Tesson et al., *Nucleic Acids Research* 2022
 - Kaiju: Menzel et al., *Nature Communications* 2016
 - Prokka: Seemann, *Bioinformatics* 2014
+- KofamScan: Aramaki et al., *Bioinformatics* 2020
+- eggNOG-mapper: Cantalapiedra et al., *Molecular Biology and Evolution* 2021
+- dbCAN3: Zheng et al., *Nucleic Acids Research* 2023
 - CoverM: [github.com/wwood/CoverM](https://github.com/wwood/CoverM)
 - MIMAG: Bowers et al., *Nature Biotechnology* 2017

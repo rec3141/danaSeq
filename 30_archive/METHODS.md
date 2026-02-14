@@ -238,6 +238,44 @@ defense-finder run -o <output> -w <threads> \
   --models-dir <models> <proteins.faa>
 ```
 
+### Metabolic Profiling
+
+Functional annotation of predicted proteins uses three complementary approaches, run on the full Prokka/Bakta protein FASTA and subsequently mapped to individual MAGs via DAS Tool contig-to-bin assignments.
+
+#### KEGG Orthology Assignment
+
+KofamScan (Aramaki et al. 2020) assigns KEGG Orthology (KO) numbers using profile HMMs with adaptive score thresholds. Each KO has a family-specific threshold that balances sensitivity and specificity:
+```
+exec_annotation --profile <profiles> --ko-list <ko_list> \
+  --cpu <threads> --format detail-tsv -o <output> <proteins>
+```
+
+Only assignments above the adaptive threshold (marked with `*` in the output) are retained.
+
+#### Functional Annotation with eggNOG-mapper
+
+eggNOG-mapper v2 (Cantalapiedra et al. 2021) provides multi-source functional annotation via DIAMOND search against the eggNOG database. Outputs include COG functional categories, Gene Ontology (GO) terms, EC numbers, KEGG KOs, KEGG pathways, and Pfam domains:
+```
+emapper.py -i <proteins> --data_dir <eggnog_db> \
+  -m diamond --cpu <threads> --output <output>
+```
+
+#### Carbohydrate-Active Enzyme Annotation
+
+dbCAN3 (Zheng et al. 2023) identifies carbohydrate-active enzymes (CAZymes) using three independent methods: HMMER against the dbCAN HMM database, DIAMOND against the CAZy sequence database, and dbCAN-sub for subfamily-level classification. Only annotations supported by at least two of three methods are retained (consensus filtering):
+```
+run_dbcan <proteins> protein --db_dir <dbcan_db> \
+  --out_dir <output> --dia_cpu <threads> --hmm_cpu <threads>
+```
+
+#### Annotation Merging and Bin Mapping
+
+Annotations from all three sources are merged into a unified per-protein table, joined on protein identifier. Proteins are mapped to MAG bins using the GFF gene-to-contig mapping and DAS Tool contig-to-bin assignments, producing per-MAG annotation tables and a community-wide annotation table.
+
+#### KEGG Module Completeness
+
+KEGG module completeness is evaluated per MAG against ~80 curated module definitions covering carbon fixation (Calvin cycle, rTCA, Wood-Ljungdahl, 3-HP), nitrogen cycling (fixation, nitrification, denitrification, DNRA, anammox), sulfur metabolism (Sox, Dsr, assimilatory), methane metabolism (methanogenesis, methanotrophy), electron transport chain complexes (I-V), photosystems, central carbon metabolism (glycolysis, TCA cycle, pentose phosphate), fermentation pathways, and vitamin/cofactor biosynthesis. Each module is defined as a series of steps, where each step is a set of alternative KOs. Module completeness is the fraction of steps with at least one KO present. Results are output as a MAG-by-module matrix and visualized as a clustered heatmap.
+
 ---
 
 ## Statistical Analysis
@@ -311,6 +349,9 @@ Key software versions used in development:
 - **DefenseFinder**: 2.0.1
 - **Kaiju**: 1.10.1
 - **CheckM2**: 1.0.2
+- **KofamScan**: 1.3.0
+- **eggNOG-mapper**: 2.1.12
+- **dbCAN**: 4.0
 - **Racon**: 1.5.0
 - **Medaka**: 1.7.2
 - **GTDB-Tk**: 2.1.1
@@ -324,11 +365,15 @@ Key software versions used in development:
 
 Abby SS, et al. (2014) MacSyFinder: a program to mine genomes for molecular system components with an application to CRISPR-Cas systems. *PLoS ONE* 9:e110726.
 
+Aramaki T, et al. (2020) KofamKOALA: KEGG Ortholog assignment based on profile HMM and adaptive score threshold. *Bioinformatics* 36:2251-2252.
+
 Bertelli C, Brinkman FSL. (2018) Improved genomic island predictions with IslandPath-DIMOB. *Bioinformatics* 34:2161-2167.
 
 Bowers RM, et al. (2017) Minimum information about a single amplified genome (MISAG) and a metagenome-assembled genome (MIMAG). *Nat Biotechnol* 35:725-731.
 
 Camargo AP, et al. (2024) Identification of mobile genetic elements with geNomad. *Nat Biotechnol* 42:1303-1312.
+
+Cantalapiedra CP, et al. (2021) eggNOG-mapper v2: Functional Annotation, Orthology Assignments, and Domain Prediction at the Metagenomic Scale. *Mol Biol Evol* 38:5825-5829.
 
 Chaumeil PA, et al. (2020) GTDB-Tk: a toolkit to classify genomes with the Genome Taxonomy Database. *Bioinformatics* 36:1925-1927.
 
@@ -371,3 +416,5 @@ Wood DE, et al. (2019) Improved metagenomic analysis with Kraken 2. *Genome Biol
 Wu YW, et al. (2016) MaxBin 2.0: an automated binning algorithm to recover genomes from multiple metagenomic datasets. *Bioinformatics* 32:605-607.
 
 Xie Z, et al. (2024) COMEBin: a contig-level metagenomic binner via contrastive multi-view representation learning. *Nat Commun* 15:1270.
+
+Zheng J, et al. (2023) dbCAN3: automated carbohydrate-active enzyme and substrate annotation. *Nucleic Acids Res* 51:W115-W121.
