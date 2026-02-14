@@ -208,41 +208,41 @@ process INTEGRONFINDER {
 
 process ISLANDPATH_DIMOB {
     tag "islandpath"
-    label 'process_low'
+    label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-islandpath"
     publishDir "${params.outdir}/mge/genomic_islands", mode: 'copy'
 
     input:
-    path(gbk)
+    path(assembly)
+    path(gff)
+    path(faa)
 
     output:
     path("genomic_islands.tsv"), emit: islands
 
     script:
+    def hmm_db = "${projectDir}/data/islandpath_hmm/Pfam-A_mobgenes_201512_prok"
     """
     # IslandPath-DIMOB: detect genomic islands via dinucleotide bias + mobility genes
-    # Reference-free method — no database download needed (HMM profiles bundled)
-    # Single-threaded Perl; runs in minutes per genome
-    # Input: GenBank format from Prokka annotation
+    # Python reimplementation — works directly with GFF + FASTA + FAA from Prokka
+    # Reference-free method — HMM profiles for mobility genes bundled in data/
+    # hmmscan benefits from multiple CPUs
 
     set +e
-    islandpath "${gbk}" raw_islands.txt
+    islandpath_dimob.py \\
+        --gff "${gff}" \\
+        --fasta "${assembly}" \\
+        --faa "${faa}" \\
+        --hmm_db "${hmm_db}" \\
+        --cpus ${task.cpus} \\
+        -o genomic_islands.tsv
     dimob_exit=\$?
     set -e
 
-    if [ \$dimob_exit -ne 0 ] || [ ! -f raw_islands.txt ]; then
+    if [ \$dimob_exit -ne 0 ] || [ ! -f genomic_islands.tsv ]; then
         echo "[WARNING] IslandPath-DIMOB exited with code \$dimob_exit" >&2
-        printf 'island_id\\tstart\\tend\\n' > genomic_islands.tsv
+        printf 'island_id\\tcontig\\tstart\\tend\\n' > genomic_islands.tsv
         exit 0
-    fi
-
-    # Add header to raw output (IslandPath outputs bare 3-column TSV: id, start, end)
-    # .txt extension triggers legacy tab-separated output (GI_N\tstart\tend)
-    if [ -s raw_islands.txt ]; then
-        printf 'island_id\\tstart\\tend\\n' > genomic_islands.tsv
-        cat raw_islands.txt >> genomic_islands.tsv
-    else
-        printf 'island_id\\tstart\\tend\\n' > genomic_islands.tsv
     fi
     """
 }

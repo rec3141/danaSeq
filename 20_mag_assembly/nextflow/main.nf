@@ -156,7 +156,7 @@ def helpMessage() {
       │   ├── integrons/               (if --run_integronfinder)
       │   │   ├── integrons.tsv
       │   │   └── summary.tsv
-      │   ├── genomic_islands/        (if --run_islandpath)
+      │   ├── genomic_islands/        (if --run_islandpath, requires Prokka)
       │   │   └── genomic_islands.tsv
       │   ├── macsyfinder/            (if --macsyfinder_models set)
       │   │   ├── all_systems.tsv
@@ -304,9 +304,9 @@ workflow {
         INTEGRONFINDER(ASSEMBLY_FLYE.out.assembly)
     }
 
-    // 2f. Genomic island detection (IslandPath-DIMOB, requires Prokka .gbk)
+    // 2f. Genomic island detection (IslandPath-DIMOB, requires Prokka .gff + .faa + assembly)
     if (params.run_islandpath && params.run_prokka) {
-        ISLANDPATH_DIMOB(PROKKA_ANNOTATE.out.gbk)
+        ISLANDPATH_DIMOB(ASSEMBLY_FLYE.out.assembly, PROKKA_ANNOTATE.out.gff, PROKKA_ANNOTATE.out.proteins)
     }
 
     // 2g. Secretion system + conjugation detection (MacSyFinder, requires Prokka .faa)

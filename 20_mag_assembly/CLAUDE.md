@@ -41,7 +41,9 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── defensefinder.yml  DefenseFinder (anti-phage defense systems)
 │   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
-│   ├── bin/                    Pipeline scripts (tetramer_freqs.py)
+│   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py)
+│   ├── data/
+│   │   └── islandpath_hmm/    Pfam mobility gene HMM profiles (bundled)
 │   ├── conda-envs/             Pre-built envs (created by install.sh)
 │   ├── install.sh              Conda environment builder
 │   ├── Dockerfile              Docker image (CPU-only SemiBin2)
@@ -105,18 +107,18 @@ mamba run -p conda-envs/dana-mag-flye \
 ### Re-running a Pipeline with -resume
 
 Nextflow's `-resume` requires the **exact same parameters** as the original run, or it will
-re-compute cached tasks instead of reusing them. Every run saves its exact command to:
+re-compute cached tasks instead of reusing them. Every run appends its exact command to:
 
 ```
 <outdir>/pipeline_info/run_command.sh
 ```
 
-To re-run (e.g. after adding a new process or fixing a bug):
+To re-run (e.g. after adding a new process or fixing a bug), use the **last line** of that file:
 
 ```bash
 cd nextflow
-# Copy the saved command (already includes -resume)
-bash <outdir>/pipeline_info/run_command.sh
+# Run the last saved command (already includes -resume)
+tail -1 <outdir>/pipeline_info/run_command.sh | bash
 ```
 
 If `run_command.sh` doesn't exist (older runs), find the command in the Nextflow log:
@@ -179,7 +181,7 @@ Twelve isolated environments avoid dependency conflicts:
 | `dana-mag-genomad` | geNomad | Virus + plasmid + provirus detection (neural network) |
 | `dana-mag-checkv` | CheckV | Viral genome quality assessment |
 | `dana-mag-integron` | IntegronFinder | Integron + gene cassette detection (attC/attI + HMM) |
-| `dana-mag-islandpath` | IslandPath-DIMOB | Genomic island detection via dinucleotide bias |
+| `dana-mag-islandpath` | Python + HMMER | Genomic island detection via dinucleotide bias (Python reimplementation) |
 | `dana-mag-macsyfinder` | MacSyFinder v2 | Secretion systems (TXSScan) + conjugation (CONJScan) |
 | `dana-mag-defensefinder` | DefenseFinder | Anti-phage defense systems (CRISPR, R-M, BREX, Abi, etc.) |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
@@ -253,7 +255,7 @@ results/
 │   │   ├── integrons.tsv          Per-element annotations (integrase, attC, attI, cassettes)
 │   │   └── summary.tsv            Counts of complete/In0/CALIN integrons per contig
 │   ├── genomic_islands/           Genomic island detection (if --run_islandpath)
-│   │   └── genomic_islands.tsv    Island coordinates (id, start, end)
+│   │   └── genomic_islands.tsv    Island coordinates (id, contig, start, end)
 │   ├── macsyfinder/               Secretion + conjugation (if --macsyfinder_models)
 │   │   ├── all_systems.tsv        Detected systems with component hits
 │   │   └── all_systems.txt        Human-readable system descriptions

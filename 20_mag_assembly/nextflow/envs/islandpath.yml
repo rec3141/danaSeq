@@ -3,4 +3,5 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - islandpath=1.0.6
+  - python >=3.9,<3.13
+  - hmmer >=3.3
