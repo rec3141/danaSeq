@@ -1,0 +1,6 @@
+name: dana-mag-defensefinder
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - defense-finder

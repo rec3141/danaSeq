@@ -17,6 +17,7 @@ set -euo pipefail
 #   ./download-databases.sh --checkm2          # Download CheckM2 database only
 #   ./download-databases.sh --kaiju            # Download Kaiju RefSeq database only
 #   ./download-databases.sh --macsyfinder      # Download MacSyFinder models (TXSScan + CONJScan)
+#   ./download-databases.sh --defensefinder    # Download DefenseFinder models (~100 MB)
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -33,6 +34,7 @@ DOWNLOAD_CHECKV=false
 DOWNLOAD_CHECKM2=false
 DOWNLOAD_KAIJU=false
 DOWNLOAD_MACSYFINDER=false
+DOWNLOAD_DEFENSEFINDER=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -46,6 +48,7 @@ while (( $# )); do
         --checkm2)   DOWNLOAD_CHECKM2=true; INTERACTIVE=false; shift ;;
         --kaiju)     DOWNLOAD_KAIJU=true; INTERACTIVE=false; shift ;;
         --macsyfinder) DOWNLOAD_MACSYFINDER=true; INTERACTIVE=false; shift ;;
+        --defensefinder) DOWNLOAD_DEFENSEFINDER=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -60,6 +63,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_CHECKM2=true
     DOWNLOAD_KAIJU=true
     DOWNLOAD_MACSYFINDER=true
+    DOWNLOAD_DEFENSEFINDER=true
 fi
 
 # ============================================================================
@@ -77,6 +81,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "checkm2"  "~3.5 GB" "CheckM2 DIAMOND db (MAG quality assessment)"
     printf "  %-12s %-8s  %s\n" "kaiju"    "~47 GB"  "Kaiju RefSeq protein db (contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "macsyfinder" "~50 MB" "MacSyFinder models: TXSScan + CONJScan (secretion + conjugation)"
+    printf "  %-12s %-8s  %s\n" "defensefinder" "~100 MB" "DefenseFinder models: ~280 defense system HMM profiles"
     echo ""
     echo "Default download directory: ${DB_DIR}"
     echo ""
@@ -86,6 +91,7 @@ show_databases() {
     echo "  --checkm2_db ${DB_DIR}/checkm2_db"
     echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
     echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
+    echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
     echo ""
 }
 
@@ -106,9 +112,10 @@ if $INTERACTIVE; then
     echo "  3) checkm2   - CheckM2 (MAG quality assessment)"
     echo "  4) kaiju     - Kaiju RefSeq proteins (contig taxonomy, ~47 GB)"
     echo "  5) macsyfinder - MacSyFinder models: TXSScan + CONJScan (~50 MB)"
-    echo "  6) all       - All databases"
+    echo "  6) defensefinder - DefenseFinder models: anti-phage defense (~100 MB)"
+    echo "  7) all       - All databases"
     echo ""
-    read -rp "Choice [1-6, or names]: " choice
+    read -rp "Choice [1-7, or names]: " choice
 
     case "$choice" in
         1|genomad)  DOWNLOAD_GENOMAD=true ;;
@@ -116,7 +123,8 @@ if $INTERACTIVE; then
         3|checkm2)  DOWNLOAD_CHECKM2=true ;;
         4|kaiju)    DOWNLOAD_KAIJU=true ;;
         5|macsyfinder) DOWNLOAD_MACSYFINDER=true ;;
-        6|all)      DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true ;;
+        6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
+        7|all)      DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -126,14 +134,15 @@ if $INTERACTIVE; then
                     3|checkm2)  DOWNLOAD_CHECKM2=true ;;
                     4|kaiju)    DOWNLOAD_KAIJU=true ;;
                     5|macsyfinder) DOWNLOAD_MACSYFINDER=true ;;
-                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true ;;
+                    6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
+                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -276,6 +285,31 @@ download_macsyfinder() {
     echo "  Use with: --macsyfinder_models ${db_path}"
 }
 
+download_defensefinder() {
+    local db_path="${DB_DIR}/defensefinder_models"
+    if [ -d "${db_path}" ] && ls "${db_path}"/*.hmm 1>/dev/null 2>&1; then
+        echo "[INFO] DefenseFinder models already exist at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading DefenseFinder models (~100 MB)..."
+    echo "  Models: ~280 anti-phage defense system HMM profiles"
+    echo "  Destination: ${db_path}"
+
+    local df_bin="${ENV_DIR}/dana-mag-defensefinder/bin/defense-finder"
+    if [ ! -x "${df_bin}" ]; then
+        echo "[ERROR] DefenseFinder not installed. Run ./install.sh first." >&2
+        return 1
+    fi
+
+    mkdir -p "${db_path}"
+    "${df_bin}" update --models-dir "${db_path}"
+    echo "[SUCCESS] DefenseFinder models downloaded to ${db_path}"
+    echo "  Use with: --defensefinder_models ${db_path}"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -305,6 +339,10 @@ if $DOWNLOAD_MACSYFINDER; then
     download_macsyfinder || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_DEFENSEFINDER; then
+    download_defensefinder || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -318,4 +356,5 @@ else
     $DOWNLOAD_CHECKM2 && echo "  --checkm2_db ${DB_DIR}/checkm2_db"
     $DOWNLOAD_KAIJU   && echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
     $DOWNLOAD_MACSYFINDER && echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
+    $DOWNLOAD_DEFENSEFINDER && echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
 fi

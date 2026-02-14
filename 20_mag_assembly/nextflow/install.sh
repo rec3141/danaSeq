@@ -8,7 +8,7 @@ set -euo pipefail
 # Creates isolated conda environments for the MAG assembly pipeline.
 # All envs are prefix-installed under ./conda-envs/.
 #
-# Eight environments are needed because of dependency conflicts:
+# Fifteen environments are needed because of dependency conflicts:
 #   dana-mag-flye    - Flye + Filtlong (Python version conflicts)
 #   dana-mag-mapping - minimap2, samtools (universal, no conflicts)
 #   dana-mag-semibin - SemiBin2, LorBin (ML dependencies: PyTorch isolated)
@@ -20,6 +20,7 @@ set -euo pipefail
 #   dana-mag-integron  - IntegronFinder (integron + gene cassette detection)
 #   dana-mag-islandpath  - IslandPath-DIMOB (genomic island detection)
 #   dana-mag-macsyfinder - MacSyFinder (secretion systems + conjugation)
+#   dana-mag-defensefinder - DefenseFinder (anti-phage defense systems)
 #   dana-mag-kaiju    - Kaiju (protein-level taxonomy via Prokka)
 #   dana-mag-checkm2  - CheckM2 (quality assessment)
 #
@@ -83,6 +84,7 @@ ENV_YAMLS=(
     integron.yml
     islandpath.yml
     macsyfinder.yml
+    defensefinder.yml
     kaiju.yml
     checkm2.yml
     bbmap.yml
@@ -101,6 +103,7 @@ declare -A ENV_CHECK=(
     [dana-mag-integron]="integron_finder"
     [dana-mag-islandpath]="islandpath"
     [dana-mag-macsyfinder]="macsyfinder"
+    [dana-mag-defensefinder]="defense-finder"
     [dana-mag-kaiju]="kaiju"
     [dana-mag-checkm2]="checkm2"
     [dana-bbmap]="bbduk.sh"

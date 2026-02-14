@@ -8,7 +8,8 @@ nextflow.enable.dsl = 2
 // Nextflow implementation of the MAG assembly and binning workflow.
 // Co-assembles all reads with Flye, maps reads back, runs five binners
 // (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin) in parallel, integrates with DAS_Tool,
-// and detects mobile genetic elements (viruses, plasmids, proviruses) with geNomad + CheckV.
+// detects mobile genetic elements (viruses, plasmids, proviruses) with geNomad + CheckV,
+// and identifies anti-phage defense systems with DefenseFinder.
 //
 // Usage:
 //   nextflow run main.nf --input /path/to/reads -resume
@@ -62,6 +63,8 @@ def helpMessage() {
       --run_islandpath    Run IslandPath-DIMOB genomic island detection [default: true]
       --run_macsyfinder   Run MacSyFinder secretion/conjugation detection [default: true]
       --macsyfinder_models PATH  Path to MacSyFinder models dir; null = skip
+      --run_defensefinder Run DefenseFinder anti-phage defense detection [default: true]
+      --defensefinder_models PATH  Path to DefenseFinder models dir; null = auto-download
 
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
@@ -155,9 +158,13 @@ def helpMessage() {
       │   │   └── summary.tsv
       │   ├── genomic_islands/        (if --run_islandpath)
       │   │   └── genomic_islands.tsv
-      │   └── macsyfinder/            (if --macsyfinder_models set)
-      │       ├── all_systems.tsv
-      │       └── all_systems.txt
+      │   ├── macsyfinder/            (if --macsyfinder_models set)
+      │   │   ├── all_systems.tsv
+      │   │   └── all_systems.txt
+      │   └── defensefinder/         (if --run_defensefinder)
+      │       ├── systems.tsv
+      │       ├── genes.tsv
+      │       └── hmmer.tsv
       ├── taxonomy/                    (if --kaiju_db set)
       │   └── kaiju/
       │       ├── kaiju_genes.tsv      Per-gene Kaiju classifications
@@ -211,6 +218,7 @@ include { CHECKV_QUALITY }      from './modules/mge'
 include { INTEGRONFINDER }      from './modules/mge'
 include { ISLANDPATH_DIMOB }    from './modules/mge'
 include { MACSYFINDER }         from './modules/mge'
+include { DEFENSEFINDER }       from './modules/mge'
 include { NCLB_GATHER }         from './modules/refinement'
 include { NCLB_CONVERSE }       from './modules/refinement'
 include { NCLB_ELDERS }         from './modules/refinement'
@@ -304,6 +312,11 @@ workflow {
     // 2g. Secretion system + conjugation detection (MacSyFinder, requires Prokka .faa)
     if (params.run_macsyfinder && params.run_prokka && params.macsyfinder_models) {
         MACSYFINDER(PROKKA_ANNOTATE.out.proteins)
+    }
+
+    // 2h. Anti-phage defense system detection (DefenseFinder, requires Prokka .faa)
+    if (params.run_defensefinder && params.run_prokka) {
+        DEFENSEFINDER(PROKKA_ANNOTATE.out.proteins)
     }
 
     // 3. Map each sample back to assembly: fan-out

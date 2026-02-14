@@ -1,7 +1,8 @@
 // Mobile genetic element detection: geNomad (virus + plasmid), CheckV (viral QA),
 // IntegronFinder (integron + gene cassette detection),
 // IslandPath-DIMOB (genomic island detection via dinucleotide bias),
-// MacSyFinder (secretion systems + conjugation detection)
+// MacSyFinder (secretion systems + conjugation detection),
+// DefenseFinder (anti-phage defense system detection)
 
 process GENOMAD_CLASSIFY {
     tag "genomad"
@@ -308,6 +309,79 @@ process MACSYFINDER {
         cp msf_out/all_systems.txt .
     else
         echo "# No systems found" > all_systems.txt
+    fi
+    """
+}
+
+process DEFENSEFINDER {
+    tag "defensefinder"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-defensefinder"
+    publishDir "${params.outdir}/mge/defensefinder", mode: 'copy'
+
+    input:
+    path(proteins)
+
+    output:
+    path("systems.tsv"), emit: systems
+    path("genes.tsv"),   emit: genes
+    path("hmmer.tsv"),   emit: hmmer
+
+    script:
+    def models_opt = params.defensefinder_models ? "--models-dir ${params.defensefinder_models}" : ""
+    """
+    # DefenseFinder: detect anti-phage defense systems (CRISPR, R-M, BREX, Abi, etc.)
+    # Uses HMMER searches across ~280 defense system HMM profiles
+    # Input: Prokka protein FASTA (.faa) — proteins must be in genomic order
+    # -w: parallel HMMER worker threads
+
+    if [ ! -s "${proteins}" ]; then
+        echo "[WARNING] No protein sequences — skipping DefenseFinder" >&2
+        printf 'sys_id\\ttype\\tsubtype\\tprotein_in_syst\\tgenes_count\\tspec\\n' > systems.tsv
+        printf 'replicon\\thit_id\\tgene_name\\n' > genes.tsv
+        printf 'hit_id\\treplicon\\tposition_hit\\thit_sequence_length\\n' > hmmer.tsv
+        exit 0
+    fi
+
+    # If no pre-downloaded models, fetch them first
+    if [ -z "${models_opt}" ]; then
+        defense-finder update
+    fi
+
+    set +e
+    defense-finder run \\
+        -o df_out \\
+        -w ${task.cpus} \\
+        ${models_opt} \\
+        "${proteins}"
+    df_exit=\$?
+    set -e
+
+    if [ \$df_exit -ne 0 ] || [ ! -d df_out ]; then
+        echo "[WARNING] DefenseFinder exited with code \$df_exit" >&2
+        printf 'sys_id\\ttype\\tsubtype\\tprotein_in_syst\\tgenes_count\\tspec\\n' > systems.tsv
+        printf 'replicon\\thit_id\\tgene_name\\n' > genes.tsv
+        printf 'hit_id\\treplicon\\tposition_hit\\thit_sequence_length\\n' > hmmer.tsv
+        exit 0
+    fi
+
+    # Copy outputs (DefenseFinder produces defense_finder_*.tsv in output dir)
+    if [ -f df_out/defense_finder_systems.tsv ]; then
+        cp df_out/defense_finder_systems.tsv systems.tsv
+    else
+        printf 'sys_id\\ttype\\tsubtype\\tprotein_in_syst\\tgenes_count\\tspec\\n' > systems.tsv
+    fi
+
+    if [ -f df_out/defense_finder_genes.tsv ]; then
+        cp df_out/defense_finder_genes.tsv genes.tsv
+    else
+        printf 'replicon\\thit_id\\tgene_name\\n' > genes.tsv
+    fi
+
+    if [ -f df_out/defense_finder_hmmer.tsv ]; then
+        cp df_out/defense_finder_hmmer.tsv hmmer.tsv
+    else
+        printf 'hit_id\\treplicon\\tposition_hit\\thit_sequence_length\\n' > hmmer.tsv
     fi
     """
 }
