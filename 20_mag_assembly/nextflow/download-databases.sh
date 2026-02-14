@@ -345,14 +345,15 @@ download_bakta() {
     echo "[INFO] Downloading Bakta database (~37 GB full, or ~1.4 GB light)..."
     echo "  Destination: ${db_path}"
 
-    local bakta_bin="${ENV_DIR}/dana-mag-bakta/bin/bakta_db"
-    if [ ! -x "${bakta_bin}" ]; then
+    local bakta_env="${ENV_DIR}/dana-mag-bakta"
+    if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
         echo "[ERROR] Bakta not installed. Run ./install.sh first." >&2
         return 1
     fi
 
     mkdir -p "${db_path}"
-    "${bakta_bin}" download --output "${db_path}" --type full
+    # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
+    ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type full
     echo "[SUCCESS] Bakta database downloaded to ${db_path}"
     echo "  Use with: --bakta_db ${db_path}/db"
 }
