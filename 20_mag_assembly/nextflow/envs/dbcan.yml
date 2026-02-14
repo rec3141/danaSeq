@@ -1,0 +1,6 @@
+name: dana-mag-dbcan
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - dbcan>=4.0

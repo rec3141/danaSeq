@@ -57,6 +57,12 @@ def helpMessage() {
       --run_kaiju        Run Kaiju protein-level taxonomy on Prokka proteins [default: true]
       --kaiju_db PATH    Path to Kaiju database (*.fmi + nodes.dmp + names.dmp); null = skip
 
+    Metabolic Profiling:
+      --run_metabolism    Run metabolic profiling (KofamScan + eggNOG + dbCAN) [default: false]
+      --kofam_db PATH    Path to KOfam profiles dir (contains profiles/ + ko_list)
+      --eggnog_db PATH   Path to eggNOG-mapper database dir
+      --dbcan_db PATH    Path to dbCAN database dir
+
     Mobile Genetic Elements:
       --run_genomad      Run geNomad virus + plasmid detection [default: true]
       --genomad_db PATH  Path to geNomad database; null = skip geNomad
@@ -168,6 +174,22 @@ def helpMessage() {
       │       ├── systems.tsv
       │       ├── genes.tsv
       │       └── hmmer.tsv
+      ├── metabolism/                   (if --run_metabolism)
+      │   ├── kofamscan/
+      │   │   └── kofamscan_results.tsv    Per-protein KO assignments
+      │   ├── emapper/
+      │   │   └── emapper_results.emapper.annotations   COG/GO/EC/KEGG/Pfam
+      │   ├── dbcan/
+      │   │   └── overview.txt             CAZyme consensus (≥2/3 methods)
+      │   ├── merged/
+      │   │   └── merged_annotations.tsv   Unified per-protein annotation table
+      │   ├── per_mag/
+      │   │   └── *.tsv                    Per-MAG annotation tables
+      │   ├── modules/
+      │   │   ├── module_completeness.tsv  MAG × module completeness matrix
+      │   │   └── module_heatmap.svg       Clustered heatmap
+      │   └── community/
+      │       └── community_annotations.tsv  All proteins with bin_id column
       ├── taxonomy/                    (if --kaiju_db set)
       │   └── kaiju/
       │       ├── kaiju_genes.tsv      Per-gene Kaiju classifications
@@ -240,6 +262,12 @@ include { NCLB_GATHER }         from './modules/refinement'
 include { NCLB_CONVERSE }       from './modules/refinement'
 include { NCLB_ELDERS }         from './modules/refinement'
 include { NCLB_INTEGRATE }      from './modules/refinement'
+include { KOFAMSCAN }           from './modules/metabolism'
+include { EMAPPER }             from './modules/metabolism'
+include { DBCAN }               from './modules/metabolism'
+include { MERGE_ANNOTATIONS }   from './modules/metabolism'
+include { MAP_TO_BINS }         from './modules/metabolism'
+include { KEGG_MODULES }        from './modules/metabolism'
 
 // ============================================================================
 // Main workflow
@@ -343,6 +371,45 @@ workflow {
     // 2h. Anti-phage defense system detection (DefenseFinder, requires .faa)
     if (params.run_defensefinder && effective_annotator != 'none') {
         DEFENSEFINDER(ch_proteins)
+    }
+
+    // 2i. Metabolic profiling (KofamScan + eggNOG-mapper + dbCAN3)
+    //     Runs on full .faa, then maps annotations to bins via contig2bin.tsv
+    if (params.run_metabolism && effective_annotator != 'none') {
+
+        // Core annotation tools run in parallel on the same .faa
+        ch_ko      = Channel.empty()
+        ch_emapper = Channel.empty()
+        ch_dbcan   = Channel.empty()
+
+        if (params.kofam_db) {
+            KOFAMSCAN(ch_proteins, file("${params.kofam_db}/profiles"), file("${params.kofam_db}/ko_list"))
+            ch_ko = KOFAMSCAN.out.ko_assignments
+        }
+
+        if (params.eggnog_db) {
+            EMAPPER(ch_proteins, file(params.eggnog_db))
+            ch_emapper = EMAPPER.out.annotations
+        }
+
+        if (params.dbcan_db) {
+            DBCAN(ch_proteins, file(params.dbcan_db))
+            ch_dbcan = DBCAN.out.overview
+        }
+
+        // Merge annotations (needs at least one source; provide empty files for missing)
+        // Create default empty files for tools that were not run
+        ch_ko_file = ch_ko.ifEmpty(file('EMPTY_KOFAM'))
+        ch_em_file = ch_emapper.ifEmpty(file('EMPTY_EMAPPER'))
+        ch_db_file = ch_dbcan.ifEmpty(file('EMPTY_DBCAN'))
+
+        MERGE_ANNOTATIONS(ch_ko_file, ch_em_file, ch_db_file)
+
+        // Map to bins (requires DAS_Tool contig2bin + GFF)
+        MAP_TO_BINS(MERGE_ANNOTATIONS.out.merged, DASTOOL_CONSENSUS.out.contig2bin, ch_gff)
+
+        // KEGG module completeness scoring + heatmap
+        KEGG_MODULES(MAP_TO_BINS.out.per_mag)
     }
 
     // 3. Map each sample back to assembly: fan-out

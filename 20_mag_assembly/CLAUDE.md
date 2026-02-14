@@ -24,8 +24,10 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
 │   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_ANNOTATE
-│   │   └── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
-│   │                           ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
+│   │   ├── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
+│   │   │                       ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
+│   │   └── metabolism.nf       KOFAMSCAN, EMAPPER, DBCAN, MERGE_ANNOTATIONS,
+│   │                           MAP_TO_BINS, KEGG_MODULES
 │   ├── envs/                   Conda YAML specs
 │   │   ├── flye.yml            Flye, Filtlong, Nextflow, OpenJDK
 │   │   ├── mapping.yml         minimap2, samtools, CoverM
@@ -41,9 +43,14 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── macsyfinder.yml    MacSyFinder (secretion systems + conjugation)
 │   │   ├── defensefinder.yml  DefenseFinder (anti-phage defense systems)
 │   │   ├── bakta.yml          Bakta (modern alternative to Prokka)
+│   │   ├── kofamscan.yml      KofamScan (KEGG Orthology)
+│   │   ├── emapper.yml        eggNOG-mapper (COG/GO/EC/KEGG/Pfam)
+│   │   ├── dbcan.yml          dbCAN3 (CAZyme annotation)
 │   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
-│   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py)
+│   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py,
+│   │                           merge_annotations.py, map_annotations_to_bins.py,
+│   │                           kegg_module_completeness.py)
 │   ├── data/
 │   │   └── islandpath_hmm/    Pfam mobility gene HMM profiles (bundled)
 │   ├── conda-envs/             Pre-built envs (created by install.sh)
@@ -182,7 +189,14 @@ Sample FASTQs (N files)
          │ collect()        │                │
    CALCULATE_DEPTHS   PROKKA|BAKTA    CHECKV_QUALITY
                             │
-                      ISLANDPATH_DIMOB
+                  ┌─────────┼──────────┐
+            ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   (metabolism, parallel)
+                            └─────┬────┘
+                          MERGE_ANNOTATIONS
+                                  │
+                           MAP_TO_BINS
+                                  │
+                          KEGG_MODULES
          │
     ┌────┼────┬────┬────┐
  SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (serial)
@@ -208,7 +222,7 @@ Sample FASTQs (N files)
 
 ### Conda Environments
 
-Thirteen isolated environments avoid dependency conflicts:
+Sixteen isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
@@ -223,6 +237,9 @@ Thirteen isolated environments avoid dependency conflicts:
 | `dana-mag-islandpath` | Python + HMMER | Genomic island detection via dinucleotide bias (Python reimplementation) |
 | `dana-mag-macsyfinder` | MacSyFinder v2 | Secretion systems (TXSScan) + conjugation (CONJScan) |
 | `dana-mag-defensefinder` | DefenseFinder | Anti-phage defense systems (CRISPR, R-M, BREX, Abi, etc.) |
+| `dana-mag-kofamscan` | KofamScan, HMMER | KEGG Orthology assignment via adaptive HMM thresholds |
+| `dana-mag-emapper` | eggNOG-mapper, DIAMOND | COG/GO/EC/KEGG/Pfam functional annotation |
+| `dana-mag-dbcan` | run_dbcan, HMMER, DIAMOND | CAZyme annotation (3-method consensus) |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
@@ -302,6 +319,22 @@ results/
 │       ├── systems.tsv            Detected defense systems (CRISPR, R-M, BREX, etc.)
 │       ├── genes.tsv              Per-gene assignments within systems
 │       └── hmmer.tsv              Raw HMM hits across all models
+├── metabolism/                    Metabolic profiling (if --run_metabolism)
+│   ├── kofamscan/
+│   │   └── kofamscan_results.tsv  Per-protein KO assignments (adaptive threshold)
+│   ├── emapper/
+│   │   └── emapper_results.emapper.annotations  COG/GO/EC/KEGG/Pfam
+│   ├── dbcan/
+│   │   └── overview.txt           CAZyme consensus (≥2/3 methods)
+│   ├── merged/
+│   │   └── merged_annotations.tsv Unified per-protein annotation table
+│   ├── per_mag/
+│   │   └── *.tsv                  Per-MAG annotation tables
+│   ├── modules/
+│   │   ├── module_completeness.tsv  MAG × module completeness matrix
+│   │   └── module_heatmap.svg       Clustered heatmap
+│   └── community/
+│       └── community_annotations.tsv  All proteins with bin_id column
 └── pipeline_info/
     ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html

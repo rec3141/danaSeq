@@ -8,13 +8,16 @@ set -euo pipefail
 # Creates isolated conda environments for the MAG assembly pipeline.
 # All envs are prefix-installed under ./conda-envs/.
 #
-# Sixteen environments are needed because of dependency conflicts:
+# Nineteen environments are needed because of dependency conflicts:
 #   dana-mag-flye    - Flye + Filtlong (Python version conflicts)
 #   dana-mag-mapping - minimap2, samtools (universal, no conflicts)
 #   dana-mag-semibin - SemiBin2, LorBin (ML dependencies: PyTorch isolated)
 #   dana-mag-comebin - COMEBin (cloned from fork; modern Python 3.11 + numpy/torch)
 #   dana-mag-binning - MetaBAT2, MaxBin2, DAS_Tool (binning suite)
 #   dana-mag-prokka  - Prokka gene annotation
+#   dana-mag-kofamscan - KofamScan (KEGG Orthology via adaptive HMM thresholds)
+#   dana-mag-emapper  - eggNOG-mapper (COG/GO/EC/KEGG/Pfam annotation)
+#   dana-mag-dbcan    - run_dbcan / dbCAN3 (CAZyme annotation)
 #   dana-mag-genomad  - geNomad (virus + plasmid + provirus detection)
 #   dana-mag-checkv   - CheckV (viral quality assessment)
 #   dana-mag-integron  - IntegronFinder (integron + gene cassette detection)
@@ -80,6 +83,9 @@ ENV_YAMLS=(
     comebin.yml
     prokka.yml
     bakta.yml
+    kofamscan.yml
+    emapper.yml
+    dbcan.yml
     genomad.yml
     checkv.yml
     integron.yml
@@ -100,6 +106,9 @@ declare -A ENV_CHECK=(
     [dana-mag-comebin]="run_comebin.sh"
     [dana-mag-prokka]="prokka"
     [dana-mag-bakta]="bakta"
+    [dana-mag-kofamscan]="exec_annotation"
+    [dana-mag-emapper]="emapper.py"
+    [dana-mag-dbcan]="run_dbcan"
     [dana-mag-genomad]="genomad"
     [dana-mag-checkv]="checkv"
     [dana-mag-integron]="integron_finder"

@@ -1,0 +1,7 @@
+name: dana-mag-kofamscan
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - kofamscan
+  - hmmer>=3.3

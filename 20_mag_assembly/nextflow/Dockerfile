@@ -5,7 +5,7 @@
 # Self-contained image with all MAG assembly tools pre-installed in isolated
 # conda environments. Uses Miniforge for conda package management.
 #
-# Sixteen environments match the local install (install.sh):
+# Nineteen environments match the local install (install.sh):
 #   dana-mag-flye          - Flye, Filtlong, Nextflow, OpenJDK
 #   dana-mag-mapping       - minimap2, samtools, CoverM
 #   dana-mag-semibin       - SemiBin2, LorBin (CPU-only PyTorch)
@@ -14,6 +14,9 @@
 #   dana-mag-prokka        - Prokka gene annotation
 #   dana-mag-bakta         - Bakta gene annotation (alternative to Prokka)
 #   dana-mag-kaiju         - Kaiju (protein-level taxonomy)
+#   dana-mag-kofamscan     - KofamScan (KEGG Orthology via adaptive HMM thresholds)
+#   dana-mag-emapper       - eggNOG-mapper (COG/GO/EC/KEGG/Pfam annotation)
+#   dana-mag-dbcan         - run_dbcan / dbCAN3 (CAZyme annotation)
 #   dana-mag-genomad       - geNomad (virus + plasmid + provirus detection)
 #   dana-mag-checkv        - CheckV (viral quality assessment)
 #   dana-mag-integron      - IntegronFinder (integron + gene cassette detection)
@@ -65,6 +68,9 @@ RUN mamba env create -y -p /opt/conda/envs/dana-mag-binning  -f /tmp/envs/binnin
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-prokka   -f /tmp/envs/prokka.yml       && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-bakta    -f /tmp/envs/bakta.yml        && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-kaiju    -f /tmp/envs/kaiju.yml        && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-kofamscan -f /tmp/envs/kofamscan.yml    && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-emapper  -f /tmp/envs/emapper.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-dbcan    -f /tmp/envs/dbcan.yml         && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-genomad  -f /tmp/envs/genomad.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkv   -f /tmp/envs/checkv.yml       && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-integron   -f /tmp/envs/integron.yml     && mamba clean -afy
@@ -113,6 +119,21 @@ RUN mkdir -p /usr/local/bin/dana-tools \
     done \
     && for tool in bakta; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-bakta/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in exec_annotation; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-kofamscan/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in emapper.py download_eggnog_data.py; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-emapper/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in run_dbcan dbcan_build; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-dbcan/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \

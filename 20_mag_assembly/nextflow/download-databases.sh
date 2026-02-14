@@ -19,6 +19,9 @@ set -euo pipefail
 #   ./download-databases.sh --macsyfinder      # Download MacSyFinder models (TXSScan + CONJScan)
 #   ./download-databases.sh --defensefinder    # Download DefenseFinder models (~100 MB)
 #   ./download-databases.sh --bakta            # Download Bakta annotation database (~37 GB)
+#   ./download-databases.sh --kofam            # Download KOfam profiles (~4 GB)
+#   ./download-databases.sh --eggnog           # Download eggNOG diamond database (~12 GB)
+#   ./download-databases.sh --dbcan            # Download dbCAN databases (~2 GB)
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -37,6 +40,9 @@ DOWNLOAD_KAIJU=false
 DOWNLOAD_MACSYFINDER=false
 DOWNLOAD_DEFENSEFINDER=false
 DOWNLOAD_BAKTA=false
+DOWNLOAD_KOFAM=false
+DOWNLOAD_EGGNOG=false
+DOWNLOAD_DBCAN=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -52,6 +58,9 @@ while (( $# )); do
         --macsyfinder) DOWNLOAD_MACSYFINDER=true; INTERACTIVE=false; shift ;;
         --defensefinder) DOWNLOAD_DEFENSEFINDER=true; INTERACTIVE=false; shift ;;
         --bakta)     DOWNLOAD_BAKTA=true; INTERACTIVE=false; shift ;;
+        --kofam)     DOWNLOAD_KOFAM=true; INTERACTIVE=false; shift ;;
+        --eggnog)    DOWNLOAD_EGGNOG=true; INTERACTIVE=false; shift ;;
+        --dbcan)     DOWNLOAD_DBCAN=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -68,6 +77,9 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_MACSYFINDER=true
     DOWNLOAD_DEFENSEFINDER=true
     DOWNLOAD_BAKTA=true
+    DOWNLOAD_KOFAM=true
+    DOWNLOAD_EGGNOG=true
+    DOWNLOAD_DBCAN=true
 fi
 
 # ============================================================================
@@ -87,6 +99,9 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "macsyfinder" "~50 MB" "MacSyFinder models: TXSScan + CONJScan (secretion + conjugation)"
     printf "  %-12s %-8s  %s\n" "defensefinder" "~100 MB" "DefenseFinder models: ~280 defense system HMM profiles"
     printf "  %-12s %-8s  %s\n" "bakta"    "~37 GB"  "Bakta annotation db (UniProt, AMRFinderPlus, Pfam, etc.)"
+    printf "  %-12s %-8s  %s\n" "kofam"    "~4 GB"   "KOfam profiles + ko_list (KEGG Orthology via HMM)"
+    printf "  %-12s %-8s  %s\n" "eggnog"   "~12 GB"  "eggNOG-mapper DIAMOND db (COG/GO/EC/KEGG/Pfam)"
+    printf "  %-12s %-8s  %s\n" "dbcan"    "~2 GB"   "dbCAN HMM + DIAMOND + substrate db (CAZyme annotation)"
     echo ""
     echo "Default download directory: ${DB_DIR}"
     echo ""
@@ -98,6 +113,9 @@ show_databases() {
     echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
     echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
     echo "  --bakta_db   ${DB_DIR}/bakta_db"
+    echo "  --kofam_db   ${DB_DIR}/kofam_db"
+    echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
+    echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
     echo ""
 }
 
@@ -120,9 +138,12 @@ if $INTERACTIVE; then
     echo "  5) macsyfinder - MacSyFinder models: TXSScan + CONJScan (~50 MB)"
     echo "  6) defensefinder - DefenseFinder models: anti-phage defense (~100 MB)"
     echo "  7) bakta     - Bakta annotation database (~37 GB)"
-    echo "  8) all       - All databases"
+    echo "  8) kofam     - KOfam profiles (KEGG Orthology, ~4 GB)"
+    echo "  9) eggnog    - eggNOG-mapper DIAMOND db (~12 GB)"
+    echo " 10) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~2 GB)"
+    echo " 11) all       - All databases"
     echo ""
-    read -rp "Choice [1-8, or names]: " choice
+    read -rp "Choice [1-11, or names]: " choice
 
     case "$choice" in
         1|genomad)  DOWNLOAD_GENOMAD=true ;;
@@ -132,7 +153,10 @@ if $INTERACTIVE; then
         5|macsyfinder) DOWNLOAD_MACSYFINDER=true ;;
         6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
         7|bakta)    DOWNLOAD_BAKTA=true ;;
-        8|all)      DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true ;;
+        8|kofam)    DOWNLOAD_KOFAM=true ;;
+        9|eggnog)   DOWNLOAD_EGGNOG=true ;;
+        10|dbcan)   DOWNLOAD_DBCAN=true ;;
+        11|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -144,14 +168,17 @@ if $INTERACTIVE; then
                     5|macsyfinder) DOWNLOAD_MACSYFINDER=true ;;
                     6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
                     7|bakta)    DOWNLOAD_BAKTA=true ;;
-                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true ;;
+                    8|kofam)    DOWNLOAD_KOFAM=true ;;
+                    9|eggnog)   DOWNLOAD_EGGNOG=true ;;
+                    10|dbcan)   DOWNLOAD_DBCAN=true ;;
+                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -358,6 +385,81 @@ download_bakta() {
     echo "  Use with: --bakta_db ${db_path}/db"
 }
 
+download_kofam() {
+    local db_path="${DB_DIR}/kofam_db"
+    if [ -d "${db_path}/profiles" ] && [ -f "${db_path}/ko_list" ]; then
+        echo "[INFO] KOfam database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading KOfam profiles (~4 GB)..."
+    echo "  Destination: ${db_path}"
+
+    mkdir -p "${db_path}"
+
+    # Download ko_list (adaptive score thresholds)
+    wget -q -O "${db_path}/ko_list.gz" "ftp://ftp.genome.jp/pub/db/kofam/ko_list.gz"
+    gunzip -f "${db_path}/ko_list.gz"
+
+    # Download HMM profiles
+    wget -q -O "${db_path}/profiles.tar.gz" "ftp://ftp.genome.jp/pub/db/kofam/profiles.tar.gz"
+    tar -xzf "${db_path}/profiles.tar.gz" -C "${db_path}"
+    rm -f "${db_path}/profiles.tar.gz"
+
+    echo "[SUCCESS] KOfam database downloaded to ${db_path}"
+    echo "  Use with: --kofam_db ${db_path}"
+}
+
+download_eggnog() {
+    local db_path="${DB_DIR}/eggnog_db"
+    if [ -d "${db_path}" ] && ls "${db_path}"/*.db 1>/dev/null 2>&1; then
+        echo "[INFO] eggNOG database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading eggNOG-mapper database (~12 GB)..."
+    echo "  Destination: ${db_path}"
+
+    local emapper_bin="${ENV_DIR}/dana-mag-emapper/bin/download_eggnog_data.py"
+    if [ ! -x "${emapper_bin}" ]; then
+        echo "[ERROR] eggNOG-mapper not installed. Run ./install.sh first." >&2
+        return 1
+    fi
+
+    mkdir -p "${db_path}"
+    "${emapper_bin}" --data_dir "${db_path}" -y -D
+    echo "[SUCCESS] eggNOG database downloaded to ${db_path}"
+    echo "  Use with: --eggnog_db ${db_path}"
+}
+
+download_dbcan() {
+    local db_path="${DB_DIR}/dbcan_db"
+    if [ -d "${db_path}" ] && [ -f "${db_path}/dbCAN.txt" ]; then
+        echo "[INFO] dbCAN database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading dbCAN databases (~2 GB)..."
+    echo "  Destination: ${db_path}"
+
+    local dbcan_build="${ENV_DIR}/dana-mag-dbcan/bin/dbcan_build"
+    if [ ! -x "${dbcan_build}" ]; then
+        echo "[ERROR] dbCAN not installed. Run ./install.sh first." >&2
+        return 1
+    fi
+
+    mkdir -p "${db_path}"
+    "${dbcan_build}" --db_dir "${db_path}" --clean
+    echo "[SUCCESS] dbCAN database downloaded to ${db_path}"
+    echo "  Use with: --dbcan_db ${db_path}"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -395,6 +497,18 @@ if $DOWNLOAD_BAKTA; then
     download_bakta || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_KOFAM; then
+    download_kofam || failed=$((failed + 1))
+fi
+
+if $DOWNLOAD_EGGNOG; then
+    download_eggnog || failed=$((failed + 1))
+fi
+
+if $DOWNLOAD_DBCAN; then
+    download_dbcan || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -410,4 +524,7 @@ else
     $DOWNLOAD_MACSYFINDER && echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
     $DOWNLOAD_DEFENSEFINDER && echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
     $DOWNLOAD_BAKTA   && echo "  --bakta_db   ${DB_DIR}/bakta_db/db"
+    $DOWNLOAD_KOFAM   && echo "  --kofam_db   ${DB_DIR}/kofam_db"
+    $DOWNLOAD_EGGNOG  && echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
+    $DOWNLOAD_DBCAN   && echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
 fi
