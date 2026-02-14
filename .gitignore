@@ -97,6 +97,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!nclb/lib/
 lib64/
 parts/
 sdist/
