@@ -66,8 +66,7 @@ process KAIJU_CLASSIFY {
         -n "\$names" \\
         -i kaiju_raw.tsv \\
         -o kaiju_names.tsv \\
-        -r superkingdom,phylum,class,order,family,genus,species \\
-        -p
+        -r superkingdom,phylum,class,order,family,genus,species
     names_exit=\$?
     set -e
 
