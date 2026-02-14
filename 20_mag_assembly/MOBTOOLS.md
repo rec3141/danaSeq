@@ -374,34 +374,27 @@ These detect elements *within* chromosomal contigs, complementing the virus/plas
 
 ## Pipeline Integration Plan
 
-### Phase 1: Core MGE Detection (geNomad + CheckV)
+### Phase 1: Core MGE Detection (geNomad + CheckV) -- COMPLETED
 
-```
-ASSEMBLY_FLYE.out.assembly
-         │
-    GENOMAD_CLASSIFY          ← NEW: virus + plasmid + provirus detection
-         ├── virus_contigs.fasta
-         ├── plasmid_contigs.fasta
-         ├── provirus_contigs.fasta
-         └── genomad_summary.tsv
-                │
-         CHECKV_QUALITY       ← NEW: viral genome quality assessment
-              └── checkv_quality.tsv
-```
+Integrated in `modules/mge.nf`. geNomad detects viruses, plasmids, and proviruses from assembly contigs. CheckV assesses viral genome quality.
 
-**New Nextflow params:**
-- `--run_genomad` (default: true)
-- `--genomad_db` (required path to geNomad database)
-- `--run_checkv` (default: true, requires geNomad)
-- `--checkv_db` (required path to CheckV database)
+**Nextflow params:** `--run_genomad`, `--genomad_db`, `--run_checkv`, `--checkv_db`
+**Conda environments:** `dana-mag-genomad`, `dana-mag-checkv`
 
-**New conda environments:**
-- `dana-mag-genomad` — geNomad + dependencies
-- `dana-mag-checkv` — CheckV + dependencies
+### Phase 2: Genomic Island & Defense System Detection -- COMPLETED
 
-### Phase 2: Genomic Island Detection (future)
+All four tools integrated in `modules/mge.nf`, running on Prokka protein/annotation output:
 
-Add IntegronFinder, IslandPath-DIMOB, DefenseFinder as optional post-MAG-binning steps. These run on annotated chromosomal contigs (Prokka output), not on the raw assembly.
+| Tool | Purpose | Input | Param |
+|------|---------|-------|-------|
+| IntegronFinder | Integron + gene cassette detection | Assembly FASTA | `--run_integronfinder` |
+| IslandPath-DIMOB | Genomic island detection (dinucleotide bias + mobility genes) | Prokka GBK | `--run_islandpath` |
+| MacSyFinder v2 | Secretion systems (TXSScan) + conjugation (CONJScan) | Prokka FAA | `--macsyfinder_models` |
+| DefenseFinder | Anti-phage defense systems (CRISPR, R-M, BREX, Abi, etc.) | Prokka FAA | `--run_defensefinder` |
+
+**Conda environments:** `dana-mag-integron`, `dana-mag-islandpath`, `dana-mag-macsyfinder`, `dana-mag-defensefinder`
+
+**Known issue:** DefenseFinder 2.0.1 bundles macsyfinder 2.1.4 which is incompatible with CasFinder model definition version 2.1. The `download-databases.sh` script automatically downgrades CasFinder 3.1.1 to 3.1.0 as a workaround (see [defense-finder#91](https://github.com/mdmparis/defense-finder/issues/91)).
 
 ### Phase 3: Consensus Plasmid Detection (future)
 
@@ -489,4 +482,4 @@ mamba create -p conda-envs/dana-mag-integron -c conda-forge -c bioconda integron
 
 ---
 
-*Last updated: 2026-02-13*
+*Last updated: 2026-02-14*

@@ -94,14 +94,15 @@ minimap2 -ax map-ont -t <threads> <assembly> <reads> | \
 samtools sort -@ <threads> -o <output.bam>
 ```
 
-Coverage profiles are calculated using JGI's method (Kang et al. 2019):
+Coverage profiles are calculated using CoverM (github.com/wwood/CoverM), which replaces `jgi_summarize_bam_contig_depths` to avoid an integer overflow bug in MetaBAT2 <=2.17 when processing long-read BAMs:
 ```
-jgi_summarize_bam_contig_depths --outputDepth <output> <bam_files>
+coverm contig --bam-files <bam_files> \
+  --methods metabat --output-file <output>
 ```
 
 ### Genome Binning
 
-Three complementary binning algorithms generate initial bins:
+Five complementary binning algorithms generate initial bins:
 
 #### SemiBin2
 Deep learning-based binner trained on thousands of reference genomes (Pan et al. 2023):
@@ -122,6 +123,19 @@ Marker gene-based binning using 107 bacterial single-copy genes (Wu et al. 2016)
 ```
 run_MaxBin.pl -contig <contigs> -abund <coverage> \
   -out <output> -thread <threads>
+```
+
+#### LorBin
+Deep learning binner designed specifically for long-read metagenomics (Gao et al. 2024). Uses read-level features and contig composition for improved long-read binning:
+```
+LorBin --input <contigs> --bam <bam> --output <output> \
+  --bin_length 80000
+```
+
+#### COMEBin
+Contrastive learning binner that learns contig embeddings from coverage and composition features (Xie et al. 2024):
+```
+run_comebin.sh -a <contigs> -p <bam_dir> -o <output>
 ```
 
 ### Consensus Binning
@@ -162,14 +176,67 @@ Bins are classified according to MIMAG standards (Bowers et al. 2017):
 - **Medium-quality**: >50% complete, <10% contaminated
 - **Low-quality**: <50% complete, <10% contaminated
 
+### Gene Annotation
+
+Prokka (Seemann 2014) annotates the co-assembly to predict coding sequences, rRNAs, and tRNAs. The protein FASTA output is used as input for downstream tools (Kaiju, IslandPath-DIMOB, MacSyFinder, DefenseFinder):
+```
+prokka --outdir <outdir> --prefix <prefix> \
+  --kingdom Bacteria --metagenome --cpus <threads> <assembly>
+```
+
 ### Taxonomic Classification
 
-Kaiju (Menzel et al. 2016) assigns taxonomy using translated search against NCBI nr:
+Kaiju (Menzel et al. 2016) assigns protein-level taxonomy to contigs using translated search against RefSeq reference genomes (bacteria, archaea, viruses):
 ```
-kaiju -t <nodes.dmp> -f <database> -i <genome> -o <output>
+kaiju -t <nodes.dmp> -f <database.fmi> -i <proteins.faa> -o <output>
 ```
 
 For high-quality MAGs, GTDB-Tk (Chaumeil et al. 2020) provides standardized taxonomy based on the Genome Taxonomy Database.
+
+### Mobile Genetic Element Detection
+
+#### Virus and Plasmid Detection
+
+geNomad (Camargo et al. 2024) detects viruses, plasmids, and proviruses from assembly contigs using a neural network trained on >200k marker gene profiles:
+```
+genomad end-to-end <assembly> <output> <database> --threads <threads>
+```
+
+CheckV (Nayfach et al. 2021) assesses viral genome quality (completeness, contamination, host contamination boundaries) for contigs classified as viral by geNomad:
+```
+checkv end_to_end <viral_contigs> <output> -d <database> -t <threads>
+```
+
+#### Integron Detection
+
+IntegronFinder (Cury et al. 2016) identifies integrons and gene cassettes by detecting attI recombination sites, attC sites, and integrase genes:
+```
+integron_finder --local-max --cpu <threads> <assembly>
+```
+
+#### Genomic Island Detection
+
+IslandPath-DIMOB (Bertelli & Brinkman 2018) detects genomic islands using dinucleotide bias combined with the presence of mobility genes (integrases, transposases). The pipeline uses a Python reimplementation with bundled HMM profiles:
+```
+islandpath_dimob.py <prokka.gbk> <output.tsv>
+```
+
+#### Secretion and Conjugation Systems
+
+MacSyFinder v2 (Abby et al. 2014) detects macromolecular systems using HMM-based component searches with co-localization constraints. The pipeline uses TXSScan models (20 secretion system types) and CONJScan models (17 conjugation system types):
+```
+macsyfinder --models TXSScan CONJScan all \
+  --sequence-db <proteins.faa> --db-type ordered_replicon \
+  --models-dir <models> -w <threads>
+```
+
+#### Anti-Phage Defense Systems
+
+DefenseFinder (Tesson et al. 2022) detects anti-phage defense systems including CRISPR arrays, restriction-modification systems, BREX, abortive infection, and other defense mechanisms. Uses HMMER searches across ~280 defense system HMM profiles:
+```
+defense-finder run -o <output> -w <threads> \
+  --models-dir <models> <proteins.faa>
+```
 
 ---
 
@@ -228,17 +295,26 @@ Key software versions used in development:
 - **Kraken2**: 2.1.2
 - **Prokka**: 1.14.6
 - **HMMER**: 3.3.2
-- **Flye**: 2.9.1
-- **minimap2**: 2.24
-- **SemiBin2**: 1.5.0
-- **MetaBAT2**: 2.15
+- **Flye**: 2.9.5
+- **minimap2**: 2.28
+- **CoverM**: 0.7.0
+- **SemiBin2**: 2.1.0
+- **MetaBAT2**: 2.17
 - **MaxBin2**: 2.2.7
-- **DAS Tool**: 1.1.5
+- **LorBin**: 1.0
+- **COMEBin**: 1.0.4
+- **DAS Tool**: 1.1.7
+- **geNomad**: 1.8.0
+- **CheckV**: 1.0.3
+- **IntegronFinder**: 2.0.5
+- **MacSyFinder**: 2.1.4
+- **DefenseFinder**: 2.0.1
+- **Kaiju**: 1.10.1
+- **CheckM2**: 1.0.2
 - **Racon**: 1.5.0
 - **Medaka**: 1.7.2
-- **CheckM2**: 1.0.1
-- **Kaiju**: 1.9.0
 - **GTDB-Tk**: 2.1.1
+- **Nextflow**: 25.10.3
 - **R**: 4.2+
 - **Python**: 3.9+
 
@@ -246,13 +322,23 @@ Key software versions used in development:
 
 ## References
 
+Abby SS, et al. (2014) MacSyFinder: a program to mine genomes for molecular system components with an application to CRISPR-Cas systems. *PLoS ONE* 9:e110726.
+
+Bertelli C, Brinkman FSL. (2018) Improved genomic island predictions with IslandPath-DIMOB. *Bioinformatics* 34:2161-2167.
+
 Bowers RM, et al. (2017) Minimum information about a single amplified genome (MISAG) and a metagenome-assembled genome (MIMAG). *Nat Biotechnol* 35:725-731.
+
+Camargo AP, et al. (2024) Identification of mobile genetic elements with geNomad. *Nat Biotechnol* 42:1303-1312.
 
 Chaumeil PA, et al. (2020) GTDB-Tk: a toolkit to classify genomes with the Genome Taxonomy Database. *Bioinformatics* 36:1925-1927.
 
 Chklovski A, et al. (2023) CheckM2: a rapid, scalable and accurate tool for assessing microbial genome quality using machine learning. *Nat Methods* 20:1203-1212.
 
+Cury J, et al. (2016) Integron finder: an automated tool for identification and annotation of integrons and their gene cassettes. *Nucleic Acids Res* 44:4539-4550.
+
 Eddy SR. (2011) Accelerated profile HMM searches. *PLoS Comput Biol* 7:e1002195.
+
+Gao Z, et al. (2024) LorBin: a long-read-based metagenome binner using read-level features. *Brief Bioinform* 25:bbae312.
 
 Kang DD, et al. (2019) MetaBAT 2: an adaptive binning algorithm for robust and efficient genome reconstruction from metagenome assemblies. *PeerJ* 7:e7359.
 
@@ -264,6 +350,8 @@ McInnes L, Healy J, Melville J. (2018) UMAP: Uniform Manifold Approximation and 
 
 Menzel P, et al. (2016) Fast and sensitive taxonomic classification for metagenomics with Kaiju. *Nat Commun* 7:11257.
 
+Nayfach S, et al. (2021) CheckV assesses the quality and completeness of metagenome-assembled viral genomes. *Nat Biotechnol* 39:578-585.
+
 Pan S, et al. (2023) SemiBin2: self-supervised contrastive learning leads to better MAGs for short- and long-read sequencing. *Nat Commun* 14:5632.
 
 Prestat E, et al. (2014) FOAM (Functional Ontology Assignments for Metagenomes): a Hidden Markov Model (HMM) database with environmental focus. *Nucleic Acids Res* 42:10702-10713.
@@ -272,6 +360,8 @@ Seemann T. (2014) Prokka: rapid prokaryotic genome annotation. *Bioinformatics* 
 
 Sieber CMK, et al. (2018) Recovery of genomes from metagenomes via a dereplication, aggregation and scoring strategy. *Nat Microbiol* 3:836-843.
 
+Tesson F, et al. (2022) Systematic and quantitative view of the antiviral arsenal of prokaryotes. *Nat Commun* 13:2561.
+
 van der Maaten L, Hinton G. (2008) Visualizing data using t-SNE. *J Mach Learn Res* 9:2579-2605.
 
 Vaser R, et al. (2017) Fast and accurate de novo genome assembly from long uncorrected reads. *Genome Res* 27:737-746.
@@ -279,3 +369,5 @@ Vaser R, et al. (2017) Fast and accurate de novo genome assembly from long uncor
 Wood DE, et al. (2019) Improved metagenomic analysis with Kraken 2. *Genome Biol* 20:257.
 
 Wu YW, et al. (2016) MaxBin 2.0: an automated binning algorithm to recover genomes from multiple metagenomic datasets. *Bioinformatics* 32:605-607.
+
+Xie Z, et al. (2024) COMEBin: a contig-level metagenomic binner via contrastive multi-view representation learning. *Nat Commun* 15:1270.
