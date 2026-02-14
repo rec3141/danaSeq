@@ -5,21 +5,22 @@
 # Self-contained image with all MAG assembly tools pre-installed in isolated
 # conda environments. Uses Miniforge for conda package management.
 #
-# Thirteen environments match the local install (install.sh):
-#   dana-mag-flye     - Flye, Filtlong, Nextflow, OpenJDK
-#   dana-mag-mapping  - minimap2, samtools, CoverM
-#   dana-mag-semibin  - SemiBin2, LorBin (CPU-only PyTorch)
-#   dana-mag-comebin  - COMEBin (CPU-only PyTorch)
-#   dana-mag-binning  - MetaBAT2, MaxBin2, DAS_Tool
-#   dana-mag-prokka   - Prokka gene annotation
-#   dana-mag-genomad  - geNomad (virus + plasmid + provirus detection)
-#   dana-mag-checkv   - CheckV (viral quality assessment)
-#   dana-mag-integron   - IntegronFinder (integron + gene cassette detection)
-#   dana-mag-islandpath   - IslandPath-DIMOB (genomic island detection)
-#   dana-mag-macsyfinder  - MacSyFinder v2 (secretion systems + conjugation)
+# Fifteen environments match the local install (install.sh):
+#   dana-mag-flye          - Flye, Filtlong, Nextflow, OpenJDK
+#   dana-mag-mapping       - minimap2, samtools, CoverM
+#   dana-mag-semibin       - SemiBin2, LorBin (CPU-only PyTorch)
+#   dana-mag-comebin       - COMEBin (CPU-only PyTorch)
+#   dana-mag-binning       - MetaBAT2, MaxBin2, DAS_Tool
+#   dana-mag-prokka        - Prokka gene annotation
+#   dana-mag-kaiju         - Kaiju (protein-level taxonomy)
+#   dana-mag-genomad       - geNomad (virus + plasmid + provirus detection)
+#   dana-mag-checkv        - CheckV (viral quality assessment)
+#   dana-mag-integron      - IntegronFinder (integron + gene cassette detection)
+#   dana-mag-islandpath    - IslandPath-DIMOB (genomic island detection)
+#   dana-mag-macsyfinder   - MacSyFinder v2 (secretion systems + conjugation)
 #   dana-mag-defensefinder - DefenseFinder (anti-phage defense systems)
-#   dana-mag-checkm2      - CheckM2 (MAG quality assessment)
-#   dana-bbmap        - BBMap (optional dedupe)
+#   dana-mag-checkm2       - CheckM2 (MAG quality assessment)
+#   dana-bbmap             - BBMap (optional dedupe)
 #
 # Build:
 #   docker build -t danaseq-mag .
@@ -61,6 +62,7 @@ RUN mamba env create -y -p /opt/conda/envs/dana-mag-semibin  -f /tmp/envs/semibi
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-comebin  -f /tmp/envs/comebin-cpu.yml  && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-binning  -f /tmp/envs/binning.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-prokka   -f /tmp/envs/prokka.yml       && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-kaiju    -f /tmp/envs/kaiju.yml        && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-genomad  -f /tmp/envs/genomad.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkv   -f /tmp/envs/checkv.yml       && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-integron   -f /tmp/envs/integron.yml     && mamba clean -afy
@@ -119,6 +121,11 @@ RUN mkdir -p /usr/local/bin/dana-tools \
     done \
     && for tool in integron_finder; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-integron/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in kaiju kaiju-addTaxonNames kaiju2table; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-kaiju/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
