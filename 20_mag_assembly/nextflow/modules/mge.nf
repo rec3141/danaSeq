@@ -1,6 +1,7 @@
 // Mobile genetic element detection: geNomad (virus + plasmid), CheckV (viral QA),
 // IntegronFinder (integron + gene cassette detection),
-// IslandPath-DIMOB (genomic island detection via dinucleotide bias)
+// IslandPath-DIMOB (genomic island detection via dinucleotide bias),
+// MacSyFinder (secretion systems + conjugation detection)
 
 process GENOMAD_CLASSIFY {
     tag "genomad"
@@ -224,22 +225,89 @@ process ISLANDPATH_DIMOB {
     # Input: GenBank format from Prokka annotation
 
     set +e
-    Dimob.pl "${gbk}" raw_islands.tsv
+    islandpath "${gbk}" raw_islands.txt
     dimob_exit=\$?
     set -e
 
-    if [ \$dimob_exit -ne 0 ] || [ ! -f raw_islands.tsv ]; then
+    if [ \$dimob_exit -ne 0 ] || [ ! -f raw_islands.txt ]; then
         echo "[WARNING] IslandPath-DIMOB exited with code \$dimob_exit" >&2
         printf 'island_id\\tstart\\tend\\n' > genomic_islands.tsv
         exit 0
     fi
 
-    # Add header to raw output (Dimob outputs bare 3-column TSV: id, start, end)
-    if [ -s raw_islands.tsv ]; then
+    # Add header to raw output (IslandPath outputs bare 3-column TSV: id, start, end)
+    # .txt extension triggers legacy tab-separated output (GI_N\tstart\tend)
+    if [ -s raw_islands.txt ]; then
         printf 'island_id\\tstart\\tend\\n' > genomic_islands.tsv
-        cat raw_islands.tsv >> genomic_islands.tsv
+        cat raw_islands.txt >> genomic_islands.tsv
     else
         printf 'island_id\\tstart\\tend\\n' > genomic_islands.tsv
+    fi
+    """
+}
+
+process MACSYFINDER {
+    tag "macsyfinder"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-macsyfinder"
+    publishDir "${params.outdir}/mge/macsyfinder", mode: 'copy'
+
+    input:
+    path(proteins)
+
+    output:
+    path("all_systems.tsv"),   emit: systems
+    path("all_systems.txt"),   emit: systems_txt
+
+    script:
+    def models_dir = params.macsyfinder_models
+    """
+    # MacSyFinder v2: detect secretion systems + conjugation in metagenome proteins
+    # --db-type unordered: no gene order considered (appropriate for fragmented contigs)
+    # --replicon-topology linear: assembly contigs are linear fragments
+    # --models TXSScan all: all 20 secretion/appendage systems (T1SS-T9SS, flagellum, pili)
+    # --models CONJScan all: all 17 conjugation systems (8 conjugative + 8 decayed + MOB)
+    # -w: parallel HMMER searches
+
+    if [ ! -s "${proteins}" ]; then
+        echo "[WARNING] No protein sequences — skipping MacSyFinder" >&2
+        printf 'replicon\\thit_id\\tgene_name\\thit_pos\\tmodel_fqn\\tsys_id\\tsys_loci\\tlocus_num\\tsys_wholeness\\tsys_score\\tsys_occ\\thit_gene_ref\\thit_status\\thit_seq_len\\thit_i_eval\\thit_score\\thit_profile_cov\\thit_seq_cov\\thit_begin_match\\thit_end_match\\n' > all_systems.tsv
+        echo "# No systems found (empty input)" > all_systems.txt
+        exit 0
+    fi
+
+    set +e
+    macsyfinder \\
+        --db-type unordered \\
+        --sequence-db "${proteins}" \\
+        --replicon-topology linear \\
+        --models-dir "${models_dir}" \\
+        --models TXSScan all \\
+        --models CONJScan all \\
+        -w ${task.cpus} \\
+        -o msf_out \\
+        --mute
+    msf_exit=\$?
+    set -e
+
+    if [ \$msf_exit -ne 0 ] || [ ! -d msf_out ]; then
+        echo "[WARNING] MacSyFinder exited with code \$msf_exit" >&2
+        printf 'replicon\\thit_id\\tgene_name\\thit_pos\\tmodel_fqn\\tsys_id\\tsys_loci\\tlocus_num\\tsys_wholeness\\tsys_score\\tsys_occ\\thit_gene_ref\\thit_status\\thit_seq_len\\thit_i_eval\\thit_score\\thit_profile_cov\\thit_seq_cov\\thit_begin_match\\thit_end_match\\n' > all_systems.tsv
+        echo "# MacSyFinder failed" > all_systems.txt
+        exit 0
+    fi
+
+    # Copy outputs (unordered mode produces all_systems.tsv and all_systems.txt)
+    if [ -f msf_out/all_systems.tsv ]; then
+        cp msf_out/all_systems.tsv .
+    else
+        printf 'replicon\\thit_id\\tgene_name\\thit_pos\\tmodel_fqn\\tsys_id\\tsys_loci\\tlocus_num\\tsys_wholeness\\tsys_score\\tsys_occ\\thit_gene_ref\\thit_status\\thit_seq_len\\thit_i_eval\\thit_score\\thit_profile_cov\\thit_seq_cov\\thit_begin_match\\thit_end_match\\n' > all_systems.tsv
+    fi
+
+    if [ -f msf_out/all_systems.txt ]; then
+        cp msf_out/all_systems.txt .
+    else
+        echo "# No systems found" > all_systems.txt
     fi
     """
 }

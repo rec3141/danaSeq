@@ -1,0 +1,6 @@
+name: dana-mag-macsyfinder
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - macsyfinder>=2.1

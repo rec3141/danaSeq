@@ -24,7 +24,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
 │   │   └── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
-│   │                           ISLANDPATH_DIMOB
+│   │                           ISLANDPATH_DIMOB, MACSYFINDER
 │   ├── envs/                   Conda YAML specs
 │   │   ├── flye.yml            Flye, Filtlong, Nextflow, OpenJDK
 │   │   ├── mapping.yml         minimap2, samtools, CoverM
@@ -37,6 +37,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── checkv.yml           CheckV (viral quality assessment)
 │   │   ├── integron.yml        IntegronFinder (integron detection)
 │   │   ├── islandpath.yml     IslandPath-DIMOB (genomic island detection)
+│   │   ├── macsyfinder.yml    MacSyFinder (secretion systems + conjugation)
 │   │   ├── checkm2.yml         CheckM2
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py)
@@ -178,6 +179,7 @@ Twelve isolated environments avoid dependency conflicts:
 | `dana-mag-checkv` | CheckV | Viral genome quality assessment |
 | `dana-mag-integron` | IntegronFinder | Integron + gene cassette detection (attC/attI + HMM) |
 | `dana-mag-islandpath` | IslandPath-DIMOB | Genomic island detection via dinucleotide bias |
+| `dana-mag-macsyfinder` | MacSyFinder v2 | Secretion systems (TXSScan) + conjugation (CONJScan) |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
@@ -248,8 +250,11 @@ results/
 │   ├── integrons/                 Integron detection (if --run_integronfinder)
 │   │   ├── integrons.tsv          Per-element annotations (integrase, attC, attI, cassettes)
 │   │   └── summary.tsv            Counts of complete/In0/CALIN integrons per contig
-│   └── genomic_islands/           Genomic island detection (if --run_islandpath)
-│       └── genomic_islands.tsv    Island coordinates (id, start, end)
+│   ├── genomic_islands/           Genomic island detection (if --run_islandpath)
+│   │   └── genomic_islands.tsv    Island coordinates (id, start, end)
+│   └── macsyfinder/               Secretion + conjugation (if --macsyfinder_models)
+│       ├── all_systems.tsv        Detected systems with component hits
+│       └── all_systems.txt        Human-readable system descriptions
 └── pipeline_info/
     ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html

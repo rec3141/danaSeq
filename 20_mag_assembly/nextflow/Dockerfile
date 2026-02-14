@@ -15,8 +15,9 @@
 #   dana-mag-genomad  - geNomad (virus + plasmid + provirus detection)
 #   dana-mag-checkv   - CheckV (viral quality assessment)
 #   dana-mag-integron   - IntegronFinder (integron + gene cassette detection)
-#   dana-mag-islandpath - IslandPath-DIMOB (genomic island detection)
-#   dana-mag-checkm2    - CheckM2 (MAG quality assessment)
+#   dana-mag-islandpath   - IslandPath-DIMOB (genomic island detection)
+#   dana-mag-macsyfinder  - MacSyFinder v2 (secretion systems + conjugation)
+#   dana-mag-checkm2      - CheckM2 (MAG quality assessment)
 #   dana-bbmap        - BBMap (optional dedupe)
 #
 # Build:
@@ -62,8 +63,9 @@ RUN mamba env create -y -p /opt/conda/envs/dana-mag-prokka   -f /tmp/envs/prokka
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-genomad  -f /tmp/envs/genomad.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkv   -f /tmp/envs/checkv.yml       && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-integron   -f /tmp/envs/integron.yml     && mamba clean -afy
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-islandpath -f /tmp/envs/islandpath.yml  && mamba clean -afy
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkm2   -f /tmp/envs/checkm2.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-islandpath   -f /tmp/envs/islandpath.yml    && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-macsyfinder -f /tmp/envs/macsyfinder.yml  && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkm2     -f /tmp/envs/checkm2.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-bbmap        -f /tmp/envs/bbmap.yml         && mamba clean -afy
 
 # Nextflow + OpenJDK are in the flye env (via flye.yml)
@@ -118,8 +120,13 @@ RUN mkdir -p /usr/local/bin/dana-tools \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
-    && for tool in Dimob.pl; do \
+    && for tool in islandpath; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-islandpath/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in macsyfinder macsydata; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-macsyfinder/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \

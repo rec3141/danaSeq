@@ -60,9 +60,18 @@ def helpMessage() {
       --checkv_db PATH   Path to CheckV database; null = skip CheckV
       --run_integronfinder  Run IntegronFinder integron detection [default: true]
       --run_islandpath    Run IslandPath-DIMOB genomic island detection [default: true]
+      --run_macsyfinder   Run MacSyFinder secretion/conjugation detection [default: true]
+      --macsyfinder_models PATH  Path to MacSyFinder models dir; null = skip
 
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
+
+    Bin Refinement (NCLB):
+      --run_nclb          Run NCLB bin refinement after DAS_Tool [default: false]
+      --nclb_dir PATH     Path to NCLB repository (contains bin/, lib/, envs/)
+      --nclb_base_url URL LLM server URL for conversations [default: http://localhost:1234/v1]
+      --nclb_model NAME   LLM model name [default: auto-detect from server]
+      --nclb_with_ani     Run minimap2 ANI during Elder investigations [default: false]
 
     Resources:
       --assembly_cpus N     CPUs for assembly [default: 24]
@@ -144,12 +153,25 @@ def helpMessage() {
       │   ├── integrons/               (if --run_integronfinder)
       │   │   ├── integrons.tsv
       │   │   └── summary.tsv
-      │   └── genomic_islands/        (if --run_islandpath)
-      │       └── genomic_islands.tsv
+      │   ├── genomic_islands/        (if --run_islandpath)
+      │   │   └── genomic_islands.tsv
+      │   └── macsyfinder/            (if --macsyfinder_models set)
+      │       ├── all_systems.tsv
+      │       └── all_systems.txt
       ├── taxonomy/                    (if --kaiju_db set)
       │   └── kaiju/
       │       ├── kaiju_genes.tsv      Per-gene Kaiju classifications
       │       └── kaiju_contigs.tsv    Per-contig taxonomy (majority vote)
+      ├── binning/nclb/               (if --run_nclb + --nclb_dir set)
+      │   ├── communities/*.fa         Refined community FASTAs
+      │   ├── gathering.json           Identity cards + resonance data
+      │   ├── proposals.json           LLM conversation proposals
+      │   ├── elder_reports.json       SCG redundancy investigations
+      │   ├── chronicle.json           Machine-readable decision log
+      │   ├── chronicle.md            Human-readable narrative
+      │   ├── contig2community.tsv     Contig membership assignments
+      │   ├── quality_report.tsv       Community quality metrics
+      │   └── valence_report.tsv       Per-contig valence scores
       └── pipeline_info/
 
     """.stripIndent()
@@ -188,6 +210,11 @@ include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
 include { INTEGRONFINDER }      from './modules/mge'
 include { ISLANDPATH_DIMOB }    from './modules/mge'
+include { MACSYFINDER }         from './modules/mge'
+include { NCLB_GATHER }         from './modules/refinement'
+include { NCLB_CONVERSE }       from './modules/refinement'
+include { NCLB_ELDERS }         from './modules/refinement'
+include { NCLB_INTEGRATE }      from './modules/refinement'
 
 // ============================================================================
 // Main workflow
@@ -274,6 +301,11 @@ workflow {
         ISLANDPATH_DIMOB(PROKKA_ANNOTATE.out.gbk)
     }
 
+    // 2g. Secretion system + conjugation detection (MacSyFinder, requires Prokka .faa)
+    if (params.run_macsyfinder && params.run_prokka && params.macsyfinder_models) {
+        MACSYFINDER(PROKKA_ANNOTATE.out.proteins)
+    }
+
     // 3. Map each sample back to assembly: fan-out
     ch_map_input = ch_reads.combine(ASSEMBLY_FLYE.out.assembly)
     MAP_READS(ch_map_input)
@@ -357,6 +389,21 @@ workflow {
             .collect()
 
         CHECKM2(ch_all_bins)
+    }
+
+    // 8. NCLB bin refinement (optional — requires --nclb_dir + LLM server)
+    if (params.run_nclb && params.nclb_dir) {
+        // Build a "ready" signal: collect DAS Tool output (+ CheckM2 if available)
+        // This ensures all upstream results are published before NCLB reads them
+        ch_nclb_ready = DASTOOL_CONSENSUS.out.contig2bin
+            .mix(CALCULATE_TNF.out.tnf)
+            .mix(CALCULATE_DEPTHS.out.jgi_depth)
+            .collect()
+
+        NCLB_GATHER(ch_nclb_ready)
+        NCLB_CONVERSE(NCLB_GATHER.out.gathering)
+        NCLB_ELDERS(NCLB_GATHER.out.gathering)
+        NCLB_INTEGRATE(NCLB_CONVERSE.out.proposals)
     }
 }
 
