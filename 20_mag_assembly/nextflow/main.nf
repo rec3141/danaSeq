@@ -49,6 +49,10 @@ def helpMessage() {
     Annotation:
       --run_prokka       Run Prokka gene annotation on co-assembly [default: true]
 
+    Taxonomy:
+      --run_kaiju        Run Kaiju protein-level taxonomy on Prokka proteins [default: true]
+      --kaiju_db PATH    Path to Kaiju database (*.fmi + nodes.dmp + names.dmp); null = skip
+
     Mobile Genetic Elements:
       --run_genomad      Run geNomad virus + plasmid detection [default: true]
       --genomad_db PATH  Path to geNomad database; null = skip geNomad
@@ -142,6 +146,10 @@ def helpMessage() {
       │   │   └── summary.tsv
       │   └── genomic_islands/        (if --run_islandpath)
       │       └── genomic_islands.tsv
+      ├── taxonomy/                    (if --kaiju_db set)
+      │   └── kaiju/
+      │       ├── kaiju_genes.tsv      Per-gene Kaiju classifications
+      │       └── kaiju_contigs.tsv    Per-contig taxonomy (majority vote)
       └── pipeline_info/
 
     """.stripIndent()
@@ -175,6 +183,7 @@ include { BIN_COMEBIN }         from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
+include { KAIJU_CLASSIFY }      from './modules/taxonomy'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
 include { INTEGRONFINDER }      from './modules/mge'
@@ -239,6 +248,11 @@ workflow {
     // 2c. Prokka gene annotation on co-assembly (optional)
     if (params.run_prokka) {
         PROKKA_ANNOTATE(ASSEMBLY_FLYE.out.assembly)
+    }
+
+    // 2c2. Kaiju protein-level taxonomy (requires Prokka .faa + .gff)
+    if (params.run_kaiju && params.kaiju_db && params.run_prokka) {
+        KAIJU_CLASSIFY(PROKKA_ANNOTATE.out.proteins, PROKKA_ANNOTATE.out.gff)
     }
 
     // 2d. Mobile genetic element detection (geNomad + CheckV)

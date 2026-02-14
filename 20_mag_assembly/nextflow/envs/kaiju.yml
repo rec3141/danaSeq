@@ -1,0 +1,7 @@
+name: dana-mag-kaiju
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - kaiju=1.10.1
+  - python>=3.8

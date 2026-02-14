@@ -15,6 +15,7 @@ set -euo pipefail
 #   ./download-databases.sh --genomad          # Download geNomad database only
 #   ./download-databases.sh --checkv           # Download CheckV database only
 #   ./download-databases.sh --checkm2          # Download CheckM2 database only
+#   ./download-databases.sh --kaiju            # Download Kaiju RefSeq database only
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -29,6 +30,7 @@ ENV_DIR="${SCRIPT_DIR}/conda-envs"
 DOWNLOAD_GENOMAD=false
 DOWNLOAD_CHECKV=false
 DOWNLOAD_CHECKM2=false
+DOWNLOAD_KAIJU=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -40,6 +42,7 @@ while (( $# )); do
         --genomad)   DOWNLOAD_GENOMAD=true; INTERACTIVE=false; shift ;;
         --checkv)    DOWNLOAD_CHECKV=true; INTERACTIVE=false; shift ;;
         --checkm2)   DOWNLOAD_CHECKM2=true; INTERACTIVE=false; shift ;;
+        --kaiju)     DOWNLOAD_KAIJU=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -52,6 +55,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_GENOMAD=true
     DOWNLOAD_CHECKV=true
     DOWNLOAD_CHECKM2=true
+    DOWNLOAD_KAIJU=true
 fi
 
 # ============================================================================
@@ -67,6 +71,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "genomad"  "~3.5 GB" "geNomad marker profiles + MMseqs2 (virus + plasmid detection)"
     printf "  %-12s %-8s  %s\n" "checkv"   "~1.4 GB" "CheckV reference genomes (viral quality assessment)"
     printf "  %-12s %-8s  %s\n" "checkm2"  "~3.5 GB" "CheckM2 DIAMOND db (MAG quality assessment)"
+    printf "  %-12s %-8s  %s\n" "kaiju"    "~47 GB"  "Kaiju RefSeq protein db (contig-level taxonomy)"
     echo ""
     echo "Default download directory: ${DB_DIR}"
     echo ""
@@ -74,6 +79,7 @@ show_databases() {
     echo "  --genomad_db ${DB_DIR}/genomad_db"
     echo "  --checkv_db  ${DB_DIR}/checkv_db"
     echo "  --checkm2_db ${DB_DIR}/checkm2_db"
+    echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
     echo ""
 }
 
@@ -92,18 +98,17 @@ if $INTERACTIVE; then
     echo "  1) genomad   - geNomad (virus + plasmid detection)"
     echo "  2) checkv    - CheckV (viral quality assessment)"
     echo "  3) checkm2   - CheckM2 (MAG quality assessment)"
-    echo "  4) all       - All databases"
+    echo "  4) kaiju     - Kaiju RefSeq proteins (contig taxonomy, ~47 GB)"
+    echo "  5) all       - All databases"
     echo ""
-    read -rp "Choice [1-4, or names]: " choice
+    read -rp "Choice [1-5, or names]: " choice
 
     case "$choice" in
-        1|genomad)              DOWNLOAD_GENOMAD=true ;;
-        2|checkv)               DOWNLOAD_CHECKV=true ;;
-        3|checkm2)              DOWNLOAD_CHECKM2=true ;;
-        4|all)                  DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true ;;
-        *1*2*|*genomad*checkv*) DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true ;;
-        *1*3*|*genomad*checkm*) DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKM2=true ;;
-        *2*3*|*checkv*checkm*)  DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true ;;
+        1|genomad)  DOWNLOAD_GENOMAD=true ;;
+        2|checkv)   DOWNLOAD_CHECKV=true ;;
+        3|checkm2)  DOWNLOAD_CHECKM2=true ;;
+        4|kaiju)    DOWNLOAD_KAIJU=true ;;
+        5|all)      DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -111,14 +116,15 @@ if $INTERACTIVE; then
                     1|genomad)  DOWNLOAD_GENOMAD=true ;;
                     2|checkv)   DOWNLOAD_CHECKV=true ;;
                     3|checkm2)  DOWNLOAD_CHECKM2=true ;;
-                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true ;;
+                    4|kaiju)    DOWNLOAD_KAIJU=true ;;
+                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -208,6 +214,33 @@ download_checkm2() {
     echo "  Use with: --checkm2_db ${db_path}"
 }
 
+download_kaiju() {
+    local db_path="${DB_DIR}/kaiju_db"
+    if [ -d "${db_path}" ] && ls "${db_path}"/*.fmi 1>/dev/null 2>&1; then
+        echo "[INFO] Kaiju database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading Kaiju RefSeq reference database (~47 GB)..."
+    echo "  This is a large download and will take a while."
+    echo "  Destination: ${db_path}"
+
+    local kaiju_makedb="${ENV_DIR}/dana-mag-kaiju/bin/kaiju-makedb"
+    if [ ! -x "${kaiju_makedb}" ]; then
+        echo "[ERROR] Kaiju not installed. Run ./install.sh first." >&2
+        return 1
+    fi
+
+    mkdir -p "${db_path}"
+    # kaiju-makedb downloads sequences and builds the FM-index
+    # -s refseq_ref: RefSeq reference genomes (bacteria, archaea, viruses)
+    (cd "${db_path}" && "${kaiju_makedb}" -s refseq_ref)
+    echo "[SUCCESS] Kaiju database downloaded to ${db_path}"
+    echo "  Use with: --kaiju_db ${db_path}"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -229,6 +262,10 @@ if $DOWNLOAD_CHECKM2; then
     download_checkm2 || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_KAIJU; then
+    download_kaiju || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -240,4 +277,5 @@ else
     $DOWNLOAD_GENOMAD && echo "  --genomad_db ${DB_DIR}/genomad_db"
     $DOWNLOAD_CHECKV  && echo "  --checkv_db  ${DB_DIR}/checkv_db"
     $DOWNLOAD_CHECKM2 && echo "  --checkm2_db ${DB_DIR}/checkm2_db"
+    $DOWNLOAD_KAIJU   && echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
 fi

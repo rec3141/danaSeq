@@ -19,6 +19,7 @@ set -euo pipefail
 #   dana-mag-checkv   - CheckV (viral quality assessment)
 #   dana-mag-integron  - IntegronFinder (integron + gene cassette detection)
 #   dana-mag-islandpath - IslandPath-DIMOB (genomic island detection)
+#   dana-mag-kaiju    - Kaiju (protein-level taxonomy via Prokka)
 #   dana-mag-checkm2  - CheckM2 (quality assessment)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
@@ -80,6 +81,7 @@ ENV_YAMLS=(
     checkv.yml
     integron.yml
     islandpath.yml
+    kaiju.yml
     checkm2.yml
     bbmap.yml
 )
@@ -96,6 +98,7 @@ declare -A ENV_CHECK=(
     [dana-mag-checkv]="checkv"
     [dana-mag-integron]="integron_finder"
     [dana-mag-islandpath]="Dimob.pl"
+    [dana-mag-kaiju]="kaiju"
     [dana-mag-checkm2]="checkm2"
     [dana-bbmap]="bbduk.sh"
 )
