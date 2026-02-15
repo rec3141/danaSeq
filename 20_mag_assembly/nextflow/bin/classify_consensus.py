@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Merge Tiara and Whokaryote contig classifications into a consensus.
+"""DEPRECATED: No longer used by the Nextflow pipeline.
+
+Merge Tiara and Whokaryote contig classifications into a consensus.
 
 Consensus logic:
   - If both agree → high confidence
@@ -16,7 +18,7 @@ Output files:
   - organellar_contigs.txt: list of organellar contig IDs (with subdivision)
 
 Usage:
-    classify_consensus.py --tiara tiara_output.tsv --whokaryote whokaryote_out/featuretable_predictions_T.tsv
+    classify_consensus.py --tiara tiara_output.tsv --whokaryote whokaryote_classifications.tsv
                           --outdir consensus_out/
 """
 
@@ -79,7 +81,7 @@ def parse_tiara(path):
 def parse_whokaryote(path):
     """Parse Whokaryote prediction output.
 
-    Whokaryote featuretable_predictions_T.tsv format (tab-separated):
+    Whokaryote classifications format (tab-separated):
       contig  prediction  (+ feature columns)
     Predictions: prokaryote, eukaryote
     """
@@ -148,7 +150,7 @@ def main():
     parser.add_argument('--tiara', required=True,
                         help='Tiara output TSV')
     parser.add_argument('--whokaryote', required=True,
-                        help='Whokaryote featuretable_predictions_T.tsv')
+                        help='Whokaryote classifications TSV')
     parser.add_argument('--outdir', default='.',
                         help='Output directory (default: current directory)')
     args = parser.parse_args()

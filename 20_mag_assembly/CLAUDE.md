@@ -24,8 +24,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
 │   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_CDS, BAKTA_FULL
-│   │   ├── eukaryotic.nf      TIARA_CLASSIFY, WHOKARYOTE_CLASSIFY,
-│   │   │                       CLASSIFY_CONSENSUS, TAG_BINS
+│   │   ├── eukaryotic.nf      TIARA_CLASSIFY, WHOKARYOTE_CLASSIFY
 │   │   ├── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
 │   │   │                       ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
 │   │   └── metabolism.nf       KOFAMSCAN, EMAPPER, DBCAN, MERGE_ANNOTATIONS,
@@ -54,8 +53,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py,
 │   │                           merge_annotations.py, map_annotations_to_bins.py,
-│   │                           kegg_module_completeness.py,
-│   │                           classify_consensus.py, tag_bins.py)
+│   │                           kegg_module_completeness.py)
 │   ├── data/
 │   │   └── islandpath_hmm/    Pfam mobility gene HMM profiles (bundled)
 │   ├── conda-envs/             Pre-built envs (created by install.sh)
@@ -182,8 +180,8 @@ Sample FASTQs (N files)
                             │
                   ┌─────────┼──────────┬────────────────────┐
             ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   TIARA + WHOKARYOTE
-                            └─────┬────┘                    │
-                          MERGE_ANNOTATIONS         CLASSIFY_CONSENSUS
+                            └─────┬────┘
+                          MERGE_ANNOTATIONS
                                   │
                            MAP_TO_BINS
                                   │
@@ -193,8 +191,6 @@ Sample FASTQs (N files)
  SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (serial)
     └────┼────┴────┴────┘
    DASTOOL_CONSENSUS      Consensus integration
-         │
-   TAG_BINS               Domain tagging (optional, needs --run_eukaryotic)
          │ collect()
    CHECKM2                Quality assessment (optional, needs --checkm2_db)
 ```
@@ -335,16 +331,8 @@ results/
 ├── eukaryotic/                    Eukaryotic classification (if --run_eukaryotic)
 │   ├── tiara/
 │   │   └── tiara_output.tsv       Per-contig Tiara classification + probabilities
-│   ├── whokaryote/
-│   │   └── featuretable_predictions_T.tsv  Per-contig Whokaryote prediction
-│   ├── consensus/
-│   │   ├── contig_classifications.tsv  Merged consensus (tiara + whokaryote)
-│   │   ├── prokaryotic_contigs.txt
-│   │   ├── eukaryotic_contigs.txt
-│   │   └── organellar_contigs.txt
-│   └── bin_tags/
-│       ├── all_bin_domain_tags.tsv   Merged domain tags across all binners
-│       └── {binner}_bin_domain_tags.tsv  Per-binner domain tags
+│   └── whokaryote/
+│       └── whokaryote_classifications.tsv  Per-contig Whokaryote classification
 └── pipeline_info/
     ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html

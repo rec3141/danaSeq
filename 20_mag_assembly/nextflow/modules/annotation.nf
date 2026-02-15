@@ -4,7 +4,8 @@ process PROKKA_ANNOTATE {
     tag "prokka"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-prokka"
-    publishDir "${params.outdir}/annotation/prokka", mode: 'copy'
+    publishDir "${params.outdir}/annotation/prokka", mode: 'copy',
+        saveAs: { fn -> fn.minus('prokka_out/') }
 
     input:
     path(assembly)
@@ -52,7 +53,8 @@ process BAKTA_CDS {
     tag "bakta_cds"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-bakta"
-    publishDir "${params.outdir}/annotation/bakta", mode: 'copy'
+    publishDir "${params.outdir}/annotation/bakta/cds", mode: 'copy',
+        saveAs: { fn -> fn.minus('bakta_out/') }
 
     input:
     path(assembly)
@@ -91,7 +93,8 @@ process BAKTA_FULL {
     tag "bakta_full"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-bakta"
-    publishDir "${params.outdir}/annotation/bakta_full", mode: 'copy'
+    publishDir "${params.outdir}/annotation/bakta/full", mode: 'copy',
+        saveAs: { fn -> fn.minus('bakta_out/') }
 
     input:
     path(assembly)

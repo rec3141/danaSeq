@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Tag bins as prokaryotic, eukaryotic, mixed, or organellar based on contig classifications.
+"""DEPRECATED: No longer used by the Nextflow pipeline.
+
+Tag bins as prokaryotic, eukaryotic, mixed, or organellar based on contig classifications.
 
 For each binner's output, counts prokaryotic vs eukaryotic vs organellar contigs per bin,
 calculates domain fractions by both contig count and base pair length, and assigns a tag.

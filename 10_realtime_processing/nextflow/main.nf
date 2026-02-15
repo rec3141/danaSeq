@@ -282,8 +282,10 @@ workflow {
         ch_annotation_proteins = BAKTA_CDS.out.proteins
         ch_annotation_tsv      = BAKTA_CDS.out.tsv
 
-        // Slow path: full annotation — runs in parallel, doesn't block downstream
-        BAKTA_FULL(ch_fasta)
+        // Slow path: full annotation with ncRNA/tRNA/CRISPR (optional)
+        if (params.bakta_full) {
+            BAKTA_FULL(ch_fasta)
+        }
     }
 
     if (effective_annotator != 'none') {

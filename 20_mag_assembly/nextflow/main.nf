@@ -51,6 +51,7 @@ def helpMessage() {
     Annotation:
       --annotator STR    Annotator to use: 'prokka', 'bakta', or 'none' [default: prokka]
       --bakta_db PATH    Path to Bakta database (required when using Bakta)
+      --bakta_full       Also run full Bakta (ncRNA/tRNA/CRISPR — slow) [default: false]
       --run_prokka       (deprecated) Run Prokka — use --annotator instead [default: true]
       --run_bakta        (deprecated) Run Bakta — use --annotator instead [default: false]
 
@@ -198,17 +199,9 @@ def helpMessage() {
       │       └── community_annotations.tsv  All proteins with bin_id column
       ├── eukaryotic/                   (if --run_eukaryotic)
       │   ├── tiara/
-      │   │   └── tiara_output.tsv        Per-contig Tiara classification
-      │   ├── whokaryote/
-      │   │   └── featuretable_predictions_T.tsv  Per-contig Whokaryote classification
-      │   ├── consensus/
-      │   │   ├── contig_classifications.tsv  Merged consensus (tiara + whokaryote)
-      │   │   ├── prokaryotic_contigs.txt
-      │   │   ├── eukaryotic_contigs.txt
-      │   │   └── organellar_contigs.txt
-      │   └── bin_tags/
-      │       ├── all_bin_domain_tags.tsv     Merged domain tags across all binners
-      │       └── {binner}_bin_domain_tags.tsv  Per-binner domain tags
+      │   │   └── tiara_output.tsv        Per-contig Tiara classification + probabilities
+      │   └── whokaryote/
+      │       └── whokaryote_classifications.tsv  Per-contig Whokaryote classification
       ├── taxonomy/                    (if --kaiju_db set)
       │   └── kaiju/
       │       ├── kaiju_genes.tsv      Per-gene Kaiju classifications
@@ -284,8 +277,6 @@ include { NCLB_ELDERS }         from './modules/refinement'
 include { NCLB_INTEGRATE }      from './modules/refinement'
 include { TIARA_CLASSIFY }      from './modules/eukaryotic'
 include { WHOKARYOTE_CLASSIFY } from './modules/eukaryotic'
-include { CLASSIFY_CONSENSUS }  from './modules/eukaryotic'
-include { TAG_BINS }            from './modules/eukaryotic'
 include { KOFAMSCAN }           from './modules/metabolism'
 include { EMAPPER }             from './modules/metabolism'
 include { DBCAN }               from './modules/metabolism'
@@ -363,8 +354,10 @@ workflow {
         ch_proteins = BAKTA_CDS.out.proteins
         ch_gff      = BAKTA_CDS.out.gff
 
-        // Slow path: full annotation (hours) — runs in parallel, doesn't block downstream
-        BAKTA_FULL(ASSEMBLY_FLYE.out.assembly)
+        // Slow path: full annotation with ncRNA/tRNA/CRISPR (hours, optional)
+        if (params.bakta_full) {
+            BAKTA_FULL(ASSEMBLY_FLYE.out.assembly)
+        }
     }
 
     // 2c2. Kaiju protein-level taxonomy (requires annotation .faa + .gff)
@@ -380,12 +373,6 @@ workflow {
         // Whokaryote: gene structure RF — uses annotation GFF if available.
         // Patched whokaryote handles both Prodigal and standard GFF3 (Bakta, PGAP).
         WHOKARYOTE_CLASSIFY(ASSEMBLY_FLYE.out.assembly, ch_gff)
-
-        // Consensus voting: merge Tiara + Whokaryote predictions
-        CLASSIFY_CONSENSUS(
-            TIARA_CLASSIFY.out.classifications,
-            WHOKARYOTE_CLASSIFY.out.classifications
-        )
     }
 
     // 2d. Mobile genetic element detection (geNomad + CheckV)
@@ -518,24 +505,6 @@ workflow {
         ch_bin_files,
         ch_bin_labels
     )
-
-    // 6b. Tag bins by domain (eukaryotic classification post-hoc)
-    if (params.run_eukaryotic) {
-        // Reuse already-collected binner files/labels + add DAS Tool contig2bin
-        ch_tag_bin_files = ch_bin_files
-            .mix(DASTOOL_CONSENSUS.out.contig2bin)
-            .collect()
-        ch_tag_bin_labels = ch_bin_labels
-            .mix(Channel.of('dastool'))
-            .collect()
-
-        TAG_BINS(
-            CLASSIFY_CONSENSUS.out.classifications,
-            ASSEMBLY_FLYE.out.assembly,
-            ch_tag_bin_files,
-            ch_tag_bin_labels
-        )
-    }
 
     // 7. Quality assessment with CheckM2 (optional — requires database path)
     if (params.checkm2_db) {
