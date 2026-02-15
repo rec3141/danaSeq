@@ -368,6 +368,13 @@ results/
 
 ## Development Notes
 
+### Running the Pipeline (IMPORTANT)
+
+**Always use `./run-mag.sh` to launch the pipeline, never `nextflow run main.nf` directly.**
+`run-mag.sh` records every invocation to `<outdir>/pipeline_info/run_command.sh`, which is
+essential for resuming runs with the exact same parameters. Running Nextflow directly skips
+this logging, making it impossible to reliably resume later.
+
 ### Adding a New Binner
 
 1. Add a process to `modules/binning.nf` that outputs `path("LABEL_bins.tsv")` in DAS_Tool format (contig\tbin, tab-separated)
