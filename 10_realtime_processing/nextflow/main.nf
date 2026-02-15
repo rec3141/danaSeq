@@ -157,7 +157,8 @@ include { QC_FILTLONG }      from './modules/qc'
 include { CONVERT_TO_FASTA } from './modules/qc'
 include { KRAKEN2_CLASSIFY }  from './modules/kraken'
 include { PROKKA_ANNOTATE }   from './modules/prokka'
-include { BAKTA_ANNOTATE }    from './modules/bakta'
+include { BAKTA_CDS }          from './modules/bakta'
+include { BAKTA_FULL }         from './modules/bakta'
 include { SENDSKETCH }        from './modules/sketch'
 include { HMM_SEARCH }        from './modules/hmm'
 include { TETRAMER_FREQ }     from './modules/tetramer'
@@ -276,9 +277,13 @@ workflow {
         ch_annotation_proteins = PROKKA_ANNOTATE.out.proteins
         ch_annotation_tsv      = PROKKA_ANNOTATE.out.tsv
     } else if (effective_annotator == 'bakta') {
-        BAKTA_ANNOTATE(ch_fasta)
-        ch_annotation_proteins = BAKTA_ANNOTATE.out.proteins
-        ch_annotation_tsv      = BAKTA_ANNOTATE.out.tsv
+        // Fast path: CDS-only annotation — feeds HMM search and DB integration
+        BAKTA_CDS(ch_fasta)
+        ch_annotation_proteins = BAKTA_CDS.out.proteins
+        ch_annotation_tsv      = BAKTA_CDS.out.tsv
+
+        // Slow path: full annotation — runs in parallel, doesn't block downstream
+        BAKTA_FULL(ch_fasta)
     }
 
     if (effective_annotator != 'none') {

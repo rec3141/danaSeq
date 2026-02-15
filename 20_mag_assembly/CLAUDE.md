@@ -120,8 +120,7 @@ mamba run -p conda-envs/dana-mag-flye \
 
 ### Re-running a Pipeline with -resume
 
-Nextflow's `-resume` requires the **exact same parameters** as the original run, or it will
-re-compute cached tasks instead of reusing them. Every run appends its exact command to:
+`run-mag.sh` automatically records the Nextflow session ID in each run command saved to:
 
 ```
 <outdir>/pipeline_info/run_command.sh
@@ -131,33 +130,20 @@ To re-run (e.g. after adding a new process or fixing a bug), use the **last line
 
 ```bash
 cd nextflow
-# Run the last saved command (already includes -resume)
 tail -1 <outdir>/pipeline_info/run_command.sh | bash
 ```
 
-If `run_command.sh` doesn't exist (older runs), find the command in the Nextflow log:
+The saved command includes `-resume <session-id>`, so cached tasks are always found —
+even after code changes that would otherwise create a new session.
 
-```bash
-grep '\-\-input' .nextflow.log.1   # check the most recent rotated log
-```
+**Session handling:** `run-mag.sh` handles sessions three ways:
+1. **Auto-detect (default):** reads the last session ID from `run_command.sh` if it exists
+2. **Explicit:** `--session <uuid>` to resume from a specific session
+3. **Post-run capture:** after each run, extracts the actual session UUID from `.nextflow.log`
+   and writes it into `run_command.sh` so future runs can resume from it
 
 **Common pitfall:** changing `--input` path, `--assembly_cpus`, or other params will
 invalidate the task hash and force a full re-run. Always use the saved command.
-
-**Resuming a specific session:** When you modify pipeline code (e.g. add a new process or
-fix a bug in `main.nf`/`modules/*.nf`), Nextflow creates a new session on the next run.
-Plain `-resume` will not find cached tasks from the old session. To reuse the old cache,
-resume from the specific session ID:
-
-```bash
-# Find the session ID from the previous run
-nextflow log | head -5                    # shows recent session IDs
-# Or look in pipeline_info/
-cat <outdir>/pipeline_info/run_command.sh  # shows the session used
-
-# Resume from that exact session
-nextflow run main.nf <same params> -resume <session-id>
-```
 
 Only the processes whose script block changed will re-run; all others will be cached.
 

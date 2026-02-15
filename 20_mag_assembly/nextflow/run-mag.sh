@@ -93,6 +93,8 @@ usage() {
 
 INPUT_HOST=""
 OUTDIR_HOST=""
+RESUME_SESSION=""
+AUTO_SESSION=true
 
 while (( $# )); do
     case "$1" in
@@ -118,6 +120,11 @@ while (( $# )); do
             [[ -z "${2:-}" ]] && die "--outdir requires a directory path"
             OUTDIR_HOST="$(realpath -m "$2")"
             shift 2 ;;
+        --session)
+            [[ -z "${2:-}" ]] && die "--session requires a session ID"
+            RESUME_SESSION="$2"
+            AUTO_SESSION=false
+            shift 2 ;;
         *)
             NF_ARGS+=("$1")
             shift ;;
@@ -142,6 +149,21 @@ fi
 [[ -w "$OUTDIR_HOST" ]] || die "Output directory is not writable: $OUTDIR_HOST"
 
 # ============================================================================
+# Auto-detect session ID from previous runs in this outdir
+# ============================================================================
+
+if [[ "$AUTO_SESSION" == true && -z "$RESUME_SESSION" ]]; then
+    # Extract session ID from last run_command.sh entry (UUID after -resume)
+    if [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.sh" ]]; then
+        RESUME_SESSION=$(grep -oP '(?<=-resume )[0-9a-f-]{36}' \
+            "${OUTDIR_HOST}/pipeline_info/run_command.sh" | tail -1)
+        if [[ -n "$RESUME_SESSION" ]]; then
+            echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"
+        fi
+    fi
+fi
+
+# ============================================================================
 # Docker mode
 # ============================================================================
 
@@ -164,7 +186,7 @@ if [[ "$USE_DOCKER" == true ]]; then
         "$IMAGE"
         run /pipeline/main.nf
         "${NF_ARGS[@]}"
-        -resume
+        -resume ${RESUME_SESSION}
     )
 
     echo "[INFO] Mode:   Docker"
@@ -173,11 +195,19 @@ if [[ "$USE_DOCKER" == true ]]; then
     echo "[INFO] Running: ${DOCKER_CMD[*]}"
     echo ""
 
-    # Save exact command for re-running with -resume
     mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
+
+    "${DOCKER_CMD[@]}"
+    NF_EXIT=$?
+
+    # Capture session ID from Nextflow log and save command with it for reliable resume
+    NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
+    if [[ -n "$NF_SESSION" ]]; then
+        DOCKER_CMD[-1]="-resume ${NF_SESSION}"
+    fi
     printf '%s\n' "${DOCKER_CMD[*]}" >> "${OUTDIR_HOST}/pipeline_info/run_command.sh"
 
-    exec "${DOCKER_CMD[@]}"
+    exit $NF_EXIT
 fi
 
 # ============================================================================
@@ -195,7 +225,7 @@ LOCAL_CMD=(
     --input "$INPUT_HOST"
     --outdir "$OUTDIR_HOST"
     "${NF_ARGS[@]}"
-    -resume
+    -resume ${RESUME_SESSION}
 )
 
 echo "[INFO] Mode:   Local (conda)"
@@ -204,8 +234,16 @@ echo "[INFO] Output: $OUTDIR_HOST"
 echo "[INFO] Running: ${LOCAL_CMD[*]}"
 echo ""
 
-# Save exact command for re-running with -resume
 mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
+
+"${LOCAL_CMD[@]}"
+NF_EXIT=$?
+
+# Capture session ID from Nextflow log and save command with it for reliable resume
+NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
+if [[ -n "$NF_SESSION" ]]; then
+    LOCAL_CMD[-1]="-resume ${NF_SESSION}"
+fi
 printf '%s\n' "${LOCAL_CMD[*]}" >> "${OUTDIR_HOST}/pipeline_info/run_command.sh"
 
-exec "${LOCAL_CMD[@]}"
+exit $NF_EXIT
