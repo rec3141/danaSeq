@@ -377,13 +377,9 @@ workflow {
         // Tiara: deep learning k-mer NN — runs on contigs directly
         TIARA_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
 
-        // Whokaryote: gene structure RF — uses Prokka GFF (Prodigal-based) if available.
-        // Bakta GFF3 has different attribute format (no rbs_motif field) and crashes
-        // whokaryote's parser, so let whokaryote run its own Prodigal in that case.
-        ch_whokaryote_gff = (effective_annotator == 'prokka')
-            ? ch_gff
-            : Channel.of(file('NO_GFF'))
-        WHOKARYOTE_CLASSIFY(ASSEMBLY_FLYE.out.assembly, ch_whokaryote_gff)
+        // Whokaryote: gene structure RF — uses annotation GFF if available.
+        // Patched whokaryote handles both Prodigal and standard GFF3 (Bakta, PGAP).
+        WHOKARYOTE_CLASSIFY(ASSEMBLY_FLYE.out.assembly, ch_gff)
 
         // Consensus voting: merge Tiara + Whokaryote predictions
         CLASSIFY_CONSENSUS(
