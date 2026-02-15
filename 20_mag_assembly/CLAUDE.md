@@ -23,7 +23,9 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
-│   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_ANNOTATE
+│   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_CDS, BAKTA_FULL
+│   │   ├── eukaryotic.nf      TIARA_CLASSIFY, WHOKARYOTE_CLASSIFY,
+│   │   │                       CLASSIFY_CONSENSUS, TAG_BINS
 │   │   ├── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
 │   │   │                       ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
 │   │   └── metabolism.nf       KOFAMSCAN, EMAPPER, DBCAN, MERGE_ANNOTATIONS,
@@ -47,10 +49,13 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── emapper.yml        eggNOG-mapper (COG/GO/EC/KEGG/Pfam)
 │   │   ├── dbcan.yml          dbCAN3 (CAZyme annotation)
 │   │   ├── checkm2.yml         CheckM2
+│   │   ├── tiara.yml           Tiara (eukaryotic contig classification, deep learning)
+│   │   ├── whokaryote.yml     Whokaryote (eukaryotic classification, gene structure RF)
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py,
 │   │                           merge_annotations.py, map_annotations_to_bins.py,
-│   │                           kegg_module_completeness.py)
+│   │                           kegg_module_completeness.py,
+│   │                           classify_consensus.py, tag_bins.py)
 │   ├── data/
 │   │   └── islandpath_hmm/    Pfam mobility gene HMM profiles (bundled)
 │   ├── conda-envs/             Pre-built envs (created by install.sh)
@@ -189,10 +194,10 @@ Sample FASTQs (N files)
          │ collect()        │                │
    CALCULATE_DEPTHS   PROKKA|BAKTA    CHECKV_QUALITY
                             │
-                  ┌─────────┼──────────┐
-            ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   (metabolism, parallel)
-                            └─────┬────┘
-                          MERGE_ANNOTATIONS
+                  ┌─────────┼──────────┬────────────────────┐
+            ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   TIARA + WHOKARYOTE
+                            └─────┬────┘                    │
+                          MERGE_ANNOTATIONS         CLASSIFY_CONSENSUS
                                   │
                            MAP_TO_BINS
                                   │
@@ -202,6 +207,8 @@ Sample FASTQs (N files)
  SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (serial)
     └────┼────┴────┴────┘
    DASTOOL_CONSENSUS      Consensus integration
+         │
+   TAG_BINS               Domain tagging (optional, needs --run_eukaryotic)
          │ collect()
    CHECKM2                Quality assessment (optional, needs --checkm2_db)
 ```
@@ -222,7 +229,7 @@ Sample FASTQs (N files)
 
 ### Conda Environments
 
-Sixteen isolated environments avoid dependency conflicts:
+Eighteen isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
@@ -241,6 +248,8 @@ Sixteen isolated environments avoid dependency conflicts:
 | `dana-mag-emapper` | eggNOG-mapper, DIAMOND | COG/GO/EC/KEGG/Pfam functional annotation |
 | `dana-mag-dbcan` | run_dbcan, HMMER, DIAMOND | CAZyme annotation (3-method consensus) |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
+| `dana-mag-tiara` | Tiara | Deep learning k-mer eukaryotic classification (98%+ accuracy) |
+| `dana-mag-whokaryote` | Whokaryote, Prodigal | Gene structure-based eukaryotic classification (random forest) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
 ### Nextflow Config Profiles
@@ -286,7 +295,9 @@ results/
 │   │   ├── contig2bin.tsv      Contig-to-bin assignments
 │   │   ├── allbins.fa          All bins concatenated
 │   │   ├── bin_quality.tsv     Per-bin SCG completeness/redundancy (all binners)
-│   │   └── summary.tsv         DAS_Tool consensus winners with scores
+│   │   ├── summary.tsv         DAS_Tool consensus winners with scores
+│   │   ├── bacteria.scg        Bacterial single-copy gene assignments (protein_id\tSCG_name)
+│   │   └── archaea.scg         Archaeal single-copy gene assignments (protein_id\tSCG_name)
 │   └── checkm2/
 │       └── quality_report.tsv  CheckM2 quality (if --checkm2_db set)
 ├── mge/                           MGE detection (if --genomad_db set)
@@ -335,6 +346,19 @@ results/
 │   │   └── module_heatmap.svg       Clustered heatmap
 │   └── community/
 │       └── community_annotations.tsv  All proteins with bin_id column
+├── eukaryotic/                    Eukaryotic classification (if --run_eukaryotic)
+│   ├── tiara/
+│   │   └── tiara_output.tsv       Per-contig Tiara classification + probabilities
+│   ├── whokaryote/
+│   │   └── featuretable_predictions_T.tsv  Per-contig Whokaryote prediction
+│   ├── consensus/
+│   │   ├── contig_classifications.tsv  Merged consensus (tiara + whokaryote)
+│   │   ├── prokaryotic_contigs.txt
+│   │   ├── eukaryotic_contigs.txt
+│   │   └── organellar_contigs.txt
+│   └── bin_tags/
+│       ├── all_bin_domain_tags.tsv   Merged domain tags across all binners
+│       └── {binner}_bin_domain_tags.tsv  Per-binner domain tags
 └── pipeline_info/
     ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html
