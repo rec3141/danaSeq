@@ -8,7 +8,7 @@ set -euo pipefail
 # Creates isolated conda environments for the MAG assembly pipeline.
 # All envs are prefix-installed under ./conda-envs/.
 #
-# Nineteen environments are needed because of dependency conflicts:
+# Twenty environments are needed because of dependency conflicts:
 #   dana-mag-flye    - Flye + Filtlong (Python version conflicts)
 #   dana-mag-mapping - minimap2, samtools (universal, no conflicts)
 #   dana-mag-semibin - SemiBin2, LorBin (ML dependencies: PyTorch isolated)
@@ -25,6 +25,7 @@ set -euo pipefail
 #   dana-mag-macsyfinder - MacSyFinder (secretion systems + conjugation)
 #   dana-mag-defensefinder - DefenseFinder (anti-phage defense systems)
 #   dana-mag-kaiju    - Kaiju (protein-level taxonomy via Prokka)
+#   dana-mag-kraken2  - Kraken2 (k-mer contig-level taxonomy)
 #   dana-mag-checkm2  - CheckM2 (quality assessment)
 #   dana-mag-tiara    - Tiara (deep learning eukaryotic contig classification)
 #   dana-mag-whokaryote - Whokaryote (gene structure-based eukaryotic classification)
@@ -96,6 +97,7 @@ ENV_YAMLS=(
     macsyfinder.yml
     defensefinder.yml
     kaiju.yml
+    kraken2.yml
     checkm2.yml
     tiara.yml
     whokaryote.yml
@@ -122,6 +124,7 @@ declare -A ENV_CHECK=(
     [dana-mag-macsyfinder]="macsyfinder"
     [dana-mag-defensefinder]="defense-finder"
     [dana-mag-kaiju]="kaiju"
+    [dana-mag-kraken2]="kraken2"
     [dana-mag-checkm2]="checkm2"
     [dana-mag-tiara]="tiara"
     [dana-mag-whokaryote]="whokaryote.py"

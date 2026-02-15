@@ -47,6 +47,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── kofamscan.yml      KofamScan (KEGG Orthology)
 │   │   ├── emapper.yml        eggNOG-mapper (COG/GO/EC/KEGG/Pfam)
 │   │   ├── dbcan.yml          dbCAN3 (CAZyme annotation)
+│   │   ├── kraken2.yml         Kraken2 (k-mer contig-level taxonomy)
 │   │   ├── checkm2.yml         CheckM2
 │   │   ├── tiara.yml           Tiara (eukaryotic contig classification, deep learning)
 │   │   ├── whokaryote.yml     Whokaryote (eukaryotic classification, gene structure RF)
@@ -174,8 +175,8 @@ directive or in the output file copy logic (e.g. wrong filename pattern in the s
 Sample FASTQs (N files)
          │ collect()
    ASSEMBLY_FLYE          Fan-in: all reads → 1 co-assembly
-         ├──────────────────────┬──────────────────────┬──────────────────┐
-   MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY   INTEGRONFINDER
+         ├──────────────────────┬──────────────────────┬──────────────────┬───────────────────┐
+   MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY   INTEGRONFINDER   KRAKEN2_CLASSIFY   SENDSKETCH_CLASSIFY
          │ collect()        │                │
    CALCULATE_DEPTHS   PROKKA|BAKTA    CHECKV_QUALITY
                             │
@@ -212,7 +213,7 @@ Sample FASTQs (N files)
 
 ### Conda Environments
 
-Eighteen isolated environments avoid dependency conflicts:
+Nineteen isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
@@ -230,6 +231,7 @@ Eighteen isolated environments avoid dependency conflicts:
 | `dana-mag-kofamscan` | KofamScan, HMMER | KEGG Orthology assignment via adaptive HMM thresholds |
 | `dana-mag-emapper` | eggNOG-mapper, DIAMOND | COG/GO/EC/KEGG/Pfam functional annotation |
 | `dana-mag-dbcan` | run_dbcan, HMMER, DIAMOND | CAZyme annotation (3-method consensus) |
+| `dana-mag-kraken2` | Kraken2 | k-mer contig-level taxonomy (no annotation needed; maxForks 1) |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-mag-tiara` | Tiara | Deep learning k-mer eukaryotic classification (98%+ accuracy) |
 | `dana-mag-whokaryote` | Whokaryote, Prodigal | Gene structure-based eukaryotic classification (random forest) |
@@ -330,6 +332,15 @@ results/
 │   │   └── module_heatmap.svg       Clustered heatmap
 │   └── community/
 │       └── community_annotations.tsv  All proteins with bin_id column
+├── taxonomy/                      Taxonomy classification
+│   ├── kaiju/                     Protein-level taxonomy (if --kaiju_db set)
+│   │   ├── kaiju_genes.tsv        Per-gene Kaiju classifications
+│   │   └── kaiju_contigs.tsv      Per-contig taxonomy (majority vote)
+│   ├── kraken2/                   k-mer taxonomy (if --kraken2_db set)
+│   │   ├── kraken2_contigs.tsv    Per-contig Kraken2 classifications + lineage
+│   │   └── kraken2_report.txt     Standard Kraken2 report (for Krona/Pavian)
+│   └── sendsketch/                GTDB MinHash taxonomy (if --sendsketch_address set)
+│       └── sendsketch_contigs.tsv Per-contig GTDB taxonomy + ANI
 ├── eukaryotic/                    Eukaryotic analysis (if --run_eukaryotic or --run_metaeuk)
 │   ├── tiara/
 │   │   └── tiara_output.tsv       Per-contig Tiara classification + probabilities
@@ -374,7 +385,7 @@ this logging, making it impossible to reliably resume later.
 Module files are in `nextflow/modules/*.nf`. Each process has:
 - `conda` directive pointing to the pre-built env in `conda-envs/`
 - `publishDir` for output routing (with `saveAs` to normalize filenames)
-- Resource labels (`process_low`, `process_medium`, `process_high`)
+- Resource labels (`process_low`, `process_medium`, `process_high`, `process_kraken`)
 - Graceful error handling for edge cases (empty output, tool crashes)
 
 ### Known Limitations
@@ -414,6 +425,8 @@ Current database paths for pipeline flags:
 - `--macsyfinder_models /data/scratch/refdbs/macsyfinder_models`
 - `--defensefinder_models /data/scratch/refdbs/defensefinder_models`
 - `--metaeuk_db /data/scratch/refdbs/metaeuk/orthodb_v11_euk/metaeuk_db`
+- `--kraken2_db /data/scratch/refdbs/krakendb/pluspfp_08gb`
+- `--sendsketch_address http://10.151.50.41:3068/sketch`  (Ratnakara GTDB TaxServer)
 
 ---
 

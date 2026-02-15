@@ -23,6 +23,7 @@ set -euo pipefail
 #   ./download-databases.sh --eggnog           # Download eggNOG diamond database (~12 GB)
 #   ./download-databases.sh --dbcan            # Download dbCAN databases (~2 GB)
 #   ./download-databases.sh --metaeuk          # Download MetaEuk OrthoDB Eukaryota (~23 GB)
+#   ./download-databases.sh --kraken2         # Download Kraken2 PlusPFP-8 (~8 GB)
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -45,6 +46,7 @@ DOWNLOAD_KOFAM=false
 DOWNLOAD_EGGNOG=false
 DOWNLOAD_DBCAN=false
 DOWNLOAD_METAEUK=false
+DOWNLOAD_KRAKEN2=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -64,6 +66,7 @@ while (( $# )); do
         --eggnog)    DOWNLOAD_EGGNOG=true; INTERACTIVE=false; shift ;;
         --dbcan)     DOWNLOAD_DBCAN=true; INTERACTIVE=false; shift ;;
         --metaeuk)   DOWNLOAD_METAEUK=true; INTERACTIVE=false; shift ;;
+        --kraken2)   DOWNLOAD_KRAKEN2=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -84,6 +87,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_EGGNOG=true
     DOWNLOAD_DBCAN=true
     DOWNLOAD_METAEUK=true
+    DOWNLOAD_KRAKEN2=true
 fi
 
 # ============================================================================
@@ -107,6 +111,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "eggnog"   "~12 GB"  "eggNOG-mapper DIAMOND db (COG/GO/EC/KEGG/Pfam)"
     printf "  %-12s %-8s  %s\n" "dbcan"    "~2 GB"   "dbCAN HMM + DIAMOND + substrate db (CAZyme annotation)"
     printf "  %-12s %-8s  %s\n" "metaeuk"  "~8.5 GB" "MetaEuk OrthoDB v11 Eukaryota (eukaryotic gene prediction)"
+    printf "  %-12s %-8s  %s\n" "kraken2"  "~8 GB"   "Kraken2 PlusPFP-8 (k-mer contig-level taxonomy)"
     echo ""
     echo "  Note: Tiara and Whokaryote models are bundled with their conda packages"
     echo "  (no separate database download needed)."
@@ -125,6 +130,7 @@ show_databases() {
     echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
     echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
     echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
+    echo "  --kraken2_db ${DB_DIR}/kraken2_db"
     echo ""
 }
 
@@ -151,9 +157,10 @@ if $INTERACTIVE; then
     echo "  9) eggnog    - eggNOG-mapper DIAMOND db (~12 GB)"
     echo " 10) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~2 GB)"
     echo " 11) metaeuk   - MetaEuk OrthoDB v12 Eukaryota (~23 GB)"
-    echo " 12) all       - All databases"
+    echo " 12) kraken2   - Kraken2 PlusPFP-8 (contig taxonomy, ~8 GB)"
+    echo " 13) all       - All databases"
     echo ""
-    read -rp "Choice [1-12, or names]: " choice
+    read -rp "Choice [1-13, or names]: " choice
 
     case "$choice" in
         1|genomad)  DOWNLOAD_GENOMAD=true ;;
@@ -167,7 +174,8 @@ if $INTERACTIVE; then
         9|eggnog)   DOWNLOAD_EGGNOG=true ;;
         10|dbcan)   DOWNLOAD_DBCAN=true ;;
         11|metaeuk) DOWNLOAD_METAEUK=true ;;
-        12|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true ;;
+        12|kraken2) DOWNLOAD_KRAKEN2=true ;;
+        13|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -183,14 +191,15 @@ if $INTERACTIVE; then
                     9|eggnog)   DOWNLOAD_EGGNOG=true ;;
                     10|dbcan)   DOWNLOAD_DBCAN=true ;;
                     11|metaeuk) DOWNLOAD_METAEUK=true ;;
-                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true ;;
+                    12|kraken2) DOWNLOAD_KRAKEN2=true ;;
+                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -536,6 +545,32 @@ download_metaeuk() {
     echo "  Use with: --metaeuk_db ${db_path}/metaeuk_db"
 }
 
+download_kraken2() {
+    local db_path="${DB_DIR}/kraken2_db"
+    if [ -d "${db_path}" ] && [ -f "${db_path}/hash.k2d" ]; then
+        echo "[INFO] Kraken2 database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading Kraken2 PlusPFP-8 database (~8 GB)..."
+    echo "  Source: genome-idx S3 index (bacteria, archaea, viruses, fungi, protozoa, UniVec_Core)"
+    echo "  Destination: ${db_path}"
+
+    mkdir -p "${db_path}"
+
+    local url="https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_08gb_20240605.tar.gz"
+    local tarball="${db_path}/k2_pluspfp_08gb.tar.gz"
+
+    wget -q --show-progress -O "${tarball}" "${url}"
+    tar -xzf "${tarball}" -C "${db_path}"
+    rm -f "${tarball}"
+
+    echo "[SUCCESS] Kraken2 database downloaded to ${db_path}"
+    echo "  Use with: --kraken2_db ${db_path}"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -589,6 +624,10 @@ if $DOWNLOAD_METAEUK; then
     download_metaeuk || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_KRAKEN2; then
+    download_kraken2 || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -608,4 +647,5 @@ else
     $DOWNLOAD_EGGNOG  && echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
     $DOWNLOAD_DBCAN   && echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
     $DOWNLOAD_METAEUK && echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
+    $DOWNLOAD_KRAKEN2 && echo "  --kraken2_db ${DB_DIR}/kraken2_db"
 fi

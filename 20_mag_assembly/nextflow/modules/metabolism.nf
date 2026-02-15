@@ -125,13 +125,12 @@ process DBCAN {
     fi
 
     set +e
-    run_dbcan \\
-        "${proteins}" \\
-        protein \\
+    run_dbcan CAZyme_annotation \\
+        --input_raw_data "${proteins}" \\
+        --mode protein \\
         --db_dir "${dbcan_db}" \\
-        --out_dir dbcan_out \\
-        --dia_cpu ${task.cpus} \\
-        --hmm_cpu ${task.cpus}
+        --output_dir dbcan_out \\
+        --threads ${task.cpus}
     dbcan_exit=\$?
     set -e
 
@@ -189,7 +188,7 @@ process MAP_TO_BINS {
     tag "map_to_bins"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
-    publishDir "${params.outdir}/metabolism/per_mag", mode: 'copy', pattern: 'per_mag/*.tsv'
+    publishDir "${params.outdir}/metabolism", mode: 'copy', pattern: 'per_mag'
     publishDir "${params.outdir}/metabolism/community", mode: 'copy', pattern: 'community_annotations.tsv'
 
     input:

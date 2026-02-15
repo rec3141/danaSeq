@@ -58,6 +58,11 @@ def helpMessage() {
     Taxonomy:
       --run_kaiju        Run Kaiju protein-level taxonomy on Prokka proteins [default: true]
       --kaiju_db PATH    Path to Kaiju database (*.fmi + nodes.dmp + names.dmp); null = skip
+      --run_kraken2      Run Kraken2 k-mer taxonomy on contigs (no annotation needed) [default: false]
+      --kraken2_db PATH  Path to Kraken2 database (hash.k2d + nodes.dmp + names.dmp); null = skip
+      --kraken2_confidence N  Kraken2 confidence threshold [default: 0.0]
+      --run_sendsketch   Run BBSketch/sendsketch GTDB taxonomy (requires TaxServer) [default: false]
+      --sendsketch_address URL  BBSketch TaxServer URL (e.g. http://host:3068/sketch); null = skip
 
     Metabolic Profiling:
       --run_metabolism    Run metabolic profiling (KofamScan + eggNOG + dbCAN) [default: false]
@@ -211,10 +216,15 @@ def helpMessage() {
       │       ├── metaeuk_codon.fas       Nucleotide coding sequences
       │       ├── metaeuk.gff             Gene structures (exon boundaries)
       │       └── metaeuk_headers.tsv     Internal ID mapping
-      ├── taxonomy/                    (if --kaiju_db set)
-      │   └── kaiju/
-      │       ├── kaiju_genes.tsv      Per-gene Kaiju classifications
-      │       └── kaiju_contigs.tsv    Per-contig taxonomy (majority vote)
+      ├── taxonomy/                    (if --kaiju_db or --kraken2_db set)
+      │   ├── kaiju/                   (if --kaiju_db set)
+      │   │   ├── kaiju_genes.tsv      Per-gene Kaiju classifications
+      │   │   └── kaiju_contigs.tsv    Per-contig taxonomy (majority vote)
+      │   ├── kraken2/                 (if --kraken2_db set)
+      │   │   ├── kraken2_contigs.tsv  Per-contig Kraken2 classifications + lineage
+      │   │   └── kraken2_report.txt   Standard Kraken2 report (for Krona/Pavian)
+      │   └── sendsketch/             (if --sendsketch_address set)
+      │       └── sendsketch_contigs.tsv  Per-contig GTDB taxonomy + ANI
       ├── binning/nclb/               (if --run_nclb + --nclb_dir set)
       │   ├── communities/*.fa         Refined community FASTAs
       │   ├── gathering.json           Identity cards + resonance data
@@ -274,6 +284,8 @@ include { PROKKA_ANNOTATE }     from './modules/annotation'
 include { BAKTA_CDS }            from './modules/annotation'
 include { BAKTA_FULL }           from './modules/annotation'
 include { KAIJU_CLASSIFY }      from './modules/taxonomy'
+include { KRAKEN2_CLASSIFY }   from './modules/taxonomy'
+include { SENDSKETCH_CLASSIFY } from './modules/taxonomy'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
 include { INTEGRONFINDER }      from './modules/mge'
@@ -373,6 +385,16 @@ workflow {
     // 2c2. Kaiju protein-level taxonomy (requires annotation .faa + .gff)
     if (params.run_kaiju && params.kaiju_db && effective_annotator != 'none') {
         KAIJU_CLASSIFY(ch_proteins, ch_gff)
+    }
+
+    // 2c2b. Kraken2 k-mer taxonomy (runs directly on contigs — no annotation dependency)
+    if (params.run_kraken2 && params.kraken2_db) {
+        KRAKEN2_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+    }
+
+    // 2c2c. BBSketch/sendsketch MinHash taxonomy (GTDB TaxServer — no annotation dependency)
+    if (params.run_sendsketch && params.sendsketch_address) {
+        SENDSKETCH_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
     }
 
     // 2c3. Eukaryotic contig classification (Tiara + Whokaryote) + MetaEuk gene prediction
