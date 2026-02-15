@@ -68,7 +68,7 @@ process WHOKARYOTE_CLASSIFY {
         --outdir whokaryote_out/ \\
         ${gff_arg} \\
         --minsize ${min_len} \\
-        -t ${task.cpus}
+        --threads ${task.cpus}
     whokaryote_exit=\$?
     set -e
 
