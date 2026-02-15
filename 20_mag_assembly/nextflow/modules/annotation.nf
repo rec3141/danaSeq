@@ -60,9 +60,10 @@ process BAKTA_CDS {
     path(assembly)
 
     output:
-    path("bakta_out/*.faa"),  emit: proteins
-    path("bakta_out/*.gff3"), emit: gff
-    path("bakta_out/*.tsv"),  emit: tsv
+    path("bakta_out/annotation.faa"),  emit: proteins
+    path("bakta_out/annotation.gff3"), emit: gff
+    path("bakta_out/annotation.tsv"),  emit: tsv
+    path("bakta_out/annotation.hypotheticals.faa"), emit: hypotheticals, optional: true
 
     script:
     """
@@ -100,11 +101,12 @@ process BAKTA_FULL {
     path(assembly)
 
     output:
-    path("bakta_out/*.faa"),  emit: proteins
-    path("bakta_out/*.gff3"), emit: gff
-    path("bakta_out/*.tsv"),  emit: tsv
-    path("bakta_out/*.gbff"), emit: gbff, optional: true
-    path("bakta_out/*.png"),  emit: plot, optional: true
+    path("bakta_out/annotation.faa"),  emit: proteins
+    path("bakta_out/annotation.gff3"), emit: gff
+    path("bakta_out/annotation.tsv"),  emit: tsv
+    path("bakta_out/annotation.hypotheticals.faa"), emit: hypotheticals, optional: true
+    path("bakta_out/annotation.gbff"), emit: gbff, optional: true
+    path("bakta_out/annotation.png"),  emit: plot, optional: true
 
     script:
     """

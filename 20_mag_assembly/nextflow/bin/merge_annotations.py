@@ -73,23 +73,28 @@ def parse_kofamscan(path):
 def parse_emapper(path):
     """Parse eggNOG-mapper .emapper.annotations file.
 
-    Standard eggNOG-mapper v2 columns (0-indexed):
-      0: query
-      4: COG_category
-      5: Description
-      6: Preferred_name
-      7: GOs
-      8: EC
-      9: KEGG_ko
-     10: KEGG_Pathway
-     11: KEGG_Module
-     12: KEGG_Reaction
-     13: KEGG_rclass
-     14: BRITE
-     15: KEGG_TC
-     16: CAZy
-     17: BiGG_Reaction
-     18: PFAMs
+    eggNOG-mapper v2.1 output columns (21 columns, 0-indexed):
+      0:  #query
+      1:  seed_ortholog
+      2:  evalue
+      3:  score
+      4:  eggNOG_OGs
+      5:  max_annot_lvl
+      6:  COG_category
+      7:  Description
+      8:  Preferred_name
+      9:  GOs
+     10:  EC
+     11:  KEGG_ko
+     12:  KEGG_Pathway
+     13:  KEGG_Module
+     14:  KEGG_Reaction
+     15:  KEGG_rclass
+     16:  BRITE
+     17:  KEGG_TC
+     18:  CAZy
+     19:  BiGG_Reaction
+     20:  PFAMs
     """
     results = {}
     if not path:
@@ -105,18 +110,18 @@ def parse_emapper(path):
                     continue
 
                 parts = line.split('\t')
-                if len(parts) < 19:
+                if len(parts) < 21:
                     continue
 
                 protein_id = parts[0].strip()
                 results[protein_id] = {
-                    'COG_category': parts[4] if parts[4] != '-' else '',
-                    'description':  parts[5] if parts[5] != '-' else '',
-                    'GOs':          parts[7] if parts[7] != '-' else '',
-                    'EC':           parts[8] if parts[8] != '-' else '',
-                    'KEGG_ko':      parts[9] if parts[9] != '-' else '',
-                    'KEGG_Pathway': parts[10] if parts[10] != '-' else '',
-                    'PFAMs':        parts[18] if parts[18] != '-' else '',
+                    'COG_category': parts[6] if parts[6] != '-' else '',
+                    'description':  parts[7] if parts[7] != '-' else '',
+                    'GOs':          parts[9] if parts[9] != '-' else '',
+                    'EC':           parts[10] if parts[10] != '-' else '',
+                    'KEGG_ko':      parts[11] if parts[11] != '-' else '',
+                    'KEGG_Pathway': parts[12] if parts[12] != '-' else '',
+                    'PFAMs':        parts[20] if parts[20] != '-' else '',
                 }
     except FileNotFoundError:
         print(f"[WARNING] eggNOG-mapper file not found: {path}", file=sys.stderr)

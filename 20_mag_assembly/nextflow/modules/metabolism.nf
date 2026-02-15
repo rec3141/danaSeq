@@ -6,7 +6,7 @@
 
 process KOFAMSCAN {
     tag "kofamscan"
-    label 'process_high'
+    label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
     publishDir "${params.outdir}/metabolism/kofamscan", mode: 'copy'
 
@@ -51,7 +51,7 @@ process KOFAMSCAN {
 
 process EMAPPER {
     tag "emapper"
-    label 'process_high'
+    label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-emapper"
     publishDir "${params.outdir}/metabolism/emapper", mode: 'copy'
 
@@ -162,23 +162,26 @@ process MERGE_ANNOTATIONS {
     publishDir "${params.outdir}/metabolism/merged", mode: 'copy'
 
     input:
-    path(kofamscan_tsv)
-    path(emapper_tsv)
-    path(dbcan_overview)
+    val(labels)
+    path(annotation_files)
 
     output:
     path("merged_annotations.tsv"), emit: merged
 
     script:
+    // Build flags dynamically based on which annotation tools ran
+    def kofam_file   = labels.contains('kofamscan') ? annotation_files.find { it.name.contains('kofamscan') } : null
+    def emapper_file = labels.contains('emapper')   ? annotation_files.find { it.name.contains('emapper') }   : null
+    def dbcan_file   = labels.contains('dbcan')      ? annotation_files.find { it.name.contains('overview') }  : null
+    def flags = []
+    if (kofam_file)   flags << "--kofamscan ${kofam_file}"
+    if (emapper_file) flags << "--emapper ${emapper_file}"
+    if (dbcan_file)   flags << "--dbcan ${dbcan_file}"
     """
-    # Merge KofamScan + eggNOG-mapper + dbCAN annotations into unified per-protein TSV
-    # Joins on protein_id; outputs: protein_id, contig_id, KO, COG, GO, EC, Pfam, CAZy, desc
+    # Merge annotation sources into unified per-protein TSV
+    # Tools that ran: ${labels.join(', ')}
 
-    merge_annotations.py \\
-        --kofamscan "${kofamscan_tsv}" \\
-        --emapper "${emapper_tsv}" \\
-        --dbcan "${dbcan_overview}" \\
-        -o merged_annotations.tsv
+    merge_annotations.py ${flags.join(' ')} -o merged_annotations.tsv
     """
 }
 

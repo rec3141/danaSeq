@@ -24,7 +24,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
 │   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_CDS, BAKTA_FULL
-│   │   ├── eukaryotic.nf      TIARA_CLASSIFY, WHOKARYOTE_CLASSIFY
+│   │   ├── eukaryotic.nf      TIARA_CLASSIFY, WHOKARYOTE_CLASSIFY, METAEUK_PREDICT
 │   │   ├── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
 │   │   │                       ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
 │   │   └── metabolism.nf       KOFAMSCAN, EMAPPER, DBCAN, MERGE_ANNOTATIONS,
@@ -50,6 +50,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── checkm2.yml         CheckM2
 │   │   ├── tiara.yml           Tiara (eukaryotic contig classification, deep learning)
 │   │   ├── whokaryote.yml     Whokaryote (eukaryotic classification, gene structure RF)
+│   │   ├── metaeuk.yml        MetaEuk (eukaryotic gene prediction, multi-exon)
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py,
 │   │                           merge_annotations.py, map_annotations_to_bins.py,
@@ -179,7 +180,7 @@ Sample FASTQs (N files)
    CALCULATE_DEPTHS   PROKKA|BAKTA    CHECKV_QUALITY
                             │
                   ┌─────────┼──────────┬────────────────────┐
-            ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   TIARA + WHOKARYOTE
+            ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   TIARA + WHOKARYOTE   METAEUK
                             └─────┬────┘
                           MERGE_ANNOTATIONS
                                   │
@@ -232,6 +233,7 @@ Eighteen isolated environments avoid dependency conflicts:
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-mag-tiara` | Tiara | Deep learning k-mer eukaryotic classification (98%+ accuracy) |
 | `dana-mag-whokaryote` | Whokaryote, Prodigal | Gene structure-based eukaryotic classification (random forest) |
+| `dana-mag-metaeuk` | MetaEuk | Eukaryotic gene prediction (multi-exon, intron-aware, homology-based) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
 ### Nextflow Config Profiles
@@ -328,11 +330,16 @@ results/
 │   │   └── module_heatmap.svg       Clustered heatmap
 │   └── community/
 │       └── community_annotations.tsv  All proteins with bin_id column
-├── eukaryotic/                    Eukaryotic classification (if --run_eukaryotic)
+├── eukaryotic/                    Eukaryotic analysis (if --run_eukaryotic or --run_metaeuk)
 │   ├── tiara/
 │   │   └── tiara_output.tsv       Per-contig Tiara classification + probabilities
-│   └── whokaryote/
-│       └── whokaryote_classifications.tsv  Per-contig Whokaryote classification
+│   ├── whokaryote/
+│   │   └── whokaryote_classifications.tsv  Per-contig Whokaryote classification
+│   └── metaeuk/                   Eukaryotic gene prediction (if --metaeuk_db set)
+│       ├── metaeuk_proteins.fas    Multi-exon eukaryotic protein predictions
+│       ├── metaeuk_codon.fas       Nucleotide coding sequences
+│       ├── metaeuk.gff             Gene structures (exon boundaries)
+│       └── metaeuk_headers.tsv     Internal ID mapping
 └── pipeline_info/
     ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html
@@ -386,6 +393,27 @@ Run `./install.sh --check` to diagnose. Ensure mamba is on PATH. Build requires 
 
 ### Depth values are wrong (overflow/negative)
 This pipeline uses CoverM instead of `jgi_summarize_bam_contig_depths` to avoid the MetaBAT2 integer overflow bug. If you see overflow values, ensure the CALCULATE_DEPTHS process is using CoverM (check `modules/mapping.nf`).
+
+## Database Locations (this system)
+
+Reference databases live in `/data/scratch/refdbs/`, NOT in the pipeline's `databases/` directory. When downloading new databases, use:
+
+```bash
+./download-databases.sh --dir /data/scratch/refdbs
+```
+
+Current database paths for pipeline flags:
+- `--bakta_db /data/scratch/refdbs/bakta/light/db-light`
+- `--genomad_db /data/scratch/refdbs/genomad_db`
+- `--checkv_db /data/scratch/refdbs/checkv_db`
+- `--checkm2_db /data/scratch/refdbs/checkm2`
+- `--kaiju_db /data/scratch/refdbs/kaiju`
+- `--kofam_db /data/scratch/refdbs/kofam_db`
+- `--eggnog_db /data/scratch/refdbs/eggnog_db`
+- `--dbcan_db /data/scratch/refdbs/dbcan_db`
+- `--macsyfinder_models /data/scratch/refdbs/macsyfinder_models`
+- `--defensefinder_models /data/scratch/refdbs/defensefinder_models`
+- `--metaeuk_db /data/scratch/refdbs/metaeuk/orthodb_v11_euk/metaeuk_db`
 
 ---
 

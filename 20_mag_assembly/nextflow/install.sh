@@ -28,6 +28,7 @@ set -euo pipefail
 #   dana-mag-checkm2  - CheckM2 (quality assessment)
 #   dana-mag-tiara    - Tiara (deep learning eukaryotic contig classification)
 #   dana-mag-whokaryote - Whokaryote (gene structure-based eukaryotic classification)
+#   dana-mag-metaeuk  - MetaEuk (eukaryotic gene prediction, multi-exon)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
 # symlinked YAML; its env is named dana-bbmap.
@@ -98,6 +99,7 @@ ENV_YAMLS=(
     checkm2.yml
     tiara.yml
     whokaryote.yml
+    metaeuk.yml
     bbmap.yml
 )
 
@@ -123,6 +125,7 @@ declare -A ENV_CHECK=(
     [dana-mag-checkm2]="checkm2"
     [dana-mag-tiara]="tiara"
     [dana-mag-whokaryote]="whokaryote.py"
+    [dana-mag-metaeuk]="metaeuk"
     [dana-bbmap]="bbduk.sh"
 )
 

@@ -77,10 +77,14 @@ def helpMessage() {
       --run_defensefinder Run DefenseFinder anti-phage defense detection [default: true]
       --defensefinder_models PATH  Path to DefenseFinder models dir; null = auto-download
 
-    Eukaryotic Classification:
+    Eukaryotic Analysis:
       --run_eukaryotic    Enable eukaryotic contig classification [default: false]
       --tiara_min_len N   Minimum contig length for Tiara (bp) [default: 3000]
       --whokaryote_min_len N  Minimum contig length for Whokaryote (bp) [default: 5000]
+      --run_metaeuk       Run MetaEuk eukaryotic gene prediction (requires --run_eukaryotic) [default: false]
+      --metaeuk_db PATH   Path to MetaEuk protein reference database (MMseqs2 format)
+      --metaeuk_mem_limit STR  MetaEuk memory limit (e.g. '50G') [default: 50G]
+      --metaeuk_max_intron N   Maximum intron length in bp [default: 10000]
 
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
@@ -200,8 +204,13 @@ def helpMessage() {
       ├── eukaryotic/                   (if --run_eukaryotic)
       │   ├── tiara/
       │   │   └── tiara_output.tsv        Per-contig Tiara classification + probabilities
-      │   └── whokaryote/
-      │       └── whokaryote_classifications.tsv  Per-contig Whokaryote classification
+      │   ├── whokaryote/
+      │   │   └── whokaryote_classifications.tsv  Per-contig Whokaryote classification
+      │   └── metaeuk/                   (if --metaeuk_db set)
+      │       ├── metaeuk_proteins.fas    Multi-exon eukaryotic protein predictions
+      │       ├── metaeuk_codon.fas       Nucleotide coding sequences
+      │       ├── metaeuk.gff             Gene structures (exon boundaries)
+      │       └── metaeuk_headers.tsv     Internal ID mapping
       ├── taxonomy/                    (if --kaiju_db set)
       │   └── kaiju/
       │       ├── kaiju_genes.tsv      Per-gene Kaiju classifications
@@ -277,6 +286,7 @@ include { NCLB_ELDERS }         from './modules/refinement'
 include { NCLB_INTEGRATE }      from './modules/refinement'
 include { TIARA_CLASSIFY }      from './modules/eukaryotic'
 include { WHOKARYOTE_CLASSIFY } from './modules/eukaryotic'
+include { METAEUK_PREDICT }     from './modules/eukaryotic'
 include { KOFAMSCAN }           from './modules/metabolism'
 include { EMAPPER }             from './modules/metabolism'
 include { DBCAN }               from './modules/metabolism'
@@ -365,7 +375,7 @@ workflow {
         KAIJU_CLASSIFY(ch_proteins, ch_gff)
     }
 
-    // 2c3. Eukaryotic contig classification (Tiara + Whokaryote)
+    // 2c3. Eukaryotic contig classification (Tiara + Whokaryote) + MetaEuk gene prediction
     if (params.run_eukaryotic) {
         // Tiara: deep learning k-mer NN — runs on contigs directly
         TIARA_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
@@ -373,6 +383,16 @@ workflow {
         // Whokaryote: gene structure RF — uses annotation GFF if available.
         // Patched whokaryote handles both Prodigal and standard GFF3 (Bakta, PGAP).
         WHOKARYOTE_CLASSIFY(ASSEMBLY_FLYE.out.assembly, ch_gff)
+
+        // MetaEuk: eukaryotic gene prediction (multi-exon, intron-aware, homology-based)
+        // Filters to union of Tiara non-prokaryotic + Whokaryote eukaryotic contigs
+        if (params.run_metaeuk && params.metaeuk_db) {
+            METAEUK_PREDICT(
+                ASSEMBLY_FLYE.out.assembly,
+                TIARA_CLASSIFY.out.classifications,
+                WHOKARYOTE_CLASSIFY.out.classifications
+            )
+        }
     }
 
     // 2d. Mobile genetic element detection (geNomad + CheckV)
@@ -404,43 +424,32 @@ workflow {
         DEFENSEFINDER(ch_proteins)
     }
 
-    // 2i. Metabolic profiling (KofamScan + eggNOG-mapper + dbCAN3)
-    //     Runs on full .faa, then maps annotations to bins via contig2bin.tsv
+    // 2i. Metabolic profiling: annotation tools (KofamScan + eggNOG-mapper + dbCAN3)
+    //     Run in parallel on the full .faa; bin mapping happens after DAS_Tool (section 6b)
+    //     Each tool's output is tagged and collected for the merge step
+    ch_annot_for_merge = Channel.empty()
+
     if (params.run_metabolism && effective_annotator != 'none') {
-
-        // Core annotation tools run in parallel on the same .faa
-        ch_ko      = Channel.empty()
-        ch_emapper = Channel.empty()
-        ch_dbcan   = Channel.empty()
-
         if (params.kofam_db) {
             KOFAMSCAN(ch_proteins, file("${params.kofam_db}/profiles"), file("${params.kofam_db}/ko_list"))
-            ch_ko = KOFAMSCAN.out.ko_assignments
+            ch_annot_for_merge = ch_annot_for_merge.mix(
+                KOFAMSCAN.out.ko_assignments.map { ['kofamscan', it] }
+            )
         }
 
         if (params.eggnog_db) {
             EMAPPER(ch_proteins, file(params.eggnog_db))
-            ch_emapper = EMAPPER.out.annotations
+            ch_annot_for_merge = ch_annot_for_merge.mix(
+                EMAPPER.out.annotations.map { ['emapper', it] }
+            )
         }
 
         if (params.dbcan_db) {
             DBCAN(ch_proteins, file(params.dbcan_db))
-            ch_dbcan = DBCAN.out.overview
+            ch_annot_for_merge = ch_annot_for_merge.mix(
+                DBCAN.out.overview.map { ['dbcan', it] }
+            )
         }
-
-        // Merge annotations (needs at least one source; provide empty files for missing)
-        // Create default empty files for tools that were not run
-        ch_ko_file = ch_ko.ifEmpty(file('EMPTY_KOFAM'))
-        ch_em_file = ch_emapper.ifEmpty(file('EMPTY_EMAPPER'))
-        ch_db_file = ch_dbcan.ifEmpty(file('EMPTY_DBCAN'))
-
-        MERGE_ANNOTATIONS(ch_ko_file, ch_em_file, ch_db_file)
-
-        // Map to bins (requires DAS_Tool contig2bin + GFF)
-        MAP_TO_BINS(MERGE_ANNOTATIONS.out.merged, DASTOOL_CONSENSUS.out.contig2bin, ch_gff)
-
-        // KEGG module completeness scoring + heatmap
-        KEGG_MODULES(MAP_TO_BINS.out.per_mag)
     }
 
     // 3. Map each sample back to assembly: fan-out
@@ -505,6 +514,22 @@ workflow {
         ch_bin_files,
         ch_bin_labels
     )
+
+    // 6b. Metabolic profiling: merge annotations and map to bins
+    //     (Deferred to here because MAP_TO_BINS needs DASTOOL_CONSENSUS.out.contig2bin)
+    if (params.run_metabolism && effective_annotator != 'none') {
+        // Collect tagged annotation files: [[label, file], ...]
+        ch_annot_labels = ch_annot_for_merge.collect { it[0] }
+        ch_annot_files  = ch_annot_for_merge.collect { it[1] }
+
+        MERGE_ANNOTATIONS(ch_annot_labels, ch_annot_files)
+
+        // Map to bins (requires DAS_Tool contig2bin + GFF)
+        MAP_TO_BINS(MERGE_ANNOTATIONS.out.merged, DASTOOL_CONSENSUS.out.contig2bin, ch_gff)
+
+        // KEGG module completeness scoring + heatmap
+        KEGG_MODULES(MAP_TO_BINS.out.per_mag)
+    }
 
     // 7. Quality assessment with CheckM2 (optional — requires database path)
     if (params.checkm2_db) {

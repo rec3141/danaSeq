@@ -1,5 +1,6 @@
-// Eukaryotic contig classification: Tiara (deep learning k-mer NN) + Whokaryote (gene structure RF)
-// Classify contigs; contigs still flow through existing binning pipeline unchanged
+// Eukaryotic analysis:
+//   Tiara (deep learning k-mer NN) + Whokaryote (gene structure RF) — contig classification
+//   MetaEuk — eukaryotic gene prediction (multi-exon, intron-aware, homology-based)
 
 process TIARA_CLASSIFY {
     tag "tiara"
@@ -84,5 +85,85 @@ process WHOKARYOTE_CLASSIFY {
 
     n_classified=\$(tail -n +2 whokaryote_classifications.tsv | wc -l)
     echo "[INFO] Whokaryote: \${n_classified} contigs classified (min length: ${min_len} bp)" >&2
+    """
+}
+
+process METAEUK_PREDICT {
+    tag "metaeuk"
+    label 'process_high'
+    conda "${projectDir}/conda-envs/dana-mag-metaeuk"
+    publishDir "${params.outdir}/eukaryotic/metaeuk", mode: 'copy'
+
+    input:
+    path(contigs)
+    path(tiara_tsv)
+    path(whokaryote_tsv)
+
+    output:
+    path("metaeuk_proteins.fas"),       emit: proteins
+    path("metaeuk_codon.fas"),          emit: codons
+    path("metaeuk.gff"),                emit: gff
+    path("metaeuk_headers.tsv"),        emit: headers
+
+    script:
+    def mem_limit = params.metaeuk_mem_limit ?: '50G'
+    def min_len   = params.metaeuk_min_length ?: 20
+    def max_intron = params.metaeuk_max_intron ?: 10000
+    """
+    # Union of Tiara non-prokaryotic + Whokaryote eukaryotic contigs
+    # Tiara: keep eukarya, organelle, unknown (exclude bacteria/archaea/prokarya)
+    awk -F'\\t' 'NR>1 && \$2!="bacteria" && \$2!="archaea" && \$2!="prokarya" {print \$1}' \\
+        "${tiara_tsv}" > tiara_keep.txt
+    # Whokaryote: keep anything classified as eukaryote
+    awk -F'\\t' 'NR>1 && \$NF=="eukaryote" {print \$1}' \\
+        "${whokaryote_tsv}" > whok_keep.txt
+    # Union (deduplicated)
+    sort -u tiara_keep.txt whok_keep.txt > keep_ids.txt
+
+    n_total=\$(tail -n +2 "${tiara_tsv}" | wc -l)
+    n_tiara=\$(wc -l < tiara_keep.txt)
+    n_whok=\$(wc -l < whok_keep.txt)
+    n_keep=\$(wc -l < keep_ids.txt)
+    echo "[INFO] MetaEuk: Tiara non-prok: \${n_tiara}, Whokaryote euk: \${n_whok}, union: \${n_keep} of \${n_total} contigs" >&2
+
+    # Extract matching contigs from assembly FASTA
+    awk 'BEGIN{while((getline line < "keep_ids.txt")>0) ids[line]=1}
+         /^>/{keep=(substr(\$1,2) in ids)} keep' "${contigs}" > filtered_contigs.fasta
+
+    if [ ! -s filtered_contigs.fasta ]; then
+        echo "[WARNING] No non-prokaryotic contigs to predict — skipping MetaEuk" >&2
+        touch metaeuk_proteins.fas metaeuk_codon.fas metaeuk.gff metaeuk_headers.tsv
+    else
+        set +e
+        metaeuk easy-predict \\
+            filtered_contigs.fasta \\
+            "${params.metaeuk_db}" \\
+            metaeuk_out \\
+            tmp_metaeuk \\
+            --threads ${task.cpus} \\
+            --split-memory-limit ${mem_limit} \\
+            -e 100 \\
+            --metaeuk-eval 0.0001 \\
+            --metaeuk-tcov 0.6 \\
+            --min-length ${min_len} \\
+            --max-intron ${max_intron} \\
+            --remove-tmp-files 1
+        metaeuk_exit=\$?
+        set -e
+
+        if [ \$metaeuk_exit -ne 0 ]; then
+            echo "[WARNING] MetaEuk exited with code \$metaeuk_exit" >&2
+            touch metaeuk_proteins.fas metaeuk_codon.fas metaeuk.gff metaeuk_headers.tsv
+        else
+            # MetaEuk outputs: prefix.fas, prefix.codon.fas, prefix.gff, prefix.headersMap.tsv
+            mv metaeuk_out.fas          metaeuk_proteins.fas
+            mv metaeuk_out.codon.fas    metaeuk_codon.fas
+            mv metaeuk_out.gff          metaeuk.gff
+            mv metaeuk_out.headersMap.tsv metaeuk_headers.tsv
+        fi
+    fi
+
+    n_proteins=\$(grep -c '^>' metaeuk_proteins.fas 2>/dev/null || echo 0)
+    echo "[INFO] MetaEuk: \${n_proteins} eukaryotic proteins predicted" >&2
     """
 }

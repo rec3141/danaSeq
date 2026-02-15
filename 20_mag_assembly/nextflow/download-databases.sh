@@ -22,6 +22,7 @@ set -euo pipefail
 #   ./download-databases.sh --kofam            # Download KOfam profiles (~4 GB)
 #   ./download-databases.sh --eggnog           # Download eggNOG diamond database (~12 GB)
 #   ./download-databases.sh --dbcan            # Download dbCAN databases (~2 GB)
+#   ./download-databases.sh --metaeuk          # Download MetaEuk OrthoDB Eukaryota (~23 GB)
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -43,6 +44,7 @@ DOWNLOAD_BAKTA=false
 DOWNLOAD_KOFAM=false
 DOWNLOAD_EGGNOG=false
 DOWNLOAD_DBCAN=false
+DOWNLOAD_METAEUK=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -61,6 +63,7 @@ while (( $# )); do
         --kofam)     DOWNLOAD_KOFAM=true; INTERACTIVE=false; shift ;;
         --eggnog)    DOWNLOAD_EGGNOG=true; INTERACTIVE=false; shift ;;
         --dbcan)     DOWNLOAD_DBCAN=true; INTERACTIVE=false; shift ;;
+        --metaeuk)   DOWNLOAD_METAEUK=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -80,6 +83,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_KOFAM=true
     DOWNLOAD_EGGNOG=true
     DOWNLOAD_DBCAN=true
+    DOWNLOAD_METAEUK=true
 fi
 
 # ============================================================================
@@ -102,10 +106,10 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "kofam"    "~4 GB"   "KOfam profiles + ko_list (KEGG Orthology via HMM)"
     printf "  %-12s %-8s  %s\n" "eggnog"   "~12 GB"  "eggNOG-mapper DIAMOND db (COG/GO/EC/KEGG/Pfam)"
     printf "  %-12s %-8s  %s\n" "dbcan"    "~2 GB"   "dbCAN HMM + DIAMOND + substrate db (CAZyme annotation)"
+    printf "  %-12s %-8s  %s\n" "metaeuk"  "~8.5 GB" "MetaEuk OrthoDB v11 Eukaryota (eukaryotic gene prediction)"
     echo ""
     echo "  Note: Tiara and Whokaryote models are bundled with their conda packages"
-    echo "  (no separate database download needed). Future phases (MetaEuk, EukCC)"
-    echo "  will require additional database downloads."
+    echo "  (no separate database download needed)."
     echo ""
     echo "Default download directory: ${DB_DIR}"
     echo ""
@@ -120,6 +124,7 @@ show_databases() {
     echo "  --kofam_db   ${DB_DIR}/kofam_db"
     echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
     echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
+    echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
     echo ""
 }
 
@@ -145,9 +150,10 @@ if $INTERACTIVE; then
     echo "  8) kofam     - KOfam profiles (KEGG Orthology, ~4 GB)"
     echo "  9) eggnog    - eggNOG-mapper DIAMOND db (~12 GB)"
     echo " 10) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~2 GB)"
-    echo " 11) all       - All databases"
+    echo " 11) metaeuk   - MetaEuk OrthoDB v12 Eukaryota (~23 GB)"
+    echo " 12) all       - All databases"
     echo ""
-    read -rp "Choice [1-11, or names]: " choice
+    read -rp "Choice [1-12, or names]: " choice
 
     case "$choice" in
         1|genomad)  DOWNLOAD_GENOMAD=true ;;
@@ -160,7 +166,8 @@ if $INTERACTIVE; then
         8|kofam)    DOWNLOAD_KOFAM=true ;;
         9|eggnog)   DOWNLOAD_EGGNOG=true ;;
         10|dbcan)   DOWNLOAD_DBCAN=true ;;
-        11|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true ;;
+        11|metaeuk) DOWNLOAD_METAEUK=true ;;
+        12|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -175,14 +182,15 @@ if $INTERACTIVE; then
                     8|kofam)    DOWNLOAD_KOFAM=true ;;
                     9|eggnog)   DOWNLOAD_EGGNOG=true ;;
                     10|dbcan)   DOWNLOAD_DBCAN=true ;;
-                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true ;;
+                    11|metaeuk) DOWNLOAD_METAEUK=true ;;
+                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -418,7 +426,7 @@ download_kofam() {
 
 download_eggnog() {
     local db_path="${DB_DIR}/eggnog_db"
-    if [ -d "${db_path}" ] && ls "${db_path}"/*.db 1>/dev/null 2>&1; then
+    if [ -d "${db_path}" ] && [ -f "${db_path}/eggnog.db" ]; then
         echo "[INFO] eggNOG database already exists at ${db_path}"
         echo "  Delete ${db_path} and re-run to force re-download."
         return 0
@@ -435,33 +443,97 @@ download_eggnog() {
     fi
 
     mkdir -p "${db_path}"
-    "${emapper_bin}" --data_dir "${db_path}" -y -D
+    # Workaround: eggnog-mapper <=2.1.13 has broken download URLs
+    # (eggnogdb.embl.de returns 404; eggnog5.embl.de is the working host)
+    # https://github.com/eggnogdb/eggnog-mapper/issues/571
+    sed -i "s|eggnogdb.embl.de|eggnog5.embl.de|g" "${emapper_bin}"
+    "${emapper_bin}" --data_dir "${db_path}" -y
     echo "[SUCCESS] eggNOG database downloaded to ${db_path}"
     echo "  Use with: --eggnog_db ${db_path}"
 }
 
 download_dbcan() {
     local db_path="${DB_DIR}/dbcan_db"
-    if [ -d "${db_path}" ] && [ -f "${db_path}/dbCAN.txt" ]; then
+    if [ -d "${db_path}" ] && [ -f "${db_path}/dbCAN.hmm" ] && [ -f "${db_path}/dbCAN.hmm.h3i" ]; then
         echo "[INFO] dbCAN database already exists at ${db_path}"
         echo "  Delete ${db_path} and re-run to force re-download."
         return 0
     fi
 
     echo ""
-    echo "[INFO] Downloading dbCAN databases (~2 GB)..."
+    echo "[INFO] Downloading dbCAN databases (~5 GB)..."
     echo "  Destination: ${db_path}"
 
-    local dbcan_build="${ENV_DIR}/dana-mag-dbcan/bin/dbcan_build"
-    if [ ! -x "${dbcan_build}" ]; then
+    local run_dbcan="${ENV_DIR}/dana-mag-dbcan/bin/run_dbcan"
+    local hmmpress="${ENV_DIR}/dana-mag-dbcan/bin/hmmpress"
+    if [ ! -x "${run_dbcan}" ]; then
         echo "[ERROR] dbCAN not installed. Run ./install.sh first." >&2
         return 1
     fi
 
     mkdir -p "${db_path}"
-    "${dbcan_build}" --db_dir "${db_path}" --clean
+    # Use AWS S3 mirror — bcb.unl.edu has persistent SSL cert issues
+    # (https://github.com/bcb-unl/run_dbcan/issues/53)
+    "${run_dbcan}" database --db_dir "${db_path}" --aws_s3
+
+    # Press HMM databases for HMMER (required before first run_dbcan use)
+    echo "[INFO] Pressing HMM databases with hmmpress..."
+    for hmm in "${db_path}"/dbCAN.hmm "${db_path}"/dbCAN-sub.hmm "${db_path}"/STP.hmm "${db_path}"/TF.hmm; do
+        if [ -f "${hmm}" ] && [ ! -f "${hmm}.h3i" ]; then
+            echo "  Pressing $(basename "${hmm}")..."
+            "${hmmpress}" "${hmm}"
+        fi
+    done
+
     echo "[SUCCESS] dbCAN database downloaded to ${db_path}"
     echo "  Use with: --dbcan_db ${db_path}"
+}
+
+download_metaeuk() {
+    local db_path="${DB_DIR}/metaeuk_db"
+    if [ -f "${db_path}/metaeuk_db" ] && [ -f "${db_path}/metaeuk_db.dbtype" ]; then
+        echo "[INFO] MetaEuk database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading MetaEuk OrthoDB v11 Eukaryota database (~8.5 GB compressed)..."
+    echo "  Source: bioinf.uni-greifswald.de (OrthoDB v11, ~2,000 eukaryotic genomes)"
+    echo "  Destination: ${db_path}"
+    echo ""
+    echo "  Note: OrthoDB v11 is used instead of v12 (~23 GB) because v12 decompresses"
+    echo "  to ~70-80 GB and exceeds 64 GB RAM even with --split-memory-limit."
+    echo "  For systems with >128 GB RAM, download v12 manually from:"
+    echo "  https://bioinf.uni-greifswald.de/bioinf/partitioned_odb12/Eukaryota.fa.gz"
+
+    local metaeuk_bin="${ENV_DIR}/dana-mag-metaeuk/bin/metaeuk"
+    if [ ! -x "${metaeuk_bin}" ]; then
+        echo "[ERROR] MetaEuk not installed. Run ./install.sh first." >&2
+        return 1
+    fi
+
+    mkdir -p "${db_path}"
+
+    # Download OrthoDB v11 Eukaryota protein FASTA (~2,000 eukaryotic genomes)
+    local fasta_gz="${db_path}/Eukaryota.fa.gz"
+    local fasta="${db_path}/Eukaryota.fa"
+    if [ ! -f "${fasta}" ]; then
+        echo "[INFO] Downloading Eukaryota.fa.gz..."
+        wget -q --show-progress -O "${fasta_gz}" \
+            "https://bioinf.uni-greifswald.de/bioinf/partitioned_odb11/Eukaryota.fa.gz"
+        echo "[INFO] Decompressing..."
+        gunzip -f "${fasta_gz}"
+    else
+        echo "[INFO] FASTA already downloaded: ${fasta}"
+    fi
+
+    # Convert to MMseqs2 database format
+    echo "[INFO] Creating MMseqs2 database (metaeuk createdb)..."
+    "${metaeuk_bin}" createdb "${fasta}" "${db_path}/metaeuk_db"
+
+    echo "[SUCCESS] MetaEuk database created at ${db_path}/metaeuk_db"
+    echo "  Use with: --metaeuk_db ${db_path}/metaeuk_db"
 }
 
 # ============================================================================
@@ -513,6 +585,10 @@ if $DOWNLOAD_DBCAN; then
     download_dbcan || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_METAEUK; then
+    download_metaeuk || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -531,4 +607,5 @@ else
     $DOWNLOAD_KOFAM   && echo "  --kofam_db   ${DB_DIR}/kofam_db"
     $DOWNLOAD_EGGNOG  && echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
     $DOWNLOAD_DBCAN   && echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
+    $DOWNLOAD_METAEUK && echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
 fi

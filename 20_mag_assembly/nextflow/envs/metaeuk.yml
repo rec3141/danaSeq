@@ -1,0 +1,6 @@
+name: dana-mag-metaeuk
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - metaeuk
