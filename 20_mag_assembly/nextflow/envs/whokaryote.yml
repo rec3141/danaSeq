@@ -1,0 +1,10 @@
+name: dana-mag-whokaryote
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python >=3.7,<3.11
+  - prodigal
+  - pip
+  - pip:
+    - whokaryote

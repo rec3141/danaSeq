@@ -26,6 +26,8 @@ set -euo pipefail
 #   dana-mag-defensefinder - DefenseFinder (anti-phage defense systems)
 #   dana-mag-kaiju    - Kaiju (protein-level taxonomy via Prokka)
 #   dana-mag-checkm2  - CheckM2 (quality assessment)
+#   dana-mag-tiara    - Tiara (deep learning eukaryotic contig classification)
+#   dana-mag-whokaryote - Whokaryote (gene structure-based eukaryotic classification)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
 # symlinked YAML; its env is named dana-bbmap.
@@ -94,6 +96,8 @@ ENV_YAMLS=(
     defensefinder.yml
     kaiju.yml
     checkm2.yml
+    tiara.yml
+    whokaryote.yml
     bbmap.yml
 )
 
@@ -117,6 +121,8 @@ declare -A ENV_CHECK=(
     [dana-mag-defensefinder]="defense-finder"
     [dana-mag-kaiju]="kaiju"
     [dana-mag-checkm2]="checkm2"
+    [dana-mag-tiara]="tiara"
+    [dana-mag-whokaryote]="whokaryote.py"
     [dana-bbmap]="bbduk.sh"
 )
 

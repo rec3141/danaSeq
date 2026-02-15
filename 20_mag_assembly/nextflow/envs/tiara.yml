@@ -1,0 +1,14 @@
+name: dana-mag-tiara
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python >=3.7,<3.10
+  - numpy
+  - biopython
+  - tqdm
+  - joblib
+  - numba
+  - pip
+  - pip:
+    - tiara

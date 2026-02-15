@@ -14,11 +14,12 @@ process MAP_READS {
 
     script:
     """
-    # -F 0x904: drop unmapped (0x4), secondary (0x100), supplementary (0x800)
-    # Supplementary alignments from chimeric long reads cause massive depth overcounting
+    # -F 0x104: drop unmapped (0x4) and secondary (0x100), keep supplementary (0x800)
+    # Supplementary alignments are kept for read-bridged adjacency (cross-contig links)
+    # CoverM's metabat method ignores supplementary alignments, so depths are unchanged
     minimap2 -a -x map-ont --secondary=no -t ${task.cpus} \\
         "${assembly}" "${fastq}" \\
-        | samtools view -b -F 0x904 \\
+        | samtools view -b -F 0x104 \\
         | samtools sort -@ ${task.cpus} -o "${meta.id}.sorted.bam" -
 
     samtools index -@ ${task.cpus} "${meta.id}.sorted.bam"

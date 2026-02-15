@@ -8,6 +8,7 @@ nextflow.enable.dsl = 2
 // Nextflow implementation of the MAG assembly and binning workflow.
 // Co-assembles all reads with Flye, maps reads back, runs five binners
 // (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin) in parallel, integrates with DAS_Tool,
+// classifies contigs as prokaryotic/eukaryotic/organellar (Tiara + Whokaryote),
 // detects mobile genetic elements (viruses, plasmids, proviruses) with geNomad + CheckV,
 // and identifies anti-phage defense systems with DefenseFinder.
 //
@@ -74,6 +75,11 @@ def helpMessage() {
       --macsyfinder_models PATH  Path to MacSyFinder models dir; null = skip
       --run_defensefinder Run DefenseFinder anti-phage defense detection [default: true]
       --defensefinder_models PATH  Path to DefenseFinder models dir; null = auto-download
+
+    Eukaryotic Classification:
+      --run_eukaryotic    Enable eukaryotic contig classification [default: false]
+      --tiara_min_len N   Minimum contig length for Tiara (bp) [default: 3000]
+      --whokaryote_min_len N  Minimum contig length for Whokaryote (bp) [default: 5000]
 
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
@@ -190,6 +196,19 @@ def helpMessage() {
       │   │   └── module_heatmap.svg       Clustered heatmap
       │   └── community/
       │       └── community_annotations.tsv  All proteins with bin_id column
+      ├── eukaryotic/                   (if --run_eukaryotic)
+      │   ├── tiara/
+      │   │   └── tiara_output.tsv        Per-contig Tiara classification
+      │   ├── whokaryote/
+      │   │   └── featuretable_predictions_T.tsv  Per-contig Whokaryote classification
+      │   ├── consensus/
+      │   │   ├── contig_classifications.tsv  Merged consensus (tiara + whokaryote)
+      │   │   ├── prokaryotic_contigs.txt
+      │   │   ├── eukaryotic_contigs.txt
+      │   │   └── organellar_contigs.txt
+      │   └── bin_tags/
+      │       ├── all_bin_domain_tags.tsv     Merged domain tags across all binners
+      │       └── {binner}_bin_domain_tags.tsv  Per-binner domain tags
       ├── taxonomy/                    (if --kaiju_db set)
       │   └── kaiju/
       │       ├── kaiju_genes.tsv      Per-gene Kaiju classifications
@@ -250,7 +269,8 @@ include { BIN_COMEBIN }         from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
-include { BAKTA_ANNOTATE }      from './modules/annotation'
+include { BAKTA_CDS }            from './modules/annotation'
+include { BAKTA_FULL }           from './modules/annotation'
 include { KAIJU_CLASSIFY }      from './modules/taxonomy'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
@@ -262,6 +282,10 @@ include { NCLB_GATHER }         from './modules/refinement'
 include { NCLB_CONVERSE }       from './modules/refinement'
 include { NCLB_ELDERS }         from './modules/refinement'
 include { NCLB_INTEGRATE }      from './modules/refinement'
+include { TIARA_CLASSIFY }      from './modules/eukaryotic'
+include { WHOKARYOTE_CLASSIFY } from './modules/eukaryotic'
+include { CLASSIFY_CONSENSUS }  from './modules/eukaryotic'
+include { TAG_BINS }            from './modules/eukaryotic'
 include { KOFAMSCAN }           from './modules/metabolism'
 include { EMAPPER }             from './modules/metabolism'
 include { DBCAN }               from './modules/metabolism'
@@ -334,14 +358,36 @@ workflow {
         ch_proteins = PROKKA_ANNOTATE.out.proteins
         ch_gff      = PROKKA_ANNOTATE.out.gff
     } else if (effective_annotator == 'bakta') {
-        BAKTA_ANNOTATE(ASSEMBLY_FLYE.out.assembly)
-        ch_proteins = BAKTA_ANNOTATE.out.proteins
-        ch_gff      = BAKTA_ANNOTATE.out.gff
+        // Fast path: CDS-only annotation (minutes) — feeds all downstream tools
+        BAKTA_CDS(ASSEMBLY_FLYE.out.assembly)
+        ch_proteins = BAKTA_CDS.out.proteins
+        ch_gff      = BAKTA_CDS.out.gff
+
+        // Slow path: full annotation (hours) — runs in parallel, doesn't block downstream
+        BAKTA_FULL(ASSEMBLY_FLYE.out.assembly)
     }
 
     // 2c2. Kaiju protein-level taxonomy (requires annotation .faa + .gff)
     if (params.run_kaiju && params.kaiju_db && effective_annotator != 'none') {
         KAIJU_CLASSIFY(ch_proteins, ch_gff)
+    }
+
+    // 2c3. Eukaryotic contig classification (Tiara + Whokaryote)
+    if (params.run_eukaryotic) {
+        // Tiara: deep learning k-mer NN — runs on contigs directly
+        TIARA_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+
+        // Whokaryote: gene structure RF — uses GFF if annotation is available
+        ch_whokaryote_gff = (effective_annotator != 'none')
+            ? ch_gff
+            : Channel.of(file('NO_GFF'))
+        WHOKARYOTE_CLASSIFY(ASSEMBLY_FLYE.out.assembly, ch_whokaryote_gff)
+
+        // Consensus voting: merge Tiara + Whokaryote predictions
+        CLASSIFY_CONSENSUS(
+            TIARA_CLASSIFY.out.classifications,
+            WHOKARYOTE_CLASSIFY.out.classifications
+        )
     }
 
     // 2d. Mobile genetic element detection (geNomad + CheckV)
@@ -474,6 +520,24 @@ workflow {
         ch_bin_files,
         ch_bin_labels
     )
+
+    // 6b. Tag bins by domain (eukaryotic classification post-hoc)
+    if (params.run_eukaryotic) {
+        // Reuse already-collected binner files/labels + add DAS Tool contig2bin
+        ch_tag_bin_files = ch_bin_files
+            .mix(DASTOOL_CONSENSUS.out.contig2bin)
+            .collect()
+        ch_tag_bin_labels = ch_bin_labels
+            .mix(Channel.of('dastool'))
+            .collect()
+
+        TAG_BINS(
+            CLASSIFY_CONSENSUS.out.classifications,
+            ASSEMBLY_FLYE.out.assembly,
+            ch_tag_bin_files,
+            ch_tag_bin_labels
+        )
+    }
 
     // 7. Quality assessment with CheckM2 (optional — requires database path)
     if (params.checkm2_db) {

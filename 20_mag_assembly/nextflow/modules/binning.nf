@@ -287,6 +287,8 @@ process DASTOOL_CONSENSUS {
     path("allbins.fa"),       emit: allbins
     path("bin_quality.tsv"),  emit: bin_quality
     path("summary.tsv"),     emit: summary
+    path("bacteria.scg"),    emit: bacteria_scg
+    path("archaea.scg"),     emit: archaea_scg
 
     script:
     // Build comma-separated file and label lists from collected inputs
@@ -313,7 +315,7 @@ process DASTOOL_CONSENSUS {
     if [ -z "\$FILTERED_FILES" ]; then
         echo "[WARNING] All binners produced empty output -- skipping DAS_Tool" >&2
         mkdir -p bins
-        touch contig2bin.tsv allbins.fa bin_quality.tsv summary.tsv
+        touch contig2bin.tsv allbins.fa bin_quality.tsv summary.tsv bacteria.scg archaea.scg
         exit 0
     fi
 
@@ -380,6 +382,18 @@ process DASTOOL_CONSENSUS {
     else
         echo "[WARNING] DAS_Tool produced no consensus bins" >&2
         touch allbins.fa
+    fi
+
+    # Publish single-copy gene (SCG) assignments from DAS_Tool
+    if [ -f dastool_out/dastool_proteins.faa.bacteria.scg ]; then
+        cp dastool_out/dastool_proteins.faa.bacteria.scg bacteria.scg
+    else
+        touch bacteria.scg
+    fi
+    if [ -f dastool_out/dastool_proteins.faa.archaea.scg ]; then
+        cp dastool_out/dastool_proteins.faa.archaea.scg archaea.scg
+    else
+        touch archaea.scg
     fi
     """
 }
