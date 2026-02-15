@@ -51,7 +51,16 @@ process ASSEMBLY_FLYE {
         exit 1
     fi
 
-    cp flye_out/assembly.fasta assembly.fasta
+    # Sort contigs by length (longest first) and rename with zero-padded IDs
+    # Padding width = number of digits in total contig count
+    NCONTIGS=\$(grep -c '^>' flye_out/assembly.fasta)
+    PAD=\${#NCONTIGS}
+    TAB=\$(printf '\\t')
+    awk '/^>/{if(h) print h "\\t" length(s) "\\t" s; h=\$0; s=""; next} {s=s\$0} END{if(h) print h "\\t" length(s) "\\t" s}' flye_out/assembly.fasta \\
+    | sort -t"\$TAB" -k2,2rn \\
+    | awk -F'\\t' -v pad="\$PAD" '{n++; printf ">contig_%0*d\\n", pad, n; s=\$3; for(i=1;i<=length(s);i+=80) print substr(s,i,80)}' \\
+    > assembly.fasta
+
     cp flye_out/assembly_info.txt assembly_info.txt
     cp flye_out/assembly_graph.gfa assembly_graph.gfa
 
