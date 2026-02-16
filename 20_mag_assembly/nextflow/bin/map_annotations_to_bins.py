@@ -108,7 +108,8 @@ def main():
 
     # Read merged annotations and assign to bins
     bin_rows = {}  # bin_id -> list of rows
-    unbinned = 0
+    all_rows = []  # all rows (for community + unbinned pseudo-MAGs)
+    unbinned_rows = []  # rows with no bin assignment
     total = 0
     header = None
 
@@ -129,10 +130,12 @@ def main():
             bin_id = contig2bin.get(contig_id, '')
             row['bin_id'] = bin_id
 
+            all_rows.append(dict(row))
+
             if bin_id:
                 bin_rows.setdefault(bin_id, []).append(row)
             else:
-                unbinned += 1
+                unbinned_rows.append(row)
 
     out_header = header + ['bin_id']
 
@@ -144,12 +147,24 @@ def main():
             writer.writeheader()
             writer.writerows(rows)
 
-    # Write community-wide TSV (all proteins with bin_id column)
-    with open(args.community, 'w', newline='') as fh:
-        # Re-read to include unbinned proteins too
-        pass
+    # Write community pseudo-MAG (all proteins — for community-level pathway analysis)
+    community_mag = os.path.join(args.outdir, '_community.tsv')
+    with open(community_mag, 'w', newline='') as fh:
+        writer = csv.DictWriter(fh, fieldnames=out_header, delimiter='\t')
+        writer.writeheader()
+        writer.writerows(all_rows)
+    print(f"[INFO] Community pseudo-MAG: {len(all_rows)} proteins", file=sys.stderr)
 
-    # Re-read and write community file with all proteins
+    # Write unbinned pseudo-MAG (proteins not assigned to any bin)
+    if unbinned_rows:
+        unbinned_mag = os.path.join(args.outdir, '_unbinned.tsv')
+        with open(unbinned_mag, 'w', newline='') as fh:
+            writer = csv.DictWriter(fh, fieldnames=out_header, delimiter='\t')
+            writer.writeheader()
+            writer.writerows(unbinned_rows)
+        print(f"[INFO] Unbinned pseudo-MAG: {len(unbinned_rows)} proteins", file=sys.stderr)
+
+    # Write community-wide TSV (separate published output with all proteins)
     with open(args.annotations) as in_fh, \
          open(args.community, 'w', newline='') as out_fh:
         reader = csv.DictReader(in_fh, delimiter='\t')
@@ -170,7 +185,7 @@ def main():
     binned_proteins = sum(len(rows) for rows in bin_rows.values())
     print(f"[INFO] Total proteins: {total}", file=sys.stderr)
     print(f"[INFO] Binned: {binned_proteins} across {len(bin_rows)} MAGs", file=sys.stderr)
-    print(f"[INFO] Unbinned: {unbinned}", file=sys.stderr)
+    print(f"[INFO] Unbinned: {len(unbinned_rows)}", file=sys.stderr)
     print(f"[INFO] Per-MAG TSVs written to: {args.outdir}", file=sys.stderr)
     print(f"[INFO] Community TSV written to: {args.community}", file=sys.stderr)
 
