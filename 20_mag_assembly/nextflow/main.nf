@@ -208,6 +208,12 @@ def helpMessage() {
       │   ├── modules/
       │   │   ├── module_completeness.tsv  MAG × module completeness matrix
       │   │   └── module_heatmap.svg       Clustered heatmap
+      │   ├── minpath/
+      │   │   ├── minpath_pathways.tsv     MAG × pathway (naive vs parsimony)
+      │   │   └── details/                 Per-MAG MinPath reports
+      │   ├── kegg_decoder/
+      │   │   ├── kegg_decoder_output.tsv  MAG × function completeness (~80 functions)
+      │   │   └── function_heatmap.svg     Publication-quality heatmap
       │   └── community/
       │       └── community_annotations.tsv  All proteins with bin_id column
       ├── eukaryotic/                   (if --run_eukaryotic)
@@ -314,6 +320,8 @@ include { DBCAN }               from './modules/metabolism'
 include { MERGE_ANNOTATIONS }   from './modules/metabolism'
 include { MAP_TO_BINS }         from './modules/metabolism'
 include { KEGG_MODULES }        from './modules/metabolism'
+include { MINPATH }             from './modules/metabolism'
+include { KEGG_DECODER }        from './modules/metabolism'
 
 // ============================================================================
 // Main workflow
@@ -565,6 +573,12 @@ workflow {
 
         // KEGG module completeness scoring + heatmap
         KEGG_MODULES(MAP_TO_BINS.out.per_mag)
+
+        // MinPath parsimony pathway reconstruction (parallel with KEGG_MODULES)
+        MINPATH(MAP_TO_BINS.out.per_mag)
+
+        // KEGG-Decoder biogeochemical function scoring + heatmap (parallel)
+        KEGG_DECODER(MAP_TO_BINS.out.per_mag)
     }
 
     // 7. Quality assessment with CheckM2 (optional — requires database path)

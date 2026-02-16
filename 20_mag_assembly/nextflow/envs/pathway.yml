@@ -1,0 +1,14 @@
+name: dana-mag-pathway
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.8,<3.13
+  - glpk
+  - matplotlib
+  - pandas
+  - seaborn
+  - scipy
+  - biopython
+  - plotly
+  - pip

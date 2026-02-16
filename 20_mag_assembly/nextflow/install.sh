@@ -31,6 +31,7 @@ set -euo pipefail
 #   dana-mag-whokaryote - Whokaryote (gene structure-based eukaryotic classification)
 #   dana-mag-metaeuk  - MetaEuk (eukaryotic gene prediction, multi-exon)
 #   dana-mag-rrna     - barrnap + vsearch (rRNA gene detection + SILVA classification)
+#   dana-mag-pathway  - MinPath + KEGG-Decoder (parsimony pathways + biogeochemical heatmaps)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
 # symlinked YAML; its env is named dana-bbmap.
@@ -104,6 +105,7 @@ ENV_YAMLS=(
     whokaryote.yml
     metaeuk.yml
     rrna.yml
+    pathway.yml
     bbmap.yml
 )
 
@@ -132,6 +134,7 @@ declare -A ENV_CHECK=(
     [dana-mag-whokaryote]="whokaryote.py"
     [dana-mag-metaeuk]="metaeuk"
     [dana-mag-rrna]="barrnap"
+    [dana-mag-pathway]="KEGG-decoder"
     [dana-bbmap]="bbduk.sh"
 )
 
@@ -246,6 +249,26 @@ WRAPPER
                 chmod +x "${env_path}/bin/gen_cov_file.sh"
             fi
             echo "  COMEBin installed from ${comebin_repo}@${comebin_branch}"
+        fi
+
+        # Post-install: install KEGGDecoder + clone MinPath into the pathway env
+        if [[ "${env_name}" == "dana-mag-pathway" ]]; then
+            # KEGGDecoder via pip (--no-deps: matplotlib already from conda)
+            echo "  Installing KEGGDecoder via pip..."
+            "${env_path}/bin/pip" install --no-deps KEGGDecoder > /dev/null 2>&1
+            echo "  KEGGDecoder installed"
+
+            # Clone MinPath
+            local minpath_dir="${env_path}/share/minpath"
+            if [[ ! -d "${minpath_dir}" ]]; then
+                echo "  Cloning MinPath..."
+                git clone --depth 1 https://github.com/mgtools/MinPath.git "${minpath_dir}" \
+                    > /dev/null 2>&1
+                chmod +x "${minpath_dir}/MinPath.py" 2>/dev/null || true
+                echo "  MinPath installed to ${minpath_dir}"
+            else
+                echo "  MinPath already present at ${minpath_dir}"
+            fi
         fi
 
         echo "  Done"

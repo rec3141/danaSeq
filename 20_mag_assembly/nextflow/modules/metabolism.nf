@@ -242,3 +242,86 @@ process KEGG_MODULES {
         --heatmap module_heatmap.svg
     """
 }
+
+process MINPATH {
+    tag "minpath"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-pathway"
+    publishDir "${params.outdir}/metabolism/minpath", mode: 'copy'
+
+    input:
+    path(per_mag_dir)
+
+    output:
+    path("minpath_pathways.tsv"),  emit: pathways
+    path("details/"),              emit: details, optional: true
+
+    script:
+    def minpath_dir = "${projectDir}/conda-envs/dana-mag-pathway/share/minpath"
+    """
+    # MinPath (Ye & Doak, 2009): parsimony pathway reconstruction
+    # Finds the minimum set of KEGG pathways consistent with observed KOs,
+    # preventing pathway inflation in draft MAGs.
+    # Uses GLPK integer programming solver.
+
+    run_minpath_per_mag.py \\
+        --input "${per_mag_dir}" \\
+        --minpath_dir "${minpath_dir}" \\
+        --output minpath_pathways.tsv \\
+        --details details
+    """
+}
+
+process KEGG_DECODER {
+    tag "kegg_decoder"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-pathway"
+    publishDir "${params.outdir}/metabolism/kegg_decoder", mode: 'copy'
+
+    input:
+    path(per_mag_dir)
+
+    output:
+    path("kegg_decoder_output.tsv"),  emit: output
+    path("function_heatmap.svg"),     emit: heatmap, optional: true
+
+    script:
+    """
+    # KEGG-Decoder (Graham et al. 2018): scores ~80 environmentally-curated
+    # biogeochemical modules and generates publication-quality heatmaps.
+    # Covers: carbon, nitrogen, sulfur, photosynthesis, transporters, etc.
+
+    # Step 1: Convert per-MAG TSVs to KEGG-Decoder input format
+    prepare_keggdecoder_input.py \\
+        --input "${per_mag_dir}" \\
+        --output keggdecoder_input.tsv
+
+    # Step 2: Run KEGG-Decoder (skip if no KO entries; requires >= 3 genomes)
+    if [ -s keggdecoder_input.tsv ]; then
+        # Count distinct genomes (prefix before first '_')
+        n_genomes=\$(cut -f1 keggdecoder_input.tsv | cut -d'_' -f1 | sort -u | wc -l)
+        if [ "\$n_genomes" -lt 3 ]; then
+            echo "[WARNING] Only \$n_genomes genomes — KEGG-Decoder requires >= 3, skipping" >&2
+            printf 'Function\\n' > kegg_decoder_output.tsv
+        else
+            set +e
+            KEGG-decoder -i keggdecoder_input.tsv -o kegg_decoder_output.tsv -v static
+            decoder_exit=\$?
+            set -e
+
+            if [ \$decoder_exit -ne 0 ] || [ ! -f kegg_decoder_output.tsv ]; then
+                echo "[WARNING] KEGG-Decoder exited with code \$decoder_exit" >&2
+                printf 'Function\\n' > kegg_decoder_output.tsv
+            fi
+
+            # KEGG-Decoder names the SVG after the -o file (e.g. kegg_decoder_output.svg)
+            if [ ! -f "function_heatmap.svg" ] && ls *.svg 1>/dev/null 2>&1; then
+                mv *.svg function_heatmap.svg 2>/dev/null || true
+            fi
+        fi
+    else
+        echo "[WARNING] No KO entries found — skipping KEGG-Decoder" >&2
+        printf 'Function\\n' > kegg_decoder_output.tsv
+    fi
+    """
+}
