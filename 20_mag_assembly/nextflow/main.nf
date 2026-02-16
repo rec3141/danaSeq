@@ -63,6 +63,10 @@ def helpMessage() {
       --kraken2_confidence N  Kraken2 confidence threshold [default: 0.0]
       --run_sendsketch   Run BBSketch/sendsketch GTDB taxonomy (requires TaxServer) [default: false]
       --sendsketch_address URL  BBSketch TaxServer URL (e.g. http://host:3068/sketch); null = skip
+      --run_rrna         Run barrnap + vsearch rRNA gene classification (requires --silva_ssu_db) [default: false]
+      --silva_ssu_db PATH  Path to SILVA SSU NR99 FASTA (DNA, U→T converted); null = skip
+      --silva_lsu_db PATH  Path to SILVA LSU NR99 FASTA (optional); null = skip LSU classification
+      --rrna_min_identity N  Minimum vsearch identity for rRNA classification [default: 0.80]
 
     Metabolic Profiling:
       --run_metabolism    Run metabolic profiling (KofamScan + eggNOG + dbCAN) [default: false]
@@ -196,7 +200,7 @@ def helpMessage() {
       │   ├── emapper/
       │   │   └── emapper_results.emapper.annotations   COG/GO/EC/KEGG/Pfam
       │   ├── dbcan/
-      │   │   └── overview.txt             CAZyme consensus (≥2/3 methods)
+      │   │   └── overview.tsv             CAZyme consensus (≥2/3 methods)
       │   ├── merged/
       │   │   └── merged_annotations.tsv   Unified per-protein annotation table
       │   ├── per_mag/
@@ -216,15 +220,19 @@ def helpMessage() {
       │       ├── metaeuk_codon.fas       Nucleotide coding sequences
       │       ├── metaeuk.gff             Gene structures (exon boundaries)
       │       └── metaeuk_headers.tsv     Internal ID mapping
-      ├── taxonomy/                    (if --kaiju_db or --kraken2_db set)
+      ├── taxonomy/                    (if --kaiju_db, --kraken2_db, or --silva_ssu_db set)
       │   ├── kaiju/                   (if --kaiju_db set)
       │   │   ├── kaiju_genes.tsv      Per-gene Kaiju classifications
       │   │   └── kaiju_contigs.tsv    Per-contig taxonomy (majority vote)
       │   ├── kraken2/                 (if --kraken2_db set)
       │   │   ├── kraken2_contigs.tsv  Per-contig Kraken2 classifications + lineage
       │   │   └── kraken2_report.txt   Standard Kraken2 report (for Krona/Pavian)
-      │   └── sendsketch/             (if --sendsketch_address set)
-      │       └── sendsketch_contigs.tsv  Per-contig GTDB taxonomy + ANI
+      │   ├── sendsketch/             (if --sendsketch_address set)
+      │   │   └── sendsketch_contigs.tsv  Per-contig GTDB taxonomy + ANI
+      │   └── rrna/                  (if --silva_ssu_db set)
+      │       ├── rrna_genes.tsv     Per-gene rRNA classifications (barrnap + vsearch)
+      │       ├── rrna_contigs.tsv   Per-contig rRNA summary (best SSU/LSU taxonomy)
+      │       └── rrna_sequences.fasta  Extracted rRNA gene sequences
       ├── binning/nclb/               (if --run_nclb + --nclb_dir set)
       │   ├── communities/*.fa         Refined community FASTAs
       │   ├── gathering.json           Identity cards + resonance data
@@ -286,6 +294,7 @@ include { BAKTA_FULL }           from './modules/annotation'
 include { KAIJU_CLASSIFY }      from './modules/taxonomy'
 include { KRAKEN2_CLASSIFY }   from './modules/taxonomy'
 include { SENDSKETCH_CLASSIFY } from './modules/taxonomy'
+include { RRNA_CLASSIFY }      from './modules/rrna'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
 include { INTEGRONFINDER }      from './modules/mge'
@@ -395,6 +404,11 @@ workflow {
     // 2c2c. BBSketch/sendsketch MinHash taxonomy (GTDB TaxServer — no annotation dependency)
     if (params.run_sendsketch && params.sendsketch_address) {
         SENDSKETCH_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+    }
+
+    // 2c2d. rRNA gene classification (barrnap + vsearch against SILVA — no annotation dependency)
+    if (params.run_rrna && params.silva_ssu_db) {
+        RRNA_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
     }
 
     // 2c3. Eukaryotic contig classification (Tiara + Whokaryote) + MetaEuk gene prediction

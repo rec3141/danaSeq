@@ -1,0 +1,8 @@
+name: dana-mag-rrna
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - barrnap=0.9
+  - vsearch>=2.28
+  - python>=3.8

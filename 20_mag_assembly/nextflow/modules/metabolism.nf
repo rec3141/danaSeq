@@ -105,7 +105,7 @@ process DBCAN {
     path(dbcan_db)
 
     output:
-    path("overview.txt"),    emit: overview
+    path("overview.tsv"),    emit: overview
     path("hmmer.out"),       emit: hmmer, optional: true
     path("diamond.out"),     emit: diamond, optional: true
     path("substrate.out"),   emit: substrate, optional: true
@@ -120,7 +120,7 @@ process DBCAN {
 
     if [ ! -s "${proteins}" ]; then
         echo "[WARNING] No protein sequences — skipping dbCAN" >&2
-        printf 'Gene ID\\tHMMER\\tdbCAN_sub\\tDIAMOND\\t#ofTools\\n' > overview.txt
+        printf 'Gene ID\\tEC#\\tdbCAN_hmm\\tdbCAN_sub\\tDIAMOND\\t#ofTools\\tRecommend Results\\tSubstrate\\n' > overview.tsv
         exit 0
     fi
 
@@ -136,15 +136,17 @@ process DBCAN {
 
     if [ \$dbcan_exit -ne 0 ] || [ ! -d dbcan_out ]; then
         echo "[WARNING] dbCAN exited with code \$dbcan_exit" >&2
-        printf 'Gene ID\\tHMMER\\tdbCAN_sub\\tDIAMOND\\t#ofTools\\n' > overview.txt
+        printf 'Gene ID\\tEC#\\tdbCAN_hmm\\tdbCAN_sub\\tDIAMOND\\t#ofTools\\tRecommend Results\\tSubstrate\\n' > overview.tsv
         exit 0
     fi
 
-    # Copy outputs to working directory
-    if [ -f dbcan_out/overview.txt ]; then
-        cp dbcan_out/overview.txt .
+    # Copy overview (run_dbcan v4+ outputs .tsv, older versions output .txt)
+    if [ -f dbcan_out/overview.tsv ]; then
+        cp dbcan_out/overview.tsv .
+    elif [ -f dbcan_out/overview.txt ]; then
+        cp dbcan_out/overview.txt overview.tsv
     else
-        printf 'Gene ID\\tHMMER\\tdbCAN_sub\\tDIAMOND\\t#ofTools\\n' > overview.txt
+        printf 'Gene ID\\tEC#\\tdbCAN_hmm\\tdbCAN_sub\\tDIAMOND\\t#ofTools\\tRecommend Results\\tSubstrate\\n' > overview.tsv
     fi
 
     # Optional detailed outputs

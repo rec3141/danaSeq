@@ -30,6 +30,7 @@ set -euo pipefail
 #   dana-mag-tiara    - Tiara (deep learning eukaryotic contig classification)
 #   dana-mag-whokaryote - Whokaryote (gene structure-based eukaryotic classification)
 #   dana-mag-metaeuk  - MetaEuk (eukaryotic gene prediction, multi-exon)
+#   dana-mag-rrna     - barrnap + vsearch (rRNA gene detection + SILVA classification)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
 # symlinked YAML; its env is named dana-bbmap.
@@ -102,6 +103,7 @@ ENV_YAMLS=(
     tiara.yml
     whokaryote.yml
     metaeuk.yml
+    rrna.yml
     bbmap.yml
 )
 
@@ -129,6 +131,7 @@ declare -A ENV_CHECK=(
     [dana-mag-tiara]="tiara"
     [dana-mag-whokaryote]="whokaryote.py"
     [dana-mag-metaeuk]="metaeuk"
+    [dana-mag-rrna]="barrnap"
     [dana-bbmap]="bbduk.sh"
 )
 

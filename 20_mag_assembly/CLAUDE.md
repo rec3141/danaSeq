@@ -25,6 +25,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
 │   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_CDS, BAKTA_FULL
 │   │   ├── eukaryotic.nf      TIARA_CLASSIFY, WHOKARYOTE_CLASSIFY, METAEUK_PREDICT
+│   │   ├── rrna.nf             RRNA_CLASSIFY (barrnap + vsearch SILVA classification)
 │   │   ├── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
 │   │   │                       ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
 │   │   └── metabolism.nf       KOFAMSCAN, EMAPPER, DBCAN, MERGE_ANNOTATIONS,
@@ -52,6 +53,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── tiara.yml           Tiara (eukaryotic contig classification, deep learning)
 │   │   ├── whokaryote.yml     Whokaryote (eukaryotic classification, gene structure RF)
 │   │   ├── metaeuk.yml        MetaEuk (eukaryotic gene prediction, multi-exon)
+│   │   ├── rrna.yml            barrnap + vsearch (rRNA gene classification)
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py,
 │   │                           merge_annotations.py, map_annotations_to_bins.py,
@@ -133,8 +135,9 @@ cd nextflow
 tail -1 <outdir>/pipeline_info/run_command.sh | bash
 ```
 
-The saved command includes `-resume <session-id>`, so cached tasks are always found —
-even after code changes that would otherwise create a new session.
+The saved command is a `run-mag.sh` invocation (not raw mamba/nextflow) with
+`--session <uuid>`, so cached tasks are always found — even after code changes.
+To add new flags, just append them to the saved command.
 
 **Session handling:** `run-mag.sh` handles sessions three ways:
 1. **Auto-detect (default):** reads the last session ID from `run_command.sh` if it exists
@@ -142,8 +145,10 @@ even after code changes that would otherwise create a new session.
 3. **Post-run capture:** after each run, extracts the actual session UUID from `.nextflow.log`
    and writes it into `run_command.sh` so future runs can resume from it
 
-**Common pitfall:** changing `--input` path, `--assembly_cpus`, or other params will
-invalidate the task hash and force a full re-run. Always use the saved command.
+**Common pitfall:** changing `--input` path, `--assembly_cpus`, `--assembly_memory`, or other
+params will invalidate the task hash and force a full re-run. Assembly takes **hours** on real
+data (even "test" data with ~3 GB of reads). Always use the saved command from
+`run_command.sh` and only append new flags — never change existing ones.
 
 Only the processes whose script block changed will re-run; all others will be cached.
 
@@ -176,7 +181,7 @@ Sample FASTQs (N files)
          │ collect()
    ASSEMBLY_FLYE          Fan-in: all reads → 1 co-assembly
          ├──────────────────────┬──────────────────────┬──────────────────┬───────────────────┐
-   MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY   INTEGRONFINDER   KRAKEN2_CLASSIFY   SENDSKETCH_CLASSIFY
+   MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY   INTEGRONFINDER   KRAKEN2_CLASSIFY   SENDSKETCH_CLASSIFY   RRNA_CLASSIFY
          │ collect()        │                │
    CALCULATE_DEPTHS   PROKKA|BAKTA    CHECKV_QUALITY
                             │
@@ -236,6 +241,7 @@ Nineteen isolated environments avoid dependency conflicts:
 | `dana-mag-tiara` | Tiara | Deep learning k-mer eukaryotic classification (98%+ accuracy) |
 | `dana-mag-whokaryote` | Whokaryote, Prodigal | Gene structure-based eukaryotic classification (random forest) |
 | `dana-mag-metaeuk` | MetaEuk | Eukaryotic gene prediction (multi-exon, intron-aware, homology-based) |
+| `dana-mag-rrna` | barrnap, vsearch | rRNA gene detection (barrnap) + SILVA classification (vsearch) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
 ### Nextflow Config Profiles
@@ -322,7 +328,7 @@ results/
 │   ├── emapper/
 │   │   └── emapper_results.emapper.annotations  COG/GO/EC/KEGG/Pfam
 │   ├── dbcan/
-│   │   └── overview.txt           CAZyme consensus (≥2/3 methods)
+│   │   └── overview.tsv           CAZyme consensus (≥2/3 methods)
 │   ├── merged/
 │   │   └── merged_annotations.tsv Unified per-protein annotation table
 │   ├── per_mag/
@@ -339,8 +345,12 @@ results/
 │   ├── kraken2/                   k-mer taxonomy (if --kraken2_db set)
 │   │   ├── kraken2_contigs.tsv    Per-contig Kraken2 classifications + lineage
 │   │   └── kraken2_report.txt     Standard Kraken2 report (for Krona/Pavian)
-│   └── sendsketch/                GTDB MinHash taxonomy (if --sendsketch_address set)
-│       └── sendsketch_contigs.tsv Per-contig GTDB taxonomy + ANI
+│   ├── sendsketch/                GTDB MinHash taxonomy (if --sendsketch_address set)
+│   │   └── sendsketch_contigs.tsv Per-contig GTDB taxonomy + ANI
+│   └── rrna/                      rRNA gene classification (if --silva_ssu_db set)
+│       ├── rrna_genes.tsv         Per-gene rRNA classifications (barrnap + vsearch)
+│       ├── rrna_contigs.tsv       Per-contig rRNA summary (best SSU/LSU taxonomy)
+│       └── rrna_sequences.fasta   Extracted rRNA gene sequences
 ├── eukaryotic/                    Eukaryotic analysis (if --run_eukaryotic or --run_metaeuk)
 │   ├── tiara/
 │   │   └── tiara_output.tsv       Per-contig Tiara classification + probabilities
@@ -426,6 +436,8 @@ Current database paths for pipeline flags:
 - `--defensefinder_models /data/scratch/refdbs/defensefinder_models`
 - `--metaeuk_db /data/scratch/refdbs/metaeuk/orthodb_v11_euk/metaeuk_db`
 - `--kraken2_db /data/scratch/refdbs/krakendb/pluspfp_08gb`
+- `--silva_ssu_db /data/scratch/refdbs/silva_db/SILVA_138.2_SSURef_NR99.fasta`
+- `--silva_lsu_db /data/scratch/refdbs/silva_db/SILVA_138.2_LSURef_NR99.fasta`
 - `--sendsketch_address http://10.151.50.41:3068/sketch`  (Ratnakara GTDB TaxServer)
 
 ---

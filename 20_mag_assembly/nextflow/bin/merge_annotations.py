@@ -158,8 +158,9 @@ def parse_dbcan(path):
                     continue
 
                 # Collect CAZy family assignments from the methods that hit
+                # run_dbcan v4+ renamed HMMER → dbCAN_hmm
                 cazymes = set()
-                for col in ['HMMER', 'dbCAN_sub', 'DIAMOND']:
+                for col in ['HMMER', 'dbCAN_hmm', 'dbCAN_sub', 'DIAMOND']:
                     val = row.get(col, '-').strip()
                     if val and val != '-':
                         # May contain multiple families separated by +
@@ -230,6 +231,10 @@ def main():
         ko = ko_map.get(protein_id, '')
         em = emapper_map.get(protein_id, {})
         cazy = dbcan_map.get(protein_id, '')
+
+        # Use eggNOG KEGG_ko as fallback when KofamScan KO is absent
+        if not ko:
+            ko = em.get('KEGG_ko', '')
 
         row = [
             protein_id,

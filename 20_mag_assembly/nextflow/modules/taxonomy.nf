@@ -361,15 +361,19 @@ gtdb_to_std = {'d': 'd', 'p': 'p', 'c': 'c', 'o': 'o', 'f': 'f', 'g': 'g', 's': 
 
 def convert_lineage(gtdb_lin):
     # Convert d:Bacteria;k:Pseudomonadati;p:Bacteroidota;... to d__Bacteria;p__Bacteroidota;...
-    parts = []
+    # Always emit all 7 standard ranks; missing ranks get empty prefix (e.g. o__)
+    rank_map = {}
     for token in gtdb_lin.split(';'):
         token = token.strip()
         if ':' not in token:
             continue
         prefix, name = token.split(':', 1)
         if prefix in gtdb_to_std:
-            parts.append(f'{gtdb_to_std[prefix]}__{name}')
-    return ';'.join(parts) if parts else 'Unclassified'
+            rank_map[gtdb_to_std[prefix]] = name
+    if not rank_map:
+        return 'Unclassified'
+    all_ranks = ['d', 'p', 'c', 'o', 'f', 'g', 's']
+    return ';'.join(f'{r}__{rank_map.get(r, "")}' for r in all_ranks)
 
 n_total = 0
 n_classified = 0

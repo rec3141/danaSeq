@@ -45,8 +45,25 @@ IMAGE="danaseq-mag"
 USE_DOCKER=false
 NF_ARGS=()
 MOUNTS=()
+ORIGINAL_ARGS=("$@")
 
 die() { echo "[ERROR] $1" >&2; exit 1; }
+
+# Build a re-runnable self-invocation with the correct --session ID
+save_run_command() {
+    local outdir="$1" session="$2"
+    local save_args=()
+    local skip_next=false has_session=false
+    for arg in "${ORIGINAL_ARGS[@]}"; do
+        if $skip_next; then skip_next=false; continue; fi
+        if [[ "$arg" == "--session" ]]; then skip_next=true; has_session=true; continue; fi
+        save_args+=("$arg")
+    done
+    if [[ -n "$session" ]]; then
+        save_args+=("--session" "$session")
+    fi
+    printf '%s\n' "$(realpath "$0") ${save_args[*]}" >> "${outdir}/pipeline_info/run_command.sh"
+}
 
 usage() {
     echo "Usage: $0 --input DIR --outdir DIR [pipeline options]"
@@ -200,12 +217,9 @@ if [[ "$USE_DOCKER" == true ]]; then
     "${DOCKER_CMD[@]}"
     NF_EXIT=$?
 
-    # Capture session ID from Nextflow log and save command with it for reliable resume
+    # Capture session ID from Nextflow log and save self-invocation for reliable resume
     NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
-    if [[ -n "$NF_SESSION" ]]; then
-        DOCKER_CMD[-1]="-resume ${NF_SESSION}"
-    fi
-    printf '%s\n' "${DOCKER_CMD[*]}" >> "${OUTDIR_HOST}/pipeline_info/run_command.sh"
+    save_run_command "$OUTDIR_HOST" "$NF_SESSION"
 
     exit $NF_EXIT
 fi
@@ -239,11 +253,8 @@ mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 "${LOCAL_CMD[@]}"
 NF_EXIT=$?
 
-# Capture session ID from Nextflow log and save command with it for reliable resume
+# Capture session ID from Nextflow log and save self-invocation for reliable resume
 NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
-if [[ -n "$NF_SESSION" ]]; then
-    LOCAL_CMD[-1]="-resume ${NF_SESSION}"
-fi
-printf '%s\n' "${LOCAL_CMD[*]}" >> "${OUTDIR_HOST}/pipeline_info/run_command.sh"
+save_run_command "$OUTDIR_HOST" "$NF_SESSION"
 
 exit $NF_EXIT

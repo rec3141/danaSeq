@@ -24,6 +24,7 @@ set -euo pipefail
 #   ./download-databases.sh --dbcan            # Download dbCAN databases (~2 GB)
 #   ./download-databases.sh --metaeuk          # Download MetaEuk OrthoDB Eukaryota (~23 GB)
 #   ./download-databases.sh --kraken2         # Download Kraken2 PlusPFP-8 (~8 GB)
+#   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -47,6 +48,7 @@ DOWNLOAD_EGGNOG=false
 DOWNLOAD_DBCAN=false
 DOWNLOAD_METAEUK=false
 DOWNLOAD_KRAKEN2=false
+DOWNLOAD_SILVA=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -67,6 +69,7 @@ while (( $# )); do
         --dbcan)     DOWNLOAD_DBCAN=true; INTERACTIVE=false; shift ;;
         --metaeuk)   DOWNLOAD_METAEUK=true; INTERACTIVE=false; shift ;;
         --kraken2)   DOWNLOAD_KRAKEN2=true; INTERACTIVE=false; shift ;;
+        --silva)     DOWNLOAD_SILVA=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -88,6 +91,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_DBCAN=true
     DOWNLOAD_METAEUK=true
     DOWNLOAD_KRAKEN2=true
+    DOWNLOAD_SILVA=true
 fi
 
 # ============================================================================
@@ -112,6 +116,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "dbcan"    "~2 GB"   "dbCAN HMM + DIAMOND + substrate db (CAZyme annotation)"
     printf "  %-12s %-8s  %s\n" "metaeuk"  "~8.5 GB" "MetaEuk OrthoDB v11 Eukaryota (eukaryotic gene prediction)"
     printf "  %-12s %-8s  %s\n" "kraken2"  "~8 GB"   "Kraken2 PlusPFP-8 (k-mer contig-level taxonomy)"
+    printf "  %-12s %-8s  %s\n" "silva"    "~900 MB" "SILVA 138.2 SSU + LSU NR99 (rRNA gene classification)"
     echo ""
     echo "  Note: Tiara and Whokaryote models are bundled with their conda packages"
     echo "  (no separate database download needed)."
@@ -131,6 +136,8 @@ show_databases() {
     echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
     echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
     echo "  --kraken2_db ${DB_DIR}/kraken2_db"
+    echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
+    echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
     echo ""
 }
 
@@ -158,9 +165,10 @@ if $INTERACTIVE; then
     echo " 10) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~2 GB)"
     echo " 11) metaeuk   - MetaEuk OrthoDB v12 Eukaryota (~23 GB)"
     echo " 12) kraken2   - Kraken2 PlusPFP-8 (contig taxonomy, ~8 GB)"
-    echo " 13) all       - All databases"
+    echo " 13) silva     - SILVA SSU + LSU NR99 (rRNA classification, ~900 MB)"
+    echo " 14) all       - All databases"
     echo ""
-    read -rp "Choice [1-13, or names]: " choice
+    read -rp "Choice [1-14, or names]: " choice
 
     case "$choice" in
         1|genomad)  DOWNLOAD_GENOMAD=true ;;
@@ -175,7 +183,8 @@ if $INTERACTIVE; then
         10|dbcan)   DOWNLOAD_DBCAN=true ;;
         11|metaeuk) DOWNLOAD_METAEUK=true ;;
         12|kraken2) DOWNLOAD_KRAKEN2=true ;;
-        13|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true ;;
+        13|silva)   DOWNLOAD_SILVA=true ;;
+        14|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -192,14 +201,15 @@ if $INTERACTIVE; then
                     10|dbcan)   DOWNLOAD_DBCAN=true ;;
                     11|metaeuk) DOWNLOAD_METAEUK=true ;;
                     12|kraken2) DOWNLOAD_KRAKEN2=true ;;
-                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true ;;
+                    13|silva)   DOWNLOAD_SILVA=true ;;
+                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -571,6 +581,53 @@ download_kraken2() {
     echo "  Use with: --kraken2_db ${db_path}"
 }
 
+download_silva() {
+    local db_path="${DB_DIR}/silva_db"
+    local ssu_fasta="${db_path}/SILVA_138.2_SSURef_NR99.fasta"
+    local lsu_fasta="${db_path}/SILVA_138.2_LSURef_NR99.fasta"
+
+    if [ -f "${ssu_fasta}" ] && [ -f "${lsu_fasta}" ]; then
+        echo "[INFO] SILVA databases already exist at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading SILVA 138.2 SSU + LSU NR99 databases (~900 MB)..."
+    echo "  Source: arb-silva.de (SILVA 138.2, non-redundant 99% identity)"
+    echo "  Destination: ${db_path}"
+
+    mkdir -p "${db_path}"
+
+    # Download SSU NR99 (~600 MB compressed)
+    if [ ! -f "${ssu_fasta}" ]; then
+        local ssu_gz="${db_path}/SILVA_138.2_SSURef_NR99_tax_silva.fasta.gz"
+        echo "[INFO] Downloading SILVA SSU NR99..."
+        wget -q --show-progress -O "${ssu_gz}" \
+            "https://www.arb-silva.de/fileadmin/silva_databases/release_138.2/Exports/SILVA_138.2_SSURef_NR99_tax_silva.fasta.gz"
+        echo "[INFO] Decompressing and converting U→T for vsearch compatibility..."
+        gunzip -c "${ssu_gz}" | sed '/^[^>]/s/U/T/g' > "${ssu_fasta}"
+        rm -f "${ssu_gz}"
+        echo "[INFO] SSU NR99 ready: ${ssu_fasta}"
+    fi
+
+    # Download LSU NR99 (~300 MB compressed)
+    if [ ! -f "${lsu_fasta}" ]; then
+        local lsu_gz="${db_path}/SILVA_138.2_LSURef_NR99_tax_silva.fasta.gz"
+        echo "[INFO] Downloading SILVA LSU NR99..."
+        wget -q --show-progress -O "${lsu_gz}" \
+            "https://www.arb-silva.de/fileadmin/silva_databases/release_138.2/Exports/SILVA_138.2_LSURef_NR99_tax_silva.fasta.gz"
+        echo "[INFO] Decompressing and converting U→T for vsearch compatibility..."
+        gunzip -c "${lsu_gz}" | sed '/^[^>]/s/U/T/g' > "${lsu_fasta}"
+        rm -f "${lsu_gz}"
+        echo "[INFO] LSU NR99 ready: ${lsu_fasta}"
+    fi
+
+    echo "[SUCCESS] SILVA databases downloaded to ${db_path}"
+    echo "  Use with: --silva_ssu_db ${ssu_fasta}"
+    echo "            --silva_lsu_db ${lsu_fasta}"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -628,6 +685,10 @@ if $DOWNLOAD_KRAKEN2; then
     download_kraken2 || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_SILVA; then
+    download_silva || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -648,4 +709,6 @@ else
     $DOWNLOAD_DBCAN   && echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
     $DOWNLOAD_METAEUK && echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
     $DOWNLOAD_KRAKEN2 && echo "  --kraken2_db ${DB_DIR}/kraken2_db"
+    $DOWNLOAD_SILVA   && echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
+    $DOWNLOAD_SILVA   && echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
 fi
