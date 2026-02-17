@@ -1,6 +1,6 @@
 # MAG Assembly Pipeline
 
-Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes mobile genetic element detection, gene annotation, contig-level taxonomy, anti-phage defense system detection, and metabolic profiling (KofamScan, eggNOG-mapper, dbCAN3).
+Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes gene annotation (Prokka/Bakta), four taxonomy classifiers (Kaiju, Kraken2, sendsketch, rRNA/SILVA), mobile genetic element detection (geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder), metabolic profiling with pathway analysis (KofamScan, eggNOG-mapper, dbCAN3, MinPath, KEGG-Decoder), eukaryotic analysis (Tiara, Whokaryote, MetaEuk), and optional LLM-guided bin refinement (NCLB).
 
 ## Quick Start
 
@@ -33,6 +33,7 @@ cd nextflow
     --dedupe \
     --filtlong_size 40000000000 \
     --min_overlap 1000 \
+    --annotator prokka \
     --run_maxbin true \
     --run_lorbin true \
     --run_comebin true \
@@ -42,12 +43,17 @@ cd nextflow
     --genomad_db /path/to/genomad_db \
     --checkv_db /path/to/checkv_db \
     --kaiju_db /path/to/kaiju_db \
+    --run_kraken2 true --kraken2_db /path/to/kraken2_db \
+    --run_sendsketch true --sendsketch_address http://host:3068/sketch \
+    --run_rrna true --silva_ssu_db /path/to/SILVA_SSU.fasta \
     --macsyfinder_models /path/to/macsyfinder_models \
     --defensefinder_models /path/to/defensefinder_models \
     --run_metabolism true \
     --kofam_db /path/to/kofam_db \
     --eggnog_db /path/to/eggnog_db \
     --dbcan_db /path/to/dbcan_db \
+    --run_eukaryotic true \
+    --run_metaeuk true --metaeuk_db /path/to/metaeuk_db \
     --assembly_cpus 24 \
     --assembly_memory '64 GB'
 ```
@@ -90,7 +96,17 @@ Sample FASTQs (N files)
       |
       MAP_TO_BINS           Per-MAG annotation tables (via contig2bin)
       |
-      KEGG_MODULES          Module completeness scoring + heatmap
+      +-- KEGG_MODULES      Module completeness scoring + heatmap
+      +-- MINPATH            Parsimony pathway reconstruction (Ye & Doak 2009)
+      +-- KEGG_DECODER       Biogeochemical function scoring + heatmap (Graham et al. 2018)
+
+   KRAKEN2_CLASSIFY          k-mer contig-level taxonomy (no annotation needed)
+   SENDSKETCH_CLASSIFY       GTDB MinHash taxonomy (BBSketch TaxServer)
+   RRNA_CLASSIFY             rRNA gene detection (barrnap) + SILVA classification (vsearch)
+
+   TIARA_CLASSIFY            Deep learning eukaryotic classification
+   WHOKARYOTE_CLASSIFY       Gene structure-based eukaryotic classification
+      +-- METAEUK_PREDICT    Multi-exon eukaryotic gene prediction
 
    GENOMAD_CLASSIFY          Virus + plasmid + provirus detection
       |
@@ -98,6 +114,13 @@ Sample FASTQs (N files)
 
    INTEGRONFINDER           Integron + gene cassette detection
    CALCULATE_TNF            Tetranucleotide frequency profiles
+
+  --- optional bin refinement (after DAS Tool) ---
+
+   NCLB_GATHER              Build contig identity cards
+   NCLB_CONVERSE            LLM-guided bin placement conversations
+   NCLB_ELDERS              SCG redundancy investigation (ecotype vs contamination)
+   NCLB_INTEGRATE           Apply proposals, extract refined community FASTAs
 ```
 
 ## Output
@@ -126,16 +149,34 @@ results/
 │   └── checkm2/
 │       └── quality_report.tsv    CheckM2 completeness/contamination (if --checkm2_db)
 ├── annotation/
-│   └── prokka/                   Prokka gene annotation (if --run_prokka)
+│   └── prokka/ or bakta/         Gene annotation (depending on --annotator)
 │       ├── *.gff                 GFF3 annotations
-│       ├── *.gbk                 GenBank format
 │       ├── *.faa                 Protein sequences
 │       ├── *.ffn                 Nucleotide CDS sequences
 │       └── *.tsv                 Tab-separated feature table
 ├── taxonomy/
-│   └── kaiju/                    Contig-level taxonomy (if --kaiju_db)
-│       ├── kaiju_summary.tsv     Per-contig taxonomic assignments
-│       └── kaiju_names.tsv       Assignments with full taxon names
+│   ├── kaiju/                    Protein-level taxonomy (if --kaiju_db)
+│   │   ├── kaiju_genes.tsv       Per-gene Kaiju classifications
+│   │   └── kaiju_contigs.tsv     Per-contig taxonomy (majority vote)
+│   ├── kraken2/                  k-mer taxonomy (if --kraken2_db)
+│   │   ├── kraken2_contigs.tsv   Per-contig classifications + lineage
+│   │   └── kraken2_report.txt    Standard Kraken2 report (for Krona/Pavian)
+│   ├── sendsketch/               GTDB MinHash taxonomy (if --sendsketch_address)
+│   │   └── sendsketch_contigs.tsv  Per-contig GTDB taxonomy + ANI
+│   └── rrna/                     rRNA classification (if --silva_ssu_db)
+│       ├── rrna_genes.tsv        Per-gene rRNA classifications (barrnap + vsearch)
+│       ├── rrna_contigs.tsv      Per-contig rRNA summary (best SSU/LSU taxonomy)
+│       └── rrna_sequences.fasta  Extracted rRNA gene sequences
+├── eukaryotic/                   Eukaryotic analysis (if --run_eukaryotic)
+│   ├── tiara/
+│   │   └── tiara_output.tsv      Per-contig classification + probabilities
+│   ├── whokaryote/
+│   │   └── whokaryote_classifications.tsv  Per-contig classification
+│   └── metaeuk/                  Eukaryotic gene prediction (if --metaeuk_db)
+│       ├── metaeuk_proteins.fas  Multi-exon protein predictions
+│       ├── metaeuk_codon.fas     Nucleotide coding sequences
+│       ├── metaeuk.gff           Gene structures (exon boundaries)
+│       └── metaeuk_headers.tsv   Internal ID mapping
 ├── mge/
 │   ├── genomad/                  Virus + plasmid detection (if --genomad_db)
 │   │   ├── virus_summary.tsv     Virus contigs with scores + taxonomy
@@ -166,7 +207,7 @@ results/
 │   ├── emapper/
 │   │   └── emapper_results.emapper.annotations  COG/GO/EC/KEGG/Pfam
 │   ├── dbcan/
-│   │   └── overview.txt           CAZyme consensus (>=2/3 methods agree)
+│   │   └── overview.tsv           CAZyme consensus (>=2/3 methods agree)
 │   ├── merged/
 │   │   └── merged_annotations.tsv Unified per-protein annotation table
 │   ├── per_mag/
@@ -174,8 +215,24 @@ results/
 │   ├── modules/
 │   │   ├── module_completeness.tsv  MAG x module completeness matrix
 │   │   └── module_heatmap.svg       Clustered heatmap visualization
+│   ├── minpath/
+│   │   ├── minpath_pathways.tsv     MAG x pathway (naive vs parsimony counts)
+│   │   └── details/                 Per-MAG MinPath reports
+│   ├── kegg_decoder/
+│   │   ├── kegg_decoder_output.tsv  MAG x function completeness (~80 functions)
+│   │   └── function_heatmap.svg     Publication-quality biogeochemical heatmap
 │   └── community/
 │       └── community_annotations.tsv  All proteins with bin_id column
+├── binning/nclb/                 NCLB bin refinement (if --run_nclb + --nclb_dir)
+│   ├── communities/*.fa          Refined community FASTAs
+│   ├── gathering.json            Identity cards + resonance data
+│   ├── proposals.json            LLM conversation proposals
+│   ├── elder_reports.json        SCG redundancy investigations
+│   ├── chronicle.json            Machine-readable decision log
+│   ├── chronicle.md              Human-readable narrative
+│   ├── contig2community.tsv      Contig membership assignments
+│   ├── quality_report.tsv        Community quality metrics
+│   └── valence_report.tsv        Per-contig valence scores
 └── pipeline_info/
     ├── run_command.sh            Exact re-runnable command (for -resume)
     ├── timeline.html
@@ -206,13 +263,31 @@ results/
 | `--lorbin_min_length` | `80000` | LorBin `--bin_length` minimum (bp) |
 | `--metabat_min_cls` | `50000` | MetaBAT2 minimum cluster size |
 
-### Annotation & Taxonomy
+### Annotation
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--run_prokka` | `true` | Run Prokka gene annotation on co-assembly |
-| `--run_kaiju` | `true` | Run Kaiju protein-level taxonomy (requires Prokka + `kaiju_db`) |
+| `--annotator` | (auto) | Annotator: `prokka`, `bakta`, or `none`. Overrides legacy flags |
+| `--run_prokka` | `true` | (deprecated) Run Prokka — use `--annotator` instead |
+| `--run_bakta` | `false` | (deprecated) Run Bakta — use `--annotator` instead |
+| `--bakta_db` | (skip) | Path to Bakta database (required when using Bakta) |
+| `--bakta_full` | `false` | Also run full Bakta annotation (ncRNA/tRNA/CRISPR — slow) |
+
+### Taxonomy
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--run_kaiju` | `true` | Run Kaiju protein-level taxonomy (requires annotation + `kaiju_db`) |
 | `--kaiju_db` | (skip) | Path to Kaiju database (`*.fmi` + `nodes.dmp` + `names.dmp`) |
+| `--run_kraken2` | `false` | Run Kraken2 k-mer taxonomy on contigs (no annotation needed) |
+| `--kraken2_db` | (skip) | Path to Kraken2 database (`hash.k2d` + `nodes.dmp` + `names.dmp`) |
+| `--kraken2_confidence` | `0.0` | Kraken2 confidence threshold (0.0 = any match) |
+| `--run_sendsketch` | `false` | Run BBSketch/sendsketch GTDB taxonomy (requires TaxServer) |
+| `--sendsketch_address` | (skip) | BBSketch TaxServer URL (e.g. `http://host:3068/sketch`) |
+| `--run_rrna` | `false` | Run barrnap + vsearch rRNA gene classification |
+| `--silva_ssu_db` | (skip) | Path to SILVA SSU NR99 FASTA (DNA, U→T converted) |
+| `--silva_lsu_db` | (skip) | Path to SILVA LSU NR99 FASTA (optional) |
+| `--rrna_min_identity` | `0.80` | Minimum vsearch identity for rRNA classification |
 
 ### Mobile Genetic Elements
 
@@ -238,13 +313,35 @@ results/
 | `--eggnog_db` | (skip) | Path to eggNOG-mapper database dir |
 | `--dbcan_db` | (skip) | Path to dbCAN database dir |
 
+### Eukaryotic Analysis
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--run_eukaryotic` | `false` | Enable eukaryotic contig classification (Tiara + Whokaryote) |
+| `--tiara_min_len` | `3000` | Minimum contig length for Tiara (bp) |
+| `--whokaryote_min_len` | `5000` | Minimum contig length for Whokaryote (bp) |
+| `--run_metaeuk` | `false` | Run MetaEuk eukaryotic gene prediction (requires `--run_eukaryotic`) |
+| `--metaeuk_db` | (skip) | Path to MetaEuk protein reference database (MMseqs2 format) |
+| `--metaeuk_mem_limit` | `50G` | MetaEuk `--split-memory-limit` |
+| `--metaeuk_max_intron` | `10000` | Maximum intron length in bp |
+
+### Bin Refinement (NCLB)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--run_nclb` | `false` | Run NCLB LLM-guided bin refinement after DAS Tool |
+| `--nclb_dir` | (skip) | Path to NCLB repository (contains `bin/`, `lib/`, `envs/`) |
+| `--nclb_base_url` | (auto) | LLM server URL (default: `http://localhost:1234/v1`) |
+| `--nclb_model` | (auto) | LLM model name (default: auto-detect from server) |
+| `--nclb_with_ani` | `false` | Run minimap2 ANI during Elder investigations |
+
 ### Quality & Resources
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--checkm2_db` | (skip) | Path to CheckM2 DIAMOND database |
-| `--assembly_cpus` | `24` | CPUs for assembly |
-| `--assembly_memory` | `64 GB` | Memory for assembly |
+| `--assembly_cpus` | `16` | CPUs for assembly |
+| `--assembly_memory` | `60 GB` | Memory for assembly |
 
 ### Profiles
 
@@ -265,15 +362,19 @@ cd nextflow
 ./download-databases.sh
 
 # Or download specific databases
-./download-databases.sh --genomad          # ~3.5 GB (virus + plasmid detection)
-./download-databases.sh --checkv           # ~1.4 GB (viral quality assessment)
-./download-databases.sh --checkm2          # ~3.5 GB (MAG quality assessment)
-./download-databases.sh --kaiju            # ~47 GB  (protein-level taxonomy)
-./download-databases.sh --macsyfinder      # ~50 MB  (secretion + conjugation models)
-./download-databases.sh --defensefinder    # ~100 MB (anti-phage defense models)
-./download-databases.sh --kofam            # ~4 GB   (KEGG Orthology HMM profiles)
-./download-databases.sh --eggnog           # ~12 GB  (eggNOG-mapper DIAMOND db)
-./download-databases.sh --dbcan            # ~2 GB   (dbCAN HMM + DIAMOND db)
+./download-databases.sh --genomad          # ~3.5 GB  (virus + plasmid detection)
+./download-databases.sh --checkv           # ~1.4 GB  (viral quality assessment)
+./download-databases.sh --checkm2          # ~3.5 GB  (MAG quality assessment)
+./download-databases.sh --kaiju            # ~47 GB   (protein-level taxonomy)
+./download-databases.sh --kraken2          # ~8-70 GB (k-mer taxonomy, varies by DB)
+./download-databases.sh --silva            # ~1 GB    (rRNA classification - SSU + LSU)
+./download-databases.sh --macsyfinder      # ~50 MB   (secretion + conjugation models)
+./download-databases.sh --defensefinder    # ~100 MB  (anti-phage defense models)
+./download-databases.sh --kofam            # ~4 GB    (KEGG Orthology HMM profiles)
+./download-databases.sh --eggnog           # ~12 GB   (eggNOG-mapper DIAMOND db)
+./download-databases.sh --dbcan            # ~2 GB    (dbCAN HMM + DIAMOND db)
+./download-databases.sh --bakta            # ~1.5 GB  (light) or ~30 GB (full)
+./download-databases.sh --metaeuk          # ~18 GB   (OrthoDB eukaryotic proteins)
 ./download-databases.sh --all              # All databases
 ```
 
@@ -289,9 +390,21 @@ cd nextflow
 
 **Graceful failure handling.** All processes handle edge cases (empty input, tool crashes, 0 bins) without crashing the pipeline. DefenseFinder and MacSyFinder produce empty TSVs with headers on failure.
 
-**Sixteen isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
+**Annotate once, map to bins.** Metabolic profiling tools (KofamScan, eggNOG-mapper, dbCAN) run on the full protein FASTA from annotation. Results are merged into a unified per-protein table, then partitioned to individual MAGs via DAS Tool contig-to-bin assignments. This avoids redundant computation and ensures unbinned contigs are also annotated.
+
+**Three pathway analysis approaches.** KEGG module completeness provides step-by-step pathway evaluation. MinPath (Ye & Doak 2009) uses integer programming to find the minimum set of pathways explaining observed KOs, preventing inflation in draft MAGs. KEGG-Decoder (Graham et al. 2018) scores ~80 environmentally-curated biogeochemical functions.
+
+**Four independent taxonomy classifiers.** Kaiju (protein-level, RefSeq), Kraken2 (k-mer, configurable DB), sendsketch (GTDB MinHash via TaxServer), and rRNA (barrnap + vsearch SILVA). Each provides orthogonal signal; users can run any combination.
+
+**Eukaryotic contig filtering.** Tiara (deep learning k-mer NN) and Whokaryote (gene structure random forest) independently classify contigs. MetaEuk runs only on the union of non-prokaryotic contigs, avoiding wasted computation on bacterial sequences.
+
+**NCLB bin refinement.** Optional LLM-guided iterative refinement of DAS Tool bins. Four-step process: gather contig identity cards, LLM conversations for placement proposals, Elder investigations for SCG redundancy, and integration to produce refined community FASTAs.
+
+**Twenty-five isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
 
 ## Conda Environments
+
+Twenty-five isolated environments avoid dependency conflicts (27 YAML specs including CPU variants):
 
 | Environment | Tools |
 |-------------|-------|
@@ -300,6 +413,11 @@ cd nextflow
 | `dana-mag-semibin` | SemiBin2, LorBin, PyTorch GPU |
 | `dana-mag-comebin` | COMEBin (rec3141 fork), PyTorch GPU |
 | `dana-mag-binning` | MetaBAT2, MaxBin2, DAS_Tool |
+| `dana-mag-prokka` | Prokka |
+| `dana-mag-bakta` | Bakta (modern Prokka alternative) |
+| `dana-mag-kaiju` | Kaiju |
+| `dana-mag-kraken2` | Kraken2 (k-mer contig-level taxonomy) |
+| `dana-mag-rrna` | barrnap, vsearch (rRNA gene classification) |
 | `dana-mag-genomad` | geNomad |
 | `dana-mag-checkv` | CheckV |
 | `dana-mag-integron` | IntegronFinder |
@@ -309,8 +427,11 @@ cd nextflow
 | `dana-mag-kofamscan` | KofamScan, HMMER (KEGG Orthology) |
 | `dana-mag-emapper` | eggNOG-mapper, DIAMOND (COG/GO/EC/Pfam) |
 | `dana-mag-dbcan` | run_dbcan, HMMER, DIAMOND (CAZyme) |
+| `dana-mag-pathway` | MinPath, KEGG-Decoder (pathway analysis) |
+| `dana-mag-tiara` | Tiara (deep learning eukaryotic classification) |
+| `dana-mag-whokaryote` | Whokaryote, Prodigal (gene structure eukaryotic classification) |
+| `dana-mag-metaeuk` | MetaEuk (multi-exon eukaryotic gene prediction) |
 | `dana-mag-checkm2` | CheckM2 |
-| `dana-mag-kaiju` | Kaiju |
 | `dana-bbmap` | BBMap (optional dedupe) |
 
 ## MAG Quality Standards (MIMAG)
@@ -323,23 +444,48 @@ cd nextflow
 
 ## References
 
+**Assembly & Binning:**
 - Flye: Kolmogorov et al., *Nature Biotechnology* 2019
 - SemiBin2: Pan et al., *Nature Communications* 2023
 - MetaBAT2: Kang et al., *PeerJ* 2019
+- MaxBin2: Wu et al., *Bioinformatics* 2016
 - LorBin: Gao et al., *Briefings in Bioinformatics* 2024
 - COMEBin: Xie et al., *Nature Communications* 2024
 - DAS Tool: Sieber et al., *Nature Microbiology* 2018
 - CheckM2: Chklovski et al., *Nature Methods* 2023
+- CoverM: [github.com/wwood/CoverM](https://github.com/wwood/CoverM)
+
+**Annotation:**
+- Prokka: Seemann, *Bioinformatics* 2014
+- Bakta: Schwengers et al., *Microbial Genomics* 2021
+
+**Taxonomy:**
+- Kaiju: Menzel et al., *Nature Communications* 2016
+- Kraken2: Wood et al., *Genome Biology* 2019
+- BBSketch/sendsketch: Bushnell, [sourceforge.net/projects/bbmap](https://sourceforge.net/projects/bbmap/)
+- barrnap: Seemann, [github.com/tseemann/barrnap](https://github.com/tseemann/barrnap)
+- vsearch: Rognes et al., *PeerJ* 2016
+- SILVA: Quast et al., *Nucleic Acids Research* 2013
+
+**Mobile Genetic Elements:**
 - geNomad: Camargo et al., *Nature Biotechnology* 2024
 - CheckV: Nayfach et al., *Nature Biotechnology* 2021
 - IntegronFinder: Cury et al., *Nucleic Acids Research* 2016
 - IslandPath-DIMOB: Bertelli & Brinkman, *Bioinformatics* 2018
 - MacSyFinder: Abby et al., *PLoS ONE* 2014
-- DefenseFinder: Tesson et al., *Nucleic Acids Research* 2022
-- Kaiju: Menzel et al., *Nature Communications* 2016
-- Prokka: Seemann, *Bioinformatics* 2014
+- DefenseFinder: Tesson et al., *Nature Communications* 2022
+
+**Metabolic Profiling:**
 - KofamScan: Aramaki et al., *Bioinformatics* 2020
 - eggNOG-mapper: Cantalapiedra et al., *Molecular Biology and Evolution* 2021
 - dbCAN3: Zheng et al., *Nucleic Acids Research* 2023
-- CoverM: [github.com/wwood/CoverM](https://github.com/wwood/CoverM)
+- MinPath: Ye & Doak, *PLoS Computational Biology* 2009
+- KEGG-Decoder: Graham et al., *bioRxiv* 2018
+
+**Eukaryotic Analysis:**
+- Tiara: Karlicki et al., *Bioinformatics* 2022
+- Whokaryote: Pronk et al., *Microbial Genomics* 2022
+- MetaEuk: Levy Karin et al., *Microbiome* 2020
+
+**Standards:**
 - MIMAG: Bowers et al., *Nature Biotechnology* 2017

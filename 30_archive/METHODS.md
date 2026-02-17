@@ -147,20 +147,19 @@ DAS_Tool -i <bin_list> -c <contigs> -o <output> \
   --search_engine diamond --threads <threads>
 ```
 
-### Genome Refinement
+### Bin Refinement (NCLB)
 
-Selected bins undergo iterative polishing:
+NCLB (No Contig Left Behind) provides optional LLM-guided iterative bin refinement after DAS Tool consensus. The four-step process examines unbinned and ambiguously-binned contigs:
 
-1. **Racon** (2 rounds): Consensus correction using read alignments (Vaser et al. 2017)
-```
-racon -t <threads> <reads> <alignments> <genome> > polished.fasta
-```
+1. **Gather**: Build identity cards for all contigs incorporating composition (GC%, tetranucleotide frequencies), coverage, single-copy gene content, and taxonomy signals.
 
-2. **Medaka**: Neural network-based polishing trained on Nanopore errors
-```
-medaka_consensus -i <reads> -d <draft> -o <output> \
-  -m r941_min_high_g360
-```
+2. **Converse**: LLM tool-use conversations propose bin placements for each unplaced contig, using contig identity cards and bin membership context.
+
+3. **Elders**: Investigate single-copy gene redundancy within bins to distinguish biological ecotypes (strain variants within a bin) from contamination (misplaced contigs).
+
+4. **Integrate**: Apply accepted proposals, extract refined community FASTAs, and generate a machine-readable decision chronicle.
+
+*Note: Legacy polishing with Racon and Medaka (Vaser et al. 2017) is documented in the archive but not included in the Nextflow pipeline.*
 
 ### Quality Assessment
 
@@ -178,20 +177,65 @@ Bins are classified according to MIMAG standards (Bowers et al. 2017):
 
 ### Gene Annotation
 
-Prokka (Seemann 2014) annotates the co-assembly to predict coding sequences, rRNAs, and tRNAs. The protein FASTA output is used as input for downstream tools (Kaiju, IslandPath-DIMOB, MacSyFinder, DefenseFinder):
+The pipeline supports two gene annotators, selectable via `--annotator`:
+
+#### Prokka
+
+Prokka (Seemann 2014) rapidly annotates the co-assembly to predict coding sequences, rRNAs, and tRNAs. The protein FASTA output is used as input for downstream tools (Kaiju, IslandPath-DIMOB, MacSyFinder, DefenseFinder, metabolic profiling):
 ```
 prokka --outdir <outdir> --prefix <prefix> \
   --kingdom Bacteria --metagenome --cpus <threads> <assembly>
 ```
 
+#### Bakta
+
+Bakta (Schwengers et al. 2021) provides an alternative annotation path with improved database coverage and standardized gene naming. It supports two modes: fast CDS-only annotation (minutes, sufficient for all downstream tools) and optional full annotation with ncRNA, tRNA, and CRISPR detection:
+```
+bakta --db <bakta_db> --output <outdir> --prefix <prefix> \
+  --skip-trna --skip-tmrna --skip-rrna --skip-ncrna --skip-crispr \
+  --threads <cpus> <assembly>
+```
+
 ### Taxonomic Classification
 
-Kaiju (Menzel et al. 2016) assigns protein-level taxonomy to contigs using translated search against RefSeq reference genomes (bacteria, archaea, viruses):
+Four independent taxonomy classifiers provide complementary information at different levels:
+
+#### Kaiju (Protein-level)
+
+Kaiju (Menzel et al. 2016) assigns protein-level taxonomy to contigs using translated search against RefSeq reference genomes (bacteria, archaea, viruses). Per-gene classifications are aggregated to per-contig taxonomy by majority vote:
 ```
-kaiju -t <nodes.dmp> -f <database.fmi> -i <proteins.faa> -o <output>
+kaiju -p -t <nodes.dmp> -f <database.fmi> -i <proteins.faa> -o <output> \
+  -a greedy -e 5
 ```
 
-For high-quality MAGs, GTDB-Tk (Chaumeil et al. 2020) provides standardized taxonomy based on the Genome Taxonomy Database.
+#### Kraken2 (k-mer)
+
+Kraken2 (Wood et al. 2019) performs k-mer based taxonomic classification directly on assembled contigs, requiring no gene annotation. Uses exact k-mer matching against a reference database for fast, memory-efficient classification. The pipeline runs Kraken2 with `maxForks 1` to prevent memory exhaustion from concurrent database loading:
+```
+kraken2 --db <database> --threads <cpus> --confidence <threshold> \
+  --output <output> --report <report> <contigs>
+```
+
+Per-contig classifications are enriched with full taxonomic lineages from the NCBI taxonomy.
+
+#### sendsketch (GTDB MinHash)
+
+BBSketch/sendsketch (Bushnell, BBTools) performs MinHash-based taxonomy against a GTDB reference database via a network TaxServer. Provides ANI-based species-level classification without requiring local database storage:
+```
+sendsketch.sh in=<contigs> out=<output> address=<taxserver_url> \
+  printall=t mode=sequence
+```
+
+#### rRNA Gene Classification
+
+rRNA genes are detected with barrnap (Seemann) using kingdom-specific HMM models for bacteria, archaea, and eukaryotes. Detected rRNA sequences are classified against the SILVA reference database (Quast et al. 2013) using vsearch global alignment:
+```
+barrnap --kingdom <bac|arc|euk> --threads <cpus> <assembly> > <gff>
+vsearch --usearch_global <rrna_seqs> --db <silva_db> \
+  --id <min_identity> --blast6out <output> --maxaccepts 1
+```
+
+SSU (16S/18S) and LSU (23S/28S) classifications are reported separately, with per-contig summaries aggregating the best rRNA-based taxonomy.
 
 ### Mobile Genetic Element Detection
 
@@ -274,7 +318,49 @@ Annotations from all three sources are merged into a unified per-protein table, 
 
 #### KEGG Module Completeness
 
-KEGG module completeness is evaluated per MAG against ~80 curated module definitions covering carbon fixation (Calvin cycle, rTCA, Wood-Ljungdahl, 3-HP), nitrogen cycling (fixation, nitrification, denitrification, DNRA, anammox), sulfur metabolism (Sox, Dsr, assimilatory), methane metabolism (methanogenesis, methanotrophy), electron transport chain complexes (I-V), photosystems, central carbon metabolism (glycolysis, TCA cycle, pentose phosphate), fermentation pathways, and vitamin/cofactor biosynthesis. Each module is defined as a series of steps, where each step is a set of alternative KOs. Module completeness is the fraction of steps with at least one KO present. Results are output as a MAG-by-module matrix and visualized as a clustered heatmap.
+KEGG module completeness is evaluated per MAG against ~150 curated module definitions covering carbon fixation (Calvin cycle, rTCA, Wood-Ljungdahl, 3-HP), nitrogen cycling (fixation, nitrification, denitrification, DNRA, anammox), sulfur metabolism (Sox, Dsr, assimilatory), methane metabolism (methanogenesis, methanotrophy), electron transport chain complexes (I-V), photosystems, central carbon metabolism (glycolysis, TCA cycle, pentose phosphate), fermentation pathways, and vitamin/cofactor biosynthesis. Each module is defined as a series of steps, where each step is a set of alternative KOs. Module completeness is the fraction of steps with at least one KO present. Results are output as a MAG-by-module matrix and visualized as a clustered heatmap.
+
+#### Parsimony Pathway Reconstruction (MinPath)
+
+MinPath (Ye & Doak 2009) identifies the minimum set of KEGG pathways that explain the observed KO annotations per MAG using integer linear programming (GLPK solver). This prevents pathway inflation common in draft MAGs, where incomplete genomes may spuriously activate many pathways. Both naive (all pathways containing any observed KO) and parsimony-filtered pathway counts are reported per MAG:
+```
+MinPath1.4.py -ko <ko_list> -report <output> -details <details> -mps <glpk_solver>
+```
+
+#### Biogeochemical Function Scoring (KEGG-Decoder)
+
+KEGG-Decoder (Graham et al. 2018) scores ~80 environmentally-curated biogeochemical functions per MAG, including carbon fixation pathways, nitrogen/sulfur/methane cycling, photosynthesis, metal transport, and organic compound utilization. Each function receives a completeness score (0-1) based on the presence of its component KOs. Results are output as a MAG-by-function matrix and visualized as a publication-quality clustered heatmap:
+```
+KEGG-decoder -i <ko_input> -o <output> -v static
+```
+
+### Eukaryotic Analysis
+
+#### Eukaryotic Contig Classification
+
+Two complementary classifiers identify eukaryotic contigs in the assembly:
+
+**Tiara** (Karlicki et al. 2022) uses a deep learning k-mer neural network trained on RefSeq sequences to classify contigs as prokaryotic, eukaryotic, organellar (mitochondria/plastid), or unknown. Achieves >98% accuracy on contigs >3 kb:
+```
+tiara -i <contigs> -o <output> --min_len <min_length> -t <threads>
+```
+
+**Whokaryote** (Pronk et al. 2022) classifies contigs using gene structure features (gene density, coding fraction, intergenic distances) via a random forest model trained on Prodigal gene predictions. Provides orthogonal signal to k-mer-based approaches:
+```
+whokaryote.py --contigs <contigs> --outdir <output> --gff <annotation.gff> \
+  --minsize <min_length> --threads <threads>
+```
+
+#### Eukaryotic Gene Prediction
+
+MetaEuk (Levy Karin et al. 2020) predicts multi-exon eukaryotic genes from contigs classified as non-prokaryotic by the Tiara/Whokaryote union. Uses homology-based search against a protein reference database (e.g., OrthoDB) to identify intron-spanning gene models:
+```
+metaeuk easy-predict <contigs> <protein_db> <output> <tmp> \
+  --split-memory-limit <mem_limit> --min-length <min_codons> \
+  --max-intron <max_intron_bp>
+```
+
+Outputs include predicted protein sequences, nucleotide coding sequences, and GFF gene structure annotations with exon boundaries.
 
 ---
 
@@ -328,34 +414,54 @@ clusters <- cluster_louvain(graph)
 
 Key software versions used in development:
 
-- **BBTools**: 38.90
-- **Filtlong**: 0.2.1
-- **Kraken2**: 2.1.2
-- **Prokka**: 1.14.6
-- **HMMER**: 3.3.2
+**Assembly & Mapping:**
 - **Flye**: 2.9.5
 - **minimap2**: 2.28
 - **CoverM**: 0.7.0
+- **BBTools**: 38.90
+- **Filtlong**: 0.2.1
+
+**Binning:**
 - **SemiBin2**: 2.1.0
 - **MetaBAT2**: 2.17
 - **MaxBin2**: 2.2.7
 - **LorBin**: 1.0
 - **COMEBin**: 1.0.4
 - **DAS Tool**: 1.1.7
+- **CheckM2**: 1.0.2
+
+**Annotation:**
+- **Prokka**: 1.14.6
+- **Bakta**: 1.9.4
+
+**Taxonomy:**
+- **Kaiju**: 1.10.1
+- **Kraken2**: 2.1.2
+- **barrnap**: 0.9
+- **vsearch**: 2.28.1
+
+**Mobile Genetic Elements:**
 - **geNomad**: 1.8.0
 - **CheckV**: 1.0.3
 - **IntegronFinder**: 2.0.5
 - **MacSyFinder**: 2.1.4
 - **DefenseFinder**: 2.0.1
-- **Kaiju**: 1.10.1
-- **CheckM2**: 1.0.2
+
+**Metabolic Profiling:**
 - **KofamScan**: 1.3.0
 - **eggNOG-mapper**: 2.1.12
 - **dbCAN**: 4.0
-- **Racon**: 1.5.0
-- **Medaka**: 1.7.2
-- **GTDB-Tk**: 2.1.1
+- **MinPath**: 1.4
+- **KEGG-Decoder**: 1.3
+
+**Eukaryotic Analysis:**
+- **Tiara**: 1.0.3
+- **Whokaryote**: 1.1.2
+- **MetaEuk**: 7
+
+**Runtime:**
 - **Nextflow**: 25.10.3
+- **HMMER**: 3.3.2
 - **R**: 4.2+
 - **Python**: 3.9+
 
@@ -371,6 +477,8 @@ Bertelli C, Brinkman FSL. (2018) Improved genomic island predictions with Island
 
 Bowers RM, et al. (2017) Minimum information about a single amplified genome (MISAG) and a metagenome-assembled genome (MIMAG). *Nat Biotechnol* 35:725-731.
 
+Bushnell B. BBTools software package. sourceforge.net/projects/bbmap/.
+
 Camargo AP, et al. (2024) Identification of mobile genetic elements with geNomad. *Nat Biotechnol* 42:1303-1312.
 
 Cantalapiedra CP, et al. (2021) eggNOG-mapper v2: Functional Annotation, Orthology Assignments, and Domain Prediction at the Metagenomic Scale. *Mol Biol Evol* 38:5825-5829.
@@ -385,9 +493,15 @@ Eddy SR. (2011) Accelerated profile HMM searches. *PLoS Comput Biol* 7:e1002195.
 
 Gao Z, et al. (2024) LorBin: a long-read-based metagenome binner using read-level features. *Brief Bioinform* 25:bbae312.
 
+Graham ED, Heidelberg JF, Tully BJ. (2018) Potential for primary productivity in a globally-distributed bacterial phototroph. *ISME J* 12:1861-1866.
+
 Kang DD, et al. (2019) MetaBAT 2: an adaptive binning algorithm for robust and efficient genome reconstruction from metagenome assemblies. *PeerJ* 7:e7359.
 
+Karlicki M, et al. (2022) Tiara: deep learning-based classification system for eukaryotic sequences. *Bioinformatics* 38:344-350.
+
 Kolmogorov M, et al. (2019) Assembly of long, error-prone reads using repeat graphs. *Nat Biotechnol* 37:540-546.
+
+Levy Karin E, et al. (2020) MetaEuk — sensitive, high-throughput gene discovery, and annotation for large-scale eukaryotic metagenomics. *Microbiome* 8:48.
 
 Li H. (2018) Minimap2: pairwise alignment for nucleotide sequences. *Bioinformatics* 34:3094-3100.
 
@@ -400,6 +514,14 @@ Nayfach S, et al. (2021) CheckV assesses the quality and completeness of metagen
 Pan S, et al. (2023) SemiBin2: self-supervised contrastive learning leads to better MAGs for short- and long-read sequencing. *Nat Commun* 14:5632.
 
 Prestat E, et al. (2014) FOAM (Functional Ontology Assignments for Metagenomes): a Hidden Markov Model (HMM) database with environmental focus. *Nucleic Acids Res* 42:10702-10713.
+
+Pronk LJU, et al. (2022) Whokaryote: distinguishing eukaryotic and prokaryotic contigs in metagenomes based on gene structure. *Microb Genom* 8:000823.
+
+Quast C, et al. (2013) The SILVA ribosomal RNA gene database project: improved data processing and web-based tools. *Nucleic Acids Res* 41:D590-D596.
+
+Rognes T, et al. (2016) VSEARCH: a versatile open source tool for metagenomics. *PeerJ* 4:e2584.
+
+Schwengers O, et al. (2021) Bakta: rapid and standardized annotation of bacterial genomes via a comprehensive and consistent information resource. *Microb Genom* 7:000685.
 
 Seemann T. (2014) Prokka: rapid prokaryotic genome annotation. *Bioinformatics* 30:2068-2069.
 
@@ -416,5 +538,7 @@ Wood DE, et al. (2019) Improved metagenomic analysis with Kraken 2. *Genome Biol
 Wu YW, et al. (2016) MaxBin 2.0: an automated binning algorithm to recover genomes from multiple metagenomic datasets. *Bioinformatics* 32:605-607.
 
 Xie Z, et al. (2024) COMEBin: a contig-level metagenomic binner via contrastive multi-view representation learning. *Nat Commun* 15:1270.
+
+Ye Y, Doak TG. (2009) A parsimony approach to biological pathway reconstruction/inference for genomes and metagenomes. *PLoS Comput Biol* 5:e1000465.
 
 Zheng J, et al. (2023) dbCAN3: automated carbohydrate-active enzyme and substrate annotation. *Nucleic Acids Res* 51:W115-W121.

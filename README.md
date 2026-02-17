@@ -66,12 +66,26 @@ cd danaSeq/20_mag_assembly/nextflow
     --dedupe \
     --filtlong_size 40000000000 \
     --min_overlap 1000 \
+    --annotator prokka \
     --run_maxbin true \
     --run_lorbin true \
     --run_comebin true \
     --lorbin_min_length 80000 \
     --metabat_min_cls 50000 \
     --checkm2_db /path/to/checkm2_db \
+    --genomad_db /path/to/genomad_db \
+    --checkv_db /path/to/checkv_db \
+    --kaiju_db /path/to/kaiju_db \
+    --run_kraken2 true --kraken2_db /path/to/kraken2_db \
+    --run_sendsketch true --sendsketch_address http://host:3068/sketch \
+    --run_rrna true --silva_ssu_db /path/to/SILVA_SSU.fasta \
+    --run_metabolism true \
+    --kofam_db /path/to/kofam_db \
+    --eggnog_db /path/to/eggnog_db \
+    --dbcan_db /path/to/dbcan_db \
+    --run_eukaryotic true --run_metaeuk true --metaeuk_db /path/to/metaeuk_db \
+    --macsyfinder_models /path/to/macsyfinder_models \
+    --defensefinder_models /path/to/defensefinder_models \
     --assembly_cpus 24 \
     --assembly_memory '64 GB'
 ```
@@ -105,12 +119,14 @@ dānaSeq/
 │
 ├── 20_mag_assembly/              Metagenome-assembled genome reconstruction
 │   ├── nextflow/                 Nextflow DSL2 pipeline
-│   │   ├── main.nf              Entry point (7 processes)
-│   │   ├── modules/             assembly, mapping, binning
-│   │   ├── envs/                Conda YAML specs (8 environments)
+│   │   ├── main.nf              Entry point (40+ processes)
+│   │   ├── modules/             11 modules: assembly, mapping, binning, annotation,
+│   │   │                          taxonomy, mge, metabolism, eukaryotic, rrna, refinement,
+│   │   │                          preprocess
+│   │   ├── bin/                  Pipeline scripts (merge, map, MinPath, KEGG-Decoder, etc.)
+│   │   ├── envs/                Conda YAML specs (25 environments)
 │   │   ├── Dockerfile           Self-contained Docker image
 │   │   └── test-data/           Bundled test data
-│   ├── 40s-90s scripts          Polishing, taxonomy, visualization (not yet ported)
 │   └── archive/                 Replaced bash scripts (reference only)
 │
 ├── 30_archive/                   Archived root-level scripts and documentation
@@ -151,24 +167,44 @@ Reconstructs metagenome-assembled genomes alongside real-time processing:
 
 ```
 Sample FASTQs → Flye co-assembly → minimap2 mapping → CoverM depths
-                                                          ├── SemiBin2
-                                                          ├── MetaBAT2
-                                                          ├── MaxBin2
-                                                          ├── LorBin
-                                                          └── COMEBin
-                                                                ↓
-                                                          DAS Tool consensus
-                                                                ↓
-                                                          CheckM2 quality (optional)
+                        │                                   │
+                        │                            ┌──────┼──────┬──────┬──────┐
+                        │                         SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin
+                        │                            └──────┼──────┴──────┴──────┘
+                        │                              DAS Tool consensus → CheckM2
+                        │                                   │
+                        │                              NCLB bin refinement (optional)
+                        │
+                   Parallel annotation & classification:
+                        ├── Prokka/Bakta gene annotation
+                        │     ├── Kaiju protein-level taxonomy
+                        │     ├── KofamScan + eggNOG-mapper + dbCAN → merge → bin mapping
+                        │     │     ├── KEGG module completeness
+                        │     │     ├── MinPath pathway reconstruction
+                        │     │     └── KEGG-Decoder biogeochemical functions
+                        │     ├── IslandPath-DIMOB genomic islands
+                        │     ├── MacSyFinder secretion/conjugation systems
+                        │     └── DefenseFinder anti-phage defense
+                        ├── Kraken2 k-mer taxonomy
+                        ├── sendsketch GTDB MinHash taxonomy
+                        ├── barrnap + vsearch rRNA classification (SILVA)
+                        ├── geNomad virus/plasmid → CheckV quality
+                        ├── IntegronFinder integron detection
+                        ├── Tiara + Whokaryote eukaryotic classification
+                        │     └── MetaEuk eukaryotic gene prediction
+                        └── Tetranucleotide frequency profiles
 ```
 
 Key features:
+- **Five-binner consensus**: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin → DAS Tool
+- **Four taxonomy classifiers**: Kaiju (protein), Kraken2 (k-mer), sendsketch (GTDB MinHash), rRNA (SILVA)
+- **Metabolic profiling**: KofamScan + eggNOG-mapper + dbCAN → KEGG modules, MinPath, KEGG-Decoder
+- **Mobile genetic elements**: geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder
+- **Eukaryotic analysis**: Tiara + Whokaryote classification, MetaEuk gene prediction
+- **NCLB bin refinement**: LLM-guided iterative bin refinement (optional)
 - CheckM2 quality assessment (completeness/contamination per MIMAG standards)
 - CoverM for depth calculation (avoids MetaBAT2 integer overflow bug)
-- Supplementary alignment filtering (`-F 0x904`) for long reads
-- Dynamic binner architecture (add new binners with one line, run serially)
-- Graceful failure handling for small/empty datasets
-- GPU-accelerated SemiBin2 (local), CPU-only in Docker
+- GPU-accelerated ML binners (local), CPU-only in Docker
 
 See `20_mag_assembly/README.md` for full details.
 
@@ -210,14 +246,50 @@ MAGs are classified per MIMAG (Bowers et al. 2017):
 
 ## References
 
+**Assembly & Binning:**
 - Flye: Kolmogorov et al., Nature Biotechnology 2019
 - SemiBin2: Pan et al., Nature Communications 2023
 - MetaBAT2: Kang et al., PeerJ 2019
-- DAS Tool: Sieber et al., Nature Microbiology 2018
+- MaxBin2: Wu et al., Bioinformatics 2016
 - LorBin: Gao et al., Briefings in Bioinformatics 2024
 - COMEBin: Xie et al., Nature Communications 2024
+- DAS Tool: Sieber et al., Nature Microbiology 2018
 - CheckM2: Chklovski et al., Nature Methods 2023
 - CoverM: [github.com/wwood/CoverM](https://github.com/wwood/CoverM)
+
+**Annotation:**
+- Prokka: Seemann, Bioinformatics 2014
+- Bakta: Schwengers et al., Microbial Genomics 2021
+
+**Taxonomy:**
+- Kaiju: Menzel et al., Nature Communications 2016
+- Kraken2: Wood et al., Genome Biology 2019
+- BBSketch/sendsketch: Bushnell, [sourceforge.net/projects/bbmap](https://sourceforge.net/projects/bbmap/)
+- barrnap: Seemann, [github.com/tseemann/barrnap](https://github.com/tseemann/barrnap)
+- vsearch: Rognes et al., PeerJ 2016
+- SILVA: Quast et al., Nucleic Acids Research 2013
+
+**Mobile Genetic Elements:**
+- geNomad: Camargo et al., Nature Biotechnology 2024
+- CheckV: Nayfach et al., Nature Biotechnology 2021
+- IntegronFinder: Cury et al., Nucleic Acids Research 2016
+- IslandPath-DIMOB: Bertelli & Brinkman, Bioinformatics 2018
+- MacSyFinder: Abby et al., PLoS ONE 2014
+- DefenseFinder: Tesson et al., Nature Communications 2022
+
+**Metabolic Profiling:**
+- KofamScan: Aramaki et al., Bioinformatics 2020
+- eggNOG-mapper: Cantalapiedra et al., Molecular Biology and Evolution 2021
+- dbCAN3: Zheng et al., Nucleic Acids Research 2023
+- MinPath: Ye & Doak, PLoS Computational Biology 2009
+- KEGG-Decoder: Graham et al., bioRxiv 2018
+
+**Eukaryotic Analysis:**
+- Tiara: Karlicki et al., Bioinformatics 2022
+- Whokaryote: Pronk et al., Microbial Genomics 2022
+- MetaEuk: Levy Karin et al., Microbiome 2020
+
+**Standards:**
 - MIMAG: Bowers et al., Nature Biotechnology 2017
 - FOAM: Prestat et al., Nucleic Acids Research 2014
 - CANT-HYD: Khot et al., 2022
