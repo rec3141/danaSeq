@@ -444,6 +444,7 @@ Current database paths for pipeline flags:
 - `--kraken2_db /data/scratch/refdbs/krakendb/pluspfp_08gb`
 - `--silva_ssu_db /data/scratch/refdbs/silva_db/SILVA_138.2_SSURef_NR99.fasta`
 - `--silva_lsu_db /data/scratch/refdbs/silva_db/SILVA_138.2_LSURef_NR99.fasta`
+- `--marferret_db /data/scratch/refdbs/marferret_db`
 - `--sendsketch_address http://10.151.50.41:3068/sketch`  (Ratnakara GTDB TaxServer)
 
 ---

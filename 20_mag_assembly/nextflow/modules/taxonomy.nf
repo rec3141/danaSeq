@@ -5,6 +5,7 @@ process KAIJU_CLASSIFY {
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-kaiju"
     publishDir "${params.outdir}/taxonomy/kaiju", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/taxonomy/kaiju" : null
 
     input:
     path(proteins)   // Prokka .faa (amino acid sequences)
@@ -162,6 +163,7 @@ process KRAKEN2_CLASSIFY {
     maxForks 1
     conda "${projectDir}/conda-envs/dana-mag-kraken2"
     publishDir "${params.outdir}/taxonomy/kraken2", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/taxonomy/kraken2" : null
 
     input:
     path(contigs)   // Assembly FASTA — no annotation needed
@@ -303,6 +305,7 @@ process SENDSKETCH_CLASSIFY {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-bbmap"
     publishDir "${params.outdir}/taxonomy/sendsketch", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/taxonomy/sendsketch" : null
 
     input:
     path(contigs)   // Assembly FASTA — no annotation needed

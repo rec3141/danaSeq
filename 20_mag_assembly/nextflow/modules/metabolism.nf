@@ -9,6 +9,7 @@ process KOFAMSCAN {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
     publishDir "${params.outdir}/metabolism/kofamscan", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/kofamscan" : null
 
     input:
     path(proteins)
@@ -54,6 +55,7 @@ process EMAPPER {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-emapper"
     publishDir "${params.outdir}/metabolism/emapper", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/emapper" : null
 
     input:
     path(proteins)
@@ -99,6 +101,7 @@ process DBCAN {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-dbcan"
     publishDir "${params.outdir}/metabolism/dbcan", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/dbcan" : null
 
     input:
     path(proteins)
@@ -161,6 +164,7 @@ process MERGE_ANNOTATIONS {
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
     publishDir "${params.outdir}/metabolism/merged", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/merged" : null
 
     input:
     val(labels)
@@ -192,6 +196,7 @@ process MAP_TO_BINS {
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
     publishDir "${params.outdir}/metabolism", mode: 'copy', pattern: 'per_mag'
     publishDir "${params.outdir}/metabolism/community", mode: 'copy', pattern: 'community_annotations.tsv'
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/per_mag" : null
 
     input:
     path(merged)
@@ -222,6 +227,7 @@ process KEGG_MODULES {
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
     publishDir "${params.outdir}/metabolism/modules", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/modules" : null
 
     input:
     path(per_mag_dir)
@@ -248,6 +254,7 @@ process MINPATH {
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-pathway"
     publishDir "${params.outdir}/metabolism/minpath", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/minpath" : null
 
     input:
     path(per_mag_dir)
@@ -277,6 +284,7 @@ process KEGG_DECODER {
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-pathway"
     publishDir "${params.outdir}/metabolism/kegg_decoder", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/kegg_decoder" : null
 
     input:
     path(per_mag_dir)

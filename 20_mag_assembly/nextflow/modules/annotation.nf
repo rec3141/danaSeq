@@ -4,17 +4,17 @@ process PROKKA_ANNOTATE {
     tag "prokka"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-prokka"
-    publishDir "${params.outdir}/annotation/prokka", mode: 'copy',
-        saveAs: { fn -> fn.minus('prokka_out/') }
+    publishDir "${params.outdir}/annotation/prokka", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/annotation/prokka" : null
 
     input:
     path(assembly)
 
     output:
-    path("prokka_out/*.faa"),  emit: proteins
-    path("prokka_out/*.gff"),  emit: gff
-    path("prokka_out/*.gbk"),  emit: gbk
-    path("prokka_out/*.tsv"),  emit: tsv
+    path("annotation.faa"),  emit: proteins
+    path("annotation.gff"),  emit: gff
+    path("annotation.gbk"),  emit: gbk
+    path("annotation.tsv"),  emit: tsv
 
     script:
     """
@@ -30,6 +30,7 @@ process PROKKA_ANNOTATE {
         --metagenome \\
         --cpus ${task.cpus} \\
         --evalue 1e-20 \\
+        --prefix annotation \\
         --outdir prokka_out \\
         --force \\
         --quiet \\
@@ -39,9 +40,11 @@ process PROKKA_ANNOTATE {
     rm -f prokka_out/*.{err,fna,fsa,log,sqn,txt} 2>/dev/null || true
     rm -f prokka_out/*.tmp.*.faa 2>/dev/null || true
 
-    if [ ! -s prokka_out/PROKKA_*.faa ]; then
+    if [ ! -s prokka_out/annotation.faa ]; then
         echo "[WARNING] Prokka produced no protein output" >&2
     fi
+
+    cp prokka_out/annotation.faa prokka_out/annotation.gff prokka_out/annotation.gbk prokka_out/annotation.tsv .
     """
 }
 
@@ -53,17 +56,17 @@ process BAKTA_CDS {
     tag "bakta_cds"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-bakta"
-    publishDir "${params.outdir}/annotation/bakta/cds", mode: 'copy',
-        saveAs: { fn -> fn.minus('bakta_out/') }
+    publishDir "${params.outdir}/annotation/bakta/cds", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/cds" : null
 
     input:
     path(assembly)
 
     output:
-    path("bakta_out/annotation.faa"),  emit: proteins
-    path("bakta_out/annotation.gff3"), emit: gff
-    path("bakta_out/annotation.tsv"),  emit: tsv
-    path("bakta_out/annotation.hypotheticals.faa"), emit: hypotheticals, optional: true
+    path("annotation.faa"),  emit: proteins
+    path("annotation.gff3"), emit: gff
+    path("annotation.tsv"),  emit: tsv
+    path("annotation.hypotheticals.faa"), emit: hypotheticals, optional: true
 
     script:
     """
@@ -83,6 +86,9 @@ process BAKTA_CDS {
     if [ ! -s bakta_out/annotation.faa ]; then
         echo "[WARNING] Bakta CDS produced no protein output" >&2
     fi
+
+    cp bakta_out/annotation.faa bakta_out/annotation.gff3 bakta_out/annotation.tsv .
+    cp bakta_out/annotation.hypotheticals.faa . 2>/dev/null || true
     """
 }
 
@@ -94,19 +100,19 @@ process BAKTA_FULL {
     tag "bakta_full"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-bakta"
-    publishDir "${params.outdir}/annotation/bakta/full", mode: 'copy',
-        saveAs: { fn -> fn.minus('bakta_out/') }
+    publishDir "${params.outdir}/annotation/bakta/full", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/full" : null
 
     input:
     path(assembly)
 
     output:
-    path("bakta_out/annotation.faa"),  emit: proteins
-    path("bakta_out/annotation.gff3"), emit: gff
-    path("bakta_out/annotation.tsv"),  emit: tsv
-    path("bakta_out/annotation.hypotheticals.faa"), emit: hypotheticals, optional: true
-    path("bakta_out/annotation.gbff"), emit: gbff, optional: true
-    path("bakta_out/annotation.png"),  emit: plot, optional: true
+    path("annotation.faa"),  emit: proteins
+    path("annotation.gff3"), emit: gff
+    path("annotation.tsv"),  emit: tsv
+    path("annotation.hypotheticals.faa"), emit: hypotheticals, optional: true
+    path("annotation.gbff"), emit: gbff, optional: true
+    path("annotation.png"),  emit: plot, optional: true
 
     script:
     """
@@ -122,5 +128,8 @@ process BAKTA_FULL {
     if [ ! -s bakta_out/annotation.faa ]; then
         echo "[WARNING] Bakta full produced no protein output" >&2
     fi
+
+    cp bakta_out/annotation.faa bakta_out/annotation.gff3 bakta_out/annotation.tsv .
+    cp bakta_out/annotation.hypotheticals.faa bakta_out/annotation.gbff bakta_out/annotation.png . 2>/dev/null || true
     """
 }

@@ -4,7 +4,8 @@ process BIN_SEMIBIN2 {
     tag "semibin2"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-semibin"
-    publishDir "${params.outdir}/binning/semibin", mode: 'copy', saveAs: { fn -> fn == 'semibin_bins.tsv' ? 'contig_bins.tsv' : fn }
+    publishDir "${params.outdir}/binning/semibin", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/semibin" : null
 
     input:
     path(assembly)
@@ -61,7 +62,8 @@ process BIN_METABAT2 {
     tag "metabat2"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/metabat", mode: 'copy', saveAs: { fn -> fn == 'metabat_bins.tsv' ? 'contig_bins.tsv' : fn }
+    publishDir "${params.outdir}/binning/metabat", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/metabat" : null
 
     input:
     path(assembly)
@@ -109,7 +111,8 @@ process BIN_MAXBIN2 {
     tag "maxbin2"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/maxbin", mode: 'copy', saveAs: { fn -> fn == 'maxbin_bins.tsv' ? 'contig_bins.tsv' : fn }
+    publishDir "${params.outdir}/binning/maxbin", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/maxbin" : null
 
     input:
     path(assembly)
@@ -158,7 +161,8 @@ process BIN_LORBIN {
     tag "lorbin"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-semibin"
-    publishDir "${params.outdir}/binning/lorbin", mode: 'copy', saveAs: { fn -> fn == 'lorbin_bins.tsv' ? 'contig_bins.tsv' : fn }
+    publishDir "${params.outdir}/binning/lorbin", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/lorbin" : null
 
     input:
     path(assembly)
@@ -217,7 +221,8 @@ process BIN_COMEBIN {
     tag "comebin"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-comebin"
-    publishDir "${params.outdir}/binning/comebin", mode: 'copy', saveAs: { fn -> fn == 'comebin_bins.tsv' ? 'contig_bins.tsv' : fn }
+    publishDir "${params.outdir}/binning/comebin", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/comebin" : null
 
     input:
     path(assembly)
@@ -275,6 +280,7 @@ process DASTOOL_CONSENSUS {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
     publishDir "${params.outdir}/binning/dastool", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/dastool" : null
 
     input:
     path(assembly)
@@ -403,6 +409,7 @@ process CHECKM2 {
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-checkm2"
     publishDir "${params.outdir}/binning/checkm2", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/checkm2" : null
 
     input:
     path(bins_dirs, stageAs: 'bins_?')   // collected list of bins/ directories
@@ -436,6 +443,10 @@ process CHECKM2 {
         fi
         DB_PATH="\$DMND_FILE"
     fi
+
+    # Use work directory for DIAMOND tmp (avoid filling /tmp on root partition)
+    export TMPDIR="\$(pwd)/tmp"
+    mkdir -p "\$TMPDIR"
 
     checkm2 predict \\
         --threads ${task.cpus} \\

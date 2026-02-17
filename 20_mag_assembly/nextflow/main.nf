@@ -35,6 +35,11 @@ def helpMessage() {
       --input DIR        Input directory (see Input section below)
       --outdir DIR       Output directory [default: results]
 
+    Caching:
+      --store_dir DIR    Persistent cache directory (storeDir); completed processes are
+                         skipped across runs even after work/ cleanup. Off by default.
+                         When active, outputs go directly to store_dir (publishDir ignored).
+
     Assembly:
       --min_overlap N    Flye --min-overlap [default: 1000]
       --polish           Enable Flye polishing iterations [default: true]

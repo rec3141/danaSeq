@@ -75,6 +75,10 @@ usage() {
     echo "Mode:"
     echo "  --docker         Run in Docker instead of local conda"
     echo ""
+    echo "Caching:"
+    echo "  --store_dir DIR      Persistent cache directory (storeDir); skips completed processes"
+    echo "                       across runs even after work/ cleanup. Off by default."
+    echo ""
     echo "Pipeline flags (passed to Nextflow):"
     echo "  --dedupe             BBDuk deduplication before assembly"
     echo "  --filtlong_size N    Filtlong target bases (e.g. 40000000000); skip if not set"
@@ -214,8 +218,7 @@ if [[ "$USE_DOCKER" == true ]]; then
 
     mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
-    "${DOCKER_CMD[@]}"
-    NF_EXIT=$?
+    "${DOCKER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
     # Capture session ID from Nextflow log and save self-invocation for reliable resume
     NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
@@ -250,8 +253,7 @@ echo ""
 
 mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
-"${LOCAL_CMD[@]}"
-NF_EXIT=$?
+"${LOCAL_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
 # Capture session ID from Nextflow log and save self-invocation for reliable resume
 NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)

@@ -5,6 +5,7 @@ process ASSEMBLY_FLYE {
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-flye"
     publishDir "${params.outdir}/assembly", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
     path(reads)
@@ -65,6 +66,7 @@ process CALCULATE_TNF {
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-flye"
     publishDir "${params.outdir}/assembly", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
     path(assembly)

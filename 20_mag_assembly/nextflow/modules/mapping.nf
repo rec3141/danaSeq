@@ -5,6 +5,7 @@ process MAP_READS {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-mapping"
     publishDir "${params.outdir}/mapping", mode: 'copy', pattern: '*.{bam,bai}'
+    storeDir params.store_dir ? "${params.store_dir}/mapping" : null
 
     input:
     tuple val(meta), path(fastq), path(assembly)
@@ -37,6 +38,7 @@ process CALCULATE_DEPTHS {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-mapping"
     publishDir "${params.outdir}/mapping", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/mapping" : null
 
     input:
     path(bams)

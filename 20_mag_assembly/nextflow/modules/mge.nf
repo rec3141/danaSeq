@@ -9,6 +9,7 @@ process GENOMAD_CLASSIFY {
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-genomad"
     publishDir "${params.outdir}/mge/genomad", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/mge/genomad" : null
 
     input:
     path(assembly)
@@ -85,6 +86,7 @@ process CHECKV_QUALITY {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-checkv"
     publishDir "${params.outdir}/mge/checkv", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/mge/checkv" : null
 
     input:
     path(virus_fasta)
@@ -150,6 +152,7 @@ process INTEGRONFINDER {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-integron"
     publishDir "${params.outdir}/mge/integrons", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/mge/integrons" : null
 
     input:
     path(assembly)
@@ -211,6 +214,7 @@ process ISLANDPATH_DIMOB {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-islandpath"
     publishDir "${params.outdir}/mge/genomic_islands", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/mge/genomic_islands" : null
 
     input:
     path(assembly)
@@ -252,6 +256,7 @@ process MACSYFINDER {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-macsyfinder"
     publishDir "${params.outdir}/mge/macsyfinder", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/mge/macsyfinder" : null
 
     input:
     path(proteins)
@@ -318,6 +323,7 @@ process DEFENSEFINDER {
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-defensefinder"
     publishDir "${params.outdir}/mge/defensefinder", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/mge/defensefinder" : null
 
     input:
     path(proteins)

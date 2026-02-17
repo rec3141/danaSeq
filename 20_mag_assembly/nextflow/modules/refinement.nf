@@ -15,6 +15,7 @@ process NCLB_GATHER {
     label 'process_medium'
     conda "${params.nclb_dir}/envs/nclb.yml"
     publishDir "${params.outdir}/binning/nclb", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/nclb" : null
 
     input:
     val(ready)    // upstream completion signal (collected outputs)
@@ -38,6 +39,7 @@ process NCLB_CONVERSE {
     label 'process_medium'
     conda "${params.nclb_dir}/envs/nclb.yml"
     publishDir "${params.outdir}/binning/nclb", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/nclb" : null
 
     input:
     path(gathering)   // from NCLB_GATHER
@@ -66,6 +68,7 @@ process NCLB_ELDERS {
     label 'process_medium'
     conda "${params.nclb_dir}/envs/nclb.yml"
     publishDir "${params.outdir}/binning/nclb", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/binning/nclb" : null
 
     input:
     path(gathering)   // from NCLB_GATHER (DAG ordering)
@@ -92,6 +95,7 @@ process NCLB_INTEGRATE {
     conda "${params.nclb_dir}/envs/nclb.yml"
     publishDir "${params.outdir}/binning/nclb", mode: 'copy',
         saveAs: { fn -> fn }
+    storeDir params.store_dir ? "${params.store_dir}/binning/nclb" : null
 
     input:
     path(proposals)       // from NCLB_CONVERSE
