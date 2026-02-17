@@ -426,12 +426,23 @@ process CHECKM2 {
         exit 0
     fi
 
+    # Resolve database path: accept either a .dmnd file or a directory containing one
+    DB_PATH="${params.checkm2_db}"
+    if [ -d "\$DB_PATH" ]; then
+        DMND_FILE=\$(find "\$DB_PATH" -name '*.dmnd' -type f | head -1)
+        if [ -z "\$DMND_FILE" ]; then
+            echo "[ERROR] No .dmnd file found in \$DB_PATH" >&2
+            exit 1
+        fi
+        DB_PATH="\$DMND_FILE"
+    fi
+
     checkm2 predict \\
         --threads ${task.cpus} \\
         --input all_bins \\
         --output-directory checkm2_out \\
         -x fa \\
-        --database_path ${params.checkm2_db}
+        --database_path "\$DB_PATH"
 
     cp checkm2_out/quality_report.tsv .
     """
