@@ -8,7 +8,7 @@ set -euo pipefail
 # Creates isolated conda environments for the MAG assembly pipeline.
 # All envs are prefix-installed under ./conda-envs/.
 #
-# Twenty environments are needed because of dependency conflicts:
+# Twenty-one environments are needed because of dependency conflicts:
 #   dana-mag-flye    - Flye + Filtlong (Python version conflicts)
 #   dana-mag-mapping - minimap2, samtools (universal, no conflicts)
 #   dana-mag-semibin - SemiBin2, LorBin (ML dependencies: PyTorch isolated)
@@ -32,6 +32,7 @@ set -euo pipefail
 #   dana-mag-metaeuk  - MetaEuk (eukaryotic gene prediction, multi-exon)
 #   dana-mag-rrna     - barrnap + vsearch (rRNA gene detection + SILVA classification)
 #   dana-mag-pathway  - MinPath + KEGG-Decoder (parsimony pathways + biogeochemical heatmaps)
+#   dana-mag-marferret - DIAMOND + Python/pandas (MarFERReT marine eukaryotic classification)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
 # symlinked YAML; its env is named dana-bbmap.
@@ -106,6 +107,7 @@ ENV_YAMLS=(
     metaeuk.yml
     rrna.yml
     pathway.yml
+    marferret.yml
     bbmap.yml
 )
 
@@ -135,6 +137,7 @@ declare -A ENV_CHECK=(
     [dana-mag-metaeuk]="metaeuk"
     [dana-mag-rrna]="barrnap"
     [dana-mag-pathway]="KEGG-decoder"
+    [dana-mag-marferret]="diamond"
     [dana-bbmap]="bbduk.sh"
 )
 

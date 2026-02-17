@@ -1,0 +1,8 @@
+name: dana-mag-marferret
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - diamond>=2.1
+  - python>=3.9
+  - pandas

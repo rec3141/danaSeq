@@ -94,6 +94,8 @@ def helpMessage() {
       --metaeuk_db PATH   Path to MetaEuk protein reference database (MMseqs2 format)
       --metaeuk_mem_limit STR  MetaEuk memory limit (e.g. '50G') [default: 50G]
       --metaeuk_max_intron N   Maximum intron length in bp [default: 10000]
+      --run_marferret    Run DIAMOND blastp against MarFERReT marine eukaryotic database [default: false]
+      --marferret_db PATH  Path to MarFERReT database dir (.dmnd + .taxonomies.tab.gz + .best_pfam_annotations.csv.gz)
 
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
@@ -221,11 +223,14 @@ def helpMessage() {
       │   │   └── tiara_output.tsv        Per-contig Tiara classification + probabilities
       │   ├── whokaryote/
       │   │   └── whokaryote_classifications.tsv  Per-contig Whokaryote classification
-      │   └── metaeuk/                   (if --metaeuk_db set)
-      │       ├── metaeuk_proteins.fas    Multi-exon eukaryotic protein predictions
-      │       ├── metaeuk_codon.fas       Nucleotide coding sequences
-      │       ├── metaeuk.gff             Gene structures (exon boundaries)
-      │       └── metaeuk_headers.tsv     Internal ID mapping
+      │   ├── metaeuk/                   (if --metaeuk_db set)
+      │   │   ├── metaeuk_proteins.fas    Multi-exon eukaryotic protein predictions
+      │   │   ├── metaeuk_codon.fas       Nucleotide coding sequences
+      │   │   ├── metaeuk.gff             Gene structures (exon boundaries)
+      │   │   └── metaeuk_headers.tsv     Internal ID mapping
+      │   └── marferret/                  (if --marferret_db set)
+      │       ├── marferret_proteins.tsv  Per-protein MarFERReT taxonomy + Pfam
+      │       └── marferret_contigs.tsv   Per-contig aggregated taxonomy + Pfam domains
       ├── taxonomy/                    (if --kaiju_db, --kraken2_db, or --silva_ssu_db set)
       │   ├── kaiju/                   (if --kaiju_db set)
       │   │   ├── kaiju_genes.tsv      Per-gene Kaiju classifications
@@ -314,6 +319,7 @@ include { NCLB_INTEGRATE }      from './modules/refinement'
 include { TIARA_CLASSIFY }      from './modules/eukaryotic'
 include { WHOKARYOTE_CLASSIFY } from './modules/eukaryotic'
 include { METAEUK_PREDICT }     from './modules/eukaryotic'
+include { MARFERRET_CLASSIFY }  from './modules/eukaryotic'
 include { KOFAMSCAN }           from './modules/metabolism'
 include { EMAPPER }             from './modules/metabolism'
 include { DBCAN }               from './modules/metabolism'
@@ -436,6 +442,15 @@ workflow {
                 TIARA_CLASSIFY.out.classifications,
                 WHOKARYOTE_CLASSIFY.out.classifications
             )
+
+            // MarFERReT: DIAMOND blastp against marine eukaryotic protein database
+            // Provides NCBI taxonomy + Pfam annotations for MetaEuk-predicted proteins
+            if (params.run_marferret && params.marferret_db) {
+                MARFERRET_CLASSIFY(
+                    METAEUK_PREDICT.out.proteins,
+                    file(params.marferret_db)
+                )
+            }
         }
     }
 

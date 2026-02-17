@@ -24,7 +24,8 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
 │   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_CDS, BAKTA_FULL
-│   │   ├── eukaryotic.nf      TIARA_CLASSIFY, WHOKARYOTE_CLASSIFY, METAEUK_PREDICT
+│   │   ├── eukaryotic.nf      TIARA_CLASSIFY, WHOKARYOTE_CLASSIFY, METAEUK_PREDICT,
+│   │   │                       MARFERRET_CLASSIFY
 │   │   ├── rrna.nf             RRNA_CLASSIFY (barrnap + vsearch SILVA classification)
 │   │   ├── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
 │   │   │                       ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
@@ -53,11 +54,12 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   │   ├── tiara.yml           Tiara (eukaryotic contig classification, deep learning)
 │   │   ├── whokaryote.yml     Whokaryote (eukaryotic classification, gene structure RF)
 │   │   ├── metaeuk.yml        MetaEuk (eukaryotic gene prediction, multi-exon)
+│   │   ├── marferret.yml      MarFERReT (DIAMOND + Python/pandas)
 │   │   ├── rrna.yml            barrnap + vsearch (rRNA gene classification)
 │   │   └── bbmap.yml           BBMap (optional dedupe)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py,
 │   │                           merge_annotations.py, map_annotations_to_bins.py,
-│   │                           kegg_module_completeness.py)
+│   │                           kegg_module_completeness.py, parse_marferret_results.py)
 │   ├── data/
 │   │   └── islandpath_hmm/    Pfam mobility gene HMM profiles (bundled)
 │   ├── conda-envs/             Pre-built envs (created by install.sh)
@@ -186,7 +188,7 @@ Sample FASTQs (N files)
    CALCULATE_DEPTHS   PROKKA|BAKTA    CHECKV_QUALITY
                             │
                   ┌─────────┼──────────┬────────────────────┐
-            ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   TIARA + WHOKARYOTE   METAEUK
+            ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   TIARA + WHOKARYOTE   METAEUK → MARFERRET
                             └─────┬────┘
                           MERGE_ANNOTATIONS
                                   │
@@ -218,7 +220,7 @@ Sample FASTQs (N files)
 
 ### Conda Environments
 
-Nineteen isolated environments avoid dependency conflicts:
+Twenty isolated environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
@@ -241,6 +243,7 @@ Nineteen isolated environments avoid dependency conflicts:
 | `dana-mag-tiara` | Tiara | Deep learning k-mer eukaryotic classification (98%+ accuracy) |
 | `dana-mag-whokaryote` | Whokaryote, Prodigal | Gene structure-based eukaryotic classification (random forest) |
 | `dana-mag-metaeuk` | MetaEuk | Eukaryotic gene prediction (multi-exon, intron-aware, homology-based) |
+| `dana-mag-marferret` | DIAMOND, Python, pandas | Marine eukaryotic taxonomy + Pfam via MarFERReT |
 | `dana-mag-rrna` | barrnap, vsearch | rRNA gene detection (barrnap) + SILVA classification (vsearch) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 
@@ -356,11 +359,14 @@ results/
 │   │   └── tiara_output.tsv       Per-contig Tiara classification + probabilities
 │   ├── whokaryote/
 │   │   └── whokaryote_classifications.tsv  Per-contig Whokaryote classification
-│   └── metaeuk/                   Eukaryotic gene prediction (if --metaeuk_db set)
-│       ├── metaeuk_proteins.fas    Multi-exon eukaryotic protein predictions
-│       ├── metaeuk_codon.fas       Nucleotide coding sequences
-│       ├── metaeuk.gff             Gene structures (exon boundaries)
-│       └── metaeuk_headers.tsv     Internal ID mapping
+│   ├── metaeuk/                   Eukaryotic gene prediction (if --metaeuk_db set)
+│   │   ├── metaeuk_proteins.fas    Multi-exon eukaryotic protein predictions
+│   │   ├── metaeuk_codon.fas       Nucleotide coding sequences
+│   │   ├── metaeuk.gff             Gene structures (exon boundaries)
+│   │   └── metaeuk_headers.tsv     Internal ID mapping
+│   └── marferret/                 Marine eukaryotic taxonomy (if --marferret_db set)
+│       ├── marferret_proteins.tsv  Per-protein MarFERReT taxonomy + Pfam
+│       └── marferret_contigs.tsv   Per-contig aggregated taxonomy + Pfam domains
 └── pipeline_info/
     ├── run_command.sh         Exact re-runnable command (for -resume)
     ├── timeline.html

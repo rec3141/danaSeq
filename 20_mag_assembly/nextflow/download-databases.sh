@@ -25,6 +25,7 @@ set -euo pipefail
 #   ./download-databases.sh --metaeuk          # Download MetaEuk OrthoDB Eukaryota (~23 GB)
 #   ./download-databases.sh --kraken2         # Download Kraken2 PlusPFP-8 (~8 GB)
 #   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
+#   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -49,6 +50,7 @@ DOWNLOAD_DBCAN=false
 DOWNLOAD_METAEUK=false
 DOWNLOAD_KRAKEN2=false
 DOWNLOAD_SILVA=false
+DOWNLOAD_MARFERRET=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -70,6 +72,7 @@ while (( $# )); do
         --metaeuk)   DOWNLOAD_METAEUK=true; INTERACTIVE=false; shift ;;
         --kraken2)   DOWNLOAD_KRAKEN2=true; INTERACTIVE=false; shift ;;
         --silva)     DOWNLOAD_SILVA=true; INTERACTIVE=false; shift ;;
+        --marferret) DOWNLOAD_MARFERRET=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -92,6 +95,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_METAEUK=true
     DOWNLOAD_KRAKEN2=true
     DOWNLOAD_SILVA=true
+    DOWNLOAD_MARFERRET=true
 fi
 
 # ============================================================================
@@ -117,6 +121,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "metaeuk"  "~8.5 GB" "MetaEuk OrthoDB v11 Eukaryota (eukaryotic gene prediction)"
     printf "  %-12s %-8s  %s\n" "kraken2"  "~8 GB"   "Kraken2 PlusPFP-8 (k-mer contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "silva"    "~900 MB" "SILVA 138.2 SSU + LSU NR99 (rRNA gene classification)"
+    printf "  %-12s %-8s  %s\n" "marferret" "~9 GB"  "MarFERReT v1.1.1 marine eukaryotic proteins (DIAMOND + taxonomy + Pfam)"
     echo ""
     echo "  Note: Tiara and Whokaryote models are bundled with their conda packages"
     echo "  (no separate database download needed)."
@@ -138,6 +143,7 @@ show_databases() {
     echo "  --kraken2_db ${DB_DIR}/kraken2_db"
     echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
     echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
+    echo "  --marferret_db ${DB_DIR}/marferret_db"
     echo ""
 }
 
@@ -166,9 +172,10 @@ if $INTERACTIVE; then
     echo " 11) metaeuk   - MetaEuk OrthoDB v12 Eukaryota (~23 GB)"
     echo " 12) kraken2   - Kraken2 PlusPFP-8 (contig taxonomy, ~8 GB)"
     echo " 13) silva     - SILVA SSU + LSU NR99 (rRNA classification, ~900 MB)"
-    echo " 14) all       - All databases"
+    echo " 14) marferret - MarFERReT marine eukaryotic proteins (~9 GB)"
+    echo " 15) all       - All databases"
     echo ""
-    read -rp "Choice [1-14, or names]: " choice
+    read -rp "Choice [1-15, or names]: " choice
 
     case "$choice" in
         1|genomad)  DOWNLOAD_GENOMAD=true ;;
@@ -184,7 +191,8 @@ if $INTERACTIVE; then
         11|metaeuk) DOWNLOAD_METAEUK=true ;;
         12|kraken2) DOWNLOAD_KRAKEN2=true ;;
         13|silva)   DOWNLOAD_SILVA=true ;;
-        14|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true ;;
+        14|marferret) DOWNLOAD_MARFERRET=true ;;
+        15|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -202,14 +210,15 @@ if $INTERACTIVE; then
                     11|metaeuk) DOWNLOAD_METAEUK=true ;;
                     12|kraken2) DOWNLOAD_KRAKEN2=true ;;
                     13|silva)   DOWNLOAD_SILVA=true ;;
-                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true ;;
+                    14|marferret) DOWNLOAD_MARFERRET=true ;;
+                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_MARFERRET; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -628,6 +637,55 @@ download_silva() {
     echo "            --silva_lsu_db ${lsu_fasta}"
 }
 
+download_marferret() {
+    local db_path="${DB_DIR}/marferret_db"
+    if [ -d "${db_path}" ] && ls "${db_path}"/*.dmnd 1>/dev/null 2>&1; then
+        echo "[INFO] MarFERReT database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading MarFERReT v1.1.1 marine eukaryotic database (~9 GB total)..."
+    echo "  Source: Zenodo (Carradec et al. 2023, Scientific Data 10:901)"
+    echo "  Contents: ~28M protein sequences from 800 marine eukaryotic taxa"
+    echo "  Destination: ${db_path}"
+
+    mkdir -p "${db_path}"
+
+    local zenodo_base="https://zenodo.org/records/10553848/files"
+
+    # Pre-built DIAMOND database (~8.9 GB)
+    if [ ! -f "${db_path}/MarFERReT.v1.1.1.dmnd" ]; then
+        echo "[INFO] Downloading MarFERReT.v1.1.1.dmnd (~8.9 GB)..."
+        wget -q --show-progress -O "${db_path}/MarFERReT.v1.1.1.dmnd" \
+            "${zenodo_base}/MarFERReT.v1.1.1.dmnd"
+    else
+        echo "[INFO] DIAMOND database already present"
+    fi
+
+    # Taxonomy mapping (~90.6 MB)
+    if [ ! -f "${db_path}/MarFERReT.v1.1.1.taxonomies.tab.gz" ]; then
+        echo "[INFO] Downloading MarFERReT.v1.1.1.taxonomies.tab.gz (~90.6 MB)..."
+        wget -q --show-progress -O "${db_path}/MarFERReT.v1.1.1.taxonomies.tab.gz" \
+            "${zenodo_base}/MarFERReT.v1.1.1.taxonomies.tab.gz"
+    else
+        echo "[INFO] Taxonomy file already present"
+    fi
+
+    # Pfam annotations (~121.9 MB)
+    if [ ! -f "${db_path}/MarFERReT.v1.1.1.best_pfam_annotations.csv.gz" ]; then
+        echo "[INFO] Downloading MarFERReT.v1.1.1.best_pfam_annotations.csv.gz (~121.9 MB)..."
+        wget -q --show-progress -O "${db_path}/MarFERReT.v1.1.1.best_pfam_annotations.csv.gz" \
+            "${zenodo_base}/MarFERReT.v1.1.1.best_pfam_annotations.csv.gz"
+    else
+        echo "[INFO] Pfam annotation file already present"
+    fi
+
+    echo "[SUCCESS] MarFERReT database downloaded to ${db_path}"
+    echo "  Use with: --marferret_db ${db_path}"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -689,6 +747,10 @@ if $DOWNLOAD_SILVA; then
     download_silva || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_MARFERRET; then
+    download_marferret || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -711,4 +773,5 @@ else
     $DOWNLOAD_KRAKEN2 && echo "  --kraken2_db ${DB_DIR}/kraken2_db"
     $DOWNLOAD_SILVA   && echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
     $DOWNLOAD_SILVA   && echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
+    $DOWNLOAD_MARFERRET && echo "  --marferret_db ${DB_DIR}/marferret_db"
 fi

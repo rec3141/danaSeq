@@ -362,6 +362,18 @@ metaeuk easy-predict <contigs> <protein_db> <output> <tmp> \
 
 Outputs include predicted protein sequences, nucleotide coding sequences, and GFF gene structure annotations with exon boundaries.
 
+#### Marine Eukaryotic Protein Classification (MarFERReT)
+
+MarFERReT v1.1.1 (Marine Functional EukaRyotic Reference Taxa; Carradec et al. 2023) provides taxonomy and functional annotation for MetaEuk-predicted eukaryotic proteins via DIAMOND blastp against a curated library of ~28 million marine eukaryotic protein sequences from 800 taxa (453 species). Each protein is classified by best-hit against the MarFERReT database, then annotated with NCBI taxonomy lineages and Pfam domain assignments from the MarFERReT reference files:
+
+```
+diamond blastp --db <marferret.dmnd> --query <metaeuk_proteins> \
+  --out <hits.tsv> --outfmt 6 qseqid sseqid pident length evalue bitscore stitle \
+  --max-target-seqs 1 --evalue 1e-5 --threads <cpus>
+```
+
+Per-protein DIAMOND hits are joined with MarFERReT taxonomy mappings (NCBI taxon IDs and lineages) and Pfam domain annotations. Results are aggregated per contig, with majority-vote taxonomy and union of Pfam domains across all classified proteins on each contig.
+
 ---
 
 ## Statistical Analysis
@@ -458,6 +470,8 @@ Key software versions used in development:
 - **Tiara**: 1.0.3
 - **Whokaryote**: 1.1.2
 - **MetaEuk**: 7
+- **MarFERReT**: 1.1.1
+- **DIAMOND**: 2.1+
 
 **Runtime:**
 - **Nextflow**: 25.10.3
@@ -480,6 +494,8 @@ Bowers RM, et al. (2017) Minimum information about a single amplified genome (MI
 Bushnell B. BBTools software package. sourceforge.net/projects/bbmap/.
 
 Camargo AP, et al. (2024) Identification of mobile genetic elements with geNomad. *Nat Biotechnol* 42:1303-1312.
+
+Carradec Q, et al. (2023) MarFERReT: an open-source, version-controlled reference library of marine microbial eukaryote functional genes. *Sci Data* 10:901.
 
 Cantalapiedra CP, et al. (2021) eggNOG-mapper v2: Functional Annotation, Orthology Assignments, and Domain Prediction at the Metagenomic Scale. *Mol Biol Evol* 38:5825-5829.
 

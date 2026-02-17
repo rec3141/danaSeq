@@ -167,3 +167,78 @@ process METAEUK_PREDICT {
     echo "[INFO] MetaEuk: \${n_proteins} eukaryotic proteins predicted" >&2
     """
 }
+
+process MARFERRET_CLASSIFY {
+    tag "marferret"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-marferret"
+    publishDir "${params.outdir}/eukaryotic/marferret", mode: 'copy'
+
+    input:
+    path(proteins)
+    path(marferret_db)
+
+    output:
+    path("marferret_proteins.tsv"), emit: proteins
+    path("marferret_contigs.tsv"),  emit: contigs
+
+    script:
+    """
+    # Find MarFERReT database files
+    DMND=\$(ls "${marferret_db}"/*.dmnd 2>/dev/null | head -1)
+    TAX=\$(ls "${marferret_db}"/*.taxonomies.tab.gz 2>/dev/null | head -1)
+    PFAM=\$(ls "${marferret_db}"/*.best_pfam_annotations.csv.gz 2>/dev/null | head -1)
+
+    if [ -z "\$DMND" ]; then
+        echo "[ERROR] No .dmnd file found in ${marferret_db}" >&2
+        printf 'protein_id\\tcontig_id\\tbest_hit\\tpident\\taln_length\\tevalue\\tbitscore\\tstitle\\ttaxon_id\\ttaxonomy\\tpfam\\n' > marferret_proteins.tsv
+        printf 'contig_id\\tn_proteins\\tn_classified\\ttop_taxonomy\\tpfam_domains\\n' > marferret_contigs.tsv
+        exit 0
+    fi
+
+    # Check for empty protein input
+    n_input=\$(grep -c '^>' "${proteins}" 2>/dev/null || echo 0)
+    if [ "\$n_input" -eq 0 ]; then
+        echo "[WARNING] MarFERReT: no input proteins — producing empty output" >&2
+        printf 'protein_id\\tcontig_id\\tbest_hit\\tpident\\taln_length\\tevalue\\tbitscore\\tstitle\\ttaxon_id\\ttaxonomy\\tpfam\\n' > marferret_proteins.tsv
+        printf 'contig_id\\tn_proteins\\tn_classified\\ttop_taxonomy\\tpfam_domains\\n' > marferret_contigs.tsv
+        exit 0
+    fi
+
+    # DIAMOND blastp
+    set +e
+    diamond blastp \\
+        --db "\$DMND" \\
+        --query "${proteins}" \\
+        --out diamond_hits.tsv \\
+        --outfmt 6 qseqid sseqid pident length evalue bitscore stitle \\
+        --max-target-seqs 1 \\
+        --evalue 1e-5 \\
+        --threads ${task.cpus} \\
+        --block-size 4 \\
+        --index-chunks 1
+    diamond_exit=\$?
+    set -e
+
+    if [ \$diamond_exit -ne 0 ]; then
+        echo "[WARNING] DIAMOND exited with code \$diamond_exit" >&2
+        touch diamond_hits.tsv
+    fi
+
+    # Parse results: join with taxonomy + Pfam, aggregate per-contig
+    TAX_ARG=""
+    PFAM_ARG=""
+    [ -n "\$TAX" ] && TAX_ARG="--taxonomy \$TAX"
+    [ -n "\$PFAM" ] && PFAM_ARG="--pfam \$PFAM"
+
+    parse_marferret_results.py \\
+        --diamond diamond_hits.tsv \\
+        \$TAX_ARG \\
+        \$PFAM_ARG \\
+        --out-proteins marferret_proteins.tsv \\
+        --out-contigs marferret_contigs.tsv
+
+    n_hits=\$(tail -n +2 marferret_proteins.tsv | wc -l)
+    echo "[INFO] MarFERReT: \${n_hits} proteins classified from \${n_input} input" >&2
+    """
+}

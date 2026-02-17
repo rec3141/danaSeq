@@ -1,6 +1,6 @@
 # MAG Assembly Pipeline
 
-Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes gene annotation (Prokka/Bakta), four taxonomy classifiers (Kaiju, Kraken2, sendsketch, rRNA/SILVA), mobile genetic element detection (geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder), metabolic profiling with pathway analysis (KofamScan, eggNOG-mapper, dbCAN3, MinPath, KEGG-Decoder), eukaryotic analysis (Tiara, Whokaryote, MetaEuk), and optional LLM-guided bin refinement (NCLB).
+Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes gene annotation (Prokka/Bakta), four taxonomy classifiers (Kaiju, Kraken2, sendsketch, rRNA/SILVA), mobile genetic element detection (geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder), metabolic profiling with pathway analysis (KofamScan, eggNOG-mapper, dbCAN3, MinPath, KEGG-Decoder), eukaryotic analysis (Tiara, Whokaryote, MetaEuk, MarFERReT), and optional LLM-guided bin refinement (NCLB).
 
 ## Quick Start
 
@@ -54,6 +54,7 @@ cd nextflow
     --dbcan_db /path/to/dbcan_db \
     --run_eukaryotic true \
     --run_metaeuk true --metaeuk_db /path/to/metaeuk_db \
+    --run_marferret true --marferret_db /path/to/marferret_db \
     --assembly_cpus 24 \
     --assembly_memory '64 GB'
 ```
@@ -107,6 +108,7 @@ Sample FASTQs (N files)
    TIARA_CLASSIFY            Deep learning eukaryotic classification
    WHOKARYOTE_CLASSIFY       Gene structure-based eukaryotic classification
       +-- METAEUK_PREDICT    Multi-exon eukaryotic gene prediction
+         +-- MARFERRET_CLASSIFY  Marine eukaryotic taxonomy + Pfam (DIAMOND)
 
    GENOMAD_CLASSIFY          Virus + plasmid + provirus detection
       |
@@ -172,11 +174,14 @@ results/
 │   │   └── tiara_output.tsv      Per-contig classification + probabilities
 │   ├── whokaryote/
 │   │   └── whokaryote_classifications.tsv  Per-contig classification
-│   └── metaeuk/                  Eukaryotic gene prediction (if --metaeuk_db)
-│       ├── metaeuk_proteins.fas  Multi-exon protein predictions
-│       ├── metaeuk_codon.fas     Nucleotide coding sequences
-│       ├── metaeuk.gff           Gene structures (exon boundaries)
-│       └── metaeuk_headers.tsv   Internal ID mapping
+│   ├── metaeuk/                  Eukaryotic gene prediction (if --metaeuk_db)
+│   │   ├── metaeuk_proteins.fas  Multi-exon protein predictions
+│   │   ├── metaeuk_codon.fas     Nucleotide coding sequences
+│   │   ├── metaeuk.gff           Gene structures (exon boundaries)
+│   │   └── metaeuk_headers.tsv   Internal ID mapping
+│   └── marferret/                Marine eukaryotic taxonomy (if --marferret_db)
+│       ├── marferret_proteins.tsv  Per-protein taxonomy + Pfam annotations
+│       └── marferret_contigs.tsv   Per-contig aggregated taxonomy + Pfam domains
 ├── mge/
 │   ├── genomad/                  Virus + plasmid detection (if --genomad_db)
 │   │   ├── virus_summary.tsv     Virus contigs with scores + taxonomy
@@ -324,6 +329,8 @@ results/
 | `--metaeuk_db` | (skip) | Path to MetaEuk protein reference database (MMseqs2 format) |
 | `--metaeuk_mem_limit` | `50G` | MetaEuk `--split-memory-limit` |
 | `--metaeuk_max_intron` | `10000` | Maximum intron length in bp |
+| `--run_marferret` | `false` | Run DIAMOND blastp against MarFERReT marine eukaryotic database |
+| `--marferret_db` | (skip) | Path to MarFERReT database dir (`.dmnd` + taxonomy + Pfam) |
 
 ### Bin Refinement (NCLB)
 
@@ -375,6 +382,7 @@ cd nextflow
 ./download-databases.sh --dbcan            # ~2 GB    (dbCAN HMM + DIAMOND db)
 ./download-databases.sh --bakta            # ~1.5 GB  (light) or ~30 GB (full)
 ./download-databases.sh --metaeuk          # ~18 GB   (OrthoDB eukaryotic proteins)
+./download-databases.sh --marferret        # ~9 GB    (MarFERReT marine eukaryotic proteins)
 ./download-databases.sh --all              # All databases
 ```
 
@@ -400,11 +408,11 @@ cd nextflow
 
 **NCLB bin refinement.** Optional LLM-guided iterative refinement of DAS Tool bins. Four-step process: gather contig identity cards, LLM conversations for placement proposals, Elder investigations for SCG redundancy, and integration to produce refined community FASTAs.
 
-**Twenty-five isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
+**Twenty-six isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
 
 ## Conda Environments
 
-Twenty-five isolated environments avoid dependency conflicts (27 YAML specs including CPU variants):
+Twenty-six isolated environments avoid dependency conflicts (28 YAML specs including CPU variants):
 
 | Environment | Tools |
 |-------------|-------|
@@ -431,6 +439,7 @@ Twenty-five isolated environments avoid dependency conflicts (27 YAML specs incl
 | `dana-mag-tiara` | Tiara (deep learning eukaryotic classification) |
 | `dana-mag-whokaryote` | Whokaryote, Prodigal (gene structure eukaryotic classification) |
 | `dana-mag-metaeuk` | MetaEuk (multi-exon eukaryotic gene prediction) |
+| `dana-mag-marferret` | DIAMOND, Python, pandas (MarFERReT marine eukaryotic classification) |
 | `dana-mag-checkm2` | CheckM2 |
 | `dana-bbmap` | BBMap (optional dedupe) |
 
@@ -486,6 +495,7 @@ Twenty-five isolated environments avoid dependency conflicts (27 YAML specs incl
 - Tiara: Karlicki et al., *Bioinformatics* 2022
 - Whokaryote: Pronk et al., *Microbial Genomics* 2022
 - MetaEuk: Levy Karin et al., *Microbiome* 2020
+- MarFERReT: Carradec et al., *Scientific Data* 2023
 
 **Standards:**
 - MIMAG: Bowers et al., *Nature Biotechnology* 2017

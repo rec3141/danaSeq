@@ -84,6 +84,7 @@ cd danaSeq/20_mag_assembly/nextflow
     --eggnog_db /path/to/eggnog_db \
     --dbcan_db /path/to/dbcan_db \
     --run_eukaryotic true --run_metaeuk true --metaeuk_db /path/to/metaeuk_db \
+    --run_marferret true --marferret_db /path/to/marferret_db \
     --macsyfinder_models /path/to/macsyfinder_models \
     --defensefinder_models /path/to/defensefinder_models \
     --assembly_cpus 24 \
@@ -192,6 +193,7 @@ Sample FASTQs → Flye co-assembly → minimap2 mapping → CoverM depths
                         ├── IntegronFinder integron detection
                         ├── Tiara + Whokaryote eukaryotic classification
                         │     └── MetaEuk eukaryotic gene prediction
+                        │           └── MarFERReT marine eukaryotic taxonomy + Pfam
                         └── Tetranucleotide frequency profiles
 ```
 
@@ -288,6 +290,7 @@ MAGs are classified per MIMAG (Bowers et al. 2017):
 - Tiara: Karlicki et al., Bioinformatics 2022
 - Whokaryote: Pronk et al., Microbial Genomics 2022
 - MetaEuk: Levy Karin et al., Microbiome 2020
+- MarFERReT: Carradec et al., Scientific Data 2023
 
 **Standards:**
 - MIMAG: Bowers et al., Nature Biotechnology 2017
