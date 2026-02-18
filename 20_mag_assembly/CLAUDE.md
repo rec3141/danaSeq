@@ -67,6 +67,7 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   ├── Dockerfile              Docker image (CPU-only SemiBin2)
 │   ├── entrypoint.sh           Docker entrypoint
 │   ├── run-mag.sh              Pipeline launcher (local/Docker)
+│   ├── seed-store-dir.sh       Seed storeDir from existing results (hardlink/symlink/copy)
 │   ├── download-databases.sh   Database downloader (geNomad, CheckV, CheckM2)
 │   ├── .dockerignore           Excludes conda-envs/, work/ from image
 │   └── .gitignore              Excludes runtime artifacts
@@ -93,6 +94,10 @@ cd nextflow
 # With Filtlong pre-filtering, no MaxBin2
 ./run-mag.sh --input /path/to/reads --outdir /path/to/output \
     --filtlong_size 40000000000 --run_maxbin false
+
+# With persistent caching (storeDir) — survives work/ cleanup
+./run-mag.sh --input /path/to/reads --outdir /path/to/output \
+    --store_dir /data/scratch/mag_store
 
 # Kitchen sink — all options with defaults
 ./run-mag.sh --input /path/to/reads --outdir /path/to/output \
@@ -153,6 +158,43 @@ data (even "test" data with ~3 GB of reads). Always use the saved command from
 `run_command.sh` and only append new flags — never change existing ones.
 
 Only the processes whose script block changed will re-run; all others will be cached.
+
+### Persistent Caching with storeDir
+
+`-resume` caches are tied to the work directory and session ID — if `work/` is cleaned up,
+all cached results are lost. `storeDir` provides persistent caching that survives across
+runs, sessions, and work directory cleanup.
+
+```bash
+# Enable storeDir (opt-in, off by default)
+./run-mag.sh --input /data/reads --outdir /data/output --store_dir /data/scratch/mag_store
+```
+
+**How it works:** When `--store_dir` is set, each process stores its outputs directly in
+the store directory. On subsequent runs, if all declared output files already exist in
+storeDir, the process is skipped entirely (Nextflow shows "Stored" status). No work
+directory task is created.
+
+**Key behavior:** When storeDir is active for a process, publishDir is silently ignored by
+Nextflow. Outputs go directly to the storeDir path. The store directory structure mirrors
+the publishDir layout.
+
+**Seeding from existing results:** To populate a storeDir from a previous run without
+re-executing the pipeline:
+
+```bash
+# Same filesystem → hardlinks (zero extra disk space)
+./seed-store-dir.sh full_test_20260216 /data/mag_store
+
+# Cross-filesystem → auto-detects and uses symlinks
+./seed-store-dir.sh full_test_20260216 /data/scratch/mag_store
+
+# Force a specific mode
+./seed-store-dir.sh --mode copy full_test_20260216 /data/scratch/mag_store
+```
+
+The seed script handles legacy naming conventions (e.g. `contig_bins.tsv` →
+`{name}_bins.tsv`, `PROKKA_*` → `annotation.*`).
 
 ### Verifying Process Output (Testing)
 
@@ -218,6 +260,8 @@ Sample FASTQs (N files)
 
 **Resume:** Nextflow's built-in `-resume` uses task hashing. No manual checkpoint logic needed.
 
+**Persistent caching:** All 41 processes support `storeDir` for caching that survives work directory cleanup. Opt-in via `--store_dir`. When active, publishDir is ignored and outputs go directly to the store path.
+
 ### Conda Environments
 
 Twenty isolated environments avoid dependency conflicts:
@@ -280,11 +324,11 @@ results/
 │   ├── *.sorted.bam.bai       BAM indices
 │   └── depths.txt             CoverM depth table
 ├── binning/
-│   ├── semibin/contig_bins.tsv
-│   ├── metabat/contig_bins.tsv
-│   ├── maxbin/contig_bins.tsv
-│   ├── lorbin/contig_bins.tsv
-│   ├── comebin/contig_bins.tsv
+│   ├── semibin/semibin_bins.tsv
+│   ├── metabat/metabat_bins.tsv
+│   ├── maxbin/maxbin_bins.tsv
+│   ├── lorbin/lorbin_bins.tsv
+│   ├── comebin/comebin_bins.tsv
 │   ├── dastool/
 │   │   ├── bins/*.fa           Final consensus MAG FASTAs
 │   │   ├── contig2bin.tsv      Contig-to-bin assignments
@@ -400,7 +444,8 @@ this logging, making it impossible to reliably resume later.
 
 Module files are in `nextflow/modules/*.nf`. Each process has:
 - `conda` directive pointing to the pre-built env in `conda-envs/`
-- `publishDir` for output routing (with `saveAs` to normalize filenames)
+- `publishDir` for output routing
+- `storeDir` for persistent caching (active when `params.store_dir` is set)
 - Resource labels (`process_low`, `process_medium`, `process_high`, `process_kraken`)
 - Graceful error handling for edge cases (empty output, tool crashes)
 
