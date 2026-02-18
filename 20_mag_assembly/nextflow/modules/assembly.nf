@@ -52,9 +52,27 @@ process ASSEMBLY_FLYE {
         exit 1
     fi
 
-    cp flye_out/assembly.fasta assembly.fasta
-    cp flye_out/assembly_info.txt assembly_info.txt
-    cp flye_out/assembly_graph.gfa assembly_graph.gfa
+    # Sort contigs by length (longest first) and rename with zero-padded IDs
+    NCONTIGS=\$(grep -c '^>' flye_out/assembly.fasta)
+    PAD=\${#NCONTIGS}
+    TAB=\$(printf '\\t')
+
+    # Build sorted FASTA + name map (old_name → new_name)
+    awk '/^>/{if(h) print h "\\t" length(s) "\\t" s; h=substr(\$0,2); s=""; next} {s=s\$0} END{if(h) print h "\\t" length(s) "\\t" s}' flye_out/assembly.fasta \\
+    | sort -t"\$TAB" -k2,2rn \\
+    | awk -F'\\t' -v pad="\$PAD" '{n++; new=sprintf("contig_%0*d",pad,n); printf ">%s\\n",new>"assembly.fasta"; s=\$3; for(i=1;i<=length(s);i+=80) print substr(s,i,80)>"assembly.fasta"; print \$1"\\t"new>"name_map.tsv"}'
+
+    # Update assembly_info.txt: rename first column, sort by length descending
+    head -1 flye_out/assembly_info.txt > assembly_info.txt
+    tail -n+2 flye_out/assembly_info.txt \\
+    | awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} {if(\$1 in map) \$1=map[\$1]; print}' name_map.tsv - \\
+    | sort -t"\$TAB" -k2,2rn >> assembly_info.txt
+
+    # Update GFA: rename contig names in P (path) lines only
+    # S and L lines use edge_N names (graph structure) — unchanged
+    awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} \$1=="P"&&(\$2 in map){\$2=map[\$2]} {print}' name_map.tsv flye_out/assembly_graph.gfa > assembly_graph.gfa
+
+    rm -f name_map.tsv
 
     # Cleanup intermediate files
     rm -f all_reads.fastq.gz
