@@ -248,9 +248,9 @@ The script handles legacy naming conventions:
 
 ### When to Use storeDir vs. `-resume`
 
-- **Development/testing**: Use `-resume` (fast iteration, no extra config)
-- **Production/shipboard**: Use `--store_dir` (survives work directory cleanup,
-  protects against accidental cache loss)
+- **`-resume` only**: Sufficient for quick one-off runs where you don't need durability
+- **`--store_dir`**: Recommended for both testing and production — survives work directory
+  cleanup, shareable across sessions, and protects against accidental cache loss
 - **Both together**: They complement each other. `-resume` handles the fast path
   (hash match → skip), storeDir handles the durable path (files exist → skip).
 
@@ -265,8 +265,8 @@ The script handles legacy naming conventions:
    wait for the current run to finish before starting another
 5. **Use `--outdir` consistently** — `run-mag.sh` binds session IDs to output
    directories; switching `--outdir` means losing cache
-6. **Use `--store_dir` for production** — persistent caching that survives work
-   directory cleanup; seed it from existing results with `seed-store-dir.sh`
+6. **Use `--store_dir`** — persistent caching that survives work directory cleanup;
+   seed it from existing results with `seed-store-dir.sh`
 
 ## References
 
