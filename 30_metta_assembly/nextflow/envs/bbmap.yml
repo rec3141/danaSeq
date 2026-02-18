@@ -1,0 +1,7 @@
+name: dana-metta-bbmap
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - bbmap>=39.0
+  - samtools>=1.10

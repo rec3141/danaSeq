@@ -1,0 +1,6 @@
+name: dana-metta-spades
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - spades>=3.15
