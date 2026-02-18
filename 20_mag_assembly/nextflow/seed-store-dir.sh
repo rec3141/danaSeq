@@ -121,8 +121,8 @@ link_dir "$RESULTS/binning/checkm2" "$STORE/binning/checkm2"
 link_dir "$RESULTS/binning/nclb" "$STORE/binning/nclb"
 
 # Annotation (Bakta already uses annotation.* names)
-link_dir "$RESULTS/annotation/bakta/cds" "$STORE/annotation/bakta/cds"
-link_dir "$RESULTS/annotation/bakta/full" "$STORE/annotation/bakta/full"
+link_dir "$RESULTS/annotation/bakta/basic" "$STORE/annotation/bakta/basic"
+link_dir "$RESULTS/annotation/bakta/extra" "$STORE/annotation/bakta/extra"
 
 # Annotation (Prokka — may have PROKKA_* or annotation.* names)
 if [[ -d "$RESULTS/annotation/prokka" ]]; then
@@ -157,7 +157,8 @@ link_dir "$RESULTS/eukaryotic/marferret" "$STORE/eukaryotic/marferret"
 link_dir "$RESULTS/mge/genomad" "$STORE/mge/genomad"
 link_dir "$RESULTS/mge/checkv" "$STORE/mge/checkv"
 link_dir "$RESULTS/mge/integrons" "$STORE/mge/integrons"
-link_dir "$RESULTS/mge/genomic_islands" "$STORE/mge/genomic_islands"
+link_dir "$RESULTS/mge/islandpath" "$STORE/mge/islandpath"
+link_dir "$RESULTS/mge/genomic_islands" "$STORE/mge/islandpath"  # legacy name
 link_dir "$RESULTS/mge/macsyfinder" "$STORE/mge/macsyfinder"
 link_dir "$RESULTS/mge/defensefinder" "$STORE/mge/defensefinder"
 

@@ -385,9 +385,30 @@ do_clean() {
     fi
 }
 
+# Install visualization dashboard dependencies (Node.js)
+install_viz() {
+    local viz_dir="${SCRIPT_DIR}/viz"
+    if [[ ! -d "${viz_dir}" ]]; then
+        echo "[INFO] No viz/ directory found, skipping dashboard setup"
+        return 0
+    fi
+    if ! command -v npm &>/dev/null; then
+        echo "[WARNING] npm not found — skipping viz dashboard install"
+        echo "  Install Node.js >= 18 to enable the MAG dashboard"
+        return 0
+    fi
+    echo ""
+    echo "Installing visualization dashboard dependencies ..."
+    (cd "${viz_dir}" && npm install --no-audit --no-fund) || {
+        echo "[WARNING] viz npm install failed (non-fatal)"
+        return 0
+    }
+    echo "[SUCCESS] Viz dashboard ready. Run: cd viz && npm run dev"
+}
+
 # Run the requested action
 case "${ACTION}" in
-    install) do_install ;;
+    install) do_install; install_viz ;;
     check)   do_check ;;
     clean)   do_clean ;;
 esac

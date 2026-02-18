@@ -213,8 +213,8 @@ process ISLANDPATH_DIMOB {
     tag "islandpath"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-islandpath"
-    publishDir "${params.outdir}/mge/genomic_islands", mode: 'copy'
-    storeDir params.store_dir ? "${params.store_dir}/mge/genomic_islands" : null
+    publishDir "${params.outdir}/mge/islandpath", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/mge/islandpath" : null
 
     input:
     path(assembly)
@@ -225,11 +225,11 @@ process ISLANDPATH_DIMOB {
     path("genomic_islands.tsv"), emit: islands
 
     script:
-    def hmm_db = "${projectDir}/data/islandpath_hmm/Pfam-A_mobgenes_201512_prok"
+    def hmm_db = params.islandpath_hmm_db ? "${params.islandpath_hmm_db}/Pfam-A_mobgenes_201512_prok" : "${projectDir}/conda-envs/dana-mag-islandpath/opt/islandpath/hmmpfam/Pfam-A_mobgenes_201512_prok"
     """
     # IslandPath-DIMOB: detect genomic islands via dinucleotide bias + mobility genes
     # Python reimplementation — works directly with GFF + FASTA + FAA from Prokka
-    # Reference-free method — HMM profiles for mobility genes bundled in data/
+    # Reference-free method — HMM profiles for mobility genes (Pfam-A, 2015)
     # hmmscan benefits from multiple CPUs
 
     set +e
@@ -327,6 +327,7 @@ process DEFENSEFINDER {
 
     input:
     path(proteins)
+    path(gff)
 
     output:
     path("systems.tsv"), emit: systems
@@ -338,8 +339,8 @@ process DEFENSEFINDER {
     """
     # DefenseFinder: detect anti-phage defense systems (CRISPR, R-M, BREX, Abi, etc.)
     # Uses HMMER searches across ~280 defense system HMM profiles
-    # Input: Prokka protein FASTA (.faa) — proteins must be in genomic order
-    # -w: parallel HMMER worker threads
+    # Parallelized by splitting proteins into per-contig chunks (gembase format)
+    # so MacSyFinder's system detection runs on N smaller replicons concurrently
 
     if [ ! -s "${proteins}" ]; then
         echo "[WARNING] No protein sequences — skipping DefenseFinder" >&2
@@ -355,43 +356,26 @@ process DEFENSEFINDER {
     fi
 
     set +e
-    defense-finder run \\
-        -o df_out \\
-        -w ${task.cpus} \\
-        ${models_opt} \\
-        "${proteins}"
+    parallel_defensefinder.py \\
+        --proteins "${proteins}" \\
+        --gff "${gff}" \\
+        --output-dir df_out \\
+        --workers ${task.cpus} \\
+        ${models_opt}
     df_exit=\$?
     set -e
 
     if [ \$df_exit -ne 0 ] || [ ! -d df_out ]; then
-        echo "[WARNING] DefenseFinder exited with code \$df_exit" >&2
+        echo "[WARNING] parallel_defensefinder.py exited with code \$df_exit" >&2
         printf 'sys_id\\ttype\\tsubtype\\tprotein_in_syst\\tgenes_count\\tspec\\n' > systems.tsv
         printf 'replicon\\thit_id\\tgene_name\\n' > genes.tsv
         printf 'hit_id\\treplicon\\tposition_hit\\thit_sequence_length\\n' > hmmer.tsv
         exit 0
     fi
 
-    # Copy outputs (DefenseFinder prefixes files with the input basename:
-    #   <base>_defense_finder_systems.tsv, <base>_defense_finder_genes.tsv, etc.)
-    sys_file=\$(ls df_out/*_defense_finder_systems.tsv 2>/dev/null | head -1)
-    if [ -n "\$sys_file" ]; then
-        cp "\$sys_file" systems.tsv
-    else
-        printf 'sys_id\\ttype\\tsubtype\\tprotein_in_syst\\tgenes_count\\tspec\\n' > systems.tsv
-    fi
-
-    gene_file=\$(ls df_out/*_defense_finder_genes.tsv 2>/dev/null | head -1)
-    if [ -n "\$gene_file" ]; then
-        cp "\$gene_file" genes.tsv
-    else
-        printf 'replicon\\thit_id\\tgene_name\\n' > genes.tsv
-    fi
-
-    hmmer_file=\$(ls df_out/*_defense_finder_hmmer.tsv 2>/dev/null | head -1)
-    if [ -n "\$hmmer_file" ]; then
-        cp "\$hmmer_file" hmmer.tsv
-    else
-        printf 'hit_id\\treplicon\\tposition_hit\\thit_sequence_length\\n' > hmmer.tsv
-    fi
+    # Copy merged outputs from wrapper
+    cp df_out/systems.tsv .
+    cp df_out/genes.tsv .
+    cp df_out/hmmer.tsv .
     """
 }

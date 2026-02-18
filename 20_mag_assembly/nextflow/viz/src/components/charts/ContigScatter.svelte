@@ -71,13 +71,17 @@
       }];
     }
 
-    // Categorical color modes: bin, phylum, domain
+    // Categorical color modes
+    const categoryField = {
+      'bin': 'bin', 'phylum': 'phylum', 'domain': 'domain',
+      'kaiju_phylum': 'kaiju_phylum', 'kraken2_phylum': 'kraken2_phylum', 'rrna_phylum': 'rrna_phylum',
+    };
     const groups = {};
     for (const c of contigs) {
       let key;
+      const field = categoryField[colorBy];
       if (colorBy === 'bin') key = c.bin || 'unbinned';
-      else if (colorBy === 'phylum') key = c.phylum || 'Unknown';
-      else if (colorBy === 'domain') key = c.domain || 'Unknown';
+      else if (field) key = c[field] || 'Unknown';
       else key = 'all';
 
       if (!groups[key]) groups[key] = { x: [], y: [], text: [], sizes: [] };

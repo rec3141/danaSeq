@@ -444,9 +444,12 @@ process CHECKM2 {
         DB_PATH="\$DMND_FILE"
     fi
 
-    # Use work directory for DIAMOND tmp (avoid filling /tmp on root partition)
-    export TMPDIR="\$(pwd)/tmp"
+    # Use /tmp for TMPDIR — CheckM2's Python multiprocessing creates AF_UNIX
+    # sockets under TMPDIR, and Nextflow work dir paths can exceed the 108-char
+    # socket path limit, causing "AF_UNIX path too long" errors.
+    export TMPDIR="/tmp/checkm2_\$\$"
     mkdir -p "\$TMPDIR"
+    trap 'rm -rf "\$TMPDIR"' EXIT
 
     checkm2 predict \\
         --threads ${task.cpus} \\

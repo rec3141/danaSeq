@@ -622,74 +622,75 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
         for _, row in contig2bin.iterrows():
             c2b[row.iloc[0]] = row.iloc[1]
 
-    # Multi-source taxonomy: Kraken2 (k-mer, GTDB) > rRNA (SILVA) > Kaiju (protein)
-    # Kraken2 has lower coverage (~41%) but higher confidence per-contig assignments.
-    # rRNA covers only ~107 contigs but is the gold standard.
-    # Kaiju has ~100% coverage but noisy gene-level voting.
+    # Per-source taxonomy maps: each classifier gets its own domain/phylum per contig
+    from collections import Counter
+
     def strip_gtdb_prefix(s):
         """Remove GTDB-style rank prefix like 'd__', 'p__', etc."""
         if s and len(s) > 3 and s[1:3] == '__':
             return s[3:]
         return s
 
-    tax_map = {}  # contig_id -> {domain, phylum, source}
+    def parse_lineage(lineage):
+        """Extract (domain, phylum) from semicolon-delimited lineage string."""
+        parts = [p.strip() for p in lineage.split(';')]
+        domain = parts[0] if len(parts) > 0 else ''
+        phylum = parts[1] if len(parts) > 1 else ''
+        return domain, phylum
 
-    # Layer 1 (lowest priority): Kaiju (six-frame or protein-level)
+    # Kaiju (six-frame or protein-level)
+    kaiju_tax = {}  # contig_id -> {domain, phylum}
     if kaiju_df is not None:
         for _, row in kaiju_df.iterrows():
             lineage = row.get('lineage', '')
             if pd.notna(lineage) and lineage and lineage != 'Unclassified':
-                parts = [p.strip() for p in lineage.split(';')]
-                domain = parts[0] if len(parts) > 0 else ''
-                phylum = parts[1] if len(parts) > 1 else ''
+                domain, phylum = parse_lineage(lineage)
                 if domain or phylum:
-                    tax_map[row['contig_id']] = {
-                        'domain': domain, 'phylum': phylum, 'source': 'kaiju',
-                    }
+                    kaiju_tax[row['contig_id']] = {'domain': domain, 'phylum': phylum}
+    print(f"  Kaiju taxonomy: {len(kaiju_tax)} contigs")
 
-    # Layer 2: rRNA (SILVA SSU/LSU) — overwrites Kaiju where available
-    rrna_path = os.path.join(results_dir, 'taxonomy', 'rrna', 'rrna_contigs.tsv')
-    rrna_df = load_tsv(rrna_path)
-    if rrna_df is not None:
-        for _, row in rrna_df.iterrows():
-            # Prefer SSU taxonomy, fall back to LSU
-            lineage = row.get('best_ssu_taxonomy', '')
-            if not lineage or (pd.isna(lineage)):
-                lineage = row.get('best_lsu_taxonomy', '')
-            if pd.notna(lineage) and lineage:
-                parts = [p.strip() for p in lineage.split(';')]
-                domain = parts[0] if len(parts) > 0 else ''
-                phylum = parts[1] if len(parts) > 1 else ''
-                if domain or phylum:
-                    tax_map[row['contig_id']] = {
-                        'domain': domain, 'phylum': phylum, 'source': 'rrna',
-                    }
-        print(f"  rRNA taxonomy: {len(rrna_df)} contigs")
-
-    # Layer 3 (highest priority): Kraken2 (GTDB lineages with d__/p__ prefixes)
+    # Kraken2 (GTDB k-mer)
+    kraken2_tax = {}
     kraken2_path = os.path.join(results_dir, 'taxonomy', 'kraken2', 'kraken2_contigs.tsv')
     kraken2_df = load_tsv(kraken2_path)
     if kraken2_df is not None:
-        n_used = 0
         for _, row in kraken2_df.iterrows():
             if row.get('status') != 'C':
                 continue
             lineage = row.get('lineage', '')
             if pd.notna(lineage) and lineage and lineage != 'Unclassified':
-                parts = [p.strip() for p in lineage.split(';')]
-                domain = strip_gtdb_prefix(parts[0]) if len(parts) > 0 else ''
-                phylum = strip_gtdb_prefix(parts[1]) if len(parts) > 1 else ''
+                domain, phylum = parse_lineage(lineage)
+                domain = strip_gtdb_prefix(domain)
+                phylum = strip_gtdb_prefix(phylum)
                 if domain or phylum:
-                    tax_map[row['contig_id']] = {
-                        'domain': domain, 'phylum': phylum, 'source': 'kraken2',
-                    }
-                    n_used += 1
-        print(f"  Kraken2 taxonomy: {n_used} contigs with lineage")
+                    kraken2_tax[row['contig_id']] = {'domain': domain, 'phylum': phylum}
+    print(f"  Kraken2 taxonomy: {len(kraken2_tax)} contigs")
 
-    # Report source breakdown
-    from collections import Counter
+    # rRNA (SILVA SSU/LSU)
+    rrna_tax = {}
+    rrna_path = os.path.join(results_dir, 'taxonomy', 'rrna', 'rrna_contigs.tsv')
+    rrna_df = load_tsv(rrna_path)
+    if rrna_df is not None:
+        for _, row in rrna_df.iterrows():
+            lineage = row.get('best_ssu_taxonomy', '')
+            if not lineage or pd.isna(lineage):
+                lineage = row.get('best_lsu_taxonomy', '')
+            if pd.notna(lineage) and lineage:
+                domain, phylum = parse_lineage(lineage)
+                if domain or phylum:
+                    rrna_tax[row['contig_id']] = {'domain': domain, 'phylum': phylum}
+    print(f"  rRNA taxonomy: {len(rrna_tax)} contigs")
+
+    # Merged (Kraken2 > rRNA > Kaiju priority)
+    tax_map = {}
+    for cid, tax in kaiju_tax.items():
+        tax_map[cid] = {**tax, 'source': 'kaiju'}
+    for cid, tax in rrna_tax.items():
+        tax_map[cid] = {**tax, 'source': 'rrna'}
+    for cid, tax in kraken2_tax.items():
+        tax_map[cid] = {**tax, 'source': 'kraken2'}
     sources = Counter(v['source'] for v in tax_map.values())
-    print(f"  Taxonomy sources: {dict(sources)} (total {len(tax_map)} contigs)")
+    print(f"  Merged taxonomy: {dict(sources)} (total {len(tax_map)} contigs)")
 
     depth_map = {}
     depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
@@ -744,10 +745,21 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
             'pca_x': round(float(pca_coords[i, 0]), 4),
             'pca_y': round(float(pca_coords[i, 1]), 4),
         }
+        # Merged taxonomy (best available)
         tax = tax_map.get(cid, {})
         rec['domain'] = tax.get('domain', '')
         rec['phylum'] = tax.get('phylum', '')
         rec['tax_source'] = tax.get('source', '')
+        # Per-source taxonomy for individual classifier views
+        kt = kaiju_tax.get(cid, {})
+        rec['kaiju_domain'] = kt.get('domain', '')
+        rec['kaiju_phylum'] = kt.get('phylum', '')
+        k2t = kraken2_tax.get(cid, {})
+        rec['kraken2_domain'] = k2t.get('domain', '')
+        rec['kraken2_phylum'] = k2t.get('phylum', '')
+        rt = rrna_tax.get(cid, {})
+        rec['rrna_domain'] = rt.get('domain', '')
+        rec['rrna_phylum'] = rt.get('phylum', '')
 
         if tsne_coords is not None:
             rec['tsne_x'] = round(float(tsne_coords[i, 0]), 4)

@@ -60,8 +60,6 @@ The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scr
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py,
 │   │                           merge_annotations.py, map_annotations_to_bins.py,
 │   │                           kegg_module_completeness.py, parse_marferret_results.py)
-│   ├── data/
-│   │   └── islandpath_hmm/    Pfam mobility gene HMM profiles (bundled)
 │   ├── conda-envs/             Pre-built envs (created by install.sh)
 │   ├── install.sh              Conda environment builder
 │   ├── Dockerfile              Docker image (CPU-only SemiBin2)
@@ -360,7 +358,7 @@ results/
 │   ├── integrons/                 Integron detection (if --run_integronfinder)
 │   │   ├── integrons.tsv          Per-element annotations (integrase, attC, attI, cassettes)
 │   │   └── summary.tsv            Counts of complete/In0/CALIN integrons per contig
-│   ├── genomic_islands/           Genomic island detection (if --run_islandpath)
+│   ├── islandpath/                Genomic island detection (if --run_islandpath)
 │   │   └── genomic_islands.tsv    Island coordinates (id, contig, start, end)
 │   ├── macsyfinder/               Secretion + conjugation (if --macsyfinder_models)
 │   │   ├── all_systems.tsv        Detected systems with component hits
