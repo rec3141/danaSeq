@@ -48,16 +48,17 @@ process PROKKA_ANNOTATE {
     """
 }
 
-// Gene annotation: Bakta CDS-only (fast path — minutes on large metagenomes)
+// Gene annotation: Bakta basic (fast path — minutes on large metagenomes)
+// Uses the Bakta light database (auto-derived from bakta_db path).
 // Skips ncRNA/tRNA/CRISPR/sORF scanning (cmscan is the bottleneck on large assemblies).
 // Produces .faa + .gff3 for all downstream tools (Kaiju, DefenseFinder, metabolism, etc.)
 
-process BAKTA_CDS {
-    tag "bakta_cds"
+process BAKTA_BASIC {
+    tag "bakta_basic"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-bakta"
-    publishDir "${params.outdir}/annotation/bakta/cds", mode: 'copy'
-    storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/cds" : null
+    publishDir "${params.outdir}/annotation/bakta/basic", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/basic" : null
 
     input:
     path(assembly)
@@ -69,10 +70,21 @@ process BAKTA_CDS {
     path("annotation.hypotheticals.faa"), emit: hypotheticals, optional: true
 
     script:
+    // Derive light DB: bakta_db points to full DB (e.g. .../bakta/full/db),
+    // light DB is its sibling (e.g. .../bakta/light/db-light)
+    def light_db = file(params.bakta_db).parent.parent.resolve('light/db-light')
     """
+    if [ ! -d "${light_db}" ]; then
+        echo "[ERROR] Bakta light database not found at ${light_db}" >&2
+        echo "[INFO]  Expected layout: <bakta_root>/full/db and <bakta_root>/light/db-light" >&2
+        echo "[INFO]  Download with: bakta_db download --output \$(dirname \$(dirname ${params.bakta_db})) --type light" >&2
+        exit 1
+    fi
+
     bakta \
-        --db "${params.bakta_db}" \
+        --db "${light_db}" \
         --meta \
+        --keep-contig-headers \
         --threads ${task.cpus} \
         --output bakta_out \
         --prefix annotation \
@@ -84,24 +96,26 @@ process BAKTA_CDS {
         "${assembly}"
 
     if [ ! -s bakta_out/annotation.faa ]; then
-        echo "[WARNING] Bakta CDS produced no protein output" >&2
+        echo "[WARNING] Bakta basic produced no protein output" >&2
     fi
 
-    cp bakta_out/annotation.faa bakta_out/annotation.gff3 bakta_out/annotation.tsv .
+    cp bakta_out/annotation.faa bakta_out/annotation.tsv .
+    # Strip ##FASTA section from GFF3 (embedded sequences bloat the file and confuse parsers)
+    sed '/^##FASTA/Q' bakta_out/annotation.gff3 > annotation.gff3
     cp bakta_out/annotation.hypotheticals.faa . 2>/dev/null || true
     """
 }
 
-// Gene annotation: Bakta full (slow path — hours on large metagenomes)
-// Complete annotation including ncRNA, tRNA, CRISPR, sORF, etc.
+// Gene annotation: Bakta extra (slow path — hours on large metagenomes)
+// Uses the Bakta full database. Complete annotation including ncRNA, tRNA, CRISPR, sORF, etc.
 // Runs in parallel with downstream tools; does not block the pipeline.
 
-process BAKTA_FULL {
-    tag "bakta_full"
+process BAKTA_EXTRA {
+    tag "bakta_extra"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-bakta"
-    publishDir "${params.outdir}/annotation/bakta/full", mode: 'copy'
-    storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/full" : null
+    publishDir "${params.outdir}/annotation/bakta/extra", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/extra" : null
 
     input:
     path(assembly)
@@ -119,6 +133,7 @@ process BAKTA_FULL {
     bakta \
         --db "${params.bakta_db}" \
         --meta \
+        --keep-contig-headers \
         --threads ${task.cpus} \
         --output bakta_out \
         --prefix annotation \
@@ -129,7 +144,9 @@ process BAKTA_FULL {
         echo "[WARNING] Bakta full produced no protein output" >&2
     fi
 
-    cp bakta_out/annotation.faa bakta_out/annotation.gff3 bakta_out/annotation.tsv .
+    cp bakta_out/annotation.faa bakta_out/annotation.tsv .
+    # Strip ##FASTA section from GFF3 (embedded sequences bloat the file and confuse parsers)
+    sed '/^##FASTA/Q' bakta_out/annotation.gff3 > annotation.gff3
     cp bakta_out/annotation.hypotheticals.faa bakta_out/annotation.gbff bakta_out/annotation.png . 2>/dev/null || true
     """
 }

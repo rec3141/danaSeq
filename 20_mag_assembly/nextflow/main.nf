@@ -55,8 +55,8 @@ def helpMessage() {
 
     Annotation:
       --annotator STR    Annotator to use: 'prokka', 'bakta', or 'none' [default: prokka]
-      --bakta_db PATH    Path to Bakta database (required when using Bakta)
-      --bakta_full       Also run full Bakta (ncRNA/tRNA/CRISPR — slow) [default: false]
+      --bakta_db PATH    Path to Bakta full database (BAKTA_EXTRA uses this; BAKTA_BASIC auto-derives light DB)
+      --bakta_extra       Also run BAKTA_EXTRA (ncRNA/tRNA/CRISPR — slow) [default: false]
       --run_prokka       (deprecated) Run Prokka — use --annotator instead [default: true]
       --run_bakta        (deprecated) Run Bakta — use --annotator instead [default: false]
 
@@ -192,7 +192,7 @@ def helpMessage() {
       │   ├── integrons/               (if --run_integronfinder)
       │   │   ├── integrons.tsv
       │   │   └── summary.tsv
-      │   ├── genomic_islands/        (if --run_islandpath, requires Prokka)
+      │   ├── islandpath/             (if --run_islandpath, requires Prokka)
       │   │   └── genomic_islands.tsv
       │   ├── macsyfinder/            (if --macsyfinder_models set)
       │   │   ├── all_systems.tsv
@@ -305,8 +305,8 @@ include { BIN_COMEBIN }         from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
-include { BAKTA_CDS }            from './modules/annotation'
-include { BAKTA_FULL }           from './modules/annotation'
+include { BAKTA_BASIC }          from './modules/annotation'
+include { BAKTA_EXTRA }          from './modules/annotation'
 include { KAIJU_CLASSIFY }      from './modules/taxonomy'
 include { KRAKEN2_CLASSIFY }   from './modules/taxonomy'
 include { SENDSKETCH_CLASSIFY } from './modules/taxonomy'
@@ -399,14 +399,14 @@ workflow {
         ch_proteins = PROKKA_ANNOTATE.out.proteins
         ch_gff      = PROKKA_ANNOTATE.out.gff
     } else if (effective_annotator == 'bakta') {
-        // Fast path: CDS-only annotation (minutes) — feeds all downstream tools
-        BAKTA_CDS(ASSEMBLY_FLYE.out.assembly)
-        ch_proteins = BAKTA_CDS.out.proteins
-        ch_gff      = BAKTA_CDS.out.gff
+        // Fast path: basic annotation with light DB (minutes) — feeds all downstream tools
+        BAKTA_BASIC(ASSEMBLY_FLYE.out.assembly)
+        ch_proteins = BAKTA_BASIC.out.proteins
+        ch_gff      = BAKTA_BASIC.out.gff
 
-        // Slow path: full annotation with ncRNA/tRNA/CRISPR (hours, optional)
-        if (params.bakta_full) {
-            BAKTA_FULL(ASSEMBLY_FLYE.out.assembly)
+        // Slow path: extra annotation with full DB + ncRNA/tRNA/CRISPR (hours, optional)
+        if (params.bakta_extra) {
+            BAKTA_EXTRA(ASSEMBLY_FLYE.out.assembly)
         }
     }
 
@@ -483,9 +483,9 @@ workflow {
         MACSYFINDER(ch_proteins)
     }
 
-    // 2h. Anti-phage defense system detection (DefenseFinder, requires .faa)
+    // 2h. Anti-phage defense system detection (DefenseFinder, requires .faa + .gff)
     if (params.run_defensefinder && effective_annotator != 'none') {
-        DEFENSEFINDER(ch_proteins)
+        DEFENSEFINDER(ch_proteins, ch_gff)
     }
 
     // 2i. Metabolic profiling: annotation tools (KofamScan + eggNOG-mapper + dbCAN3)
