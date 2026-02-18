@@ -307,6 +307,7 @@ include { CHECKM2 }             from './modules/binning'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
 include { BAKTA_BASIC }          from './modules/annotation'
 include { BAKTA_EXTRA }          from './modules/annotation'
+include { KAIJU_CONTIG_CLASSIFY } from './modules/taxonomy'
 include { KAIJU_CLASSIFY }      from './modules/taxonomy'
 include { KRAKEN2_CLASSIFY }   from './modules/taxonomy'
 include { SENDSKETCH_CLASSIFY } from './modules/taxonomy'
@@ -410,7 +411,12 @@ workflow {
         }
     }
 
-    // 2c2. Kaiju protein-level taxonomy (requires annotation .faa + .gff)
+    // 2c2. Kaiju taxonomy — primary: six-frame translation on contigs (no annotation dependency)
+    if (params.run_kaiju && params.kaiju_db) {
+        KAIJU_CONTIG_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+    }
+
+    // 2c2a. Kaiju taxonomy — secondary: protein-level via annotation .faa + .gff (per-gene detail)
     if (params.run_kaiju && params.kaiju_db && effective_annotator != 'none') {
         KAIJU_CLASSIFY(ch_proteins, ch_gff)
     }

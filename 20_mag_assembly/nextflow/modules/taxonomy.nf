@@ -1,18 +1,18 @@
-// Contig-level taxonomy classification: Kaiju (protein-level via Prokka .faa)
+// Contig-level taxonomy classification: Kaiju six-frame translation (runs directly on contigs)
+// Primary Kaiju mode — no annotation dependency, avoids Bakta contig renumbering issues.
+// Uses Kaiju's built-in six-frame translation to classify each contig independently.
 
-process KAIJU_CLASSIFY {
-    tag "kaiju"
+process KAIJU_CONTIG_CLASSIFY {
+    tag "kaiju_contigs"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-kaiju"
     publishDir "${params.outdir}/taxonomy/kaiju", mode: 'copy'
     storeDir params.store_dir ? "${params.store_dir}/taxonomy/kaiju" : null
 
     input:
-    path(proteins)   // Prokka .faa (amino acid sequences)
-    path(gff)        // Prokka .gff (gene-to-contig mapping)
+    path(contigs)   // Assembly FASTA — no annotation needed
 
     output:
-    path("kaiju_genes.tsv"),   emit: gene_taxonomy
     path("kaiju_contigs.tsv"), emit: contig_taxonomy
 
     script:
@@ -25,15 +25,118 @@ process KAIJU_CLASSIFY {
 
     if [ -z "\$fmi" ] || [ ! -f "\$fmi" ]; then
         echo "[ERROR] No .fmi file found in ${db_dir}" >&2
+        printf 'contig_id\\tstatus\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
+        exit 0
+    fi
+
+    if [ ! -f "\$nodes" ] || [ ! -f "\$names" ]; then
+        echo "[ERROR] nodes.dmp or names.dmp not found in ${db_dir}" >&2
+        printf 'contig_id\\tstatus\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
+        exit 0
+    fi
+
+    # Kaiju six-frame translation mode (no -p flag): translates contigs in all 6 frames
+    # and classifies the resulting protein fragments against the database.
+    # -a greedy -e 5: greedy mode allowing 5 mismatches (better sensitivity)
+    set +e
+    kaiju \\
+        -t "\$nodes" \\
+        -f "\$fmi" \\
+        -i "${contigs}" \\
+        -o kaiju_raw.tsv \\
+        -z ${task.cpus} \\
+        -a greedy \\
+        -e 5 \\
+        -v
+    kaiju_exit=\$?
+    set -e
+
+    if [ \$kaiju_exit -ne 0 ]; then
+        echo "[WARNING] Kaiju exited with code \$kaiju_exit" >&2
+        printf 'contig_id\\tstatus\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
+        exit 0
+    fi
+
+    # Add full taxonomic lineage names
+    set +e
+    kaiju-addTaxonNames \\
+        -t "\$nodes" \\
+        -n "\$names" \\
+        -i kaiju_raw.tsv \\
+        -o kaiju_names.tsv \\
+        -r superkingdom,phylum,class,order,family,genus,species
+    names_exit=\$?
+    set -e
+
+    if [ \$names_exit -ne 0 ]; then
+        echo "[WARNING] kaiju-addTaxonNames exited with code \$names_exit" >&2
+        printf 'contig_id\\tstatus\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
+        exit 0
+    fi
+
+    # Build per-contig TSV: contig_id, status, taxon_id, lineage
+    # Output is one row per contig (Kaiju outputs one row per input sequence in contig mode)
+    {
+        printf 'contig_id\\tstatus\\ttaxon_id\\tlineage\\n'
+        awk -F'\\t' '{
+            status = \$1
+            contig = \$2
+            taxid = \$3
+            lineage = (NF >= 4) ? \$NF : ""
+            # Clean trailing semicolons and whitespace
+            gsub(/;[ ]*\$/, "", lineage)
+            if (status == "C") {
+                print contig "\\t" status "\\t" taxid "\\t" lineage
+            } else {
+                print contig "\\tU\\t0\\tUnclassified"
+            }
+        }' kaiju_names.tsv
+    } > kaiju_contigs.tsv
+
+    n_total=\$(tail -n +2 kaiju_contigs.tsv | wc -l)
+    n_classified=\$(tail -n +2 kaiju_contigs.tsv | awk -F'\\t' '\$2=="C"' | wc -l)
+    echo "[INFO] Kaiju (6-frame): \$n_classified/\$n_total contigs classified" >&2
+    """
+}
+
+// Kaiju protein-level taxonomy (secondary — uses Prokka/Bakta .faa + .gff)
+// Per-gene classification aggregated to per-contig via GFF mapping.
+// Note: depends on annotation; contig IDs must match between assembly and annotation.
+
+process KAIJU_CLASSIFY {
+    tag "kaiju_proteins"
+    label 'process_high'
+    conda "${projectDir}/conda-envs/dana-mag-kaiju"
+    publishDir "${params.outdir}/taxonomy/kaiju", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/taxonomy/kaiju" : null
+
+    input:
+    path(proteins)   // Prokka .faa (amino acid sequences)
+    path(gff)        // Prokka .gff (gene-to-contig mapping)
+
+    output:
+    path("kaiju_genes.tsv"),            emit: gene_taxonomy
+    path("kaiju_protein_contigs.tsv"),  emit: contig_taxonomy
+
+    script:
+    def db_dir = params.kaiju_db
+    """
+    # Auto-detect .fmi file in database directory
+    fmi=\$(ls "${db_dir}"/*.fmi 2>/dev/null | head -1)
+    nodes="${db_dir}/nodes.dmp"
+    names="${db_dir}/names.dmp"
+
+    if [ -z "\$fmi" ] || [ ! -f "\$fmi" ]; then
+        echo "[ERROR] No .fmi file found in ${db_dir}" >&2
         printf 'classified\\tgene_id\\ttaxon_id\\tlineage\\n' > kaiju_genes.tsv
-        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
+        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_protein_contigs.tsv
         exit 0
     fi
 
     if [ ! -f "\$nodes" ] || [ ! -f "\$names" ]; then
         echo "[ERROR] nodes.dmp or names.dmp not found in ${db_dir}" >&2
         printf 'classified\\tgene_id\\ttaxon_id\\tlineage\\n' > kaiju_genes.tsv
-        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
+        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_protein_contigs.tsv
         exit 0
     fi
 
@@ -56,7 +159,7 @@ process KAIJU_CLASSIFY {
     if [ \$kaiju_exit -ne 0 ]; then
         echo "[WARNING] Kaiju exited with code \$kaiju_exit" >&2
         printf 'classified\\tgene_id\\ttaxon_id\\tlineage\\n' > kaiju_genes.tsv
-        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
+        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_protein_contigs.tsv
         exit 0
     fi
 
@@ -74,7 +177,7 @@ process KAIJU_CLASSIFY {
     if [ \$names_exit -ne 0 ]; then
         echo "[WARNING] kaiju-addTaxonNames exited with code \$names_exit" >&2
         printf 'classified\\tgene_id\\ttaxon_id\\tlineage\\n' > kaiju_genes.tsv
-        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
+        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_protein_contigs.tsv
         exit 0
     fi
 
@@ -131,7 +234,7 @@ with open(kaiju_path) as f:
 # For each contig, majority-vote lineage
 # Strategy: pick the most common full lineage; if tied, pick the one with
 # the most specific (deepest) classification
-with open('kaiju_contigs.tsv', 'w') as out:
+with open('kaiju_protein_contigs.tsv', 'w') as out:
     out.write('contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n')
     for contig in sorted(contig_genes.keys()):
         total = contig_genes[contig]
