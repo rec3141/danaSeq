@@ -194,7 +194,7 @@ mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 "${LOCAL_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
 # Capture session ID from Nextflow log and save self-invocation for reliable resume
-NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
+NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1 || true)
 save_run_command "$OUTDIR_HOST" "$NF_SESSION"
 
 exit $NF_EXIT

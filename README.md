@@ -4,7 +4,9 @@
 
 Named after the Buddhist concept of *dāna* (selfless giving), this pipeline processes DNA reads as they stream from the sequencer, providing live taxonomic classification, gene annotation, and functional profiling. Post-expedition, a separate pipeline reconstructs metagenome-assembled genomes (MAGs) from the collected data.
 
-Both pipelines are implemented in Nextflow DSL2 and run via conda or Docker with no hardcoded paths.
+A companion Illumina short-read pipeline (METTA) handles metagenomic assembly with multi-assembler consensus and MetaBAT2 binning.
+
+All pipelines are implemented in Nextflow DSL2 and run via conda or Docker with no hardcoded paths.
 
 ## Quick Start
 
@@ -39,6 +41,24 @@ cd danaSeq/nanopore_mag/nextflow
 # Or with Docker
 docker build -t danaseq-mag .
 ./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
+```
+
+### METTA assembly (Illumina short-read)
+
+```bash
+cd danaSeq/illumina_mag/nextflow
+./install.sh && ./install.sh --check
+
+# Run (local conda, handles activation automatically)
+./run-metta.sh --input /path/to/reads --outdir /path/to/output
+
+# Co-assembly mode
+./run-metta.sh --input /path/to/reads --outdir /path/to/output --coassembly
+
+# SLURM profile (Compute Canada)
+./run-metta.sh --input /path/to/reads --outdir /path/to/output \
+    -profile slurm --slurm_account def-myaccount \
+    --conda_path ~/scratch/miniforge3/bin
 ```
 
 ### Kitchen sink — all modules (real-time)
@@ -91,6 +111,25 @@ cd danaSeq/nanopore_mag/nextflow
     --assembly_memory '64 GB'
 ```
 
+### Kitchen sink — all options (METTA)
+
+```bash
+cd danaSeq/illumina_mag/nextflow
+./run-metta.sh --input /data/reads --outdir /data/output \
+    --coassembly \
+    --min_readlen 70 \
+    --run_normalize true \
+    --run_tadpole true \
+    --run_megahit true \
+    --run_spades true \
+    --run_metaspades true \
+    --dedupe_identity 98 \
+    --metabat_min_cls 2000 \
+    --store_dir /scratch/metta_store \
+    --assembly_cpus 24 \
+    --assembly_memory '250 GB'
+```
+
 ### Test with bundled data
 
 ```bash
@@ -131,7 +170,15 @@ dānaSeq/
 │   │   └── test-data/           Bundled test data
 │   └── archive/                 Replaced bash scripts (reference only)
 │
-├── archive/                   Archived root-level scripts and documentation
+├── illumina_mag/                  Illumina metagenomic assembly (METTA)
+│   └── nextflow/                 Nextflow DSL2 pipeline
+│       ├── main.nf              Entry point (18 processes)
+│       ├── modules/             8 modules: preprocess, error_correct, normalize,
+│       │                          merge_reads, assembly, dedupe, mapping, binning
+│       ├── envs/                Conda YAML specs (4 environments)
+│       └── run-metta.sh         Pipeline launcher
+│
+├── archive/                      Archived root-level scripts and documentation
 ├── tests/                        Pipeline tests
 ├── CITATION.bib                  References
 └── LICENSE                       MIT
@@ -214,6 +261,35 @@ Key features:
 
 See `nanopore_mag/README.md` for full details.
 
+### METTA assembly (illumina_mag/)
+
+Processes Illumina paired-end metagenomic reads through multi-assembler consensus:
+
+```
+Paired-end FASTQs → BBTools QC (clumpify, filterbytile, bbduk)
+                          → 3-phase error correction (ecco, ecc, tadpole)
+                          → bbnorm normalization → bbmerge read merging
+                               │
+                    ┌──────────┼──────────┬──────────┐
+                 Tadpole    Megahit    SPAdes   metaSPAdes
+                    └──────────┼──────────┴──────────┘
+                          Cascade deduplication (100% → 99% → 98%)
+                               │
+                          bbmap read mapping → jgi_summarize_bam_contig_depths
+                               │
+                          MetaBAT2 binning
+```
+
+Key features:
+- **Four-assembler consensus**: Tadpole, Megahit, SPAdes, metaSPAdes with cascade deduplication
+- **BBTools-based QC**: Optical deduplication, tile filtering, adapter/artifact removal
+- **Three-phase error correction**: Overlap, clump, and k-mer-based correction
+- **Per-sample and co-assembly modes**: `--coassembly` pools all samples
+- **SRA-safe**: Automatic fallbacks for SRA-stripped read headers
+- **SLURM support**: `-profile slurm` for Compute Canada HPC clusters
+
+See `illumina_mag/README.md` for full details.
+
 ## Input
 
 Oxford Nanopore directory structure with multiplexed barcodes (real-time pipeline):
@@ -229,6 +305,14 @@ Directory of FASTQ files (MAG pipeline):
 input_dir/
 ├── sample1.fastq.gz
 ├── sample2.fastq.gz
+└── ...
+```
+
+Illumina paired-end reads (METTA pipeline):
+```
+input_dir/
+├── sampleA_S1_L001_R1_001.fastq.gz
+├── sampleA_S1_L001_R2_001.fastq.gz
 └── ...
 ```
 
@@ -253,6 +337,9 @@ MAGs are classified per MIMAG (Bowers et al. 2017):
 ## References
 
 **Assembly & Binning:**
+- BBTools/BBMap: Bushnell, [sourceforge.net/projects/bbmap](https://sourceforge.net/projects/bbmap/)
+- Megahit: Li et al., Bioinformatics 2015
+- SPAdes/metaSPAdes: Nurk et al., Genome Research 2017
 - Flye: Kolmogorov et al., Nature Biotechnology 2019
 - SemiBin2: Pan et al., Nature Communications 2023
 - MetaBAT2: Kang et al., PeerJ 2019
