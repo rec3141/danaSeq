@@ -33,6 +33,91 @@ def load_tsv(path, **kwargs):
     return pd.read_csv(path, sep='\t', **kwargs)
 
 
+RANKS = ['domain', 'phylum', 'class', 'order', 'family', 'genus']
+
+
+def strip_gtdb_prefix(s):
+    """Remove GTDB-style rank prefix like 'd__', 'p__', etc."""
+    if s and len(s) > 3 and s[1:3] == '__':
+        return s[3:]
+    return s
+
+
+def parse_lineage(lineage):
+    """Extract taxonomy dict from semicolon-delimited lineage string."""
+    parts = [p.strip() for p in lineage.split(';')]
+    tax = {}
+    for i, rank in enumerate(RANKS):
+        tax[rank] = parts[i] if i < len(parts) and parts[i] else ''
+    return tax
+
+
+def build_taxonomy_maps(results_dir, kaiju_df):
+    """Build per-contig taxonomy dicts for Kaiju, Kraken2, and rRNA."""
+    kaiju_tax = {}
+    if kaiju_df is not None:
+        for _, row in kaiju_df.iterrows():
+            lineage = row.get('lineage', '')
+            if pd.notna(lineage) and lineage and lineage != 'Unclassified':
+                tax = parse_lineage(lineage)
+                if any(tax.values()):
+                    kaiju_tax[row['contig_id']] = tax
+
+    kraken2_tax = {}
+    kraken2_path = os.path.join(results_dir, 'taxonomy', 'kraken2', 'kraken2_contigs.tsv')
+    kraken2_df = load_tsv(kraken2_path)
+    if kraken2_df is not None:
+        for _, row in kraken2_df.iterrows():
+            if row.get('status') != 'C':
+                continue
+            lineage = row.get('lineage', '')
+            if pd.notna(lineage) and lineage and lineage != 'Unclassified':
+                tax = parse_lineage(lineage)
+                tax = {k: strip_gtdb_prefix(v) for k, v in tax.items()}
+                if any(tax.values()):
+                    kraken2_tax[row['contig_id']] = tax
+
+    rrna_tax = {}
+    rrna_path = os.path.join(results_dir, 'taxonomy', 'rrna', 'rrna_contigs.tsv')
+    rrna_df = load_tsv(rrna_path)
+    if rrna_df is not None:
+        for _, row in rrna_df.iterrows():
+            lineage = row.get('best_ssu_taxonomy', '')
+            if not lineage or pd.isna(lineage):
+                lineage = row.get('best_lsu_taxonomy', '')
+            if pd.notna(lineage) and lineage:
+                tax = parse_lineage(lineage)
+                if any(tax.values()):
+                    rrna_tax[row['contig_id']] = tax
+
+    return {'kaiju': kaiju_tax, 'kraken2': kraken2_tax, 'rrna': rrna_tax}
+
+
+def majority_vote_taxonomy(contigs, tax_map, len_map=None):
+    """Compute majority-vote taxonomy from a contig->tax dict.
+
+    Votes on the full lineage (length-weighted if len_map provided) to avoid
+    chimeric assignments where each rank comes from a different organism.
+    """
+    entries = [(c, tax_map[c]) for c in contigs if c in tax_map]
+    if not entries:
+        return {}
+    # Build a lineage string per contig and accumulate weight
+    lineage_weights = Counter()
+    for cid, lin in entries:
+        weight = len_map.get(cid, 1) if len_map else 1
+        # Use the deepest non-empty rank as the lineage key
+        key = tuple(lin.get(r, '') for r in RANKS)
+        lineage_weights[key] += weight
+    # Winner is the full lineage with the most weight
+    winner = lineage_weights.most_common(1)[0][0]
+    tax = {}
+    for i, rank in enumerate(RANKS):
+        if winner[i]:
+            tax[rank] = winner[i]
+    return tax
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Preprocess MAG pipeline results to JSON")
     p.add_argument('--results', '-r', required=True, help='Pipeline results directory')
@@ -168,29 +253,17 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
         for _, row in integron_df.iterrows():
             integron_contigs.add(row['ID_replicon'])
 
-    # Build per-MAG taxonomy by majority vote from kaiju
+    # Build per-MAG taxonomy by majority vote from kaiju (full lineage vote)
     mag_taxonomy = {}
     if kaiju_df is not None:
+        kaiju_tax = {}
+        for _, row in kaiju_df.iterrows():
+            lineage = row.get('lineage', '')
+            if pd.notna(lineage) and lineage and lineage != 'Unclassified':
+                kaiju_tax[row['contig_id']] = parse_lineage(lineage)
         for mag_name, contigs in mag_contigs.items():
-            lineages = []
-            for c in contigs:
-                match = kaiju_df[kaiju_df['contig_id'] == c]
-                if len(match) > 0 and pd.notna(match.iloc[0].get('lineage', None)):
-                    lineages.append(match.iloc[0]['lineage'])
-            if lineages:
-                # Majority vote at each rank
-                ranks = ['domain', 'phylum', 'class', 'order', 'family', 'genus', 'species']
-                tax = {}
-                for i, rank in enumerate(ranks):
-                    rank_values = []
-                    for lin in lineages:
-                        parts = [p.strip() for p in lin.split(';')]
-                        if i < len(parts) and parts[i]:
-                            rank_values.append(parts[i])
-                    if rank_values:
-                        tax[rank] = Counter(rank_values).most_common(1)[0][0]
-                    else:
-                        tax[rank] = ''
+            tax = majority_vote_taxonomy(contigs, kaiju_tax)
+            if tax:
                 mag_taxonomy[mag_name] = tax
 
     for _, row in dastool_summary.iterrows():
@@ -258,22 +331,103 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
     return mags
 
 
-def build_checkm2_all(checkm2_df, dastool_summary):
-    """Build checkm2_all.json for the scatter plot of all 573 bins."""
+def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
+                      kaiju_df, virus_df, plasmid_df, defense_df, integron_df,
+                      assembly_info=None):
+    """Build checkm2_all.json for all bins with quality, taxonomy, and MGE."""
     print("Building checkm2_all.json ...")
     if checkm2_df is None:
         return []
 
     dastool_names = set(dastool_summary['bin'].values)
+
+    # Separate contig maps for DAS Tool vs raw binner bins
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    dastool_bin_contigs = {}  # dastool full name -> [contig_ids]
+    binner_bin_contigs = {}   # raw bin name -> [contig_ids]
+
+    # DAS Tool contig2bin (keyed by full dastool- name)
+    if contig2bin is not None:
+        for _, row in contig2bin.iterrows():
+            mag = row.iloc[1]  # e.g., dastool-semibin_022
+            dastool_bin_contigs.setdefault(mag, []).append(row.iloc[0])
+
+    # Per-binner contig2bin (keyed by raw bin name)
+    for binner in binners:
+        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is not None:
+            for _, row in bdf.iterrows():
+                binner_bin_contigs.setdefault(row['bin'], []).append(row['contig'])
+
+    # MGE contig sets
+    virus_contigs = set(virus_df['seq_name'].values) if virus_df is not None else set()
+    plasmid_contigs = set(plasmid_df['seq_name'].values) if plasmid_df is not None else set()
+
+    defense_contig_map = defaultdict(list)
+    if defense_df is not None:
+        for _, row in defense_df.iterrows():
+            sid = row['sys_id']
+            parts = sid.split('_')
+            contig = '_'.join(parts[:2])
+            defense_contig_map[contig].append(row['type'])
+
+    integron_contigs = set()
+    if integron_df is not None:
+        for _, row in integron_df.iterrows():
+            integron_contigs.add(row['ID_replicon'])
+
+    # Per-source taxonomy maps
+    tax_maps = build_taxonomy_maps(results_dir, kaiju_df)
+
+    # Contig length map for length-weighted composition
+    len_map = {}
+    if assembly_info is not None:
+        len_map = dict(zip(assembly_info['#seq_name'], assembly_info['length']))
+
     records = []
     for _, row in checkm2_df.iterrows():
         name = row['Name']
-        full_name = f"dastool-{name}"
-        is_dastool = full_name in dastool_names
+        # Only dastool- prefixed CheckM2 entries are DAS Tool consensus bins
+        if name.startswith('dastool-'):
+            is_dastool = name in dastool_names
+            short_name = name.replace('dastool-', '')
+            contigs = dastool_bin_contigs.get(name, [])
+        else:
+            is_dastool = False
+            short_name = name
+            contigs = binner_bin_contigs.get(name, [])
 
-        # Determine binner
-        m = re.match(r'(\w+?)_\d+', name)
+        m = re.match(r'(\w+?)_\d+', short_name)
         binner = m.group(1) if m else 'unknown'
+
+        # Per-source majority vote taxonomy (length-weighted full lineage)
+        taxonomy = {}
+        for source, tmap in tax_maps.items():
+            tax = majority_vote_taxonomy(contigs, tmap, len_map)
+            if tax:
+                taxonomy[source] = tax
+
+        # Per-source per-rank length-weighted composition
+        composition = {}
+        for source, tmap in tax_maps.items():
+            src_comp = {}
+            for cid in contigs:
+                clen = len_map.get(cid, 0)
+                if clen == 0:
+                    continue
+                ctax = tmap.get(cid)
+                for rk in RANKS:
+                    taxon = (ctax.get(rk, '') if ctax else '') or 'Unclassified'
+                    src_comp.setdefault(rk, {})
+                    src_comp[rk][taxon] = src_comp[rk].get(taxon, 0) + clen
+            if src_comp:
+                composition[source] = src_comp
+
+        n_virus = sum(1 for c in contigs if c in virus_contigs)
+        n_plasmid = sum(1 for c in contigs if c in plasmid_contigs)
+        n_defense = sum(len(defense_contig_map.get(c, [])) for c in contigs)
+        n_integron = sum(1 for c in contigs if c in integron_contigs)
 
         records.append({
             'name': name,
@@ -284,47 +438,40 @@ def build_checkm2_all(checkm2_df, dastool_summary):
             'n50': int(row['Contig_N50']),
             'binner': binner,
             'is_dastool': is_dastool,
-            'dastool_name': full_name if is_dastool else None,
+            'dastool_name': name if is_dastool else None,
+            'taxonomy': taxonomy,
+            'composition': composition,
+            'n_contigs': len(contigs),
+            'n_virus': n_virus,
+            'n_plasmid': n_plasmid,
+            'n_defense': n_defense,
+            'n_integron': n_integron,
         })
     return records
 
 
-def build_taxonomy_sunburst(kaiju_df, assembly_info):
-    """Build taxonomy_sunburst.json as a D3 hierarchy tree."""
-    print("Building taxonomy_sunburst.json ...")
-    if kaiju_df is None:
-        return {'name': 'root', 'children': []}
-
-    # Build contig length lookup
-    len_map = dict(zip(assembly_info['#seq_name'], assembly_info['length']))
-
-    # Count size-weighted taxonomy at each rank
+def _build_sunburst_tree(tax_map, len_map):
+    """Build a D3 hierarchy tree from a contig->taxonomy dict."""
     tree = {}
     ranks = ['domain', 'phylum', 'class', 'order']
 
-    for _, row in kaiju_df.iterrows():
-        lineage = row.get('lineage', '')
-        if pd.isna(lineage) or not lineage:
-            continue
-        parts = [p.strip() for p in lineage.split(';')]
-        contig_len = len_map.get(row['contig_id'], 1000)
-
+    for contig_id, tax in tax_map.items():
+        contig_len = len_map.get(contig_id, 1000)
         node = tree
-        for i, rank_name in enumerate(ranks):
-            if i < len(parts) and parts[i]:
-                taxon = parts[i]
-            else:
-                taxon = 'Unclassified'
+        for rank in ranks:
+            taxon = tax.get(rank, '') or 'Unclassified'
             if taxon not in node:
                 node[taxon] = {'_size': 0, '_children': {}}
             node[taxon]['_size'] += contig_len
             node = node[taxon]['_children']
 
-    # Convert to D3 hierarchy, collapsing <0.5% nodes
+    if not tree:
+        return {'name': 'Life', 'children': []}
+
     total_size = sum(v['_size'] for v in tree.values())
     threshold = total_size * 0.005
 
-    def to_hierarchy(node_dict, parent_name='root'):
+    def to_hierarchy(node_dict):
         children = []
         other_size = 0
         for name, data in sorted(node_dict.items(), key=lambda x: -x[1]['_size']):
@@ -333,7 +480,7 @@ def build_taxonomy_sunburst(kaiju_df, assembly_info):
             else:
                 child = {'name': name, 'value': data['_size']}
                 if data['_children']:
-                    sub = to_hierarchy(data['_children'], name)
+                    sub = to_hierarchy(data['_children'])
                     if sub:
                         child['children'] = sub
                 children.append(child)
@@ -341,10 +488,94 @@ def build_taxonomy_sunburst(kaiju_df, assembly_info):
             children.append({'name': 'Other', 'value': other_size})
         return children
 
-    return {
-        'name': 'Life',
-        'children': to_hierarchy(tree),
-    }
+    return {'name': 'Life', 'children': to_hierarchy(tree)}
+
+
+def build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin):
+    """Build taxonomy_sunburst.json with per-source sunburst trees + composition."""
+    print("Building taxonomy_sunburst.json ...")
+    len_map = dict(zip(assembly_info['#seq_name'], assembly_info['length']))
+    tax_maps = build_taxonomy_maps(results_dir, kaiju_df)
+
+    result = {'sunbursts': {}, 'composition': {}}
+    for source, tmap in tax_maps.items():
+        result['sunbursts'][source] = _build_sunburst_tree(tmap, len_map)
+        print(f"  {source}: {len(tmap)} contigs")
+
+    # Per-binner length-weighted composition at each rank
+    # Load per-binner contig sets
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    binner_contigs = {}  # binner -> set of contig ids
+
+    # DAS Tool
+    if contig2bin is not None:
+        dt_contigs = set()
+        for _, row in contig2bin.iterrows():
+            dt_contigs.add(row.iloc[0])
+        binner_contigs['dastool'] = dt_contigs
+
+    for binner in binners:
+        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is not None:
+            binner_contigs[binner] = set(bdf['contig'].values)
+
+    # Compute: composition[binner][source][rank] = {taxon: total_bp, ...}
+    comp = {}
+    for binner, contigs in binner_contigs.items():
+        comp[binner] = {}
+        for source, tmap in tax_maps.items():
+            rank_data = {}
+            for rank in RANKS:
+                counts = {}
+                for cid in contigs:
+                    tax = tmap.get(cid)
+                    if tax:
+                        val = tax.get(rank, '') or 'Unclassified'
+                    else:
+                        val = 'Unclassified'
+                    length = len_map.get(cid, 0)
+                    counts[val] = counts.get(val, 0) + length
+                rank_data[rank] = counts
+            comp[binner][source] = rank_data
+
+    result['composition'] = comp
+    return result
+
+
+# Merge fine-grained KEGG categories into 5 display groups
+_CATEGORY_GROUPS = {
+    'Central carbon':     'Carbon',
+    'Carbon fixation':    'Carbon',
+    'Methane metabolism':  'Carbon',
+    'Fermentation':       'Carbon',
+    'Nitrogen metabolism': 'Nitrogen',
+    'Sulfur metabolism':   'Sulfur',
+    'Energy metabolism':   'Energy',
+    'Photosynthesis':     'Energy',
+    'Hydrogen metabolism': 'Energy',
+    'Vitamins':           'Biosynthesis',
+    'Amino acids':        'Biosynthesis',
+    'Xenobiotics':        'Other',
+    'Transporters':       'Other',
+}
+
+
+def _load_kegg_categories(results_dir):
+    """Load module->category and module->group mappings from kegg_module_completeness.py."""
+    import importlib.util
+    script = os.path.join(results_dir, '..', 'bin', 'kegg_module_completeness.py')
+    if not os.path.exists(script):
+        # Try relative to this file
+        script = os.path.join(os.path.dirname(__file__), '..', '..', 'bin', 'kegg_module_completeness.py')
+    if os.path.exists(script):
+        spec = importlib.util.spec_from_file_location('kegg_mod', script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        cats = {mid: cat for mid, (name, cat, steps) in mod.KEGG_MODULES.items()}
+        groups = {mid: _CATEGORY_GROUPS.get(cat, 'Other') for mid, cat in cats.items()}
+        return cats, groups
+    return {}, {}
 
 
 def build_kegg_heatmap(results_dir):
@@ -354,7 +585,7 @@ def build_kegg_heatmap(results_dir):
     df = load_tsv(path)
     if df is None:
         return {'mag_ids': [], 'module_ids': [], 'module_names': [], 'matrix': [],
-                'row_order': [], 'col_order': []}
+                'row_order': [], 'col_order': [], 'module_categories': []}
 
     # Filter out _community and _unbinned rows
     df = df[~df['mag_id'].str.startswith('_')].copy()
@@ -369,6 +600,11 @@ def build_kegg_heatmap(results_dir):
         module_names.append(parts[1] if len(parts) > 1 else parts[0])
 
     matrix = df.values.astype(float)
+
+    # Load module categories from pipeline script
+    cat_map, group_map = _load_kegg_categories(results_dir)
+    module_categories = [cat_map.get(mid, 'Other') for mid in module_ids]
+    module_groups = [group_map.get(mid, 'Other') for mid in module_ids]
 
     # Ward hierarchical clustering on rows (MAGs) and columns (modules)
     # Only cluster if we have enough data
@@ -386,53 +622,118 @@ def build_kegg_heatmap(results_dir):
     else:
         col_order = list(range(matrix.shape[1]))
 
-    # Reorder
+    # Reorder data by clustering; send identity order so D3Heatmap doesn't double-reorder
     reordered = matrix[row_order][:, col_order].tolist()
     reordered_mags = [df.index[i] for i in row_order]
     reordered_modules = [module_ids[i] for i in col_order]
     reordered_names = [module_names[i] for i in col_order]
+    reordered_categories = [module_categories[i] for i in col_order]
+    reordered_groups = [module_groups[i] for i in col_order]
+
+    n_rows = len(reordered_mags)
+    n_cols = len(reordered_modules)
 
     return {
         'mag_ids': reordered_mags,
         'module_ids': reordered_modules,
         'module_names': reordered_names,
+        'module_categories': reordered_categories,
+        'module_groups': reordered_groups,
         'matrix': [[round(v, 3) for v in row] for row in reordered],
-        'row_order': row_order,
-        'col_order': col_order,
+        'row_order': list(range(n_rows)),
+        'col_order': list(range(n_cols)),
     }
 
 
-def build_coverage(dastool_summary, contig2bin, depths_df):
-    """Build coverage.json with per-MAG per-sample depth data."""
+def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
+    """Build coverage.json with per-bin per-sample depth for all binners, Bray-Curtis clustered."""
     print("Building coverage.json ...")
 
     depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
     sample_names = [re.sub(r'\.sorted\.bam$', '', c) for c in depth_cols]
 
-    # Build contig-to-MAG lookup
-    c2b = {}
+    def compute_bin_depths(c2b_map, bin_names):
+        """Compute per-bin per-sample mean depth matrix."""
+        rows = []
+        for b in bin_names:
+            contigs = [c for c, bn in c2b_map.items() if bn == b]
+            cd = depths_df[depths_df['contigName'].isin(contigs)]
+            row = []
+            for col in depth_cols:
+                if len(cd) > 0:
+                    row.append(round(float(cd[col].mean()), 4))
+                else:
+                    row.append(0)
+            rows.append(row)
+        return rows
+
+    # DAS Tool consensus bins
+    dastool_c2b = {}
     if contig2bin is not None:
         for _, row in contig2bin.iterrows():
-            c2b[row.iloc[0]] = row.iloc[1]
+            dastool_c2b[row.iloc[0]] = row.iloc[1]
+    dastool_bins = list(dastool_summary['bin'].values)
 
-    mag_names = list(dastool_summary['bin'].values)
-    # Per-MAG per-sample mean depth
-    matrix = []
-    for mag in mag_names:
-        contigs = [c for c, b in c2b.items() if b == mag]
-        contig_depths = depths_df[depths_df['contigName'].isin(contigs)]
-        row = []
-        for col in depth_cols:
-            if len(contig_depths) > 0:
-                row.append(round(float(contig_depths[col].mean()), 4))
-            else:
-                row.append(0)
-        matrix.append(row)
+    # All binners
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    all_bins = []   # list of {id, binner, depths: []}
+    all_matrix = []
+
+    # Add DAS Tool bins
+    dastool_depths = compute_bin_depths(dastool_c2b, dastool_bins)
+    for name, depths in zip(dastool_bins, dastool_depths):
+        all_bins.append({'id': name, 'binner': 'dastool'})
+        all_matrix.append(depths)
+
+    # Add per-binner bins
+    for binner in binners:
+        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is None:
+            continue
+        c2b_map = dict(zip(bdf['contig'], bdf['bin']))
+        bin_names = sorted(set(c2b_map.values()))
+        depths = compute_bin_depths(c2b_map, bin_names)
+        for name, d in zip(bin_names, depths):
+            all_bins.append({'id': name, 'binner': binner})
+            all_matrix.append(d)
+        print(f"  {binner}: {len(bin_names)} bins")
+
+    mat = np.array(all_matrix)
+    print(f"  Total bins: {len(all_bins)} x {len(sample_names)} samples")
+
+    # Fourth-root transform of proportions for Bray-Curtis clustering
+    row_sums = mat.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1
+    proportions = mat / row_sums
+    transformed = np.power(proportions, 0.25)
+
+    # Bray-Curtis hierarchical clustering on rows (all bins)
+    row_order = list(range(len(all_bins)))
+    if transformed.shape[0] > 2:
+        row_dist = pdist(transformed, metric='braycurtis')
+        row_dist = np.nan_to_num(row_dist, nan=0.0)
+        row_link = linkage(row_dist, method='average')
+        row_order = leaves_list(row_link).tolist()
+
+    # Bray-Curtis clustering on columns (samples)
+    col_order = list(range(len(sample_names)))
+    if transformed.shape[1] > 2:
+        col_dist = pdist(transformed.T, metric='braycurtis')
+        col_dist = np.nan_to_num(col_dist, nan=0.0)
+        col_link = linkage(col_dist, method='average')
+        col_order = leaves_list(col_link).tolist()
+
+    # Reorder
+    reordered_bins = [all_bins[i] for i in row_order]
+    reordered_samples = [sample_names[i] for i in col_order]
+    reordered_matrix = mat[row_order][:, col_order].tolist()
+    reordered_matrix = [[round(v, 4) for v in row] for row in reordered_matrix]
 
     return {
-        'mag_ids': mag_names,
-        'sample_names': sample_names,
-        'matrix': matrix,
+        'bins': reordered_bins,         # [{id, binner}, ...]
+        'sample_names': reordered_samples,
+        'matrix': reordered_matrix,
     }
 
 
@@ -609,6 +910,17 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     contig_ids = tnf_df.iloc[:, 0].values
     tnf_matrix = tnf_df.iloc[:, 1:].values.astype(float)
 
+    # Load GC% from pipeline output (computed alongside TNF)
+    gc_path = os.path.join(results_dir, 'assembly', 'gc.tsv')
+    gc_df = load_tsv(gc_path)
+    if gc_df is not None:
+        gc_map = dict(zip(gc_df['contig_id'], gc_df['gc_pct'].astype(float)))
+        gc_vals = np.array(list(gc_map.values()))
+        print(f"  GC%: median={np.median(gc_vals):.1f}%, range=[{gc_vals.min():.1f}%, {gc_vals.max():.1f}%]")
+    else:
+        gc_map = {}
+        print("  [WARNING] gc.tsv not found, GC% will be unavailable")
+
     # Fourth-root transformation of relative abundances
     # Stabilizes variance for compositional data (Hellinger-like),
     # down-weights dominant k-mers, amplifies rare signal
@@ -622,63 +934,24 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
         for _, row in contig2bin.iterrows():
             c2b[row.iloc[0]] = row.iloc[1]
 
-    # Per-source taxonomy maps: each classifier gets its own domain/phylum per contig
-    from collections import Counter
+    # Load per-binner contig2bin maps
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    binner_maps = {}
+    for binner in binners:
+        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is not None:
+            bmap = dict(zip(bdf['contig'], bdf['bin']))
+            binner_maps[binner] = bmap
+            print(f"  {binner}: {len(set(bmap.values()))} bins, {len(bmap)} contigs")
 
-    def strip_gtdb_prefix(s):
-        """Remove GTDB-style rank prefix like 'd__', 'p__', etc."""
-        if s and len(s) > 3 and s[1:3] == '__':
-            return s[3:]
-        return s
-
-    def parse_lineage(lineage):
-        """Extract (domain, phylum) from semicolon-delimited lineage string."""
-        parts = [p.strip() for p in lineage.split(';')]
-        domain = parts[0] if len(parts) > 0 else ''
-        phylum = parts[1] if len(parts) > 1 else ''
-        return domain, phylum
-
-    # Kaiju (six-frame or protein-level)
-    kaiju_tax = {}  # contig_id -> {domain, phylum}
-    if kaiju_df is not None:
-        for _, row in kaiju_df.iterrows():
-            lineage = row.get('lineage', '')
-            if pd.notna(lineage) and lineage and lineage != 'Unclassified':
-                domain, phylum = parse_lineage(lineage)
-                if domain or phylum:
-                    kaiju_tax[row['contig_id']] = {'domain': domain, 'phylum': phylum}
+    # Per-source taxonomy maps (shared helper)
+    tax_sources = build_taxonomy_maps(results_dir, kaiju_df)
+    kaiju_tax = tax_sources['kaiju']
+    kraken2_tax = tax_sources['kraken2']
+    rrna_tax = tax_sources['rrna']
     print(f"  Kaiju taxonomy: {len(kaiju_tax)} contigs")
-
-    # Kraken2 (GTDB k-mer)
-    kraken2_tax = {}
-    kraken2_path = os.path.join(results_dir, 'taxonomy', 'kraken2', 'kraken2_contigs.tsv')
-    kraken2_df = load_tsv(kraken2_path)
-    if kraken2_df is not None:
-        for _, row in kraken2_df.iterrows():
-            if row.get('status') != 'C':
-                continue
-            lineage = row.get('lineage', '')
-            if pd.notna(lineage) and lineage and lineage != 'Unclassified':
-                domain, phylum = parse_lineage(lineage)
-                domain = strip_gtdb_prefix(domain)
-                phylum = strip_gtdb_prefix(phylum)
-                if domain or phylum:
-                    kraken2_tax[row['contig_id']] = {'domain': domain, 'phylum': phylum}
     print(f"  Kraken2 taxonomy: {len(kraken2_tax)} contigs")
-
-    # rRNA (SILVA SSU/LSU)
-    rrna_tax = {}
-    rrna_path = os.path.join(results_dir, 'taxonomy', 'rrna', 'rrna_contigs.tsv')
-    rrna_df = load_tsv(rrna_path)
-    if rrna_df is not None:
-        for _, row in rrna_df.iterrows():
-            lineage = row.get('best_ssu_taxonomy', '')
-            if not lineage or pd.isna(lineage):
-                lineage = row.get('best_lsu_taxonomy', '')
-            if pd.notna(lineage) and lineage:
-                domain, phylum = parse_lineage(lineage)
-                if domain or phylum:
-                    rrna_tax[row['contig_id']] = {'domain': domain, 'phylum': phylum}
     print(f"  rRNA taxonomy: {len(rrna_tax)} contigs")
 
     # Merged (Kraken2 > rRNA > Kaiju priority)
@@ -691,6 +964,64 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
         tax_map[cid] = {**tax, 'source': 'kraken2'}
     sources = Counter(v['source'] for v in tax_map.values())
     print(f"  Merged taxonomy: {dict(sources)} (total {len(tax_map)} contigs)")
+
+    # geNomad replicon classification: only use FDR-filtered calls from summary files
+    # Default all contigs to 'chromosome', then overlay confident virus/plasmid/provirus
+    replicon_map = {cid: 'chromosome' for cid in assembly_info['#seq_name'].values}
+
+    virus_summary_path = os.path.join(results_dir, 'mge', 'genomad', 'virus_summary.tsv')
+    virus_sum_df = load_tsv(virus_summary_path)
+    if virus_sum_df is not None:
+        for cid in virus_sum_df['seq_name'].values:
+            replicon_map[cid] = 'virus'
+
+    plasmid_summary_path = os.path.join(results_dir, 'mge', 'genomad', 'plasmid_summary.tsv')
+    plasmid_sum_df = load_tsv(plasmid_summary_path)
+    if plasmid_sum_df is not None:
+        for cid in plasmid_sum_df['seq_name'].values:
+            replicon_map[cid] = 'plasmid'
+
+    # Proviruses: contigs hosting integrated phage (overrides chromosome)
+    provirus_path = os.path.join(results_dir, 'mge', 'genomad', 'provirus.tsv')
+    provirus_df = load_tsv(provirus_path)
+    if provirus_df is not None:
+        for source_seq in provirus_df['source_seq'].values:
+            if source_seq in replicon_map:
+                replicon_map[source_seq] = 'provirus'
+
+    counts = Counter(replicon_map.values())
+    print(f"  Replicon: {dict(counts)} ({len(replicon_map)} contigs)")
+
+    # geNomad viral taxonomy (semicolon-delimited lineage per virus contig)
+    genomad_tax = {}
+    genomad_tax_path = os.path.join(results_dir, 'mge', 'genomad', 'taxonomy.tsv')
+    genomad_tax_df = load_tsv(genomad_tax_path)
+    if genomad_tax_df is not None:
+        for _, row in genomad_tax_df.iterrows():
+            lineage = row.get('lineage', '')
+            if pd.notna(lineage) and lineage:
+                tax = parse_lineage(lineage)
+                if any(tax.values()):
+                    genomad_tax[row['seq_name']] = tax
+        print(f"  geNomad taxonomy: {len(genomad_tax)} contigs")
+
+    # Tiara eukaryotic classification
+    tiara_map = {}
+    tiara_path = os.path.join(results_dir, 'eukaryotic', 'tiara', 'tiara_output.tsv')
+    tiara_df = load_tsv(tiara_path)
+    if tiara_df is not None:
+        for _, row in tiara_df.iterrows():
+            tiara_map[row['sequence_id']] = row['class_fst_stage']
+        print(f"  Tiara: {len(tiara_map)} contigs ({dict(Counter(tiara_map.values()))})")
+
+    # Whokaryote classification
+    whokaryote_map = {}
+    whokaryote_path = os.path.join(results_dir, 'eukaryotic', 'whokaryote', 'whokaryote_classifications.tsv')
+    whokaryote_df = load_tsv(whokaryote_path)
+    if whokaryote_df is not None:
+        for _, row in whokaryote_df.iterrows():
+            whokaryote_map[row['contig']] = row.iloc[-1]  # 'predicted' column is last
+        print(f"  Whokaryote: {len(whokaryote_map)} contigs ({dict(Counter(whokaryote_map.values()))})")
 
     depth_map = {}
     depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
@@ -737,29 +1068,33 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     # Build output records
     contigs = []
     for i, cid in enumerate(contig_ids):
+        contig_gc = gc_map.get(cid, 0)
         rec = {
             'id': cid,
             'length': int(len_map.get(cid, 0)),
             'bin': c2b.get(cid, ''),
             'depth': round(depth_map.get(cid, 0), 4),
+            'gc': round(float(contig_gc), 2),
             'pca_x': round(float(pca_coords[i, 0]), 4),
             'pca_y': round(float(pca_coords[i, 1]), 4),
         }
-        # Merged taxonomy (best available)
-        tax = tax_map.get(cid, {})
-        rec['domain'] = tax.get('domain', '')
-        rec['phylum'] = tax.get('phylum', '')
-        rec['tax_source'] = tax.get('source', '')
-        # Per-source taxonomy for individual classifier views
-        kt = kaiju_tax.get(cid, {})
-        rec['kaiju_domain'] = kt.get('domain', '')
-        rec['kaiju_phylum'] = kt.get('phylum', '')
-        k2t = kraken2_tax.get(cid, {})
-        rec['kraken2_domain'] = k2t.get('domain', '')
-        rec['kraken2_phylum'] = k2t.get('phylum', '')
-        rt = rrna_tax.get(cid, {})
-        rec['rrna_domain'] = rt.get('domain', '')
-        rec['rrna_phylum'] = rt.get('phylum', '')
+        # Per-source taxonomy at all ranks
+        for prefix, src_map in [('kaiju', kaiju_tax), ('kraken2', kraken2_tax), ('rrna', rrna_tax)]:
+            st = src_map.get(cid, {})
+            for rank in RANKS:
+                rec[f'{prefix}_{rank}'] = st.get(rank, '')
+        # Per-binner bin assignments
+        for binner, bmap in binner_maps.items():
+            rec[f'{binner}_bin'] = bmap.get(cid, '')
+        # geNomad replicon type and viral taxonomy
+        rec['replicon'] = replicon_map.get(cid, '')
+        for prefix, src_map in [('genomad', genomad_tax)]:
+            st = src_map.get(cid, {})
+            for rank in RANKS:
+                rec[f'{prefix}_{rank}'] = st.get(rank, '')
+        # Eukaryotic classifiers
+        rec['tiara'] = tiara_map.get(cid, '')
+        rec['whokaryote'] = whokaryote_map.get(cid, '')
 
         if tsne_coords is not None:
             rec['tsne_x'] = round(float(tsne_coords[i, 0]), 4)
@@ -834,13 +1169,15 @@ def main():
     print(f"  Wrote mags.json ({len(mags)} MAGs)")
 
     # 4. checkm2_all.json
-    checkm2_all = build_checkm2_all(checkm2_df, dastool_summary)
+    checkm2_all = build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
+                                     kaiju_df, virus_df, plasmid_df, defense_df, integron_df,
+                                     assembly_info=assembly_info)
     with open(os.path.join(output_dir, 'checkm2_all.json'), 'w') as f:
         json.dump(checkm2_all, f)
     print(f"  Wrote checkm2_all.json ({len(checkm2_all)} bins)")
 
     # 5. taxonomy_sunburst.json
-    sunburst = build_taxonomy_sunburst(kaiju_df, assembly_info)
+    sunburst = build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin)
     with open(os.path.join(output_dir, 'taxonomy_sunburst.json'), 'w') as f:
         json.dump(sunburst, f)
     print(f"  Wrote taxonomy_sunburst.json")
@@ -852,7 +1189,7 @@ def main():
     print(f"  Wrote kegg_heatmap.json ({len(kegg['mag_ids'])} MAGs × {len(kegg['module_ids'])} modules)")
 
     # 7. coverage.json
-    coverage = build_coverage(dastool_summary, contig2bin, depths_df)
+    coverage = build_coverage(results_dir, dastool_summary, contig2bin, depths_df)
     with open(os.path.join(output_dir, 'coverage.json'), 'w') as f:
         json.dump(coverage, f)
     print(f"  Wrote coverage.json")

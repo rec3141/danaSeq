@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Map merged protein annotations to individual MAGs via DAS_Tool contig2bin.tsv.
+"""Map merged protein annotations to bins via combined contig2bin.tsv.
 
-Uses GFF to build gene->contig mapping, then contig->bin from DAS_Tool.
-Outputs per-MAG annotation TSVs and a community-wide table.
+Uses GFF to build gene->contig mapping, then contig->bin from combined
+DAS_Tool + individual binner assignments. A contig may map to multiple bins
+(e.g., dastool-semibin_022 and semibin_022), so each protein is written to
+every bin its contig belongs to.
+Outputs per-bin annotation TSVs and a community-wide table.
 
 Usage:
     map_annotations_to_bins.py \
@@ -21,7 +24,11 @@ import sys
 
 
 def parse_contig2bin(path):
-    """Parse DAS_Tool contig2bin.tsv: contig_id -> bin_id."""
+    """Parse contig2bin TSV: contig_id -> list of bin_ids.
+
+    A contig may appear in multiple bins (e.g., DAS Tool consensus + individual
+    binner bins). Returns a dict mapping each contig to all its bin assignments.
+    """
     mapping = {}
     with open(path) as fh:
         for line in fh:
@@ -30,7 +37,7 @@ def parse_contig2bin(path):
                 continue
             parts = line.split('\t')
             if len(parts) >= 2:
-                mapping[parts[0]] = parts[1]
+                mapping.setdefault(parts[0], []).append(parts[1])
     return mapping
 
 
@@ -96,9 +103,10 @@ def main():
                         help='Output path for community-wide TSV')
     args = parser.parse_args()
 
-    # Parse contig-to-bin assignments
+    # Parse contig-to-bin assignments (1:many — same contig in multiple binners)
     contig2bin = parse_contig2bin(args.contig2bin)
-    print(f"[INFO] Loaded {len(contig2bin)} contig-to-bin assignments", file=sys.stderr)
+    n_assignments = sum(len(v) for v in contig2bin.values())
+    print(f"[INFO] Loaded {len(contig2bin)} contigs with {n_assignments} bin assignments", file=sys.stderr)
 
     # Parse GFF for gene->contig mapping (supplements contig_id column in merged TSV)
     gff_gene_map = parse_gff_gene_contigs(args.gff)
@@ -107,8 +115,9 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
 
     # Read merged annotations and assign to bins
+    # Each protein is added to every bin its contig belongs to
     bin_rows = {}  # bin_id -> list of rows
-    all_rows = []  # all rows (for community + unbinned pseudo-MAGs)
+    all_rows = []  # all rows (for community — uses first bin_id)
     unbinned_rows = []  # rows with no bin assignment
     total = 0
     header = None
@@ -127,13 +136,17 @@ def main():
                 contig_id = gff_gene_map[protein_id]
                 row['contig_id'] = contig_id
 
-            bin_id = contig2bin.get(contig_id, '')
-            row['bin_id'] = bin_id
+            bin_ids = contig2bin.get(contig_id, [])
 
+            # Community TSV uses first bin assignment (DAS Tool preferred)
+            row['bin_id'] = bin_ids[0] if bin_ids else ''
             all_rows.append(dict(row))
 
-            if bin_id:
-                bin_rows.setdefault(bin_id, []).append(row)
+            if bin_ids:
+                for bin_id in bin_ids:
+                    row_copy = dict(row)
+                    row_copy['bin_id'] = bin_id
+                    bin_rows.setdefault(bin_id, []).append(row_copy)
             else:
                 unbinned_rows.append(row)
 
@@ -165,6 +178,7 @@ def main():
         print(f"[INFO] Unbinned pseudo-MAG: {len(unbinned_rows)} proteins", file=sys.stderr)
 
     # Write community-wide TSV (separate published output with all proteins)
+    # Uses first bin assignment per contig (DAS Tool preferred, cat-ed first)
     with open(args.annotations) as in_fh, \
          open(args.community, 'w', newline='') as out_fh:
         reader = csv.DictReader(in_fh, delimiter='\t')
@@ -179,7 +193,8 @@ def main():
                 contig_id = gff_gene_map[protein_id]
                 row['contig_id'] = contig_id
 
-            row['bin_id'] = contig2bin.get(contig_id, '')
+            bin_ids = contig2bin.get(contig_id, [])
+            row['bin_id'] = bin_ids[0] if bin_ids else ''
             writer.writerow(row)
 
     binned_proteins = sum(len(rows) for rows in bin_rows.values())

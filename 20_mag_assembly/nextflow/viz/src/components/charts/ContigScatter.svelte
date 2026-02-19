@@ -2,29 +2,42 @@
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
 
-  let { data = null, colorBy = 'bin', mode = 'pca' } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', onselect = null } = $props();
   let container;
+  let listenersAttached = false;
 
   const darkLayout = {
-    paper_bgcolor: 'transparent',
-    plot_bgcolor: 'transparent',
+    paper_bgcolor: '#1e293b',
+    plot_bgcolor: '#0f172a',
     font: { color: '#94a3b8', family: 'Inter, sans-serif', size: 12 },
     xaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155', title: 'Component 1' },
     yaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155', title: 'Component 2' },
     margin: { t: 30, r: 20, b: 50, l: 60 },
-    legend: { bgcolor: 'transparent', font: { color: '#94a3b8', size: 10 } },
+    modebar: { orientation: 'v', bgcolor: 'transparent', color: '#64748b', activecolor: '#22d3ee' },
+    legend: { bgcolor: 'rgba(15,23,42,0.7)', font: { color: '#94a3b8', size: 10 },
+              x: 1, y: 1, xanchor: 'right', yanchor: 'top' },
     dragmode: 'pan',
   };
 
-  function markerSize(length) {
-    return Math.max(2, Math.log10(length + 1) * 2);
+  function markerSize(c, sizeBy, scale) {
+    let s;
+    if (sizeBy === 'depth') s = Math.max(1.5, Math.sqrt(c.depth) * 0.8);
+    else if (sizeBy === 'fixed') s = 3;
+    else s = Math.max(1.5, Math.pow(c.length, 0.3) * 0.25);
+    // length: 1KB→2px, 10KB→4px, 100KB→8px, 500KB→14px, 1MB→20px
+    return s * scale;
   }
 
-  function hoverText(c) {
-    return `${c.id}<br>Length: ${c.length.toLocaleString()} bp<br>Depth: ${c.depth}<br>Bin: ${c.bin || 'none'}<br>Phylum: ${c.phylum || '?'}`;
+  function hoverText(c, colorBy) {
+    let tax = c.kaiju_phylum || c.kraken2_phylum || c.rrna_phylum || '?';
+    // If coloring by a taxonomy field, show that field's value
+    if (colorBy && !colorBy.endsWith('_bin') && colorBy !== 'bin' && c[colorBy] !== undefined) {
+      tax = c[colorBy] || '?';
+    }
+    return `${c.id}<br>Length: ${c.length.toLocaleString()} bp<br>Depth: ${c.depth}<br>GC: ${c.gc ?? '?'}%<br>Bin: ${c.bin || 'none'}<br>Tax: ${tax}`;
   }
 
-  function getTraces(data, colorBy, mode) {
+  function getTraces(data, colorBy, sizeBy, sizeScale, mode) {
     if (!data || !data.contigs.length) return [];
 
     const contigs = data.contigs;
@@ -36,59 +49,60 @@
                      '#2dd4bf', '#818cf8', '#f472b6', '#4ade80', '#e879f9', '#38bdf8',
                      '#94a3b8', '#d4d4d8', '#78716c'];
 
-    // Continuous color modes: depth and length
-    if (colorBy === 'depth' || colorBy === 'length') {
+    // Continuous color modes
+    const continuousModes = {
+      depth:  { fn: c => Math.log10(c.depth + 0.01), title: 'log\u2081\u2080(depth)', scale: 'Viridis' },
+      length: { fn: c => Math.log10(c.length + 1),   title: 'log\u2081\u2080(length)', scale: 'Viridis' },
+      gc:     { fn: c => c.gc,                        title: 'GC%',                     scale: 'Viridis' },
+    };
+    if (continuousModes[colorBy]) {
+      const cm = continuousModes[colorBy];
       const x = contigs.map(c => c[xKey]);
       const y = contigs.map(c => c[yKey]);
-      const text = contigs.map(c => hoverText(c));
-      const sizes = contigs.map(c => markerSize(c.length));
+      const text = contigs.map(c => hoverText(c, colorBy));
+      const customdata = contigs.map(c => c.id);
+      const sizes = contigs.map(c => markerSize(c, sizeBy, sizeScale));
+      const colors = contigs.map(cm.fn);
 
-      let colors, cbarTitle;
-      if (colorBy === 'depth') {
-        colors = contigs.map(c => Math.log10(c.depth + 0.01));
-        cbarTitle = 'log\u2081\u2080(depth)';
-      } else {
-        colors = contigs.map(c => Math.log10(c.length + 1));
-        cbarTitle = 'log\u2081\u2080(length)';
-      }
-
+      const markerOpts = {
+        size: sizes,
+        color: colors,
+        colorscale: cm.scale,
+        showscale: true,
+        colorbar: {
+          title: { text: cm.title, font: { color: '#94a3b8' } },
+          tickfont: { color: '#94a3b8' },
+          x: 0.99, xanchor: 'right', xpad: 0,
+          y: 0.98, yanchor: 'top', ypad: 0,
+          len: 0.4, thickness: 12,
+          bgcolor: 'rgba(15,23,42,0.7)',
+          borderwidth: 0,
+        },
+        line: { width: 0 },
+      };
       return [{
         type: 'scattergl',
         mode: 'markers',
-        x, y, text,
-        marker: {
-          size: sizes,
-          color: colors,
-          colorscale: 'Viridis',
-          showscale: true,
-          colorbar: {
-            title: { text: cbarTitle, font: { color: '#94a3b8' } },
-            tickfont: { color: '#94a3b8' },
-          },
-          line: { width: 0 },
-        },
+        x, y, text, customdata,
+        marker: markerOpts,
         hoverinfo: 'text',
       }];
     }
 
-    // Categorical color modes
-    const categoryField = {
-      'bin': 'bin', 'phylum': 'phylum', 'domain': 'domain',
-      'kaiju_phylum': 'kaiju_phylum', 'kraken2_phylum': 'kraken2_phylum', 'rrna_phylum': 'rrna_phylum',
-    };
+    // Categorical color modes: colorBy matches the JSON field name directly
+    const isBinField = colorBy === 'bin' || colorBy.endsWith('_bin');
     const groups = {};
     for (const c of contigs) {
-      let key;
-      const field = categoryField[colorBy];
-      if (colorBy === 'bin') key = c.bin || 'unbinned';
-      else if (field) key = c[field] || 'Unknown';
-      else key = 'all';
+      let key = c[colorBy];
+      if (isBinField) key = key || 'unbinned';
+      else key = key || 'Unknown';
 
-      if (!groups[key]) groups[key] = { x: [], y: [], text: [], sizes: [] };
+      if (!groups[key]) groups[key] = { x: [], y: [], text: [], sizes: [], ids: [] };
       groups[key].x.push(c[xKey]);
       groups[key].y.push(c[yKey]);
-      groups[key].text.push(hoverText(c));
-      groups[key].sizes.push(markerSize(c.length));
+      groups[key].text.push(hoverText(c, colorBy));
+      groups[key].sizes.push(markerSize(c, sizeBy, sizeScale));
+      groups[key].ids.push(c.id);
     }
 
     // Stable color map: assign colors alphabetically so each group always gets the same color
@@ -112,6 +126,7 @@
         x: g.x,
         y: g.y,
         text: g.text,
+        customdata: g.ids,
         marker: {
           size: g.sizes,
           color: isBackground ? '#475569' : colorMap[name],
@@ -128,28 +143,73 @@
   });
 
   $effect(() => {
+    // Read all reactive props so Svelte tracks them as dependencies
+    const _deps = [data, colorBy, sizeBy, sizeScale, mode];
     if (container && data) plot();
   });
 
   function plot() {
-    const traces = getTraces(data, colorBy, mode);
+    const traces = getTraces(data, colorBy, sizeBy, sizeScale, mode);
     const layout = {
       ...darkLayout,
-      xaxis: { ...darkLayout.xaxis, title: mode === 'tsne' ? 't-SNE 1' : mode === 'umap' ? 'UMAP 1' : 'PC 1', uirevision: mode, constrain: 'domain' },
-      yaxis: { ...darkLayout.yaxis, title: mode === 'tsne' ? 't-SNE 2' : mode === 'umap' ? 'UMAP 2' : 'PC 2', uirevision: mode, scaleanchor: 'x', scaleratio: 1, constrain: 'domain' },
+      xaxis: { ...darkLayout.xaxis, title: mode === 'tsne' ? 't-SNE 1' : mode === 'umap' ? 'UMAP 1' : 'PC 1', uirevision: mode },
+      // Note: do NOT add matches:'x' to yaxis — it conflicts with scaleanchor and breaks 1:1 aspect ratio
+      yaxis: { ...darkLayout.yaxis, title: mode === 'tsne' ? 't-SNE 2' : mode === 'umap' ? 'UMAP 2' : 'PC 2', uirevision: mode, scaleanchor: 'x', scaleratio: 1 },
       uirevision: mode + '-' + colorBy,
     };
     Plotly.react(container, traces, layout, {
       responsive: true,
       displaylogo: false,
       scrollZoom: true,
+      toImageButtonOptions: { scale: 4 },
+      doubleClick: false,
       displayModeBar: 'hover',
       modeBarButtonsToRemove: [
         'autoScale2d', 'toggleSpikelines',
         'hoverCompareCartesian', 'hoverClosestCartesian',
+        'zoomIn2d', 'zoomOut2d',
+        'zoom2d', 'select2d',
       ],
     });
+
+    if (!listenersAttached) {
+      // Double-click zooms in 2x at click point
+      container.on('plotly_doubleclick', () => {
+        // Get current axis ranges from the live layout
+        const layout = container.layout;
+        const xr = layout.xaxis.range;
+        const yr = layout.yaxis.range;
+        if (!xr || !yr) return;
+        const cx = (xr[0] + xr[1]) / 2;
+        const cy = (yr[0] + yr[1]) / 2;
+        const dx = (xr[1] - xr[0]) / 4;
+        const dy = (yr[1] - yr[0]) / 4;
+        Plotly.relayout(container, {
+          'xaxis.range': [cx - dx, cx + dx],
+          'yaxis.range': [cy - dy, cy + dy],
+        });
+      });
+
+    // Attach selection listeners once
+      container.on('plotly_selected', (eventData) => {
+        if (onselect && eventData?.points?.length) {
+          const ids = eventData.points.map(p => p.customdata).filter(Boolean);
+          onselect(ids);
+        }
+      });
+      container.on('plotly_deselect', () => {
+        if (onselect) onselect(null);
+      });
+      listenersAttached = true;
+    }
   }
 </script>
 
-<div bind:this={container} class="w-full" style="min-height: 500px;"></div>
+<div bind:this={container} class="w-full plotly-modebar-left" style="min-height: 500px;"></div>
+
+<style>
+  .plotly-modebar-left :global(.modebar) {
+    left: 0 !important;
+    right: auto !important;
+  }
+</style>

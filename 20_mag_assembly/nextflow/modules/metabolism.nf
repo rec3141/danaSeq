@@ -2,7 +2,7 @@
 // dbCAN3 (CAZyme detection), annotation merging, bin mapping, and KEGG module scoring.
 //
 // Architecture: "annotate once, map to bins" — all tools run on the full .faa,
-// then annotations are partitioned by DAS_Tool contig2bin assignments.
+// then annotations are partitioned by contig2bin assignments (DAS_Tool + all binners).
 
 process KOFAMSCAN {
     tag "kofamscan"
@@ -201,6 +201,7 @@ process MAP_TO_BINS {
     input:
     path(merged)
     path(contig2bin)
+    path(binner_bins)
     path(gff)
 
     output:
@@ -209,13 +210,15 @@ process MAP_TO_BINS {
 
     script:
     """
-    # Map merged annotations to individual MAGs via DAS_Tool contig2bin.tsv
-    # Uses GFF for accurate gene->contig mapping, then contig->bin from DAS_Tool
-    # Outputs: per-MAG TSVs + community-wide table with bin_id column
+    # Map merged annotations to bins via combined contig2bin (DAS_Tool + all binners)
+    # Uses GFF for accurate gene->contig mapping, then contig->bin assignments
+    # Outputs: per-bin TSVs + community-wide table with bin_id column
+
+    cat ${contig2bin} ${binner_bins} > combined_contig2bin.tsv
 
     map_annotations_to_bins.py \\
         --annotations "${merged}" \\
-        --contig2bin "${contig2bin}" \\
+        --contig2bin combined_contig2bin.tsv \\
         --gff "${gff}" \\
         --outdir per_mag \\
         --community community_annotations.tsv

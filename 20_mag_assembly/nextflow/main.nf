@@ -594,8 +594,9 @@ workflow {
 
         MERGE_ANNOTATIONS(ch_annot_labels, ch_annot_files)
 
-        // Map to bins (requires DAS_Tool contig2bin + GFF)
-        MAP_TO_BINS(MERGE_ANNOTATIONS.out.merged, DASTOOL_CONSENSUS.out.contig2bin, ch_gff)
+        // Map to bins (DAS_Tool contig2bin + all binner bins + GFF)
+        ch_all_binner_bins = ch_binner_results.collect { it[1] }
+        MAP_TO_BINS(MERGE_ANNOTATIONS.out.merged, DASTOOL_CONSENSUS.out.contig2bin, ch_all_binner_bins, ch_gff)
 
         // KEGG module completeness scoring + heatmap
         KEGG_MODULES(MAP_TO_BINS.out.per_mag)
