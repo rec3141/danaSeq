@@ -33,6 +33,7 @@ set -euo pipefail
 #   dana-mag-rrna     - barrnap + vsearch (rRNA gene detection + SILVA classification)
 #   dana-mag-pathway  - MinPath + KEGG-Decoder (parsimony pathways + biogeochemical heatmaps)
 #   dana-mag-marferret - DIAMOND + Python/pandas (MarFERReT marine eukaryotic classification)
+#   dana-mag-viz      - Node.js + Python/pandas/scipy (viz dashboard preprocessing + build)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
 # symlinked YAML; its env is named dana-bbmap.
@@ -109,6 +110,7 @@ ENV_YAMLS=(
     pathway.yml
     marferret.yml
     bbmap.yml
+    viz.yml
 )
 
 # Which tool binary to check for each environment
@@ -139,6 +141,7 @@ declare -A ENV_CHECK=(
     [dana-mag-pathway]="KEGG-decoder"
     [dana-mag-marferret]="diamond"
     [dana-bbmap]="bbduk.sh"
+    [dana-mag-viz]="node"
 )
 
 # Additional binaries to verify
@@ -148,6 +151,7 @@ declare -A ENV_EXTRAS=(
     [dana-mag-semibin]="LorBin"
     [dana-mag-comebin]="gen_cov_file.sh"
     [dana-mag-binning]="run_MaxBin.pl DAS_Tool jgi_summarize_bam_contig_depths"
+    [dana-mag-viz]="npm python3"
 )
 
 yaml_to_envname() {

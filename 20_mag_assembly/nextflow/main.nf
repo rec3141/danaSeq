@@ -112,6 +112,9 @@ def helpMessage() {
       --nclb_model NAME   LLM model name [default: auto-detect from server]
       --nclb_with_ani     Run minimap2 ANI during Elder investigations [default: false]
 
+    Visualization:
+      --run_viz            Build viz dashboard at end of pipeline [default: true]
+
     Resources:
       --assembly_cpus N     CPUs for assembly [default: 24]
       --assembly_memory STR Memory for assembly [default: '64 GB']
@@ -259,6 +262,13 @@ def helpMessage() {
       │   ├── contig2community.tsv     Contig membership assignments
       │   ├── quality_report.tsv       Community quality metrics
       │   └── valence_report.tsv       Per-contig valence scores
+      ├── viz/                          (if --run_viz)
+      │   ├── data/                     11 JSON files for dashboard
+      │   │   ├── overview.json
+      │   │   ├── mags.json
+      │   │   ├── checkm2_all.json
+      │   │   └── ...
+      │   └── site/                     Static site (index.html + assets/)
       └── pipeline_info/
 
     """.stripIndent()
@@ -334,6 +344,7 @@ include { MAP_TO_BINS }         from './modules/metabolism'
 include { KEGG_MODULES }        from './modules/metabolism'
 include { MINPATH }             from './modules/metabolism'
 include { KEGG_DECODER }        from './modules/metabolism'
+include { VIZ_PREPROCESS }      from './modules/viz'
 
 // ============================================================================
 // Main workflow
@@ -643,6 +654,19 @@ workflow {
         NCLB_CONVERSE(NCLB_GATHER.out.gathering)
         NCLB_ELDERS(NCLB_GATHER.out.gathering)
         NCLB_INTEGRATE(NCLB_CONVERSE.out.proposals)
+    }
+
+    // 9. Viz dashboard: preprocess results into JSON + build static site
+    if (params.run_viz) {
+        // Collect barrier signals from terminal processes
+        ch_viz_ready = DASTOOL_CONSENSUS.out.summary.collect()
+        if (params.checkm2_db) {
+            ch_viz_ready = ch_viz_ready.mix(CHECKM2.out.report.collect())
+        }
+        if (params.run_metabolism && effective_annotator != 'none') {
+            ch_viz_ready = ch_viz_ready.mix(KEGG_MODULES.out.modules.collect())
+        }
+        VIZ_PREPROCESS(ch_viz_ready.collect())
     }
 }
 
