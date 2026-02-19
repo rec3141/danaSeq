@@ -121,11 +121,12 @@ dānaSeq/
 ├── 20_mag_assembly/              Metagenome-assembled genome reconstruction
 │   ├── nextflow/                 Nextflow DSL2 pipeline
 │   │   ├── main.nf              Entry point (40+ processes)
-│   │   ├── modules/             11 modules: assembly, mapping, binning, annotation,
+│   │   ├── modules/             12 modules: assembly, mapping, binning, annotation,
 │   │   │                          taxonomy, mge, metabolism, eukaryotic, rrna, refinement,
-│   │   │                          preprocess
+│   │   │                          preprocess, viz
 │   │   ├── bin/                  Pipeline scripts (merge, map, MinPath, KEGG-Decoder, etc.)
-│   │   ├── envs/                Conda YAML specs (25 environments)
+│   │   ├── viz/                  Interactive dashboard (Svelte + Vite + Plotly)
+│   │   ├── envs/                Conda YAML specs (27 environments)
 │   │   ├── Dockerfile           Self-contained Docker image
 │   │   └── test-data/           Bundled test data
 │   └── archive/                 Replaced bash scripts (reference only)
@@ -175,6 +176,8 @@ Sample FASTQs → Flye co-assembly → minimap2 mapping → CoverM depths
                         │                              DAS Tool consensus → CheckM2
                         │                                   │
                         │                              NCLB bin refinement (optional)
+                        │                                   │
+                        │                              VIZ_PREPROCESS (dashboard + static site)
                         │
                    Parallel annotation & classification:
                         ├── Prokka/Bakta gene annotation
@@ -204,6 +207,7 @@ Key features:
 - **Mobile genetic elements**: geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder
 - **Eukaryotic analysis**: Tiara + Whokaryote classification, MetaEuk gene prediction
 - **NCLB bin refinement**: LLM-guided iterative bin refinement (optional)
+- **Interactive dashboard**: Auto-generated Svelte viz with Plotly charts (`--run_viz`)
 - CheckM2 quality assessment (completeness/contamination per MIMAG standards)
 - CoverM for depth calculation (avoids MetaBAT2 integer overflow bug)
 - GPU-accelerated ML binners (local), CPU-only in Docker

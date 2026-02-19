@@ -79,6 +79,8 @@ Sample FASTQs (N files)
    DASTOOL_CONSENSUS        Best bin per contig
          |
    CHECKM2                  Quality assessment (optional, needs --checkm2_db)
+         |
+   VIZ_PREPROCESS            Dashboard JSON + static site build (--run_viz)
 
   --- parallel annotation & MGE branches from assembly ---
 
@@ -238,6 +240,16 @@ results/
 │   ├── contig2community.tsv      Contig membership assignments
 │   ├── quality_report.tsv        Community quality metrics
 │   └── valence_report.tsv        Per-contig valence scores
+├── viz/                          Interactive dashboard (if --run_viz)
+│   ├── data/                     11 JSON files for dashboard
+│   │   ├── overview.json         Assembly + binning summary stats
+│   │   ├── mags.json             Per-MAG metrics (completeness, contamination, taxonomy)
+│   │   ├── checkm2_all.json      CheckM2 quality for all binners
+│   │   ├── kegg_heatmap.json     KEGG module completeness matrix
+│   │   ├── coverage.json         Per-sample contig coverage
+│   │   ├── taxonomy_sunburst.json  Taxonomy hierarchy for sunburst plot
+│   │   └── ...                   mge_summary, mge_per_bin, eukaryotic, contig_explorer, contig_lengths
+│   └── site/                     Static site (index.html + assets/)
 └── pipeline_info/
     ├── run_command.sh            Exact re-runnable command (for -resume)
     ├── timeline.html
@@ -342,6 +354,12 @@ results/
 | `--nclb_model` | (auto) | LLM model name (default: auto-detect from server) |
 | `--nclb_with_ani` | `false` | Run minimap2 ANI during Elder investigations |
 
+### Visualization
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--run_viz` | `true` | Build interactive dashboard at end of pipeline |
+
 ### Quality & Resources
 
 | Parameter | Default | Description |
@@ -408,11 +426,13 @@ cd nextflow
 
 **NCLB bin refinement.** Optional LLM-guided iterative refinement of DAS Tool bins. Four-step process: gather contig identity cards, LLM conversations for placement proposals, Elder investigations for SCG redundancy, and integration to produce refined community FASTAs.
 
-**Twenty-six isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
+**Integrated viz dashboard.** The pipeline automatically preprocesses all results into JSON and builds a static Svelte dashboard (`--run_viz`, on by default). Node.js and Python dependencies are bundled in a dedicated conda env (`dana-mag-viz`) for portability.
+
+**Twenty-seven isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
 
 ## Conda Environments
 
-Twenty-six isolated environments avoid dependency conflicts (28 YAML specs including CPU variants):
+Twenty-seven isolated environments avoid dependency conflicts (29 YAML specs including CPU variants):
 
 | Environment | Tools |
 |-------------|-------|
@@ -441,6 +461,7 @@ Twenty-six isolated environments avoid dependency conflicts (28 YAML specs inclu
 | `dana-mag-metaeuk` | MetaEuk (multi-exon eukaryotic gene prediction) |
 | `dana-mag-marferret` | DIAMOND, Python, pandas (MarFERReT marine eukaryotic classification) |
 | `dana-mag-checkm2` | CheckM2 |
+| `dana-mag-viz` | Node.js, Python, pandas, scipy (dashboard preprocessing + build) |
 | `dana-bbmap` | BBMap (optional dedupe) |
 
 ## MAG Quality Standards (MIMAG)
