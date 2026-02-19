@@ -220,7 +220,7 @@ chmod +x *.sh
 ./status.sh
 
 # Verify paths in scripts
-grep -n "^[A-Z_]*=" ../10_realtime_processing/24_process_reads_optimized.sh
+grep -n "^[A-Z_]*=" ../nanopore_live/24_process_reads_optimized.sh
 ```
 
 ### test_edge_cases.sh Has Many Failures

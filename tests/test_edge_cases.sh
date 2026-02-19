@@ -66,7 +66,7 @@ info "TEST 1: Empty input directory handling"
 mkdir -p "${TEST_OUTPUT}/empty_input"
 
 # Should handle gracefully (warning, not error)
-output=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" \
+output=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" \
     -i "${TEST_OUTPUT}/empty_input" \
     -o "${TEST_OUTPUT}/empty_output" \
     -m 1 2>&1 || true)
@@ -97,7 +97,7 @@ IIII
 EOF
 
 # Try to process (should handle spaces correctly due to quoting)
-output=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" \
+output=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" \
     -i "${TEST_OUTPUT}/dir with spaces" \
     -o "${TEST_OUTPUT}/output_spaces" \
     -m 1 --dry-run 2>&1 || true)
@@ -117,7 +117,7 @@ echo ""
 info "TEST 3: Barcode name format validation"
 
 # Check if invalid barcode names are rejected
-if grep -q 'barcode.*=~.*\^barcode\[0-9\]' "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q 'barcode.*=~.*\^barcode\[0-9\]' "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Barcode format validation present"
 else
     info "No strict barcode validation (may accept any name)"
@@ -133,7 +133,7 @@ IIII
 EOF
 
 # Script should skip or reject invalid barcode
-output=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" \
+output=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" \
     -i "${TEST_OUTPUT}/test_barcodes" \
     -o "${TEST_OUTPUT}/output_invalid" \
     -m 1 --dry-run 2>&1 || true)
@@ -165,7 +165,7 @@ EOF
 ln -s "${TEST_OUTPUT}/real_data" "${TEST_OUTPUT}/linked_data" 2>/dev/null || true
 
 # Should either follow symlinks or reject them safely
-output=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" \
+output=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" \
     -i "${TEST_OUTPUT}/linked_data" \
     -o "${TEST_OUTPUT}/output_symlink" \
     -m 1 --dry-run 2>&1 || true)
@@ -212,14 +212,14 @@ echo ""
 info "TEST 6: Concurrent access protection"
 
 # Check for file locking mechanism
-if grep -q "flock\|lockfile\|mkdir.*lock" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "flock\|lockfile\|mkdir.*lock" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "File locking mechanism present"
 else
     fail "No file locking (may have race conditions)"
 fi
 
 # Check for atomic operations
-if grep -q "mv.*tmp\|atomic" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "mv.*tmp\|atomic" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Atomic operations for file safety"
 else
     info "No explicit atomic operations (may corrupt on concurrent writes)"
@@ -234,14 +234,14 @@ echo ""
 info "TEST 7: Disk space checking"
 
 # Check if script checks for available disk space
-if grep -q "df\|disk.*space\|quota" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "df\|disk.*space\|quota" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Disk space checking present"
 else
     info "No disk space checking (may fail when full)"
 fi
 
 # Check if script handles write failures gracefully
-if grep -q "No space left\|disk full\|ENOSPC" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "No space left\|disk full\|ENOSPC" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Explicit handling of disk full errors"
 else
     info "No explicit disk full handling (relies on set -e)"
@@ -269,7 +269,7 @@ TGCA
 EOF
 
 # Check if script has FASTQ validation
-if grep -q "seqkit\|repair.*fastq\|validate.*fastq" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "seqkit\|repair.*fastq\|validate.*fastq" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "FASTQ validation/repair mechanism present"
 else
     info "No explicit FASTQ validation (may pass corrupt files to tools)"
@@ -304,14 +304,14 @@ echo ""
 info "TEST 10: Memory management"
 
 # Check for Kraken2 serialization (critical for memory)
-if grep -q "sem.*kraken\|kraken.*--id" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "sem.*kraken\|kraken.*--id" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Kraken2 memory serialization present"
 else
     fail "No Kraken2 serialization (CRITICAL: will OOM with parallel runs)"
 fi
 
 # Check for process limiting to prevent memory exhaustion
-if grep -q "\-j\s*[0-9]\+\|-P\s*[0-9]\+\|--jobs" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "\-j\s*[0-9]\+\|-P\s*[0-9]\+\|--jobs" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Job limiting to control memory usage"
 else
     info "No explicit job limiting (may use unlimited parallel jobs)"
@@ -330,7 +330,7 @@ mkdir -p "${TEST_OUTPUT}/readonly_test/FC001/barcode01"
 chmod 444 "${TEST_OUTPUT}/readonly_test/FC001/barcode01" 2>/dev/null || true
 
 # Try to write to read-only location
-output=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" \
+output=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" \
     -i "${TEST_OUTPUT}/readonly_test" \
     -o "${TEST_OUTPUT}/readonly_test/output" \
     -m 1 2>&1 || true)
@@ -358,7 +358,7 @@ mkdir -p "${TEST_OUTPUT}/empty_files/FC001/barcode01"
 touch "${TEST_OUTPUT}/empty_files/FC001/barcode01/empty.fastq"
 
 # Check if script detects empty files
-if grep -q "\[\[ -s " "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "\[\[ -s " "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Empty file detection present (using -s flag)"
 else
     fail "No empty file detection"
@@ -373,16 +373,16 @@ echo ""
 info "TEST 13: Path traversal attack prevention"
 
 # Check for .. detection in paths
-if grep -q "\.\." "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" | grep -q "ERROR\|reject\|invalid"; then
+if grep -q "\.\." "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" | grep -q "ERROR\|reject\|invalid"; then
     pass "Path traversal (..) detection present"
-elif grep -q "realpath" "${PROJECT_ROOT}/20_mag_assembly/61_map_and_bin_optimized.sh"; then
+elif grep -q "realpath" "${PROJECT_ROOT}/nanopore_mag/61_map_and_bin_optimized.sh"; then
     pass "Path normalization prevents traversal"
 else
     fail "No path traversal prevention"
 fi
 
 # Try path traversal in MAG script
-output=$("${PROJECT_ROOT}/20_mag_assembly/61_map_and_bin_optimized.sh" \
+output=$("${PROJECT_ROOT}/nanopore_mag/61_map_and_bin_optimized.sh" \
     "../../etc/passwd" 2>&1 || true)
 
 if echo "$output" | grep -qi "error\|invalid\|denied"; then
@@ -400,7 +400,7 @@ echo ""
 info "TEST 14: Large file handling"
 
 # Check if there are any file size limits
-if grep -q "size.*limit\|max.*size\|too.*large" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "size.*limit\|max.*size\|too.*large" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "File size limit checking present"
 else
     info "No file size limits (will process any size)"
@@ -417,7 +417,7 @@ info "TEST 15: Cleanup on unusual exits"
 # Check for comprehensive trap coverage
 traps_found=0
 for signal in EXIT INT TERM HUP QUIT; do
-    if grep -q "trap.*$signal" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+    if grep -q "trap.*$signal" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
         ((traps_found++))
     fi
 done

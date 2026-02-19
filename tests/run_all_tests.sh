@@ -176,7 +176,7 @@ echo "  • Test suites: ${SUITES_TOTAL}"
 echo ""
 
 # Check if we're in the right directory
-if [[ ! -f "${SCRIPT_DIR}/../10_realtime_processing/24_process_reads_optimized.sh" ]]; then
+if [[ ! -f "${SCRIPT_DIR}/../nanopore_live/24_process_reads_optimized.sh" ]]; then
     echo -e "${RED}[ERROR]${NC} Cannot find pipeline scripts. Run from tests/ directory." >&2
     exit 1
 fi

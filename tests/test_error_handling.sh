@@ -62,7 +62,7 @@ echo ""
 info "TEST 1: Missing required arguments"
 
 # Test missing --input
-output=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" 2>&1 || true)
+output=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" 2>&1 || true)
 if echo "$output" | grep -q "\[ERROR\].*--input"; then
     pass "Error message for missing --input argument"
 else
@@ -70,7 +70,7 @@ else
 fi
 
 # Check exit code
-if ! "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" &>/dev/null; then
+if ! "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" &>/dev/null; then
     pass "Non-zero exit code for missing arguments"
 else
     fail "Should exit with error for missing arguments"
@@ -85,7 +85,7 @@ echo ""
 info "TEST 2: Invalid path handling"
 
 # Test non-existent input directory
-output=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" -i /definitely/does/not/exist/path 2>&1 || true)
+output=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" -i /definitely/does/not/exist/path 2>&1 || true)
 if echo "$output" | grep -q "\[ERROR\]"; then
     pass "Error message for non-existent input directory"
 else
@@ -94,7 +94,7 @@ fi
 
 # Test path traversal attempt (for MAG script)
 mkdir -p "${TEST_OUTPUT}"
-output=$("${PROJECT_ROOT}/20_mag_assembly/61_map_and_bin_optimized.sh" "../../../etc" 2>&1 || true)
+output=$("${PROJECT_ROOT}/nanopore_mag/61_map_and_bin_optimized.sh" "../../../etc" 2>&1 || true)
 if echo "$output" | grep -q -i "error"; then
     pass "Path traversal attempt rejected"
 else
@@ -111,7 +111,7 @@ info "TEST 3: Invalid argument combinations"
 
 # Test --hmm without -P flag
 mkdir -p "${TEST_OUTPUT}/test_input"
-output=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" \
+output=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" \
     -i "${TEST_OUTPUT}/test_input" \
     --hmm dummy.hmm 2>&1 || true)
 if echo "$output" | grep -q "\[ERROR\].*--hmm.*-P"; then
@@ -132,13 +132,13 @@ info "TEST 4: Error message standardization"
 mkdir -p "${TEST_OUTPUT}/test_input"
 
 # Test 1: Missing argument
-output1=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" 2>&1 || true)
+output1=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" 2>&1 || true)
 
 # Test 2: Invalid path
-output2=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" -i /nonexistent 2>&1 || true)
+output2=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" -i /nonexistent 2>&1 || true)
 
 # Test 3: Invalid flag combination
-output3=$("${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" \
+output3=$("${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" \
     -i "${TEST_OUTPUT}/test_input" --hmm test.hmm 2>&1 || true)
 
 # Verify all error messages use [ERROR] prefix (not [ERR])
@@ -157,7 +157,7 @@ else
 fi
 
 # Check that errors go to stderr
-if "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" 2>/dev/null; then
+if "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" 2>/dev/null; then
     fail "Errors should go to stderr, not stdout"
 else
     pass "Errors correctly sent to stderr"
@@ -200,28 +200,28 @@ echo ""
 info "TEST 6: Cleanup on error/interrupt"
 
 # Check if cleanup_on_exit function exists
-if grep -q "cleanup_on_exit()" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "cleanup_on_exit()" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "cleanup_on_exit function defined"
 else
     fail "cleanup_on_exit function not found"
 fi
 
 # Check if EXIT trap is set
-if grep -q "trap cleanup_on_exit EXIT" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "trap cleanup_on_exit EXIT" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "EXIT trap registered"
 else
     fail "EXIT trap not registered"
 fi
 
 # Check if INT trap is set (Ctrl+C handling)
-if grep -q "trap.*INT" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "trap.*INT" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "INT trap registered (Ctrl+C handler)"
 else
     fail "INT trap not registered"
 fi
 
 # Check if TERM trap is set
-if grep -q "trap.*TERM" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "trap.*TERM" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "TERM trap registered"
 else
     fail "TERM trap not registered"
@@ -240,11 +240,11 @@ critical_commands=(minimap2 samtools bbduk kraken2 prokka)
 
 for cmd in "${critical_commands[@]}"; do
     # Look for error checking patterns: "if ! command" or "command || exit"
-    if grep -q "if ! .*${cmd}" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" 2>/dev/null; then
+    if grep -q "if ! .*${cmd}" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" 2>/dev/null; then
         pass "Error checking for: ${cmd}"
     else
         # Check in MAG script too
-        if grep -q "if ! .*${cmd}" "${PROJECT_ROOT}/20_mag_assembly/61_map_and_bin_optimized.sh" 2>/dev/null; then
+        if grep -q "if ! .*${cmd}" "${PROJECT_ROOT}/nanopore_mag/61_map_and_bin_optimized.sh" 2>/dev/null; then
             pass "Error checking for: ${cmd}"
         else
             info "No explicit error check found for: ${cmd} (may use set -e)"
@@ -261,16 +261,16 @@ echo ""
 info "TEST 8: Input validation and sanitization"
 
 # Check for barcode format validation
-if grep -q "barcode.*=~.*\[0-9\]" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "barcode.*=~.*\[0-9\]" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Barcode format validation present"
 else
     fail "Barcode format validation missing"
 fi
 
 # Check for path validation (directory traversal)
-if grep -q "\.\." "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" | grep -q "ERROR"; then
+if grep -q "\.\." "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" | grep -q "ERROR"; then
     pass "Path traversal detection present"
-elif grep -q "realpath" "${PROJECT_ROOT}/20_mag_assembly/61_map_and_bin_optimized.sh"; then
+elif grep -q "realpath" "${PROJECT_ROOT}/nanopore_mag/61_map_and_bin_optimized.sh"; then
     pass "Path normalization with realpath present"
 else
     fail "Path validation insufficient"
@@ -285,14 +285,14 @@ echo ""
 info "TEST 9: Empty or missing file handling"
 
 # Check for empty file detection
-if grep -q "\[\[ ! -s" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "\[\[ ! -s" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Empty file detection present"
 else
     fail "Empty file detection missing"
 fi
 
 # Check for file existence checks before operations
-if grep -c "\[\[ -f" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" | grep -q "[1-9]"; then
+if grep -c "\[\[ -f" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" | grep -q "[1-9]"; then
     pass "File existence checks present"
 else
     fail "Insufficient file existence checks"
@@ -307,15 +307,15 @@ echo ""
 info "TEST 10: Error recovery and resume capability"
 
 # Check for checkpoint/resume logic
-if grep -q "\.tmp\|\.partial" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "\.tmp\|\.partial" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Temporary file markers for resume logic"
 else
     info "No explicit .tmp/.partial resume markers (may use other method)"
 fi
 
 # Check for atomic operations (temp + mv)
-if grep -q "mv.*\\.tmp" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" || \
-   grep -q "mv.*tmp.*final" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "mv.*\\.tmp" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" || \
+   grep -q "mv.*tmp.*final" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Atomic file operations (temp + mv pattern)"
 else
     info "No explicit atomic mv pattern detected"

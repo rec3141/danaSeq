@@ -1,0 +1,165 @@
+################################################################################
+#                                                                              #
+#  🚨  CRITICAL FIX: Kraken2 Parallel Execution Bug  🚨                        #
+#                                                                              #
+#  Problem: Multiple Kraken2 instances load DB into RAM simultaneously         #
+#  Solution: Use semaphore to serialize Kraken calls                           #
+#                                                                              #
+################################################################################
+
+# OPTION 1: Use GNU Parallel Semaphore (RECOMMENDED)
+# ===================================================
+# Wrap Kraken2 calls with a semaphore to allow only 1 instance at a time
+
+# In process_one() function, replace lines 316-329 with:
+
+  if (( RUN_KRAKEN )); then
+    echo -n "KRAKEN "
+    local k_tsv="$bcdir/kraken/$base.tsv"
+    if [[ ! -e "$k_tsv" ]]; then
+      debug_msg "Running kraken on $base"
+      echo "DB: $KRAKEN_DB" >> "$logfile"
+
+      # 🔒 SEMAPHORE: Only 1 Kraken instance at a time!
+      sem --id kraken_lock --fg \
+        bash -c "
+          '${KRAKEN2}' --db '$KRAKEN_DB' --use-names --threads 1 \
+              --report '$bcdir/kraken/$base.report' '$fafile' 2>>'$logfile' \
+            | gawk -f '${DANADIR}/kraken_parse.awk' > '$k_tsv' 2>>'$logfile'
+        " && \
+      run_cmd "Rscript ${DANADIR}/kraken-db.r $bcdir" "$logfile" || true && \
+      run_cmd "Rscript ${DANADIR}/krakenreport-db.r $bcdir" "$logfile" || true
+    fi
+  fi
+
+
+# OPTION 2: Reduce Parallelism When Kraken Enabled (SIMPLE)
+# ==========================================================
+# After line 385, add:
+
+# Adjust threads if Kraken enabled (avoid RAM explosion!)
+PARALLEL_JOBS="${THREADS}"
+if (( RUN_KRAKEN )); then
+  PARALLEL_JOBS=1  # Serial processing when Kraken enabled
+  echo "[WARN] Kraken enabled: Processing files serially to avoid RAM exhaustion"
+  echo "[INFO] Kraken DB size: ~50-100GB - cannot run in parallel!"
+fi
+
+# Then change line 388 to use PARALLEL_JOBS:
+printf '%s\0' "${CACHED[@]}" | parallel --null -j "${PARALLEL_JOBS}" --halt now,fail=1 --bar process_one {}
+
+
+# OPTION 3: Pre-load Database with Memory Mapping (ADVANCED)
+# ===========================================================
+# Requires Kraken2 >= 2.1.0
+
+# Before the parallel call (around line 385), add:
+
+if (( RUN_KRAKEN )); then
+  echo "[INFO] Pre-loading Kraken2 database into shared memory..."
+  # Load DB once, all processes share it
+  "${KRAKEN2}" --db "$KRAKEN_DB" --memory-mapping --dummy-read-for-preload
+  echo "[INFO] Database loaded! Safe to run in parallel."
+fi
+
+
+# OPTION 4: Use flock File Lock (PORTABLE)
+# =========================================
+# Wrap Kraken call with flock for mutual exclusion
+
+  if (( RUN_KRAKEN )); then
+    echo -n "KRAKEN "
+    local k_tsv="$bcdir/kraken/$base.tsv"
+    if [[ ! -e "$k_tsv" ]]; then
+      debug_msg "Running kraken on $base (waiting for lock...)"
+
+      # 🔒 File lock: Only 1 Kraken at a time
+      (
+        flock -x 200  # Exclusive lock on FD 200
+
+        "${KRAKEN2}" --db "$KRAKEN_DB" --use-names --threads 1 \
+            --report "$bcdir/kraken/$base.report" "$fafile" 2>>"$logfile" \
+          | gawk -f "${DANADIR}/kraken_parse.awk" > "$k_tsv" 2>>"$logfile"
+
+      ) 200>/tmp/kraken.lock  # Lock file
+
+      run_cmd "Rscript ${DANADIR}/kraken-db.r $bcdir" "$logfile" || true
+      run_cmd "Rscript ${DANADIR}/krakenreport-db.r $bcdir" "$logfile" || true
+    fi
+  fi
+
+
+################################################################################
+#  RECOMMENDATION
+################################################################################
+
+Use OPTION 2 (simple) for immediate fix:
+- Easy to implement
+- 100% safe
+- Slower but won't crash
+- Good for small # of files
+
+Use OPTION 1 (semaphore) for production:
+- Parallel everything EXCEPT Kraken
+- Optimal performance
+- Requires GNU parallel (already used)
+- Best balance
+
+Use OPTION 3 (memory-mapping) if available:
+- Fastest option
+- Requires Kraken2 >= 2.1.0
+- Requires `--memory-mapping` support in your Kraken build
+- Check: kraken2 --help | grep memory-mapping
+
+
+################################################################################
+#  TEST BEFORE DEPLOYMENT
+################################################################################
+
+# Test with small dataset:
+./24_process_reads_optimized.sh -i test_data -K --threads 8
+
+# Monitor RAM usage:
+watch -n 1 'free -h && echo "---" && ps aux | grep kraken2'
+
+# Expected:
+# OPTION 1: Max 1 kraken2 process at a time ✓
+# OPTION 2: Max 1 process_one at a time (slow but safe) ✓
+# OPTION 3: Multiple kraken2, shared DB (fast) ✓
+# OPTION 4: Max 1 kraken2 process at a time ✓
+
+
+################################################################################
+#  RAM CALCULATIONS
+################################################################################
+
+Typical Kraken2 databases:
+- MiniKraken:  8 GB
+- Standard:   50 GB
+- PlusPFP:    75 GB
+- PlusPF:    100 GB
+
+If running with --threads 16 in parallel WITHOUT fix:
+- Standard DB: 16 × 50 GB = 800 GB RAM needed! 💥
+- PlusPF DB:   16 × 100 GB = 1.6 TB RAM needed! 💥💥💥
+
+WITH fix (serialized):
+- Standard DB: 1 × 50 GB = 50 GB RAM needed ✓
+- PlusPF DB:   1 × 100 GB = 100 GB RAM needed ✓
+
+
+################################################################################
+#  APPLY THE FIX
+################################################################################
+
+# 1. Backup original:
+cp nanopore_live/24_process_reads_optimized.sh{,.backup}
+
+# 2. Apply OPTION 2 (safest):
+#    Edit the script and add the PARALLEL_JOBS logic
+
+# 3. Test with small dataset first!
+
+# 4. Monitor system resources during test run
+
+# 5. Deploy to production only after successful test

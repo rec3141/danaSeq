@@ -62,15 +62,15 @@ echo ""
 info "TEST 1: Existing output file detection"
 
 # Check if scripts detect existing output
-if grep -q "\[\[ -f.*\]\] && \[\[ ! -f.*force" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" || \
-   grep -q "skip\|exist" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" | grep -q -i "already"; then
+if grep -q "\[\[ -f.*\]\] && \[\[ ! -f.*force" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" || \
+   grep -q "skip\|exist" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" | grep -q -i "already"; then
     pass "Script has logic to detect existing outputs"
 else
     info "No explicit resume skip logic detected (may overwrite)"
 fi
 
 # Check for force flag to override resume
-if grep -q "force\|overwrite" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "force\|overwrite" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Force/overwrite flag available"
 else
     info "No force flag detected (always overwrites or always resumes)"
@@ -85,14 +85,14 @@ echo ""
 info "TEST 2: Checkpoint and partial file handling"
 
 # Check for temporary file patterns (.tmp, .partial, .incomplete)
-if grep -q "\.tmp\|\.partial\|\.incomplete" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "\.tmp\|\.partial\|\.incomplete" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Temporary file markers found (.tmp/.partial)"
 else
     info "No explicit .tmp/.partial markers (may use other checkpoint method)"
 fi
 
 # Check for cleanup of partial files
-if grep -q "rm.*\.tmp\|rm.*\.partial" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "rm.*\.tmp\|rm.*\.partial" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Cleanup of temporary/partial files present"
 else
     info "No explicit cleanup of .tmp/.partial files"
@@ -107,15 +107,15 @@ echo ""
 info "TEST 3: Atomic file operations"
 
 # Check for atomic mv pattern (write to temp, then mv to final)
-if grep -q "mv.*tmp.*final\|mv.*\\.tmp" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" || \
-   grep -q ">.*\\.tmp.*mv" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "mv.*tmp.*final\|mv.*\\.tmp" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" || \
+   grep -q ">.*\\.tmp.*mv" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Atomic file operation pattern detected"
 else
     info "No explicit atomic mv pattern (may write directly)"
 fi
 
 # Check for atomic directory creation (mkdir for locks)
-if grep -q "mkdir.*lock" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "mkdir.*lock" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Atomic lock creation with mkdir"
 else
     fail "Atomic lock creation not found"
@@ -130,28 +130,28 @@ echo ""
 info "TEST 4: Lock file management"
 
 # Check for lock file creation
-if grep -q "lockfile\|lock_file" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "lockfile\|lock_file" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Lock file mechanism present"
 else
     fail "Lock file mechanism not found"
 fi
 
 # Check for lock cleanup on exit
-if grep -q "rmdir.*lock\|rm.*lock" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "rmdir.*lock\|rm.*lock" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Lock cleanup present"
 else
     fail "Lock cleanup not found"
 fi
 
 # Check for stale lock detection/cleanup
-if grep -q "find.*lock.*-mmin\|find.*lock.*-mtime" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "find.*lock.*-mmin\|find.*lock.*-mtime" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Stale lock cleanup detected"
 else
     info "No stale lock cleanup (may accumulate abandoned locks)"
 fi
 
 # Check for lock timeout/wait
-if grep -q "while.*lock.*sleep" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "while.*lock.*sleep" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Lock wait/timeout mechanism present"
 else
     info "No lock wait mechanism (may fail immediately on conflict)"
@@ -178,7 +178,7 @@ stages=(
 
 detected_stages=0
 for stage in "${stages[@]}"; do
-    if grep -qi "$stage" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+    if grep -qi "$stage" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
         ((detected_stages++))
     fi
 done
@@ -198,21 +198,21 @@ echo ""
 info "TEST 6: Parallel execution safety"
 
 # Check for GNU parallel usage
-if grep -q "parallel\|sem " "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "parallel\|sem " "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "GNU parallel/semaphore usage detected"
 else
     info "No GNU parallel detected (may use xargs or sequential)"
 fi
 
 # Check for Kraken2 serialization (CRITICAL for memory)
-if grep -q "sem.*kraken\|kraken.*sem" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "sem.*kraken\|kraken.*sem" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Kraken2 serialization with semaphore"
 else
     info "No Kraken2 serialization (may cause OOM if running parallel)"
 fi
 
 # Check for process limiting
-if grep -q "\-j\s*[0-9]\+\|-P\s*[0-9]\+\|--jobs\|--max-procs" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "\-j\s*[0-9]\+\|-P\s*[0-9]\+\|--jobs\|--max-procs" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Job/process limiting present"
 else
     info "No explicit job limiting (may use system defaults)"
@@ -227,7 +227,7 @@ echo ""
 info "TEST 7: Crash recovery mechanisms"
 
 # Check for trap handlers (critical for cleanup)
-if grep -q "trap.*EXIT" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "trap.*EXIT" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "EXIT trap for cleanup on crash"
 else
     fail "No EXIT trap (may leave partial files on crash)"
@@ -236,7 +236,7 @@ fi
 # Check for signal handlers (INT, TERM, HUP)
 signal_handlers=0
 for signal in INT TERM HUP; do
-    if grep -q "trap.*$signal" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+    if grep -q "trap.*$signal" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
         ((signal_handlers++))
     fi
 done
@@ -256,14 +256,14 @@ echo ""
 info "TEST 8: Output file validation"
 
 # Check for non-empty file verification
-if grep -q "\[\[ -s " "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "\[\[ -s " "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "File size validation present (non-empty check)"
 else
     fail "No file size validation"
 fi
 
 # Check for minimum size thresholds
-if grep -q "stat.*size\|du.*size\|wc.*size" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "stat.*size\|du.*size\|wc.*size" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Advanced file size checking detected"
 else
     info "Only basic -s flag used for size (may accept tiny/corrupt files)"
@@ -278,21 +278,21 @@ echo ""
 info "TEST 9: Directory-level locking (race condition prevention)"
 
 # Check for atomic mkdir locks
-if grep -q "if ! mkdir.*lockfile.*2>/dev/null" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "if ! mkdir.*lockfile.*2>/dev/null" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Atomic mkdir lock pattern present"
 else
     fail "Atomic mkdir lock not found"
 fi
 
 # Check for lock directory cleanup in trap
-if grep -q "trap.*rmdir.*lock" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "trap.*rmdir.*lock" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Lock cleanup in trap handler"
 else
     info "Lock cleanup may not be in trap (could leak on crash)"
 fi
 
 # Check for double-check pattern after acquiring lock
-if grep -q "# Double-check\|# Recheck\|# Verify again" "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if grep -q "# Double-check\|# Recheck\|# Verify again" "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "Double-check pattern documented"
 else
     info "No double-check comments (may still implement the pattern)"
@@ -307,14 +307,14 @@ echo ""
 info "TEST 10: Resume behavior documentation"
 
 # Check if help text mentions resume behavior
-if "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" -h 2>&1 | grep -qi "resume\|continue\|skip.*exist"; then
+if "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" -h 2>&1 | grep -qi "resume\|continue\|skip.*exist"; then
     pass "Resume behavior documented in help"
 else
     info "Resume behavior not in help text"
 fi
 
 # Check if there's a force/overwrite flag documented
-if "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" -h 2>&1 | grep -qi "force\|overwrite"; then
+if "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" -h 2>&1 | grep -qi "force\|overwrite"; then
     pass "Force flag documented in help"
 else
     info "No force flag in help (may always resume or always overwrite)"

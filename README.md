@@ -12,7 +12,7 @@ Both pipelines are implemented in Nextflow DSL2 and run via conda or Docker with
 
 ```bash
 git clone https://github.com/rec3141/danaSeq.git
-cd danaSeq/10_realtime_processing/nextflow
+cd danaSeq/nanopore_live/nextflow
 ./install.sh && ./install.sh --check
 
 # Run (local conda, handles activation automatically)
@@ -30,7 +30,7 @@ docker build -t danaseq-realtime .
 ### MAG assembly
 
 ```bash
-cd danaSeq/20_mag_assembly/nextflow
+cd danaSeq/nanopore_mag/nextflow
 ./install.sh && ./install.sh --check
 
 # Run (local conda, handles activation automatically)
@@ -44,7 +44,7 @@ docker build -t danaseq-mag .
 ### Kitchen sink — all modules (real-time)
 
 ```bash
-cd danaSeq/10_realtime_processing/nextflow
+cd danaSeq/nanopore_live/nextflow
 ./run-realtime.sh --input /data/run1 --outdir /data/output \
     --run_kraken --kraken_db /path/to/krakendb \
     --run_prokka \
@@ -61,7 +61,7 @@ cd danaSeq/10_realtime_processing/nextflow
 ### Kitchen sink — all options (MAG)
 
 ```bash
-cd danaSeq/20_mag_assembly/nextflow
+cd danaSeq/nanopore_mag/nextflow
 ./run-mag.sh --input /data/reads --outdir /data/output \
     --dedupe \
     --filtlong_size 40000000000 \
@@ -95,11 +95,11 @@ cd danaSeq/20_mag_assembly/nextflow
 
 ```bash
 # Real-time pipeline
-cd 10_realtime_processing/nextflow
+cd nanopore_live/nextflow
 nextflow run main.nf --input test-data -profile test -resume
 
 # MAG pipeline
-cd 20_mag_assembly/nextflow
+cd nanopore_mag/nextflow
 mamba run -p conda-envs/dana-mag-flye \
     nextflow run main.nf --input test-data -profile test -resume
 ```
@@ -108,7 +108,7 @@ mamba run -p conda-envs/dana-mag-flye \
 
 ```
 dānaSeq/
-├── 10_realtime_processing/       Real-time analysis during sequencing
+├── nanopore_live/       Real-time analysis during sequencing
 │   ├── nextflow/                 Nextflow DSL2 pipeline
 │   │   ├── main.nf              Entry point (11 processing stages)
 │   │   ├── modules/             validate, qc, kraken, prokka, hmm, sketch, tetramer, db
@@ -118,7 +118,7 @@ dānaSeq/
 │   │   └── test-data/           Bundled test data
 │   └── archive/                 Legacy bash scripts (reference only)
 │
-├── 20_mag_assembly/              Metagenome-assembled genome reconstruction
+├── nanopore_mag/              Metagenome-assembled genome reconstruction
 │   ├── nextflow/                 Nextflow DSL2 pipeline
 │   │   ├── main.nf              Entry point (40+ processes)
 │   │   ├── modules/             12 modules: assembly, mapping, binning, annotation,
@@ -131,7 +131,7 @@ dānaSeq/
 │   │   └── test-data/           Bundled test data
 │   └── archive/                 Replaced bash scripts (reference only)
 │
-├── 30_archive/                   Archived root-level scripts and documentation
+├── archive/                   Archived root-level scripts and documentation
 ├── tests/                        Pipeline tests
 ├── CITATION.bib                  References
 └── LICENSE                       MIT
@@ -139,7 +139,7 @@ dānaSeq/
 
 ## Pipelines
 
-### Real-time processing (10_realtime_processing/)
+### Real-time processing (nanopore_live/)
 
 Processes FASTQ files as they arrive from Oxford Nanopore MinKNOW:
 
@@ -161,9 +161,9 @@ Key features:
 - HMM search against functional gene databases (FOAM, CANT-HYD, NCycDB, etc.)
 - Post-DB cleanup to compress/delete source files after import
 
-See `10_realtime_processing/README.md` for full details.
+See `nanopore_live/README.md` for full details.
 
-### MAG assembly (20_mag_assembly/)
+### MAG assembly (nanopore_mag/)
 
 Reconstructs metagenome-assembled genomes alongside real-time processing:
 
@@ -212,7 +212,7 @@ Key features:
 - CoverM for depth calculation (avoids MetaBAT2 integer overflow bug)
 - GPU-accelerated ML binners (local), CPU-only in Docker
 
-See `20_mag_assembly/README.md` for full details.
+See `nanopore_mag/README.md` for full details.
 
 ## Input
 

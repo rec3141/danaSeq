@@ -76,13 +76,13 @@ mkdir -p "${TEST_OUTPUT}"
 
 info "TEST 1: Help and usage output"
 
-if "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" -h 2>&1 | grep -q "Usage:"; then
+if "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" -h 2>&1 | grep -q "Usage:"; then
     pass "Help flag (-h) works"
 else
     fail "Help flag (-h) doesn't work"
 fi
 
-if "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" --help 2>&1 | grep -q "Usage:"; then
+if "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" --help 2>&1 | grep -q "Usage:"; then
     pass "Help flag (--help) works"
 else
     fail "Help flag (--help) doesn't work"
@@ -97,21 +97,21 @@ echo ""
 info "TEST 2: Argument validation"
 
 # Should fail without required --input argument
-if ! "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" 2>&1 | grep -q "\[ERROR\].*--input"; then
+if ! "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" 2>&1 | grep -q "\[ERROR\].*--input"; then
     fail "Should require --input argument"
 else
     pass "Correctly requires --input argument"
 fi
 
 # Should fail with non-existent input directory
-if ! "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" -i /nonexistent/path 2>&1 | grep -q "\[ERROR\]"; then
+if ! "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" -i /nonexistent/path 2>&1 | grep -q "\[ERROR\]"; then
     fail "Should reject non-existent input directory"
 else
     pass "Correctly rejects non-existent input directory"
 fi
 
 # Should fail if --hmm used without -P flag
-if ! "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" -i "${TEST_FIXTURES}" --hmm test.hmm 2>&1 | grep -q "\[ERROR\].*--hmm.*-P"; then
+if ! "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" -i "${TEST_FIXTURES}" --hmm test.hmm 2>&1 | grep -q "\[ERROR\].*--hmm.*-P"; then
     fail "Should require -P flag when --hmm is used"
 else
     pass "Correctly requires -P flag with --hmm"
@@ -142,7 +142,7 @@ EOF
 
 # Try to run with dry-run or minimal processing
 # We'll use -m 1 to limit to 1 file and add a short timeout
-timeout 30s "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" \
+timeout 30s "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" \
     -i "${TEST_FIXTURES}" \
     -o "${TEST_OUTPUT}" \
     -m 1 \
@@ -216,13 +216,13 @@ echo ""
 info "TEST 6: Shell syntax validation"
 
 # Check both main scripts for syntax errors
-if bash -n "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh"; then
+if bash -n "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh"; then
     pass "24_process_reads_optimized.sh: Valid bash syntax"
 else
     fail "24_process_reads_optimized.sh: Syntax errors detected"
 fi
 
-if bash -n "${PROJECT_ROOT}/20_mag_assembly/61_map_and_bin_optimized.sh"; then
+if bash -n "${PROJECT_ROOT}/nanopore_mag/61_map_and_bin_optimized.sh"; then
     pass "61_map_and_bin_optimized.sh: Valid bash syntax"
 else
     fail "61_map_and_bin_optimized.sh: Syntax errors detected"
@@ -236,13 +236,13 @@ echo ""
 
 info "TEST 7: File permissions"
 
-if [[ -x "${PROJECT_ROOT}/10_realtime_processing/24_process_reads_optimized.sh" ]]; then
+if [[ -x "${PROJECT_ROOT}/nanopore_live/24_process_reads_optimized.sh" ]]; then
     pass "24_process_reads_optimized.sh is executable"
 else
     fail "24_process_reads_optimized.sh is not executable"
 fi
 
-if [[ -x "${PROJECT_ROOT}/20_mag_assembly/61_map_and_bin_optimized.sh" ]]; then
+if [[ -x "${PROJECT_ROOT}/nanopore_mag/61_map_and_bin_optimized.sh" ]]; then
     pass "61_map_and_bin_optimized.sh is executable"
 else
     fail "61_map_and_bin_optimized.sh is not executable"
