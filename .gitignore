@@ -141,3 +141,9 @@ ENV/
 
 # Semaphore lock files
 /tmp/sem.*
+
+# Nextflow
+**/work/
+**/conda-envs/
+**/.nextflow/
+**/.nextflow.log*

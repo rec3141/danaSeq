@@ -16,8 +16,9 @@ process MAP_READS_BBMAP {
     path("${meta.id}.covstats.txt"), emit: covstats
 
     script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    bbmap.sh \\
+    bbmap.sh ${xmx} \\
         in="${reads}" \\
         ref="${assembly}" \\
         out=stdout.sam \\

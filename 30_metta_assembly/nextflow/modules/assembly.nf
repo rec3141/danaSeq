@@ -14,9 +14,10 @@ process ASSEMBLE_TADPOLE {
     tuple val(meta), path("${meta.id}.tadpole.fasta"), emit: contigs
 
     script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
     set +e
-    tadpole.sh \\
+    tadpole.sh ${xmx} \\
         in="${merged},${qtrimmed}" \\
         out="${meta.id}.tadpole.fasta" \\
         k=124 \\
@@ -47,6 +48,7 @@ process ASSEMBLE_MEGAHIT {
     tuple val(meta), path("${meta.id}.megahit.fasta"), emit: contigs
 
     script:
+    def mem_bytes = task.memory ? task.memory.toBytes() : 250000000000
     """
     set +e
     megahit \\
@@ -55,6 +57,7 @@ process ASSEMBLE_MEGAHIT {
         -r "${merged}" \\
         --12 "${qtrimmed}" \\
         -o megahit_out \\
+        -m ${mem_bytes} \\
         -t ${task.cpus}
     exit_code=\$?
     set -e

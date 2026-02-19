@@ -108,6 +108,17 @@ while (( $# )); do
             RESUME_SESSION="$2"
             AUTO_SESSION=false
             shift 2 ;;
+        --assembly_memory)
+            [[ -z "${2:-}" ]] && die "--assembly_memory requires a value (e.g. '50 GB')"
+            # Nextflow needs the value as a single token; recombine split args like "50 GB"
+            mem_val="$2"; shift 2
+            # If next arg looks like a unit suffix (GB, MB, TB, etc.), append it
+            if [[ "${1:-}" =~ ^[KMGT]B?$ ]]; then
+                mem_val="${mem_val} ${1}"
+                shift
+            fi
+            NF_ARGS+=("--assembly_memory" "${mem_val}")
+            ;;
         *)
             NF_ARGS+=("$1")
             shift ;;
@@ -153,6 +164,15 @@ fi
 # Ensure conda/mamba base bin/ is on PATH so this works inside `mamba run`.
 CONDA_BASE_BIN="$(dirname "$(which mamba 2>/dev/null || which conda)")"
 export PATH="${CONDA_BASE_BIN}:${PATH}"
+
+# Point Nextflow at the conda env's Java so it never picks up system Java.
+# NXF_JAVA_HOME is the official Nextflow env var for this purpose.
+BBMAP_ENV="${SCRIPT_DIR}/conda-envs/dana-metta-bbmap"
+if [[ -d "${BBMAP_ENV}/lib/jvm" ]]; then
+    export NXF_JAVA_HOME="${BBMAP_ENV}/lib/jvm"
+elif [[ -x "${BBMAP_ENV}/bin/java" ]]; then
+    export NXF_JAVA_HOME="${BBMAP_ENV}"
+fi
 
 LOCAL_CMD=(
     mamba run -p "${SCRIPT_DIR}/conda-envs/dana-metta-bbmap"

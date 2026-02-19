@@ -15,6 +15,7 @@ process DEDUPE_ASSEMBLIES {
     path("${meta.id}.assembly_stats.txt"),            emit: stats
 
     script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
     # Combine all assembly FASTAs (skip empty files)
     > combined.fasta
@@ -32,19 +33,19 @@ process DEDUPE_ASSEMBLIES {
     fi
 
     # Cascade deduplication: 100% -> 99% -> final threshold
-    dedupe.sh \\
+    dedupe.sh ${xmx} \\
         in=combined.fasta \\
         out=d100.fasta.gz \\
         sort=length uniquenames=t minidentity=100 \\
         t=${task.cpus} ow=t
 
-    dedupe.sh \\
+    dedupe.sh ${xmx} \\
         in=d100.fasta.gz \\
         out=d99.fasta.gz \\
         sort=length uniquenames=t minidentity=99 \\
         t=${task.cpus} ow=t
 
-    dedupe.sh \\
+    dedupe.sh ${xmx} \\
         in=d99.fasta.gz \\
         out="${meta.id}.dedupe.fasta" \\
         sort=length uniquenames=t minidentity=${params.dedupe_identity} \\

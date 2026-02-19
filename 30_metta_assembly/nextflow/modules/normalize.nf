@@ -16,8 +16,9 @@ process NORMALIZE_READS {
     path("${meta.id}.peaks.txt"),                         emit: peaks
 
     script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    bbnorm.sh \\
+    bbnorm.sh ${xmx} \\
         in="${reads}" \\
         out="${meta.id}.normalized.fq.gz" \\
         target=100 mindepth=2 \\

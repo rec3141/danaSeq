@@ -15,8 +15,9 @@ process MERGE_READS {
     tuple val(meta), path("${meta.id}.unmerged.fq.gz"), emit: unmerged
 
     script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    bbmerge-auto.sh \\
+    bbmerge-auto.sh ${xmx} \\
         in="${reads}" \\
         out="${meta.id}.merged.fq.gz" \\
         outu="${meta.id}.unmerged.fq.gz" \\
@@ -51,8 +52,9 @@ process QUALITY_TRIM {
     tuple val(meta), path("${meta.id}.qtrimmed.fq.gz"), emit: reads
 
     script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    bbduk.sh \\
+    bbduk.sh ${xmx} \\
         in="${unmerged}" \\
         out="${meta.id}.qtrimmed.fq.gz" \\
         qtrim=r trimq=10 \\

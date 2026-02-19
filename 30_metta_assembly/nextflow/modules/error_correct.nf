@@ -14,8 +14,9 @@ process ERROR_CORRECT_ECCO {
     tuple val(meta), path("${meta.id}.ecco.fq.gz"), emit: reads
 
     script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    bbmerge.sh \\
+    bbmerge.sh ${xmx} \\
         in="${reads}" \\
         out="${meta.id}.ecco.fq.gz" \\
         ecco mix vstrict ordered \\
@@ -44,8 +45,9 @@ process ERROR_CORRECT_ECC {
     tuple val(meta), path("${meta.id}.eccc.fq.gz"), emit: reads
 
     script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    clumpify.sh \\
+    clumpify.sh ${xmx} \\
         in="${reads}" \\
         out="${meta.id}.eccc.fq.gz" \\
         ecc passes=4 reorder \\
@@ -73,8 +75,9 @@ process ERROR_CORRECT_TADPOLE {
     tuple val(meta), path("${meta.id}.ecct.fq.gz"), emit: reads
 
     script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    tadpole.sh \\
+    tadpole.sh ${xmx} \\
         in="${reads}" \\
         out="${meta.id}.ecct.fq.gz" \\
         ecc k=62 ordered \\
