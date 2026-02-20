@@ -321,7 +321,7 @@ include { KAIJU_CONTIG_CLASSIFY } from './modules/taxonomy'
 include { KAIJU_CLASSIFY }      from './modules/taxonomy'
 include { KRAKEN2_CLASSIFY }   from './modules/taxonomy'
 include { SENDSKETCH_CLASSIFY } from './modules/taxonomy'
-include { RRNA_CLASSIFY }      from './modules/rrna'
+include { RNA_CLASSIFY }       from './modules/rrna'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
 include { INTEGRONFINDER }      from './modules/mge'
@@ -416,9 +416,14 @@ workflow {
         ch_proteins = BAKTA_BASIC.out.proteins
         ch_gff      = BAKTA_BASIC.out.gff
 
-        // Slow path: extra annotation with full DB + ncRNA/tRNA/CRISPR (hours, optional)
+        // Slow path: full Bakta annotation with expert systems (hours, optional)
+        // Waits for BAKTA_BASIC to finish first — prevents resource starvation of the
+        // fast path that all downstream tools depend on (priority inversion fix).
         if (params.bakta_extra) {
-            BAKTA_EXTRA(ASSEMBLY_FLYE.out.assembly)
+            ch_assembly_after_basic = BAKTA_BASIC.out.proteins
+                .combine(ASSEMBLY_FLYE.out.assembly)
+                .map { prot, asm -> asm }
+            BAKTA_EXTRA(ch_assembly_after_basic)
         }
     }
 
@@ -442,9 +447,9 @@ workflow {
         SENDSKETCH_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
     }
 
-    // 2c2d. rRNA gene classification (barrnap + vsearch against SILVA — no annotation dependency)
+    // 2c2d. RNA gene classification (rRNA: barrnap + SILVA; tRNA/tmRNA: Aragorn)
     if (params.run_rrna && params.silva_ssu_db) {
-        RRNA_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+        RNA_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
     }
 
     // 2c3. Eukaryotic contig classification (Tiara + Whokaryote) + MetaEuk gene prediction

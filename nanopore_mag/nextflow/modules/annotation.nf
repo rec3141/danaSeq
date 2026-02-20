@@ -106,8 +106,8 @@ process BAKTA_BASIC {
     """
 }
 
-// Gene annotation: Bakta extra (slow path — hours on large metagenomes)
-// Uses the Bakta full database. Complete annotation including ncRNA, tRNA, CRISPR, sORF, etc.
+// Gene annotation: Bakta extra (full DB — CDS + CRISPR + sORF + expert systems)
+// Uses the Bakta full database. Skips RNA annotation (handled by RNA_CLASSIFY module).
 // Runs in parallel with downstream tools; does not block the pipeline.
 
 process BAKTA_EXTRA {
@@ -138,6 +138,8 @@ process BAKTA_EXTRA {
         --output bakta_out \
         --prefix annotation \
         --force \
+        --skip-trna --skip-tmrna --skip-rrna \
+        --skip-ncrna --skip-ncrna-region \
         "${assembly}"
 
     if [ ! -s bakta_out/annotation.faa ]; then

@@ -3,6 +3,6 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - diamond>=2.1
+  - diamond>=2.1.23  # fix deadlock in <=2.1.22 (bbuchfink/diamond#849, #930)
   - python>=3.9
   - pandas

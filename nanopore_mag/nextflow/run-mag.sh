@@ -176,8 +176,8 @@ fi
 if [[ "$AUTO_SESSION" == true && -z "$RESUME_SESSION" ]]; then
     # Extract session ID from last run_command.sh entry (UUID after -resume)
     if [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.sh" ]]; then
-        RESUME_SESSION=$(grep -oP '(?<=-resume )[0-9a-f-]{36}' \
-            "${OUTDIR_HOST}/pipeline_info/run_command.sh" | tail -1)
+        RESUME_SESSION=$(grep -oP '(?<=--session )[0-9a-f-]{36}' \
+            "${OUTDIR_HOST}/pipeline_info/run_command.sh" | tail -1 || true)
         if [[ -n "$RESUME_SESSION" ]]; then
             echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"
         fi

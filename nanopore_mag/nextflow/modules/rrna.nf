@@ -1,8 +1,10 @@
-// rRNA gene detection and classification: barrnap + vsearch against SILVA
-// Parsing logic in bin/parse_rrna_results.py (external to avoid Nextflow GString issues)
+// RNA gene detection and classification
+// rRNA: barrnap + vsearch against SILVA
+// tRNA + tmRNA: Aragorn (fast, no Infernal dependency)
+// Parsing logic in bin/parse_rrna_results.py and bin/parse_aragorn_results.py
 
-process RRNA_CLASSIFY {
-    tag "rrna"
+process RNA_CLASSIFY {
+    tag "rna"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-rrna"
     publishDir "${params.outdir}/taxonomy/rrna", mode: 'copy'
@@ -15,6 +17,7 @@ process RRNA_CLASSIFY {
     path("rrna_genes.tsv"),      emit: gene_classifications
     path("rrna_contigs.tsv"),    emit: contig_classifications
     path("rrna_sequences.fasta"), emit: sequences
+    path("trna_genes.tsv"),      emit: trna_genes
 
     script:
     def silva_ssu = params.silva_ssu_db
@@ -50,81 +53,90 @@ process RRNA_CLASSIFY {
         echo "[INFO] No rRNA genes detected in assembly" >&2
         printf 'gene_id\\tcontig_id\\tstart\\tend\\tstrand\\trrna_type\\tkingdom\\tgene_length\\tgene_completeness\\tbarrnap_score\\tbest_match\\tvsearch_identity\\tvsearch_coverage\\ttaxonomy\\n' > rrna_genes.tsv
         printf 'contig_id\\tn_rrna_genes\\trrna_types\\tkingdoms\\tbest_ssu_taxonomy\\tbest_ssu_identity\\tbest_lsu_taxonomy\\tbest_lsu_identity\\n' > rrna_contigs.tsv
-        exit 0
-    fi
+    else
+        echo "[INFO] Detected \$n_seqs rRNA gene(s) across all kingdoms" >&2
 
-    echo "[INFO] Detected \$n_seqs rRNA gene(s) across all kingdoms" >&2
-
-    # ── B. vsearch classification against SILVA SSU ────────────────────────
-    for kingdom in bac arc euk; do
-        if [ ! -s rrna_\${kingdom}.fasta ]; then
-            touch vsearch_ssu_\${kingdom}.tsv
-            continue
-        fi
-
-        set +e
-        vsearch --usearch_global rrna_\${kingdom}.fasta \
-            --db "${silva_ssu}" \
-            --id ${min_id} \
-            --maxaccepts 1 \
-            --strand both \
-            --threads ${task.cpus} \
-            --blast6out vsearch_ssu_\${kingdom}.tsv \
-            --top_hits_only \
-            --output_no_hits \
-            2>vsearch_ssu_\${kingdom}.log
-        vsearch_exit=\$?
-        set -e
-
-        if [ \$vsearch_exit -ne 0 ]; then
-            echo "[WARNING] vsearch SSU \$kingdom exited with code \$vsearch_exit" >&2
-            cat vsearch_ssu_\${kingdom}.log >&2
-            touch vsearch_ssu_\${kingdom}.tsv
-        fi
-    done
-
-    # ── C. Optional: vsearch classification against SILVA LSU ──────────────
-    if [ -n "${silva_lsu}" ] && [ -f "${silva_lsu}" ]; then
+        # ── B. vsearch classification against SILVA SSU ────────────────────────
         for kingdom in bac arc euk; do
             if [ ! -s rrna_\${kingdom}.fasta ]; then
-                touch vsearch_lsu_\${kingdom}.tsv
+                touch vsearch_ssu_\${kingdom}.tsv
                 continue
             fi
 
             set +e
             vsearch --usearch_global rrna_\${kingdom}.fasta \
-                --db "${silva_lsu}" \
+                --db "${silva_ssu}" \
                 --id ${min_id} \
                 --maxaccepts 1 \
                 --strand both \
                 --threads ${task.cpus} \
-                --blast6out vsearch_lsu_\${kingdom}.tsv \
+                --blast6out vsearch_ssu_\${kingdom}.tsv \
                 --top_hits_only \
                 --output_no_hits \
-                2>vsearch_lsu_\${kingdom}.log
+                2>vsearch_ssu_\${kingdom}.log
             vsearch_exit=\$?
             set -e
 
             if [ \$vsearch_exit -ne 0 ]; then
-                echo "[WARNING] vsearch LSU \$kingdom exited with code \$vsearch_exit" >&2
-                cat vsearch_lsu_\${kingdom}.log >&2
-                touch vsearch_lsu_\${kingdom}.tsv
+                echo "[WARNING] vsearch SSU \$kingdom exited with code \$vsearch_exit" >&2
+                cat vsearch_ssu_\${kingdom}.log >&2
+                touch vsearch_ssu_\${kingdom}.tsv
             fi
         done
-    else
-        for kingdom in bac arc euk; do
-            touch vsearch_lsu_\${kingdom}.tsv
-        done
+
+        # ── C. Optional: vsearch classification against SILVA LSU ──────────────
+        if [ -n "${silva_lsu}" ] && [ -f "${silva_lsu}" ]; then
+            for kingdom in bac arc euk; do
+                if [ ! -s rrna_\${kingdom}.fasta ]; then
+                    touch vsearch_lsu_\${kingdom}.tsv
+                    continue
+                fi
+
+                set +e
+                vsearch --usearch_global rrna_\${kingdom}.fasta \
+                    --db "${silva_lsu}" \
+                    --id ${min_id} \
+                    --maxaccepts 1 \
+                    --strand both \
+                    --threads ${task.cpus} \
+                    --blast6out vsearch_lsu_\${kingdom}.tsv \
+                    --top_hits_only \
+                    --output_no_hits \
+                    2>vsearch_lsu_\${kingdom}.log
+                vsearch_exit=\$?
+                set -e
+
+                if [ \$vsearch_exit -ne 0 ]; then
+                    echo "[WARNING] vsearch LSU \$kingdom exited with code \$vsearch_exit" >&2
+                    cat vsearch_lsu_\${kingdom}.log >&2
+                    touch vsearch_lsu_\${kingdom}.tsv
+                fi
+            done
+        else
+            for kingdom in bac arc euk; do
+                touch vsearch_lsu_\${kingdom}.tsv
+            done
+        fi
+
+        # ── D. Build accession→taxonomy map from SILVA headers ──────────────
+        # blast6out only stores the first word (accession), so we need a lookup
+        grep '^>' "${silva_ssu}" | sed 's/^>//' | awk '{acc=\$1; \$1=""; sub(/^ /,""); print acc"\\t"\$0}' > silva_taxonomy.tsv
+        if [ -n "${silva_lsu}" ] && [ -f "${silva_lsu}" ]; then
+            grep '^>' "${silva_lsu}" | sed 's/^>//' | awk '{acc=\$1; \$1=""; sub(/^ /,""); print acc"\\t"\$0}' >> silva_taxonomy.tsv
+        fi
+
+        # ── E. Parse barrnap GFF + vsearch hits into per-gene and per-contig TSVs
+        parse_rrna_results.py --taxonomy-map silva_taxonomy.tsv
     fi
 
-    # ── D. Build accession→taxonomy map from SILVA headers ──────────────
-    # blast6out only stores the first word (accession), so we need a lookup
-    grep '^>' "${silva_ssu}" | sed 's/^>//' | awk '{acc=\$1; \$1=""; sub(/^ /,""); print acc"\\t"\$0}' > silva_taxonomy.tsv
-    if [ -n "${silva_lsu}" ] && [ -f "${silva_lsu}" ]; then
-        grep '^>' "${silva_lsu}" | sed 's/^>//' | awk '{acc=\$1; \$1=""; sub(/^ /,""); print acc"\\t"\$0}' >> silva_taxonomy.tsv
-    fi
+    # ── F. Aragorn tRNA + tmRNA detection ─────────────────────────────────
+    echo "[INFO] Running Aragorn for tRNA/tmRNA detection..." >&2
+    aragorn -t -m -gcbact -w "${contigs}" > aragorn_raw.txt 2>/dev/null
 
-    # ── E. Parse barrnap GFF + vsearch hits into per-gene and per-contig TSVs
-    parse_rrna_results.py --taxonomy-map silva_taxonomy.tsv
+    # Parse Aragorn batch output into TSV
+    parse_aragorn_results.py aragorn_raw.txt trna_genes.tsv
+    n_trna=\$(tail -n +2 trna_genes.tsv | grep -c tRNA || echo 0)
+    n_tmrna=\$(tail -n +2 trna_genes.tsv | grep -c tmRNA || echo 0)
+    echo "[INFO] Aragorn found \$n_trna tRNA and \$n_tmrna tmRNA genes" >&2
     """
 }
