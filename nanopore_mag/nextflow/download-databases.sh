@@ -36,6 +36,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_DIR="${SCRIPT_DIR}/databases"
 ENV_DIR="${SCRIPT_DIR}/conda-envs"
 
+# Detect conda/mamba — prefer pre-built envs, fall back to PATH
+if [ -x "${ENV_DIR}/dana-mag-flye/bin/mamba" ]; then
+    CONDA_CMD="${ENV_DIR}/dana-mag-flye/bin/mamba"
+elif [ -x "${ENV_DIR}/dana-mag-flye/bin/conda" ]; then
+    CONDA_CMD="${ENV_DIR}/dana-mag-flye/bin/conda"
+elif command -v mamba &>/dev/null; then
+    CONDA_CMD="mamba"
+elif command -v conda &>/dev/null; then
+    CONDA_CMD="conda"
+else
+    echo "[WARNING] conda/mamba not found — bakta download will be skipped" >&2
+    CONDA_CMD=""
+fi
+
 # Parse arguments
 DOWNLOAD_GENOMAD=false
 DOWNLOAD_CHECKV=false
