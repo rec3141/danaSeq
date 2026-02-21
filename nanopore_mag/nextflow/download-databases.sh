@@ -710,59 +710,59 @@ echo "Database directory: ${DB_DIR}"
 failed=0
 
 if $DOWNLOAD_GENOMAD; then
-    download_genomad || failed=$((failed + 1))
+    ( download_genomad ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_CHECKV; then
-    download_checkv || failed=$((failed + 1))
+    ( download_checkv ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_CHECKM2; then
-    download_checkm2 || failed=$((failed + 1))
+    ( download_checkm2 ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_KAIJU; then
-    download_kaiju || failed=$((failed + 1))
+    ( download_kaiju ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_MACSYFINDER; then
-    download_macsyfinder || failed=$((failed + 1))
+    ( download_macsyfinder ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_DEFENSEFINDER; then
-    download_defensefinder || failed=$((failed + 1))
+    ( download_defensefinder ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_BAKTA; then
-    download_bakta || failed=$((failed + 1))
+    ( download_bakta ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_KOFAM; then
-    download_kofam || failed=$((failed + 1))
+    ( download_kofam ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_EGGNOG; then
-    download_eggnog || failed=$((failed + 1))
+    ( download_eggnog ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_DBCAN; then
-    download_dbcan || failed=$((failed + 1))
+    ( download_dbcan ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_METAEUK; then
-    download_metaeuk || failed=$((failed + 1))
+    ( download_metaeuk ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_KRAKEN2; then
-    download_kraken2 || failed=$((failed + 1))
+    ( download_kraken2 ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_SILVA; then
-    download_silva || failed=$((failed + 1))
+    ( download_silva ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_MARFERRET; then
-    download_marferret || failed=$((failed + 1))
+    ( download_marferret ) || failed=$((failed + 1))
 fi
 
 echo ""
