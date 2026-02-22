@@ -19,6 +19,7 @@ set -euo pipefail
 #   ./download-databases.sh --macsyfinder      # Download MacSyFinder models (TXSScan + CONJScan)
 #   ./download-databases.sh --defensefinder    # Download DefenseFinder models (~100 MB)
 #   ./download-databases.sh --bakta            # Download Bakta annotation database (~37 GB)
+#   ./download-databases.sh --bakta-light      # Download Bakta light database (~1.4 GB)
 #   ./download-databases.sh --kofam            # Download KOfam profiles (~4 GB)
 #   ./download-databases.sh --eggnog           # Download eggNOG diamond database (~12 GB)
 #   ./download-databases.sh --dbcan            # Download dbCAN databases (~2 GB)
@@ -58,6 +59,7 @@ DOWNLOAD_KAIJU=false
 DOWNLOAD_MACSYFINDER=false
 DOWNLOAD_DEFENSEFINDER=false
 DOWNLOAD_BAKTA=false
+DOWNLOAD_BAKTA_LIGHT=false
 DOWNLOAD_KOFAM=false
 DOWNLOAD_EGGNOG=false
 DOWNLOAD_DBCAN=false
@@ -79,7 +81,8 @@ while (( $# )); do
         --kaiju)     DOWNLOAD_KAIJU=true; INTERACTIVE=false; shift ;;
         --macsyfinder) DOWNLOAD_MACSYFINDER=true; INTERACTIVE=false; shift ;;
         --defensefinder) DOWNLOAD_DEFENSEFINDER=true; INTERACTIVE=false; shift ;;
-        --bakta)     DOWNLOAD_BAKTA=true; INTERACTIVE=false; shift ;;
+        --bakta)       DOWNLOAD_BAKTA=true; INTERACTIVE=false; shift ;;
+        --bakta-light) DOWNLOAD_BAKTA_LIGHT=true; INTERACTIVE=false; shift ;;
         --kofam)     DOWNLOAD_KOFAM=true; INTERACTIVE=false; shift ;;
         --eggnog)    DOWNLOAD_EGGNOG=true; INTERACTIVE=false; shift ;;
         --dbcan)     DOWNLOAD_DBCAN=true; INTERACTIVE=false; shift ;;
@@ -103,6 +106,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_MACSYFINDER=true
     DOWNLOAD_DEFENSEFINDER=true
     DOWNLOAD_BAKTA=true
+    DOWNLOAD_BAKTA_LIGHT=true
     DOWNLOAD_KOFAM=true
     DOWNLOAD_EGGNOG=true
     DOWNLOAD_DBCAN=true
@@ -128,7 +132,8 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "kaiju"    "~47 GB"  "Kaiju RefSeq protein db (contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "macsyfinder" "~50 MB" "MacSyFinder models: TXSScan + CONJScan (secretion + conjugation)"
     printf "  %-12s %-8s  %s\n" "defensefinder" "~100 MB" "DefenseFinder models: ~280 defense system HMM profiles"
-    printf "  %-12s %-8s  %s\n" "bakta"    "~37 GB"  "Bakta annotation db (UniProt, AMRFinderPlus, Pfam, etc.)"
+    printf "  %-12s %-8s  %s\n" "bakta"       "~37 GB"  "Bakta full annotation db (UniProt, AMRFinderPlus, Pfam, etc.)"
+    printf "  %-12s %-8s  %s\n" "bakta-light" "~1.4 GB" "Bakta light annotation db (faster downloads, reduced annotation)"
     printf "  %-12s %-8s  %s\n" "kofam"    "~4 GB"   "KOfam profiles + ko_list (KEGG Orthology via HMM)"
     printf "  %-12s %-8s  %s\n" "eggnog"   "~12 GB"  "eggNOG-mapper DIAMOND db (COG/GO/EC/KEGG/Pfam)"
     printf "  %-12s %-8s  %s\n" "dbcan"    "~2 GB"   "dbCAN HMM + DIAMOND + substrate db (CAZyme annotation)"
@@ -149,7 +154,8 @@ show_databases() {
     echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
     echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
     echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
-    echo "  --bakta_db   ${DB_DIR}/bakta_db"
+    echo "  --bakta_db         ${DB_DIR}/bakta/db"
+    echo "  --bakta_light_db   ${DB_DIR}/bakta/db-light"
     echo "  --kofam_db   ${DB_DIR}/kofam_db"
     echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
     echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
@@ -179,60 +185,63 @@ if $INTERACTIVE; then
     echo "  4) kaiju     - Kaiju RefSeq proteins (contig taxonomy, ~47 GB)"
     echo "  5) macsyfinder - MacSyFinder models: TXSScan + CONJScan (~50 MB)"
     echo "  6) defensefinder - DefenseFinder models: anti-phage defense (~100 MB)"
-    echo "  7) bakta     - Bakta annotation database (~37 GB)"
-    echo "  8) kofam     - KOfam profiles (KEGG Orthology, ~4 GB)"
-    echo "  9) eggnog    - eggNOG-mapper DIAMOND db (~12 GB)"
-    echo " 10) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~2 GB)"
-    echo " 11) metaeuk   - MetaEuk OrthoDB v12 Eukaryota (~23 GB)"
-    echo " 12) kraken2   - Kraken2 PlusPFP-8 (contig taxonomy, ~8 GB)"
-    echo " 13) silva     - SILVA SSU + LSU NR99 (rRNA classification, ~900 MB)"
-    echo " 14) marferret - MarFERReT marine eukaryotic proteins (~9 GB)"
-    echo " 15) all       - All databases"
+    echo "  7) bakta       - Bakta full annotation database (~37 GB)"
+    echo "  8) bakta-light - Bakta light annotation database (~1.4 GB)"
+    echo "  9) kofam     - KOfam profiles (KEGG Orthology, ~4 GB)"
+    echo " 10) eggnog    - eggNOG-mapper DIAMOND db (~12 GB)"
+    echo " 11) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~2 GB)"
+    echo " 12) metaeuk   - MetaEuk OrthoDB v12 Eukaryota (~23 GB)"
+    echo " 13) kraken2   - Kraken2 PlusPFP-8 (contig taxonomy, ~8 GB)"
+    echo " 14) silva     - SILVA SSU + LSU NR99 (rRNA classification, ~900 MB)"
+    echo " 15) marferret - MarFERReT marine eukaryotic proteins (~9 GB)"
+    echo " 16) all       - All databases"
     echo ""
-    read -rp "Choice [1-15, or names]: " choice
+    read -rp "Choice [1-16, or names]: " choice
 
     case "$choice" in
-        1|genomad)  DOWNLOAD_GENOMAD=true ;;
-        2|checkv)   DOWNLOAD_CHECKV=true ;;
-        3|checkm2)  DOWNLOAD_CHECKM2=true ;;
-        4|kaiju)    DOWNLOAD_KAIJU=true ;;
-        5|macsyfinder) DOWNLOAD_MACSYFINDER=true ;;
+        1|genomad)      DOWNLOAD_GENOMAD=true ;;
+        2|checkv)       DOWNLOAD_CHECKV=true ;;
+        3|checkm2)      DOWNLOAD_CHECKM2=true ;;
+        4|kaiju)        DOWNLOAD_KAIJU=true ;;
+        5|macsyfinder)  DOWNLOAD_MACSYFINDER=true ;;
         6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
-        7|bakta)    DOWNLOAD_BAKTA=true ;;
-        8|kofam)    DOWNLOAD_KOFAM=true ;;
-        9|eggnog)   DOWNLOAD_EGGNOG=true ;;
-        10|dbcan)   DOWNLOAD_DBCAN=true ;;
-        11|metaeuk) DOWNLOAD_METAEUK=true ;;
-        12|kraken2) DOWNLOAD_KRAKEN2=true ;;
-        13|silva)   DOWNLOAD_SILVA=true ;;
-        14|marferret) DOWNLOAD_MARFERRET=true ;;
-        15|all)     DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
+        7|bakta)        DOWNLOAD_BAKTA=true ;;
+        8|bakta-light)  DOWNLOAD_BAKTA_LIGHT=true ;;
+        9|kofam)        DOWNLOAD_KOFAM=true ;;
+        10|eggnog)      DOWNLOAD_EGGNOG=true ;;
+        11|dbcan)       DOWNLOAD_DBCAN=true ;;
+        12|metaeuk)     DOWNLOAD_METAEUK=true ;;
+        13|kraken2)     DOWNLOAD_KRAKEN2=true ;;
+        14|silva)       DOWNLOAD_SILVA=true ;;
+        15|marferret)   DOWNLOAD_MARFERRET=true ;;
+        16|all)         DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
                 case "$item" in
-                    1|genomad)  DOWNLOAD_GENOMAD=true ;;
-                    2|checkv)   DOWNLOAD_CHECKV=true ;;
-                    3|checkm2)  DOWNLOAD_CHECKM2=true ;;
-                    4|kaiju)    DOWNLOAD_KAIJU=true ;;
-                    5|macsyfinder) DOWNLOAD_MACSYFINDER=true ;;
+                    1|genomad)      DOWNLOAD_GENOMAD=true ;;
+                    2|checkv)       DOWNLOAD_CHECKV=true ;;
+                    3|checkm2)      DOWNLOAD_CHECKM2=true ;;
+                    4|kaiju)        DOWNLOAD_KAIJU=true ;;
+                    5|macsyfinder)  DOWNLOAD_MACSYFINDER=true ;;
                     6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
-                    7|bakta)    DOWNLOAD_BAKTA=true ;;
-                    8|kofam)    DOWNLOAD_KOFAM=true ;;
-                    9|eggnog)   DOWNLOAD_EGGNOG=true ;;
-                    10|dbcan)   DOWNLOAD_DBCAN=true ;;
-                    11|metaeuk) DOWNLOAD_METAEUK=true ;;
-                    12|kraken2) DOWNLOAD_KRAKEN2=true ;;
-                    13|silva)   DOWNLOAD_SILVA=true ;;
-                    14|marferret) DOWNLOAD_MARFERRET=true ;;
-                    all)        DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
+                    7|bakta)        DOWNLOAD_BAKTA=true ;;
+                    8|bakta-light)  DOWNLOAD_BAKTA_LIGHT=true ;;
+                    9|kofam)        DOWNLOAD_KOFAM=true ;;
+                    10|eggnog)      DOWNLOAD_EGGNOG=true ;;
+                    11|dbcan)       DOWNLOAD_DBCAN=true ;;
+                    12|metaeuk)     DOWNLOAD_METAEUK=true ;;
+                    13|kraken2)     DOWNLOAD_KRAKEN2=true ;;
+                    14|silva)       DOWNLOAD_SILVA=true ;;
+                    15|marferret)   DOWNLOAD_MARFERRET=true ;;
+                    all)            DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_MARFERRET; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_BAKTA_LIGHT && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_MARFERRET; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -415,16 +424,16 @@ download_defensefinder() {
 }
 
 download_bakta() {
-    local db_path="${DB_DIR}/bakta_db"
-    if [ -d "${db_path}" ] && [ -f "${db_path}/version.json" ]; then
-        echo "[INFO] Bakta database already exists at ${db_path}"
-        echo "  Delete ${db_path} and re-run to force re-download."
+    local db_path="${DB_DIR}/bakta"
+    if [ -d "${db_path}/db" ] && [ -f "${db_path}/db/version.json" ]; then
+        echo "[INFO] Bakta full database already exists at ${db_path}/db"
+        echo "  Delete ${db_path}/db and re-run to force re-download."
         return 0
     fi
 
     echo ""
-    echo "[INFO] Downloading Bakta database (~37 GB full, or ~1.4 GB light)..."
-    echo "  Destination: ${db_path}"
+    echo "[INFO] Downloading Bakta full database (~37 GB)..."
+    echo "  Destination: ${db_path}/db"
 
     local bakta_env="${ENV_DIR}/dana-mag-bakta"
     if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
@@ -435,8 +444,33 @@ download_bakta() {
     mkdir -p "${db_path}"
     # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
     ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type full
-    echo "[SUCCESS] Bakta database downloaded to ${db_path}"
+    echo "[SUCCESS] Bakta full database downloaded to ${db_path}/db"
     echo "  Use with: --bakta_db ${db_path}/db"
+}
+
+download_bakta_light() {
+    local db_path="${DB_DIR}/bakta"
+    if [ -d "${db_path}/db-light" ] && [ -f "${db_path}/db-light/version.json" ]; then
+        echo "[INFO] Bakta light database already exists at ${db_path}/db-light"
+        echo "  Delete ${db_path}/db-light and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading Bakta light database (~1.4 GB)..."
+    echo "  Destination: ${db_path}/db-light"
+
+    local bakta_env="${ENV_DIR}/dana-mag-bakta"
+    if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
+        echo "[ERROR] Bakta not installed. Run ./install.sh first." >&2
+        return 1
+    fi
+
+    mkdir -p "${db_path}"
+    # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
+    ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type light
+    echo "[SUCCESS] Bakta light database downloaded to ${db_path}/db-light"
+    echo "  Use with: --bakta_light_db ${db_path}/db-light"
 }
 
 download_kofam() {
@@ -737,6 +771,10 @@ if $DOWNLOAD_BAKTA; then
     ( download_bakta ) || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_BAKTA_LIGHT; then
+    ( download_bakta_light ) || failed=$((failed + 1))
+fi
+
 if $DOWNLOAD_KOFAM; then
     ( download_kofam ) || failed=$((failed + 1))
 fi
@@ -779,7 +817,8 @@ else
     $DOWNLOAD_KAIJU   && echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
     $DOWNLOAD_MACSYFINDER && echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
     $DOWNLOAD_DEFENSEFINDER && echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
-    $DOWNLOAD_BAKTA   && echo "  --bakta_db   ${DB_DIR}/bakta_db/db"
+    $DOWNLOAD_BAKTA         && echo "  --bakta_db         ${DB_DIR}/bakta/db"
+    $DOWNLOAD_BAKTA_LIGHT   && echo "  --bakta_light_db   ${DB_DIR}/bakta/db-light"
     $DOWNLOAD_KOFAM   && echo "  --kofam_db   ${DB_DIR}/kofam_db"
     $DOWNLOAD_EGGNOG  && echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
     $DOWNLOAD_DBCAN   && echo "  --dbcan_db   ${DB_DIR}/dbcan_db"

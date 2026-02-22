@@ -55,7 +55,8 @@ def helpMessage() {
 
     Annotation:
       --annotator STR    Annotator to use: 'prokka', 'bakta', or 'none' [default: prokka]
-      --bakta_db PATH    Path to Bakta full database (BAKTA_EXTRA uses this; BAKTA_BASIC auto-derives light DB)
+      --bakta_db PATH    Path to Bakta full database (used by BAKTA_EXTRA)
+      --bakta_light_db PATH Path to Bakta light database (used by BAKTA_BASIC)
       --bakta_extra       Also run BAKTA_EXTRA (ncRNA/tRNA/CRISPR — slow) [default: false]
       --run_prokka       (deprecated) Run Prokka — use --annotator instead [default: true]
       --run_bakta        (deprecated) Run Bakta — use --annotator instead [default: false]
@@ -292,8 +293,12 @@ if (!params.input) {
 def effective_annotator = params.annotator ?:
     (params.run_bakta ? 'bakta' : (params.run_prokka ? 'prokka' : 'none'))
 
-if (effective_annotator == 'bakta' && !params.bakta_db) {
-    log.error "ERROR: --bakta_db is required when using Bakta annotation. Provide path to Bakta database."
+if (effective_annotator == 'bakta' && !params.bakta_light_db) {
+    log.error "ERROR: --bakta_light_db is required when using Bakta annotation. Provide path to Bakta light database."
+    System.exit(1)
+}
+if (effective_annotator == 'bakta' && params.bakta_extra && !params.bakta_db) {
+    log.error "ERROR: --bakta_db is required when using --bakta_extra. Provide path to Bakta full database."
     System.exit(1)
 }
 

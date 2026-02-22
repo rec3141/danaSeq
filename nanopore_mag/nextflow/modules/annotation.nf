@@ -49,7 +49,7 @@ process PROKKA_ANNOTATE {
 }
 
 // Gene annotation: Bakta basic (fast path — minutes on large metagenomes)
-// Uses the Bakta light database (auto-derived from bakta_db path).
+// Uses the Bakta light database (--bakta_light_db).
 // Skips ncRNA/tRNA/CRISPR/sORF scanning (cmscan is the bottleneck on large assemblies).
 // Produces .faa + .gff3 for all downstream tools (Kaiju, DefenseFinder, metabolism, etc.)
 
@@ -70,19 +70,9 @@ process BAKTA_BASIC {
     path("annotation.hypotheticals.faa"), emit: hypotheticals, optional: true
 
     script:
-    // Derive light DB: bakta_db points to full DB (e.g. .../bakta/full/db),
-    // light DB is its sibling (e.g. .../bakta/light/db-light)
-    def light_db = file(params.bakta_db).parent.parent.resolve('light/db-light')
     """
-    if [ ! -d "${light_db}" ]; then
-        echo "[ERROR] Bakta light database not found at ${light_db}" >&2
-        echo "[INFO]  Expected layout: <bakta_root>/full/db and <bakta_root>/light/db-light" >&2
-        echo "[INFO]  Download with: bakta_db download --output \$(dirname \$(dirname ${params.bakta_db})) --type light" >&2
-        exit 1
-    fi
-
     bakta \
-        --db "${light_db}" \
+        --db "${params.bakta_light_db}" \
         --meta \
         --keep-contig-headers \
         --threads ${task.cpus} \
