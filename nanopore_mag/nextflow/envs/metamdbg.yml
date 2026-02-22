@@ -1,0 +1,6 @@
+name: dana-mag-metamdbg
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - metamdbg=1.3.1

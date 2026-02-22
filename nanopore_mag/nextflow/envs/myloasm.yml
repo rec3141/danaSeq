@@ -1,0 +1,6 @@
+name: dana-mag-myloasm
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - myloasm=0.4.0

@@ -1,0 +1,6 @@
+name: dana-mag-floria
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - floria=0.0.2

@@ -1,0 +1,8 @@
+name: dana-mag-derep
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - galah=0.4.2
+  - skani=0.3.1
+  - sourmash-minimal

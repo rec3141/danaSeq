@@ -1,0 +1,6 @@
+name: dana-mag-skder
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - skder=1.3.4

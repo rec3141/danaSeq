@@ -1,0 +1,20 @@
+name: dana-mag-instrain
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - samtools
+  - pysam
+  - numpy
+  - pandas
+  - matplotlib-base
+  - seaborn-base
+  - networkx
+  - h5py
+  - biopython
+  - lmfit
+  - tqdm
+  - psutil
+  - pip:
+    - instrain

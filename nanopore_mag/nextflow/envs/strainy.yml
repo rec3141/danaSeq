@@ -1,0 +1,6 @@
+name: dana-mag-strainy
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - strainy=1.2

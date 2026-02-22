@@ -1,0 +1,6 @@
+name: dana-mag-drep
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - drep=3.6.2
