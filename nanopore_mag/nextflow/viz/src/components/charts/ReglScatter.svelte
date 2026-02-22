@@ -190,15 +190,23 @@
     if (sizeBy === 'fixed') {
       sizeCfg = { sizeBy: null, pointSize: 3 * sizeScale };
     } else {
-      const sfn = sizeBy === 'depth' ? c => Math.sqrt(c.depth + 0.01) : c => Math.pow(c.length, 0.3);
-      const extent = sizeRange && sizeRange[sizeBy];
-      const sMin = extent ? extent[0] : d3.min(sorted, sfn);
-      const sMax = extent ? extent[1] : d3.max(sorted, sfn);
+      // Match Plotly's absolute sizing: sqrt(depth)*0.8 or length^0.3*0.25, clamped at 1.5 min
+      const sfn = sizeBy === 'depth'
+        ? c => Math.max(1.5, Math.sqrt(c.depth) * 0.8)
+        : c => Math.max(1.5, Math.pow(c.length, 0.3) * 0.25);
+      // Normalize to [0,1] for regl but using absolute sizes as the basis
+      let sMin = Infinity, sMax = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const s = sfn(sorted[i]);
+        if (s < sMin) sMin = s;
+        if (s > sMax) sMax = s;
+      }
       const sRange = sMax - sMin || 1;
       for (let i = 0; i < n; i++) {
         valueB[i] = Math.max(0, Math.min(1, (sfn(sorted[i]) - sMin) / sRange));
       }
-      sizeCfg = { sizeBy: 'valueB', pointSize: [1.5 * sizeScale, 14 * sizeScale] };
+      // Scale pointSize range to match the absolute pixel sizes from Plotly
+      sizeCfg = { sizeBy: 'valueB', pointSize: [sMin * sizeScale, sMax * sizeScale] };
     }
 
     scatterplot.set({ ...colorCfg, ...sizeCfg });
