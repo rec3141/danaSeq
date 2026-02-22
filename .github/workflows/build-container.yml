@@ -22,18 +22,23 @@ jobs:
       packages: write
 
     steps:
-      # Reclaim ~30 GB by removing preinstalled software
+      # Reclaim disk and mount build volume at /var/lib/docker so
+      # Docker layers don't fill the root filesystem
       - name: Maximize build disk space
         uses: easimon/maximize-build-space@v10
         with:
+          build-mount-path: /var/lib/docker
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
+      - name: Restart Docker daemon
+        run: sudo systemctl restart docker
+
       - name: Check available disk space
-        run: df -h /
+        run: df -h / /var/lib/docker
 
       - name: Checkout repository
         uses: actions/checkout@v4
