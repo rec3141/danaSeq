@@ -3,7 +3,8 @@
 process CONCAT_READS {
     tag "${meta.id}"
     label 'process_low'
-    memory = { params.dedupe ? params.dedupe_memory : 4.GB }
+    memory   = { params.dedupe ? params.dedupe_memory : 4.GB }
+    maxForks = params.dedupe ? params.dedupe_forks : null
     conda "${projectDir}/conda-envs/dana-bbmap"
     publishDir "${params.outdir}/concat", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/concat" : null
