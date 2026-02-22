@@ -102,7 +102,7 @@ process BAKTA_BASIC {
 
 process BAKTA_EXTRA {
     tag "bakta_extra"
-    label 'process_medium'
+    label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-bakta"
     publishDir "${params.outdir}/annotation/bakta/extra", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/extra" : null
