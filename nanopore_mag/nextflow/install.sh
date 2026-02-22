@@ -97,7 +97,6 @@ ENV_YAMLS=(
     mapping.yml
     semibin.yml
     binning.yml
-    comebin.yml
     prokka.yml
     bakta.yml
     kofamscan.yml
@@ -128,6 +127,7 @@ ENV_YAMLS=(
     strainy.yml
     floria.yml
     skder.yml
+    comebin.yml
 )
 
 # Which tool binary to check for each environment
