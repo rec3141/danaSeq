@@ -33,13 +33,37 @@ skip() { echo "[SKIP]  $1"; }
 ok()   { echo "  Done"; }
 
 # ============================================================================
+# Resolve conda-provided tools (no host dependencies required)
+# ============================================================================
+
+# git: present in comebin, macsyfinder, defensefinder — use whichever is installed
+GIT=""
+for _env in dana-mag-comebin dana-mag-macsyfinder dana-mag-defensefinder; do
+    if [[ -x "${ENV_DIR}/${_env}/bin/git" ]]; then
+        GIT="${ENV_DIR}/${_env}/bin/git"
+        break
+    fi
+done
+[[ -n "$GIT" ]] || die "No conda git found in ${ENV_DIR} — run install.sh first"
+
+# python3: present in bakta and flye
+PYTHON3=""
+for _env in dana-mag-bakta dana-mag-flye; do
+    if [[ -x "${ENV_DIR}/${_env}/bin/python3" ]]; then
+        PYTHON3="${ENV_DIR}/${_env}/bin/python3"
+        break
+    fi
+done
+[[ -n "$PYTHON3" ]] || die "No conda python3 found in ${ENV_DIR} — run install.sh first"
+
+# ============================================================================
 # LorBin PRs #6 + #7
 # PR #6: sklearn.InvalidParameterError crash (n_neighbors=0), NameError in
 #         mcluster (samplename → samplenames), argparse type= missing → TypeError
 # PR #7: --cuda flag not forwarded to train_vae() → GPU training silently disabled
 #
-# Both PRs are on separate branches of rec3141/LorBin. We merge them into a
-# single combined branch and pip-install from it into the semibin conda env.
+# Both PRs are on separate branches of rec3141/LorBin. We clone, merge them
+# locally, and pip-install from the local clone into the semibin conda env.
 # ============================================================================
 patch_lorbin() {
     local env="${ENV_DIR}/dana-mag-semibin"
@@ -55,28 +79,25 @@ patch_lorbin() {
 
     info "lorbin PRs #6 + #7: sklearn crash + cuda flag + argparse types..."
 
-    # Create combined fix branch in rec3141/LorBin if it doesn't exist
-    if ! git ls-remote "https://github.com/rec3141/LorBin.git" \
-            "refs/heads/fix/combined-fixes" 2>/dev/null | grep -q combined-fixes; then
-        echo "  Creating rec3141/LorBin@fix/combined-fixes..."
-        local tmp
-        tmp=$(mktemp -d)
-        # shellcheck disable=SC2064
-        trap "rm -rf '$tmp'" RETURN
-        git clone "https://github.com/rec3141/LorBin.git" "$tmp/LorBin" \
-            > /dev/null 2>&1
-        git -C "$tmp/LorBin" fetch origin \
-            fix/sklearn-n-neighbors-zero fix/bin-cmd-cuda-flag > /dev/null 2>&1
-        git -C "$tmp/LorBin" checkout -b fix/combined-fixes \
-            origin/fix/sklearn-n-neighbors-zero > /dev/null 2>&1
-        git -C "$tmp/LorBin" merge origin/fix/bin-cmd-cuda-flag \
-            --no-edit > /dev/null 2>&1
-        git -C "$tmp/LorBin" push origin fix/combined-fixes > /dev/null 2>&1
-        echo "  Created rec3141/LorBin@fix/combined-fixes"
-    fi
+    # Merge both fix branches locally and pip-install from the local clone.
+    # (We don't push because we don't have write access to rec3141/LorBin.)
+    local tmp
+    tmp=$(mktemp -d)
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp'" RETURN
+    echo "  Cloning rec3141/LorBin..."
+    "$GIT" clone "https://github.com/rec3141/LorBin.git" "$tmp/LorBin" \
+        > /dev/null 2>&1
+    "$GIT" -C "$tmp/LorBin" fetch origin \
+        fix/sklearn-n-neighbors-zero fix/bin-cmd-cuda-flag > /dev/null 2>&1
+    "$GIT" -C "$tmp/LorBin" checkout -b fix/combined-fixes \
+        origin/fix/sklearn-n-neighbors-zero > /dev/null 2>&1
+    GIT_AUTHOR_NAME="patches" GIT_AUTHOR_EMAIL="patches@localhost" \
+    GIT_COMMITTER_NAME="patches" GIT_COMMITTER_EMAIL="patches@localhost" \
+    "$GIT" -C "$tmp/LorBin" merge origin/fix/bin-cmd-cuda-flag \
+        --no-edit > /dev/null 2>&1
 
-    "${env}/bin/pip" install --force-reinstall --no-deps \
-        "lorbin @ git+https://github.com/rec3141/LorBin.git@fix/combined-fixes" \
+    "${env}/bin/pip" install --force-reinstall --no-deps "$tmp/LorBin" \
         > /dev/null 2>&1
     ok
 }
@@ -102,6 +123,8 @@ patch_whokaryote() {
     fi
 
     info "whokaryote PR #13: Fix GFF3 parsing for Bakta/PGAP output..."
+    # Prepend conda git dir to PATH so pip can resolve the git+https:// URL
+    PATH="$(dirname "$GIT"):${PATH}" \
     "${env}/bin/pip" install --force-reinstall --no-deps \
         "git+https://github.com/rec3141/whokaryote.git@fix/gff-attribute-parsing" \
         > /dev/null 2>&1
@@ -134,7 +157,7 @@ patch_bakta() {
 
     info "bakta PR #429: Make AMRFinderPlus failure non-fatal..."
 
-    python3 - "$target" <<'PYEOF'
+    "$PYTHON3" - "$target" <<'PYEOF'
 import sys
 path = sys.argv[1]
 with open(path) as f:
@@ -178,6 +201,8 @@ PYEOF
 
 echo ""
 echo "Applying upstream patches to conda environments in: ${ENV_DIR}"
+echo "  git:     ${GIT}"
+echo "  python3: ${PYTHON3}"
 echo ""
 
 patch_lorbin
