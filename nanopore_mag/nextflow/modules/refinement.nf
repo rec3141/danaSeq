@@ -14,7 +14,7 @@ process NCLB_GATHER {
     tag "nclb_gather"
     label 'process_medium'
     conda "${params.nclb_dir}/envs/nclb.yml"
-    publishDir "${params.outdir}/binning/nclb", mode: 'copy'
+    publishDir "${params.outdir}/binning/nclb", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/binning/nclb" : null
 
     input:
@@ -38,7 +38,7 @@ process NCLB_CONVERSE {
     tag "nclb_converse"
     label 'process_medium'
     conda "${params.nclb_dir}/envs/nclb.yml"
-    publishDir "${params.outdir}/binning/nclb", mode: 'copy'
+    publishDir "${params.outdir}/binning/nclb", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/binning/nclb" : null
 
     input:
@@ -67,7 +67,7 @@ process NCLB_ELDERS {
     tag "nclb_elders"
     label 'process_medium'
     conda "${params.nclb_dir}/envs/nclb.yml"
-    publishDir "${params.outdir}/binning/nclb", mode: 'copy'
+    publishDir "${params.outdir}/binning/nclb", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/binning/nclb" : null
 
     input:
@@ -93,7 +93,7 @@ process NCLB_INTEGRATE {
     tag "nclb_integrate"
     label 'process_medium'
     conda "${params.nclb_dir}/envs/nclb.yml"
-    publishDir "${params.outdir}/binning/nclb", mode: 'copy',
+    publishDir "${params.outdir}/binning/nclb", mode: 'link',
         saveAs: { fn -> fn }
     storeDir params.store_dir ? "${params.store_dir}/binning/nclb" : null
 

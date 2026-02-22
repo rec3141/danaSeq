@@ -4,7 +4,7 @@ process VIZ_PREPROCESS {
     tag "viz_preprocess"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-viz"
-    publishDir "${params.outdir}/viz", mode: 'copy'
+    publishDir "${params.outdir}/viz", mode: 'link'
     // No storeDir — always regenerate when pipeline runs
 
     input:

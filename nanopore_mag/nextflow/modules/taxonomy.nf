@@ -6,7 +6,7 @@ process KAIJU_CONTIG_CLASSIFY {
     tag "kaiju_contigs"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-kaiju"
-    publishDir "${params.outdir}/taxonomy/kaiju", mode: 'copy'
+    publishDir "${params.outdir}/taxonomy/kaiju", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/taxonomy/kaiju" : null
 
     input:
@@ -107,7 +107,7 @@ process KAIJU_CLASSIFY {
     tag "kaiju_proteins"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-kaiju"
-    publishDir "${params.outdir}/taxonomy/kaiju", mode: 'copy'
+    publishDir "${params.outdir}/taxonomy/kaiju", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/taxonomy/kaiju" : null
 
     input:
@@ -265,7 +265,7 @@ process KRAKEN2_CLASSIFY {
     label 'process_kraken'
     maxForks 1
     conda "${projectDir}/conda-envs/dana-mag-kraken2"
-    publishDir "${params.outdir}/taxonomy/kraken2", mode: 'copy'
+    publishDir "${params.outdir}/taxonomy/kraken2", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/taxonomy/kraken2" : null
 
     input:
@@ -407,7 +407,7 @@ process SENDSKETCH_CLASSIFY {
     tag "sendsketch"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-bbmap"
-    publishDir "${params.outdir}/taxonomy/sendsketch", mode: 'copy'
+    publishDir "${params.outdir}/taxonomy/sendsketch", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/taxonomy/sendsketch" : null
 
     input:

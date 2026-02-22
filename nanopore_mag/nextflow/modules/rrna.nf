@@ -7,7 +7,7 @@ process RNA_CLASSIFY {
     tag "rna"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-rrna"
-    publishDir "${params.outdir}/taxonomy/rrna", mode: 'copy'
+    publishDir "${params.outdir}/taxonomy/rrna", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/taxonomy/rrna" : null
 
     input:

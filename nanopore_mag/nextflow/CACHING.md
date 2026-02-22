@@ -216,15 +216,17 @@ must re-run.
 | Session-dependent?     | Yes (hash includes session)  | No (just checks file existence) |
 | Survives `rm -rf work/`? | No                        | Yes                           |
 | Survives new session?  | No                           | Yes                           |
-| Output location        | work/ + publishDir copy      | storeDir (publishDir ignored) |
+| Output location        | work/ + publishDir hardlink  | storeDir + publishDir hardlink |
 | Cache granularity      | Per-task hash                | Per-process output files      |
 | Concurrent run support | No (LevelDB lock)            | Yes (file-based)              |
 
 ### publishDir Interaction
 
-**When storeDir is active, publishDir is silently ignored.** Outputs go directly to the
-storeDir path instead of being copied to the outdir. The storeDir structure mirrors the
-publishDir layout so paths are consistent.
+**When storeDir is active, publishDir is NOT ignored** — both run. To avoid doubling
+disk usage, all processes in this pipeline use `publishDir mode: 'link'` (hardlinks).
+On the same filesystem, hardlinks cost zero extra disk space: outdir and storeDir point
+to the same inodes. The storeDir structure mirrors the publishDir layout so paths are
+consistent. Do not change publishDir mode to 'copy' when using --store_dir.
 
 ### Seeding storeDir from Existing Results
 

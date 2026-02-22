@@ -179,9 +179,10 @@ the store directory. On subsequent runs, if all declared output files already ex
 storeDir, the process is skipped entirely (Nextflow shows "Stored" status). No work
 directory task is created.
 
-**Key behavior:** When storeDir is active for a process, publishDir is silently ignored by
-Nextflow. Outputs go directly to the storeDir path. The store directory structure mirrors
-the publishDir layout.
+**Key behavior:** When storeDir is active, publishDir is NOT ignored by Nextflow — both
+run. To avoid doubling disk usage, all processes use `publishDir mode: 'link'` (hardlinks).
+On the same filesystem, hardlinks cost zero extra disk space. Do not change publishDir
+mode to 'copy' when using --store_dir.
 
 **Seeding from existing results:** To populate a storeDir from a previous run without
 re-executing the pipeline:
