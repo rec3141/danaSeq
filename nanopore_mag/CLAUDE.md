@@ -90,9 +90,9 @@ cd nextflow
 ./install.sh --check
 
 # Download databases (interactive menu or specify --genomad, --checkv, --checkm2, --all)
-./download-databases.sh
+./download-databases.sh --dir /data/scratch/refdbs
 
-# Basic run
+# Basic run (work dir defaults to /tmp/nanopore_mag_work)
 ./run-mag.sh --input /path/to/reads --outdir /path/to/output
 
 # With Filtlong pre-filtering, no MaxBin2
@@ -103,21 +103,54 @@ cd nextflow
 ./run-mag.sh --input /path/to/reads --outdir /path/to/output \
     --store_dir /data/scratch/mag_store
 
-# Kitchen sink — all options with defaults
-./run-mag.sh --input /path/to/reads --outdir /path/to/output \
+# Kitchen sink — compact form (--all enables all optional modules, --db_dir auto-resolves paths)
+./run-mag.sh --input /data/minknow/QEI2025 \
+    --outdir /data/minknow/QEI2025/nanopore_mag/tmpdir \
+    --store_dir /data/minknow/QEI2025/nanopore_mag/final \
+    --workdir /data/scratch/work \
+    --all \
+    --db_dir /data/scratch/refdbs \
+    --sendsketch_address http://10.151.50.41:3068/sketch \
+    --filtlong_size 40000000000 \
+    --annotator bakta \
+    --assembly_cpus 24 \
+    --assembly_memory '120 GB'
+
+# Kitchen sink — explicit form (same command, all flags spelled out for reference)
+./run-mag.sh --input /data/minknow/QEI2025 \
+    --outdir /data/minknow/QEI2025/nanopore_mag/tmpdir \
+    --store_dir /data/minknow/QEI2025/nanopore_mag/final \
+    --workdir /data/scratch/work \
     --dedupe \
     --filtlong_size 40000000000 \
-    --min_overlap 1000 \
-    --run_maxbin true \
-    --run_lorbin true \
-    --run_comebin true \
-    --lorbin_min_length 80000 \
-    --metabat_min_cls 50000 \
-    --checkm2_db /path/to/checkm2_db \
-    --genomad_db /path/to/genomad_db \
-    --checkv_db /path/to/checkv_db \
+    --annotator bakta \
+    --bakta_light_db /data/scratch/refdbs/bakta/db-light \
+    --bakta_db /data/scratch/refdbs/bakta/db \
+    --bakta_extra \
+    --genomad_db /data/scratch/refdbs/genomad_db \
+    --checkv_db /data/scratch/refdbs/checkv_db \
+    --checkm2_db /data/scratch/refdbs/checkm2 \
+    --kaiju_db /data/scratch/refdbs/kaiju/refseq_ref \
+    --run_kraken2 true \
+    --kraken2_db /data/scratch/refdbs/krakendb/pluspfp_08gb \
+    --run_sendsketch true \
+    --sendsketch_address http://10.151.50.41:3068/sketch \
+    --run_rrna true \
+    --silva_ssu_db /data/scratch/refdbs/silva_db/SILVA_138.2_SSURef_NR99.fasta \
+    --silva_lsu_db /data/scratch/refdbs/silva_db/SILVA_138.2_LSURef_NR99.fasta \
+    --run_metabolism true \
+    --kofam_db /data/scratch/refdbs/kofam_db \
+    --eggnog_db /data/scratch/refdbs/eggnog_db \
+    --dbcan_db /data/scratch/refdbs/dbcan_db \
+    --macsyfinder_models /data/scratch/refdbs/macsyfinder_models \
+    --defensefinder_models /data/scratch/refdbs/defensefinder_models \
+    --run_eukaryotic true \
+    --run_metaeuk true \
+    --metaeuk_db /data/scratch/refdbs/metaeuk_db/metaeuk_db \
+    --run_marferret true \
+    --marferret_db /data/scratch/refdbs/marferret_db \
     --assembly_cpus 24 \
-    --assembly_memory '64 GB'
+    --assembly_memory '120 GB'
 
 # Docker mode
 docker build -t danaseq-mag .

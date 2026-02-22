@@ -128,17 +128,21 @@ def helpMessage() {
       nextflow run main.nf --input /data/reads \\
           --filtlong_size 40000000000 --run_maxbin false -resume
 
-      # Kitchen sink — all options with defaults
-      nextflow run main.nf --input /data/reads --outdir results \\
-          --dedupe \\
+      # Kitchen sink — all modules + all databases (use run-mag.sh --all + --db_dir)
+      # --all enables: dedupe, bakta_extra, kraken2, sendsketch, rrna, metabolism,
+      #               eukaryotic, metaeuk, marferret
+      # --db_dir auto-resolves all standard database subdirectory paths
+      ./run-mag.sh --input /data/minknow/QEI2025 \\
+          --outdir /data/minknow/QEI2025/nanopore_mag/tmpdir \\
+          --store_dir /data/minknow/QEI2025/nanopore_mag/final \\
+          --workdir /data/scratch/work \\
+          --all \\
+          --db_dir /data/scratch/refdbs \\
+          --sendsketch_address http://10.151.50.41:3068/sketch \\
           --filtlong_size 40000000000 \\
-          --min_overlap 1000 \\
-          --run_maxbin true \\
-          --metabat_min_cls 50000 \\
-          --checkm2_db /path/to/checkm2_db \\
+          --annotator bakta \\
           --assembly_cpus 24 \\
-          --assembly_memory '64 GB' \\
-          -resume
+          --assembly_memory '120 GB'
 
       # Using launcher script (local conda or Docker)
       ./run-mag.sh --input /data/reads --outdir /data/output

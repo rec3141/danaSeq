@@ -44,10 +44,63 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="danaseq-mag"
 USE_DOCKER=false
 NF_ARGS=()
+DB_ARGS=()
 MOUNTS=()
 ORIGINAL_ARGS=("$@")
 
 die() { echo "[ERROR] $1" >&2; exit 1; }
+
+# Resolve database paths from a standard base directory (as created by download-databases.sh).
+# Populates DB_ARGS with --flag path pairs for every subdirectory/file that exists.
+# These are prepended to NF_ARGS so explicit user flags override them.
+resolve_db_dir() {
+    local base="$1"
+    local path
+
+    # Simple fixed-layout databases
+    local -A fixed_dbs=(
+        [--bakta_db]="bakta/db"
+        [--bakta_light_db]="bakta/db-light"
+        [--genomad_db]="genomad_db"
+        [--checkv_db]="checkv_db"
+        [--checkm2_db]="checkm2"
+        [--kofam_db]="kofam_db"
+        [--eggnog_db]="eggnog_db"
+        [--dbcan_db]="dbcan_db"
+        [--macsyfinder_models]="macsyfinder_models"
+        [--defensefinder_models]="defensefinder_models"
+        [--marferret_db]="marferret_db"
+        [--metaeuk_db]="metaeuk_db/metaeuk_db"
+    )
+    for flag in "${!fixed_dbs[@]}"; do
+        path="${base}/${fixed_dbs[$flag]}"
+        [[ -e "$path" ]] && DB_ARGS+=("$flag" "$path")
+    done
+
+    # Kaiju: refseq_ref preferred, then first available subdir
+    if [[ -d "${base}/kaiju/refseq_ref" ]]; then
+        DB_ARGS+=(--kaiju_db "${base}/kaiju/refseq_ref")
+    elif [[ -d "${base}/kaiju" ]]; then
+        path=$(ls -d "${base}/kaiju"/*/2>/dev/null | head -1 || true)
+        [[ -n "$path" ]] && DB_ARGS+=(--kaiju_db "$path")
+    fi
+
+    # Kraken2: pluspfp_08gb preferred, then flat layout (hash.k2d at root), then first subdir
+    if [[ -d "${base}/krakendb/pluspfp_08gb" ]]; then
+        DB_ARGS+=(--kraken2_db "${base}/krakendb/pluspfp_08gb")
+    elif [[ -f "${base}/krakendb/hash.k2d" ]]; then
+        DB_ARGS+=(--kraken2_db "${base}/krakendb")
+    elif [[ -d "${base}/krakendb" ]]; then
+        path=$(ls -d "${base}/krakendb"/*/2>/dev/null | head -1 || true)
+        [[ -n "$path" ]] && DB_ARGS+=(--kraken2_db "$path")
+    fi
+
+    # SILVA: find SSU and LSU by glob (version-independent)
+    path=$(ls "${base}/silva_db/SILVA_"*"_SSURef_NR99.fasta" 2>/dev/null | head -1 || true)
+    [[ -n "$path" ]] && DB_ARGS+=(--silva_ssu_db "$path")
+    path=$(ls "${base}/silva_db/SILVA_"*"_LSURef_NR99.fasta" 2>/dev/null | head -1 || true)
+    [[ -n "$path" ]] && DB_ARGS+=(--silva_lsu_db "$path")
+}
 
 # Build a re-runnable self-invocation with the correct --session ID
 save_run_command() {
@@ -75,8 +128,18 @@ usage() {
     echo "Mode:"
     echo "  --docker         Run in Docker instead of local conda"
     echo ""
+    echo "Shortcuts:"
+    echo "  --all            Enable all optional modules (dedupe, bakta_extra, kraken2,"
+    echo "                   sendsketch, rrna, metabolism, eukaryotic, metaeuk, marferret)"
+    echo "                   Still requires database paths to be provided separately."
+    echo "  --db_dir DIR     Base directory of databases installed by download-databases.sh."
+    echo "                   Auto-resolves all standard subdirectory paths (bakta, genomad,"
+    echo "                   checkv, checkm2, kaiju, kraken2, silva, kofam, eggnog, dbcan,"
+    echo "                   macsyfinder, defensefinder, metaeuk, marferret). Explicit"
+    echo "                   --flag PATH overrides any auto-detected path."
+    echo ""
     echo "Caching:"
-    echo "  --workdir DIR        Nextflow work directory [-w] (default: nextflow/work/)"
+    echo "  --workdir DIR        Nextflow work directory [-w] (default: /tmp/nanopore_mag_work)"
     echo "  --store_dir DIR      Persistent cache directory (storeDir); skips completed processes"
     echo "                       across runs even after work/ cleanup. Off by default."
     echo ""
@@ -92,18 +155,54 @@ usage() {
     echo "  --assembly_cpus N    CPUs for assembly [default: 24]"
     echo "  --assembly_memory S  Memory for assembly [default: '64 GB']"
     echo ""
-    echo "Kitchen sink example (all options with defaults):"
-    echo "  $0 --input /data/reads --outdir /data/output \\"
+    echo "Kitchen sink — compact form (this system):"
+    echo "  $0 --input /data/minknow/QEI2025 \\"
+    echo "      --outdir /data/minknow/QEI2025/nanopore_mag/tmpdir \\"
+    echo "      --store_dir /data/minknow/QEI2025/nanopore_mag/final \\"
+    echo "      --workdir /data/scratch/work \\"
+    echo "      --all \\"
+    echo "      --db_dir /data/scratch/refdbs \\"
+    echo "      --sendsketch_address http://10.151.50.41:3068/sketch \\"
+    echo "      --filtlong_size 40000000000 \\"
+    echo "      --annotator bakta \\"
+    echo "      --assembly_cpus 24 \\"
+    echo "      --assembly_memory '120 GB'"
+    echo ""
+    echo "Kitchen sink — explicit form (same command, all flags spelled out):"
+    echo "  $0 --input /data/minknow/QEI2025 \\"
+    echo "      --outdir /data/minknow/QEI2025/nanopore_mag/tmpdir \\"
+    echo "      --store_dir /data/minknow/QEI2025/nanopore_mag/final \\"
+    echo "      --workdir /data/scratch/work \\"
     echo "      --dedupe \\"
     echo "      --filtlong_size 40000000000 \\"
-    echo "      --min_overlap 1000 \\"
-    echo "      --run_maxbin true \\"
-    echo "      --run_lorbin true \\"
-    echo "      --run_comebin true \\"
-    echo "      --lorbin_min_length 80000 \\"
-    echo "      --metabat_min_cls 50000 \\"
+    echo "      --annotator bakta \\"
+    echo "      --bakta_light_db /data/scratch/refdbs/bakta/db-light \\"
+    echo "      --bakta_db /data/scratch/refdbs/bakta/db \\"
+    echo "      --bakta_extra \\"
+    echo "      --genomad_db /data/scratch/refdbs/genomad_db \\"
+    echo "      --checkv_db /data/scratch/refdbs/checkv_db \\"
+    echo "      --checkm2_db /data/scratch/refdbs/checkm2 \\"
+    echo "      --kaiju_db /data/scratch/refdbs/kaiju/refseq_ref \\"
+    echo "      --run_kraken2 true \\"
+    echo "      --kraken2_db /data/scratch/refdbs/krakendb/pluspfp_08gb \\"
+    echo "      --run_sendsketch true \\"
+    echo "      --sendsketch_address http://10.151.50.41:3068/sketch \\"
+    echo "      --run_rrna true \\"
+    echo "      --silva_ssu_db /data/scratch/refdbs/silva_db/SILVA_138.2_SSURef_NR99.fasta \\"
+    echo "      --silva_lsu_db /data/scratch/refdbs/silva_db/SILVA_138.2_LSURef_NR99.fasta \\"
+    echo "      --run_metabolism true \\"
+    echo "      --kofam_db /data/scratch/refdbs/kofam_db \\"
+    echo "      --eggnog_db /data/scratch/refdbs/eggnog_db \\"
+    echo "      --dbcan_db /data/scratch/refdbs/dbcan_db \\"
+    echo "      --macsyfinder_models /data/scratch/refdbs/macsyfinder_models \\"
+    echo "      --defensefinder_models /data/scratch/refdbs/defensefinder_models \\"
+    echo "      --run_eukaryotic true \\"
+    echo "      --run_metaeuk true \\"
+    echo "      --metaeuk_db /data/scratch/refdbs/metaeuk_db/metaeuk_db \\"
+    echo "      --run_marferret true \\"
+    echo "      --marferret_db /data/scratch/refdbs/marferret_db \\"
     echo "      --assembly_cpus 24 \\"
-    echo "      --assembly_memory '64 GB'"
+    echo "      --assembly_memory '120 GB'"
     echo ""
     echo "Run '$0 --help-pipeline' to see full Nextflow help."
     exit 0
@@ -115,7 +214,7 @@ usage() {
 
 INPUT_HOST=""
 OUTDIR_HOST=""
-WORKDIR_HOST=""
+WORKDIR_HOST="/tmp/nanopore_mag_work"
 RESUME_SESSION=""
 AUTO_SESSION=true
 
@@ -147,6 +246,24 @@ while (( $# )); do
             [[ -z "${2:-}" ]] && die "--workdir requires a directory path"
             WORKDIR_HOST="$(realpath -m "$2")"
             shift 2 ;;
+        --db_dir)
+            [[ -z "${2:-}" ]] && die "--db_dir requires a directory path"
+            [[ -d "$2" ]] || die "--db_dir directory does not exist: $2"
+            resolve_db_dir "$(realpath "$2")"
+            shift 2 ;;
+        --all)
+            NF_ARGS+=(
+                --dedupe
+                --bakta_extra
+                --run_kraken2 true
+                --run_sendsketch true
+                --run_rrna true
+                --run_metabolism true
+                --run_eukaryotic true
+                --run_metaeuk true
+                --run_marferret true
+            )
+            shift ;;
         --session)
             [[ -z "${2:-}" ]] && die "--session requires a session ID"
             RESUME_SESSION="$2"
@@ -157,6 +274,9 @@ while (( $# )); do
             shift ;;
     esac
 done
+
+# Prepend DB_ARGS so explicit user flags (later in NF_ARGS) override auto-detected paths
+NF_ARGS=("${DB_ARGS[@]}" "${NF_ARGS[@]}")
 
 # ============================================================================
 # Validate required paths
