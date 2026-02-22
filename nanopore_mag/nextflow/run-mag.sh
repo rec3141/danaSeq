@@ -76,6 +76,7 @@ usage() {
     echo "  --docker         Run in Docker instead of local conda"
     echo ""
     echo "Caching:"
+    echo "  --workdir DIR        Nextflow work directory [-w] (default: nextflow/work/)"
     echo "  --store_dir DIR      Persistent cache directory (storeDir); skips completed processes"
     echo "                       across runs even after work/ cleanup. Off by default."
     echo ""
@@ -114,6 +115,7 @@ usage() {
 
 INPUT_HOST=""
 OUTDIR_HOST=""
+WORKDIR_HOST=""
 RESUME_SESSION=""
 AUTO_SESSION=true
 
@@ -140,6 +142,10 @@ while (( $# )); do
         --outdir)
             [[ -z "${2:-}" ]] && die "--outdir requires a directory path"
             OUTDIR_HOST="$(realpath -m "$2")"
+            shift 2 ;;
+        --workdir|-w)
+            [[ -z "${2:-}" ]] && die "--workdir requires a directory path"
+            WORKDIR_HOST="$(realpath -m "$2")"
             shift 2 ;;
         --session)
             [[ -z "${2:-}" ]] && die "--session requires a session ID"
@@ -236,11 +242,18 @@ fi
 CONDA_BASE_BIN="$(dirname "$(which mamba 2>/dev/null || which conda)")"
 export PATH="${CONDA_BASE_BIN}:${PATH}"
 
+WORKDIR_FLAG=()
+if [[ -n "$WORKDIR_HOST" ]]; then
+    mkdir -p "$WORKDIR_HOST" || die "Cannot create work directory: $WORKDIR_HOST"
+    WORKDIR_FLAG=(-w "$WORKDIR_HOST")
+fi
+
 LOCAL_CMD=(
     mamba run -p "${SCRIPT_DIR}/conda-envs/dana-mag-flye"
     nextflow run "${SCRIPT_DIR}/main.nf"
     --input "$INPUT_HOST"
     --outdir "$OUTDIR_HOST"
+    "${WORKDIR_FLAG[@]}"
     "${NF_ARGS[@]}"
     -resume ${RESUME_SESSION}
 )
