@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
 
-  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', onselect = null } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, onselect = null, onclick = null } = $props();
   let container;
   let listenersAttached = false;
 
@@ -10,9 +10,9 @@
     paper_bgcolor: '#1e293b',
     plot_bgcolor: '#0f172a',
     font: { color: '#94a3b8', family: 'Inter, sans-serif', size: 12 },
-    xaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155', title: 'Component 1' },
-    yaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155', title: 'Component 2' },
-    margin: { t: 30, r: 20, b: 50, l: 60 },
+    xaxis: { showgrid: false, zeroline: false, showticklabels: false, title: '' },
+    yaxis: { showgrid: false, zeroline: false, showticklabels: false, title: '' },
+    margin: { t: 10, r: 10, b: 10, l: 10 },
     modebar: { orientation: 'v', bgcolor: 'transparent', color: '#64748b', activecolor: '#22d3ee' },
     legend: { bgcolor: 'rgba(15,23,42,0.7)', font: { color: '#94a3b8', size: 10 },
               x: 1, y: 1, xanchor: 'right', yanchor: 'top' },
@@ -28,13 +28,17 @@
     return s * scale;
   }
 
+  const BIN_LABELS = { bin: 'DAS Tool', semibin_bin: 'SemiBin2', metabat_bin: 'MetaBAT2', maxbin_bin: 'MaxBin2', lorbin_bin: 'LorBin', comebin_bin: 'COMEBin' };
+
   function hoverText(c, colorBy) {
     let tax = c.kaiju_phylum || c.kraken2_phylum || c.rrna_phylum || '?';
     // If coloring by a taxonomy field, show that field's value
     if (colorBy && !colorBy.endsWith('_bin') && colorBy !== 'bin' && c[colorBy] !== undefined) {
       tax = c[colorBy] || '?';
     }
-    return `${c.id}<br>Length: ${c.length.toLocaleString()} bp<br>Depth: ${c.depth}<br>GC: ${c.gc ?? '?'}%<br>Bin: ${c.bin || 'none'}<br>Tax: ${tax}`;
+    const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
+    const binLine = isBin ? `<br>${BIN_LABELS[colorBy] || colorBy}: ${c[colorBy] || 'none'}` : '';
+    return `${c.id}<br>Length: ${c.length.toLocaleString()} bp<br>Depth: ${c.depth}<br>GC: ${c.gc ?? '?'}%${binLine}<br>Tax: ${tax}`;
   }
 
   function getTraces(data, colorBy, sizeBy, sizeScale, mode) {
@@ -105,10 +109,15 @@
       groups[key].ids.push(c.id);
     }
 
-    // Stable color map: assign colors alphabetically so each group always gets the same color
-    const allNames = Object.keys(groups).filter(n => n !== 'unbinned' && n !== 'Unknown').sort();
-    const colorMap = {};
-    allNames.forEach((name, i) => { colorMap[name] = palette[i % palette.length]; });
+    // Use stable colorMap from parent (derived from full unfiltered dataset) if available,
+    // otherwise fall back to computing from visible groups
+    const useParentMap = colorMap && Object.keys(colorMap).length > 0;
+    const effectiveColorMap = useParentMap ? colorMap : (() => {
+      const allNames = Object.keys(groups).filter(n => n !== 'unbinned' && n !== 'Unknown').sort();
+      const m = {};
+      allNames.forEach((name, i) => { m[name] = palette[i % palette.length]; });
+      return m;
+    })();
 
     // Render order: unbinned/Unknown first (bottom layer), then smallest groups on top
     const entries = Object.entries(groups).sort((a, b) => {
@@ -129,7 +138,7 @@
         customdata: g.ids,
         marker: {
           size: g.sizes,
-          color: isBackground ? '#475569' : colorMap[name],
+          color: isBackground ? '#475569' : (effectiveColorMap[name] || '#94a3b8'),
           opacity: isBackground ? 0.25 : 0.75,
           line: { width: 0 },
         },
@@ -140,11 +149,15 @@
 
   onMount(() => {
     if (data) plot();
+    // Plotly needs a resize after layout settles to fit its container
+    requestAnimationFrame(() => {
+      if (container) Plotly.Plots.resize(container);
+    });
   });
 
   $effect(() => {
     // Read all reactive props so Svelte tracks them as dependencies
-    const _deps = [data, colorBy, sizeBy, sizeScale, mode];
+    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap];
     if (container && data) plot();
   });
 
@@ -152,9 +165,8 @@
     const traces = getTraces(data, colorBy, sizeBy, sizeScale, mode);
     const layout = {
       ...darkLayout,
-      xaxis: { ...darkLayout.xaxis, title: mode === 'tsne' ? 't-SNE 1' : mode === 'umap' ? 'UMAP 1' : 'PC 1', uirevision: mode },
-      // Note: do NOT add matches:'x' to yaxis — it conflicts with scaleanchor and breaks 1:1 aspect ratio
-      yaxis: { ...darkLayout.yaxis, title: mode === 'tsne' ? 't-SNE 2' : mode === 'umap' ? 'UMAP 2' : 'PC 2', uirevision: mode, scaleanchor: 'x', scaleratio: 1 },
+      xaxis: { ...darkLayout.xaxis, uirevision: mode },
+      yaxis: { ...darkLayout.yaxis, uirevision: mode, scaleanchor: 'x', scaleratio: 1 },
       uirevision: mode + '-' + colorBy,
     };
     Plotly.react(container, traces, layout, {
@@ -200,12 +212,18 @@
       container.on('plotly_deselect', () => {
         if (onselect) onselect(null);
       });
+      container.on('plotly_click', (eventData) => {
+        if (onclick && eventData?.points?.length) {
+          const id = eventData.points[0].customdata;
+          if (id) onclick(id);
+        }
+      });
       listenersAttached = true;
     }
   }
 </script>
 
-<div bind:this={container} class="w-full plotly-modebar-left" style="min-height: 500px;"></div>
+<div bind:this={container} class="w-full plotly-modebar-left flex-1 min-h-0"></div>
 
 <style>
   .plotly-modebar-left :global(.modebar) {

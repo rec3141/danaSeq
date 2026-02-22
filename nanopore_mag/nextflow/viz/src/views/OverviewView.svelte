@@ -14,31 +14,65 @@
     return n + ' bp';
   }
 
+  // Format a log10 value as human-readable
+  function logLabel(logVal) {
+    const v = Math.pow(10, logVal);
+    if (v >= 1e6) return (v / 1e6).toFixed(0) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+    if (v >= 1) return v.toFixed(0);
+    return v.toFixed(2);
+  }
+
+  function logTicksForRange(lo, hi, suffix) {
+    const vals = [];
+    const text = [];
+    for (let e = Math.ceil(lo); e <= Math.floor(hi); e++) {
+      vals.push(e);
+      const v = Math.pow(10, e);
+      let label;
+      if (v >= 1e6) label = (v / 1e6).toFixed(0) + 'M';
+      else if (v >= 1e3) label = (v / 1e3).toFixed(0) + 'K';
+      else label = v.toFixed(v < 1 ? 2 : 0);
+      text.push(label + (suffix || ''));
+    }
+    return { vals, text };
+  }
+
+  // Length histogram: use log10(center) as x, label axis with real bp values
   let histogramData = $derived.by(() => {
     if (!lenData) return [];
     const edges = lenData.bin_edges;
     const counts = lenData.counts;
     const x = [];
+    const hoverText = [];
     for (let i = 0; i < counts.length; i++) {
-      x.push((edges[i] + edges[i + 1]) / 2);
+      const center = (edges[i] + edges[i + 1]) / 2;
+      x.push(Math.log10(center));
+      hoverText.push(`${logLabel(Math.log10(center))} bp: ${counts[i]} contigs`);
     }
     return [{
       type: 'bar',
       x, y: counts,
+      text: hoverText,
+      hoverinfo: 'text',
+      textposition: 'none',
       marker: { color: '#22d3ee', opacity: 0.8 },
-      hovertemplate: '%{x:.0f} bp: %{y} contigs<extra></extra>',
     }];
   });
 
   let histogramLayout = $derived.by(() => {
     if (!lenData) return {};
+    const edges = lenData.bin_edges;
+    const lo = Math.log10(edges[0]);
+    const hi = Math.log10(edges[edges.length - 1]);
+    const ticks = logTicksForRange(lo, hi, ' bp');
     return {
       title: { text: 'Contig Length Distribution', font: { size: 14 } },
-      xaxis: { title: 'Contig length (bp)', type: 'log' },
-      yaxis: { title: 'Count' },
+      xaxis: { title: 'Contig length', tickvals: ticks.vals, ticktext: ticks.text, fixedrange: true },
+      yaxis: { title: 'Count', fixedrange: true },
       shapes: [{
         type: 'line',
-        x0: lenData.n50, x1: lenData.n50,
+        x0: Math.log10(lenData.n50), x1: Math.log10(lenData.n50),
         y0: 0, y1: 1, yref: 'paper',
         line: { color: '#fbbf24', width: 2, dash: 'dash' },
       }],
@@ -52,23 +86,88 @@
     };
   });
 
-  let donutData = $derived.by(() => {
-    if (!overviewData?.binner_counts) return [];
-    const entries = Object.entries(overviewData.binner_counts);
-    const colors = {
-      semibin: '#22d3ee', metabat: '#34d399', maxbin: '#fbbf24',
-      lorbin: '#a78bfa', comebin: '#fb923c', other: '#64748b',
-    };
+  // Coverage histogram: log10-space bins
+  let covHistData = $derived.by(() => {
+    if (!lenData?.cov_log_edges) return [];
+    const edges = lenData.cov_log_edges;
+    const counts = lenData.cov_counts;
+    const x = [];
+    const hoverText = [];
+    for (let i = 0; i < counts.length; i++) {
+      const center = (edges[i] + edges[i + 1]) / 2;
+      x.push(center);
+      hoverText.push(`${logLabel(center)}x: ${counts[i]} contigs`);
+    }
     return [{
-      type: 'pie',
-      labels: entries.map(([k]) => k),
-      values: entries.map(([, v]) => v),
-      marker: { colors: entries.map(([k]) => colors[k] || '#64748b') },
-      hole: 0.5,
-      textinfo: 'label+value',
-      textfont: { color: '#e2e8f0', size: 12 },
-      hovertemplate: '%{label}: %{value} MAGs (%{percent})<extra></extra>',
+      type: 'bar',
+      x, y: counts,
+      text: hoverText,
+      hoverinfo: 'text',
+      textposition: 'none',
+      marker: { color: '#34d399', opacity: 0.8 },
     }];
+  });
+
+  let covHistLayout = $derived.by(() => {
+    if (!lenData?.cov_log_edges) return {};
+    const edges = lenData.cov_log_edges;
+    const lo = edges[0];
+    const hi = edges[edges.length - 1];
+    const ticks = logTicksForRange(lo, hi, 'x');
+    return {
+      title: { text: 'Coverage Distribution', font: { size: 14 } },
+      xaxis: { title: 'Coverage (depth)', tickvals: ticks.vals, ticktext: ticks.text, fixedrange: true },
+      yaxis: { title: 'Count', fixedrange: true },
+    };
+  });
+
+  // Length-coverage scatter, colored by GC%
+  let scatterData = $derived.by(() => {
+    if (!lenData?.scatter_log_length) return [];
+    const hasGc = lenData.scatter_gc && lenData.scatter_gc.length === lenData.scatter_log_length.length;
+    return [{
+      type: 'scattergl',
+      mode: 'markers',
+      x: lenData.scatter_log_length,
+      y: lenData.scatter_log_depth,
+      marker: hasGc ? {
+        color: lenData.scatter_gc,
+        colorscale: 'Viridis',
+        cmin: 20,
+        cmax: 80,
+        opacity: 0.5,
+        size: 3,
+        colorbar: { title: 'GC%', thickness: 12, len: 0.5, tickfont: { size: 9 } },
+      } : {
+        color: '#a78bfa',
+        opacity: 0.3,
+        size: 3,
+      },
+      hovertemplate: hasGc
+        ? 'Length: %{customdata[0]}<br>Depth: %{customdata[1]}x<br>GC: %{customdata[2]}%<extra></extra>'
+        : 'Length: %{customdata[0]}<br>Depth: %{customdata[1]}x<extra></extra>',
+      customdata: lenData.scatter_log_length.map((lx, i) => {
+        const row = [logLabel(lx) + ' bp', logLabel(lenData.scatter_log_depth[i])];
+        if (hasGc) row.push(lenData.scatter_gc[i]);
+        return row;
+      }),
+    }];
+  });
+
+  let scatterLayout = $derived.by(() => {
+    if (!lenData?.scatter_log_length) return {};
+    const lx = lenData.scatter_log_length;
+    const ly = lenData.scatter_log_depth;
+    let xlo = Infinity, xhi = -Infinity, ylo = Infinity, yhi = -Infinity;
+    for (const v of lx) { if (v < xlo) xlo = v; if (v > xhi) xhi = v; }
+    for (const v of ly) { if (v < ylo) ylo = v; if (v > yhi) yhi = v; }
+    const xticks = logTicksForRange(xlo, xhi, ' bp');
+    const yticks = logTicksForRange(ylo, yhi, 'x');
+    return {
+      title: { text: 'Length vs Coverage', font: { size: 14 } },
+      xaxis: { title: 'Contig length', tickvals: xticks.vals, ticktext: xticks.text },
+      yaxis: { title: 'Coverage (depth)', tickvals: yticks.vals, ticktext: yticks.text },
+    };
   });
 </script>
 
@@ -82,15 +181,23 @@
     <StatCard label="Plasmid Contigs" value={overviewData.n_plasmid.toLocaleString()} color="purple" />
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
       <PlotlyChart data={histogramData} layout={histogramLayout} />
     </div>
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      <PlotlyChart
-        data={donutData}
-        layout={{ title: { text: 'Binner Origin (DAS Tool)', font: { size: 14 } }, showlegend: true }}
-      />
+      {#if scatterData.length}
+        <PlotlyChart data={scatterData} layout={scatterLayout} config={{ displayModeBar: false }} />
+      {:else}
+        <p class="text-slate-500 text-sm py-8 text-center">No coverage data available</p>
+      {/if}
+    </div>
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      {#if covHistData.length}
+        <PlotlyChart data={covHistData} layout={covHistLayout} />
+      {:else}
+        <p class="text-slate-500 text-sm py-8 text-center">No coverage data available</p>
+      {/if}
     </div>
   </div>
 {/if}

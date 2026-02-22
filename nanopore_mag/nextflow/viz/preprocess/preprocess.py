@@ -191,8 +191,8 @@ def build_overview(results_dir, assembly_info, depths_df, dastool_summary, check
     return overview
 
 
-def build_contig_lengths(assembly_info):
-    """Build contig_lengths.json with pre-bucketed histogram data."""
+def build_contig_lengths(assembly_info, depths_df=None, results_dir=None):
+    """Build contig_lengths.json with pre-bucketed histogram data, coverage histogram, and scatter."""
     print("Building contig_lengths.json ...")
     lengths = assembly_info['length'].values
 
@@ -202,12 +202,64 @@ def build_contig_lengths(assembly_info):
     bins = np.logspace(np.log10(min_len), np.log10(max_len + 1), num=50)
     counts, edges = np.histogram(lengths, bins=bins)
 
-    return {
+    result = {
         'bin_edges': [int(e) for e in edges],
         'counts': [int(c) for c in counts],
         'n50': int(np.sort(lengths)[::-1][np.searchsorted(
             np.cumsum(np.sort(lengths)[::-1]), lengths.sum() / 2)]),
     }
+
+    # Coverage histogram and length-coverage scatter (if depths available)
+    if depths_df is not None:
+        depth_map = {}
+        for _, row in depths_df.iterrows():
+            depth_map[row['contigName']] = float(row['totalAvgDepth'])
+
+        contig_names = assembly_info['#seq_name'].values
+        depths = np.array([depth_map.get(c, 0.0) for c in contig_names])
+        positive = depths > 0
+
+        # Coverage histogram: log10-space bins, equal-width bars
+        if positive.any():
+            log_depths = np.log10(depths[positive])
+            cov_min = float(np.floor(log_depths.min()))
+            cov_max = float(np.ceil(log_depths.max()))
+            cov_bins = np.linspace(cov_min, cov_max, num=50)
+            cov_counts, cov_edges = np.histogram(log_depths, bins=cov_bins)
+            result['cov_log_edges'] = [round(float(e), 4) for e in cov_edges]
+            result['cov_counts'] = [int(c) for c in cov_counts]
+            print(f"  Coverage histogram: {int(positive.sum())} contigs with depth > 0")
+
+        # Length-coverage scatter: all contigs assigned to any bin
+        if positive.any():
+            binned_contigs = set()
+            if results_dir:
+                for binner in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']:
+                    btsv = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+                    bdf = load_tsv(btsv, header=None, names=['contig', 'bin'])
+                    if bdf is not None:
+                        binned_contigs.update(bdf['contig'].values)
+                c2b_path = os.path.join(results_dir, 'binning', 'dastool', 'contig2bin.tsv')
+                c2b_df = load_tsv(c2b_path, header=None, names=['contig', 'bin'])
+                if c2b_df is not None:
+                    binned_contigs.update(c2b_df['contig'].values)
+
+            pos_idx = np.where(positive)[0]
+            if binned_contigs:
+                pos_idx = np.array([i for i in pos_idx if contig_names[i] in binned_contigs])
+            pos_idx.sort()
+            result['scatter_log_length'] = [round(float(np.log10(lengths[i])), 4) for i in pos_idx]
+            result['scatter_log_depth'] = [round(float(np.log10(depths[i])), 4) for i in pos_idx]
+            # GC% for coloring
+            if results_dir:
+                gc_path = os.path.join(results_dir, 'assembly', 'gc.tsv')
+                gc_df = load_tsv(gc_path)
+                if gc_df is not None:
+                    gc_map = dict(zip(gc_df['contig_id'], gc_df['gc_pct'].astype(float)))
+                    result['scatter_gc'] = [round(float(gc_map.get(contig_names[i], 0)), 2) for i in pos_idx]
+            print(f"  Length-coverage scatter: {len(pos_idx)} points")
+
+    return result
 
 
 def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
@@ -645,6 +697,111 @@ def build_kegg_heatmap(results_dir):
     }
 
 
+def build_scg_heatmap(results_dir):
+    """Build scg_heatmap.json with Ward-clustered marker gene presence/absence matrix."""
+    print("Building scg_heatmap.json ...")
+
+    # Load contig2bin maps for all binners
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    contig_to_bins = defaultdict(set)  # contig -> set of bin names
+
+    # DAS Tool consensus (prefixed names like dastool-semibin_001)
+    c2b_path = os.path.join(results_dir, 'binning', 'dastool', 'contig2bin.tsv')
+    c2b_df = load_tsv(c2b_path, header=None, names=['contig', 'bin'])
+    if c2b_df is not None:
+        for _, row in c2b_df.iterrows():
+            contig_to_bins[row['contig']].add(row['bin'])
+
+    # Per-binner maps
+    for binner in binners:
+        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is not None:
+            for _, row in bdf.iterrows():
+                contig_to_bins[row['contig']].add(row['bin'])
+
+    result = {}
+    for scg_set in ['bacteria', 'archaea']:
+        scg_path = os.path.join(results_dir, 'binning', 'dastool', f'{scg_set}.scg')
+        scg_df = load_tsv(scg_path, header=None, names=['protein_id', 'scg_name'])
+        if scg_df is None or scg_df.empty:
+            result[scg_set] = {
+                'mag_ids': [], 'module_ids': [], 'module_names': [],
+                'matrix': [], 'row_order': [], 'col_order': [],
+            }
+            continue
+
+        # Build bin x marker count matrix
+        bin_marker_counts = defaultdict(Counter)  # bin -> {marker: count}
+        all_markers = set()
+
+        for _, row in scg_df.iterrows():
+            protein_id = str(row['protein_id'])
+            marker = str(row['scg_name'])
+            all_markers.add(marker)
+
+            # Extract contig from protein ID: "contig_000035_269" -> "contig_000035"
+            parts = protein_id.rsplit('_', 1)
+            contig = parts[0] if len(parts) > 1 else protein_id
+
+            # Assign to all bins this contig belongs to
+            for bin_name in contig_to_bins.get(contig, []):
+                bin_marker_counts[bin_name][marker] += 1
+
+        if not bin_marker_counts:
+            result[scg_set] = {
+                'mag_ids': [], 'module_ids': [], 'module_names': [],
+                'matrix': [], 'row_order': [], 'col_order': [],
+            }
+            continue
+
+        # Sort for deterministic order
+        mag_ids = sorted(bin_marker_counts.keys())
+        marker_ids = sorted(all_markers)
+
+        # Build count matrix
+        matrix = []
+        for mag in mag_ids:
+            row = [bin_marker_counts[mag].get(m, 0) for m in marker_ids]
+            matrix.append(row)
+        mat = np.array(matrix, dtype=float)
+
+        # Ward hierarchical clustering on rows (bins) and columns (markers)
+        if mat.shape[0] > 2:
+            row_dist = pdist(mat, metric='euclidean')
+            row_linkage = linkage(row_dist, method='ward')
+            row_order = leaves_list(row_linkage).tolist()
+        else:
+            row_order = list(range(mat.shape[0]))
+
+        if mat.shape[1] > 2:
+            col_dist = pdist(mat.T, metric='euclidean')
+            col_linkage = linkage(col_dist, method='ward')
+            col_order = leaves_list(col_linkage).tolist()
+        else:
+            col_order = list(range(mat.shape[1]))
+
+        # Reorder by clustering
+        reordered = mat[row_order][:, col_order].tolist()
+        reordered_mags = [mag_ids[i] for i in row_order]
+        reordered_markers = [marker_ids[i] for i in col_order]
+
+        n_rows = len(reordered_mags)
+        n_cols = len(reordered_markers)
+
+        result[scg_set] = {
+            'mag_ids': reordered_mags,
+            'module_ids': reordered_markers,
+            'module_names': reordered_markers,
+            'matrix': [[int(v) for v in row] for row in reordered],
+            'row_order': list(range(n_rows)),
+            'col_order': list(range(n_cols)),
+        }
+        print(f"  {scg_set}: {n_rows} bins × {n_cols} markers")
+
+    return result
+
+
 def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     """Build coverage.json with per-bin per-sample depth for all binners, Bray-Curtis clustered."""
     print("Building coverage.json ...")
@@ -894,7 +1051,7 @@ def build_eukaryotic(results_dir, assembly_info):
 
 
 def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
-                          skip_tsne=False):
+                          skip_tsne=False, output_dir=None):
     """Build contig_explorer.json with PCA + t-SNE + UMAP on fourth-root transformed TNF."""
     print("Building contig_explorer.json ...")
 
@@ -1039,33 +1196,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     pca_coords = pca.fit_transform(tnf_scaled)
     pca_input = pca_coords[:, :min(50, n_components)]
 
-    # t-SNE on PCA output of fourth-root transformed data
-    tsne_coords = None
-    if not skip_tsne:
-        try:
-            from sklearn.manifold import TSNE
-            print("  Running t-SNE on fourth-root transformed TNF ...")
-            tsne = TSNE(n_components=2, perplexity=30, random_state=42, max_iter=1000,
-                        learning_rate='auto', init='pca')
-            tsne_coords = tsne.fit_transform(pca_input)
-            print("  t-SNE complete.")
-        except Exception as e:
-            print(f"  [WARNING] t-SNE failed: {e}", file=sys.stderr)
-
-    # UMAP on PCA output of fourth-root transformed data
-    umap_coords = None
-    if not skip_tsne:  # UMAP gated by same flag (both are slow)
-        try:
-            import umap
-            print("  Running UMAP on fourth-root transformed TNF ...")
-            reducer = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1,
-                                metric='euclidean', random_state=42)
-            umap_coords = reducer.fit_transform(pca_input)
-            print("  UMAP complete.")
-        except Exception as e:
-            print(f"  [WARNING] UMAP failed: {e}", file=sys.stderr)
-
-    # Build output records
+    # Build output records (without embeddings — those go in a separate file)
     contigs = []
     for i, cid in enumerate(contig_ids):
         contig_gc = gc_map.get(cid, 0)
@@ -1095,24 +1226,49 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
         # Eukaryotic classifiers
         rec['tiara'] = tiara_map.get(cid, '')
         rec['whokaryote'] = whokaryote_map.get(cid, '')
-
-        if tsne_coords is not None:
-            rec['tsne_x'] = round(float(tsne_coords[i, 0]), 4)
-            rec['tsne_y'] = round(float(tsne_coords[i, 1]), 4)
-
-        if umap_coords is not None:
-            rec['umap_x'] = round(float(umap_coords[i, 0]), 4)
-            rec['umap_y'] = round(float(umap_coords[i, 1]), 4)
-
         contigs.append(rec)
 
-    return {
+    explorer = {
         'contigs': contigs,
-        'has_tsne': tsne_coords is not None,
-        'has_umap': umap_coords is not None,
         'pca_variance_explained': [round(float(v), 4) for v in pca.explained_variance_ratio_[:5]],
         'transform': 'fourth_root',
     }
+
+    # Embeddings (t-SNE + UMAP) go in a separate file so --skip-tsne doesn't clobber them
+    embeddings = None
+    if not skip_tsne:
+        embeddings = {}
+        # t-SNE
+        try:
+            from sklearn.manifold import TSNE
+            print("  Running t-SNE on fourth-root transformed TNF ...")
+            tsne = TSNE(n_components=2, perplexity=30, random_state=42, max_iter=1000,
+                        learning_rate='auto', init='pca')
+            tsne_coords = tsne.fit_transform(pca_input)
+            print("  t-SNE complete.")
+            for i, cid in enumerate(contig_ids):
+                embeddings.setdefault(cid, {})['tsne_x'] = round(float(tsne_coords[i, 0]), 4)
+                embeddings[cid]['tsne_y'] = round(float(tsne_coords[i, 1]), 4)
+        except Exception as e:
+            print(f"  [WARNING] t-SNE failed: {e}", file=sys.stderr)
+
+        # UMAP
+        try:
+            import umap
+            print("  Running UMAP on fourth-root transformed TNF ...")
+            reducer = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1,
+                                metric='euclidean', random_state=42)
+            umap_coords = reducer.fit_transform(pca_input)
+            print("  UMAP complete.")
+            for i, cid in enumerate(contig_ids):
+                embeddings.setdefault(cid, {})['umap_x'] = round(float(umap_coords[i, 0]), 4)
+                embeddings[cid]['umap_y'] = round(float(umap_coords[i, 1]), 4)
+        except Exception as e:
+            print(f"  [WARNING] UMAP failed: {e}", file=sys.stderr)
+    else:
+        print("  --skip-tsne: skipping t-SNE/UMAP (existing contig_embeddings.json preserved)")
+
+    return explorer, embeddings
 
 
 def main():
@@ -1156,7 +1312,7 @@ def main():
     print(f"  Wrote overview.json")
 
     # 2. contig_lengths.json
-    contig_lengths = build_contig_lengths(assembly_info)
+    contig_lengths = build_contig_lengths(assembly_info, depths_df, results_dir)
     with open(os.path.join(output_dir, 'contig_lengths.json'), 'w') as f:
         json.dump(contig_lengths, f)
     print(f"  Wrote contig_lengths.json")
@@ -1188,6 +1344,16 @@ def main():
         json.dump(kegg, f)
     print(f"  Wrote kegg_heatmap.json ({len(kegg['mag_ids'])} MAGs × {len(kegg['module_ids'])} modules)")
 
+    # 6b. scg_heatmap.json
+    scg = build_scg_heatmap(results_dir)
+    with open(os.path.join(output_dir, 'scg_heatmap.json'), 'w') as f:
+        json.dump(scg, f)
+    bact_n = len(scg.get('bacteria', {}).get('mag_ids', []))
+    bact_m = len(scg.get('bacteria', {}).get('module_ids', []))
+    arch_n = len(scg.get('archaea', {}).get('mag_ids', []))
+    arch_m = len(scg.get('archaea', {}).get('module_ids', []))
+    print(f"  Wrote scg_heatmap.json (bacteria: {bact_n}×{bact_m}, archaea: {arch_n}×{arch_m})")
+
     # 7. coverage.json
     coverage = build_coverage(results_dir, dastool_summary, contig2bin, depths_df)
     with open(os.path.join(output_dir, 'coverage.json'), 'w') as f:
@@ -1213,13 +1379,20 @@ def main():
     print(f"  Wrote eukaryotic.json")
 
     # 11. contig_explorer.json (largest, do last)
-    contig_explorer = build_contig_explorer(results_dir, assembly_info, depths_df,
-                                            contig2bin, kaiju_df,
-                                            skip_tsne=args.skip_tsne)
+    contig_explorer, embeddings = build_contig_explorer(
+        results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
+        skip_tsne=args.skip_tsne, output_dir=output_dir)
     with open(os.path.join(output_dir, 'contig_explorer.json'), 'w') as f:
         json.dump(contig_explorer, f)
-    print(f"  Wrote contig_explorer.json ({len(contig_explorer['contigs'])} contigs, "
-          f"t-SNE={'yes' if contig_explorer['has_tsne'] else 'skipped'})")
+    print(f"  Wrote contig_explorer.json ({len(contig_explorer['contigs'])} contigs)")
+    if embeddings is not None:
+        with open(os.path.join(output_dir, 'contig_embeddings.json'), 'w') as f:
+            json.dump(embeddings, f, separators=(',', ':'))
+        n_tsne = sum(1 for v in embeddings.values() if 'tsne_x' in v)
+        n_umap = sum(1 for v in embeddings.values() if 'umap_x' in v)
+        print(f"  Wrote contig_embeddings.json (t-SNE: {n_tsne}, UMAP: {n_umap})")
+    else:
+        print(f"  Skipped contig_embeddings.json (--skip-tsne, existing file preserved)")
 
     print("\nDone! All JSON files written to", output_dir)
 

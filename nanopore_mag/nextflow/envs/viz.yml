@@ -7,4 +7,5 @@ dependencies:
   - numpy
   - scipy
   - scikit-learn
+  - umap-learn
   - nodejs>=18

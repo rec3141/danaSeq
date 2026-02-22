@@ -33,22 +33,21 @@ process BIN_SEMIBIN2 {
     if [ \$semibin_exit -ne 0 ]; then
         echo "[WARNING] SemiBin2 exited with code \$semibin_exit (dataset may be too small)" >&2
         touch semibin_bins.tsv
-    elif [ -f semibin_out/contig_bins.tsv ]; then
-        # SemiBin2 outputs a header line and uses -1 for unbinned contigs
-        # Filter out unbinned (-1) before renumbering
-        tail -n +2 semibin_out/contig_bins.tsv | \
-            awk -F'\\t' '\$2 != -1 {printf "%s\\tsemibin_%03d\\n", \$1, \$2+1}' > semibin_bins.tsv
-
-        # Rename intermediate bin FASTAs to standardized names
-        # SemiBin2 outputs gzipped bins (.fa.gz)
-        bin_num=0
+    elif [ -d semibin_out/output_bins ] && ls semibin_out/output_bins/*.fa.gz 1>/dev/null 2>&1; then
+        # Build TSV from FASTA headers (single source of truth)
+        # Extract bin number from SemiBin2 filename (e.g. SemiBin2_42.fa.gz -> 43)
+        > semibin_bins.tsv
         for bin_file in semibin_out/output_bins/*.fa.gz; do
             [ -e "\$bin_file" ] || continue
-            bin_num=\$((bin_num + 1))
-            zcat "\$bin_file" > "bins/\$(printf 'semibin_%03d.fa' \$bin_num)"
+            bin_num=\$(basename "\$bin_file" .fa.gz | grep -oP '\\d+\$')
+            bin_name=\$(printf 'semibin_%03d' \$((bin_num + 1)))
+            zcat "\$bin_file" > "bins/\${bin_name}.fa"
+            zcat "\$bin_file" | grep '>' | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+                printf '%s\\t%s\\n' "\$contig" "\$bin_name"
+            done >> semibin_bins.tsv
         done
     else
-        echo "[WARNING] SemiBin2 produced no contig_bins.tsv" >&2
+        echo "[WARNING] SemiBin2 produced no bins" >&2
         touch semibin_bins.tsv
     fi
 
@@ -139,12 +138,12 @@ process BIN_MAXBIN2 {
         -thread ${task.cpus}
 
     # Convert MaxBin2 FASTA bins to contig_bins.tsv format
+    # Extract bin number from filename (e.g. bin.042.fasta -> 42) for consistent naming
     > maxbin_bins.tsv
-    bin_num=0
     for bin_file in maxbin_out/bin*.fasta; do
         [ -e "\$bin_file" ] || continue
-        bin_num=\$((bin_num + 1))
-        bin_name=\$(printf 'maxbin_%03d' \$bin_num)
+        bin_num=\$(basename "\$bin_file" .fasta | grep -oP '\\d+\$')
+        bin_name=\$(printf 'maxbin_%03d' "\$bin_num")
         cp "\$bin_file" "bins/\${bin_name}.fa"
         grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
             printf '%s\\t%s\\n' "\$contig" "\$bin_name"
@@ -195,12 +194,12 @@ process BIN_LORBIN {
         touch lorbin_bins.tsv
     elif [ -d lorbin_out/output_bins ]; then
         # Convert LorBin FASTA bins to DAS_Tool format TSV (contig\\tbin)
+        # Extract bin number from filename (e.g. bin.42.fa -> 42) for consistent naming
         > lorbin_bins.tsv
-        bin_num=0
         for bin_file in lorbin_out/output_bins/bin.*.fa; do
             [ -e "\$bin_file" ] || continue
-            bin_num=\$((bin_num + 1))
-            bin_name=\$(printf 'lorbin_%03d' \$bin_num)
+            bin_num=\$(basename "\$bin_file" .fa | grep -oP '\\d+\$')
+            bin_name=\$(printf 'lorbin_%03d' "\$bin_num")
             cp "\$bin_file" "bins/\${bin_name}.fa"
             grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
@@ -253,12 +252,12 @@ process BIN_COMEBIN {
         touch comebin_bins.tsv
     elif [ -d comebin_out/comebin_res/comebin_res_bins ]; then
         # Convert COMEBin FASTA bins to DAS_Tool format TSV (contig\\tbin)
+        # Extract bin number from filename for consistent naming
         > comebin_bins.tsv
-        bin_num=0
         for bin_file in comebin_out/comebin_res/comebin_res_bins/*.fa; do
             [ -e "\$bin_file" ] || continue
-            bin_num=\$((bin_num + 1))
-            bin_name=\$(printf 'comebin_%03d' \$bin_num)
+            bin_num=\$(basename "\$bin_file" .fa | grep -oP '\\d+\$')
+            bin_name=\$(printf 'comebin_%03d' "\$bin_num")
             cp "\$bin_file" "bins/\${bin_name}.fa"
             grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"

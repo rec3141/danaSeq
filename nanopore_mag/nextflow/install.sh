@@ -35,6 +35,15 @@ set -euo pipefail
 #   dana-mag-marferret - DIAMOND + Python/pandas (MarFERReT marine eukaryotic classification)
 #   dana-mag-viz      - Node.js + Python/pandas/scipy (viz dashboard preprocessing + build)
 #
+#   dana-mag-metamdbg  - metaMDBG / nanoMDBG (de Bruijn graph ONT metagenome assembler)
+#   dana-mag-myloasm   - myloasm (high-resolution ONT strain assembler)
+#   dana-mag-derep     - galah, skani, sourmash (fast MAG dereplication + ANI + sketching)
+#   dana-mag-drep      - dRep (established MAG dereplication; heavy deps, isolated)
+#   dana-mag-instrain  - InStrain (strain-level population genomics; ancient biopython pin)
+#   dana-mag-strainy   - Strainy (strain-aware assembly from long reads)
+#   dana-mag-floria    - Floria (strain-aware phasing from long reads)
+#   dana-mag-skder     - skDER (fast skani-based dereplication; Python 3.10 pin)
+#
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
 # symlinked YAML; its env is named dana-bbmap.
 #
@@ -111,6 +120,14 @@ ENV_YAMLS=(
     marferret.yml
     bbmap.yml
     viz.yml
+    metamdbg.yml
+    myloasm.yml
+    derep.yml
+    drep.yml
+    instrain.yml
+    strainy.yml
+    floria.yml
+    skder.yml
 )
 
 # Which tool binary to check for each environment
@@ -142,6 +159,14 @@ declare -A ENV_CHECK=(
     [dana-mag-marferret]="diamond"
     [dana-bbmap]="bbduk.sh"
     [dana-mag-viz]="node"
+    [dana-mag-metamdbg]="metaMDBG"
+    [dana-mag-myloasm]="myloasm"
+    [dana-mag-derep]="galah"
+    [dana-mag-drep]="dRep"
+    [dana-mag-instrain]="inStrain"
+    [dana-mag-strainy]="strainy"
+    [dana-mag-floria]="floria"
+    [dana-mag-skder]="skder"
 )
 
 # Additional binaries to verify
@@ -152,6 +177,7 @@ declare -A ENV_EXTRAS=(
     [dana-mag-comebin]="gen_cov_file.sh"
     [dana-mag-binning]="run_MaxBin.pl DAS_Tool jgi_summarize_bam_contig_depths"
     [dana-mag-viz]="npm python3"
+    [dana-mag-derep]="skani sourmash"
 )
 
 yaml_to_envname() {

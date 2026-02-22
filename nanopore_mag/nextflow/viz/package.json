@@ -22,6 +22,7 @@
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "d3": "^7.9.0",
-    "plotly.js-dist-min": "^2.35.3"
+    "plotly.js-dist-min": "^2.35.3",
+    "regl-scatterplot": "^1.10.2"
   }
 }

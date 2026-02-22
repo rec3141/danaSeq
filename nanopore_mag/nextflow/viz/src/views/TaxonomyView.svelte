@@ -284,7 +284,8 @@
   });
 </script>
 
-<div class="mb-4 flex items-center gap-3 flex-wrap text-xs">
+<div class="sticky top-14 z-10 bg-slate-950 pb-2 -mx-4 px-4 pt-1">
+<div class="flex items-center gap-3 flex-wrap text-xs">
   <span class="text-slate-400">Classifier:</span>
   <button
     class="px-3 py-1 rounded-md border transition-colors text-center border-cyan-400 bg-cyan-400/10 text-cyan-400"
@@ -317,6 +318,7 @@
     {/if}
   {/each}
   <span class="text-slate-500">{filteredBins.length} bins</span>
+</div>
 </div>
 
 {#if taxData || filteredBins.length}

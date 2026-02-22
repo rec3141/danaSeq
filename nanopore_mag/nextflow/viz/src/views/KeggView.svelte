@@ -254,7 +254,8 @@
 </script>
 
 {#if keggData}
-  <div class="mb-4 flex items-center gap-3 flex-wrap text-xs">
+  <div class="sticky top-14 z-10 bg-slate-950 pb-2 -mx-4 px-4 pt-1">
+  <div class="flex items-center gap-3 flex-wrap text-xs">
     <span class="text-slate-400">Binners:</span>
     {#each binnerDefs as { key, label }}
       {#if binnerCounts[key]}
@@ -283,6 +284,7 @@
         {summaryStats.nMods} modules, {summaryStats.completeModules} detected (≥75%), avg {(summaryStats.avgCompleteness * 100).toFixed(0)}%
       </span>
     {/if}
+  </div>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">

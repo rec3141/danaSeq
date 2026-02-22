@@ -3,7 +3,8 @@
   import * as d3 from 'd3';
 
   let { data = null, onCellClick = null, onRowClick = null,
-        tooltipFormat = null, legendLabel = null, selectedRow = null } = $props();
+        tooltipFormat = null, legendLabel = null, selectedRow = null,
+        rowAnnotations = null, colorScale: colorScaleProp = null } = $props();
   let container;
 
   onMount(() => {
@@ -37,11 +38,28 @@
     const marginLeft = 180;
     const marginTop = 260;
     const marginBottom = 20;
-    const marginRight = 100;
-    const width = marginLeft + orderedMods.length * cellW + marginRight;
+
+    // Calculate right margin for annotations
+    const defaultAnnoColWidth = 60;
+    const annoGap = 8;
+    const nAnnoCols = rowAnnotations?.length || 0;
+    // Compute per-column offsets using individual widths
+    const annoColWidths = rowAnnotations ? rowAnnotations.map(c => c.width || defaultAnnoColWidth) : [];
+    const annoColOffsets = [];
+    let runningOffset = 0;
+    for (const w of annoColWidths) {
+      annoColOffsets.push(runningOffset);
+      runningOffset += w;
+    }
+    const annoTotalWidth = nAnnoCols > 0 ? annoGap + runningOffset : 0;
+    const marginRight = Math.max(100, annoTotalWidth + 20);
+
+    const heatmapWidth = orderedMods.length * cellW;
+    const width = marginLeft + heatmapWidth + marginRight;
     const height = marginTop + orderedMags.length * cellH + marginBottom;
 
-    const colorScale = d3.scaleSequential(d3.interpolateViridis).domain([0, 1]);
+    const colorScale = colorScaleProp
+      || d3.scaleSequential(d3.interpolateViridis).domain([0, 1]);
 
     const defaultTooltip = (val, magId, modId, modName) =>
       `<strong>${modId}</strong><br>${modName}<br>MAG: ${magId}<br>Completeness: ${(val * 100).toFixed(0)}%`;
@@ -67,7 +85,7 @@
           .attr('y', marginTop + i * cellH)
           .attr('width', cellW - 1)
           .attr('height', cellH - 1)
-          .attr('fill', val > 0 ? colorScale(val) : '#0f172a')
+          .attr('fill', colorScaleProp ? colorScale(val) : (val > 0 ? colorScale(val) : '#0f172a'))
           .attr('rx', 1)
           .style('cursor', 'pointer')
           .on('mouseover', function (event) {
@@ -137,6 +155,54 @@
         .text(orderedNames[j]);
     }
 
+    // Row annotations (right side of heatmap)
+    if (rowAnnotations && rowAnnotations.length > 0) {
+      const annoX = marginLeft + heatmapWidth + annoGap;
+
+      // Annotation column headers
+      for (let c = 0; c < rowAnnotations.length; c++) {
+        const col = rowAnnotations[c];
+        const colW = annoColWidths[c];
+        const align = col.align || 'middle';
+        const xPos = align === 'start'
+          ? annoX + annoColOffsets[c] + 2
+          : annoX + annoColOffsets[c] + colW / 2;
+        svg.append('text')
+          .attr('x', xPos)
+          .attr('y', marginTop - 6)
+          .attr('text-anchor', align)
+          .attr('dominant-baseline', 'auto')
+          .attr('fill', '#64748b')
+          .attr('font-size', '8px')
+          .attr('font-family', 'Inter, sans-serif')
+          .text(col.label);
+      }
+
+      // Annotation values per row
+      for (let i = 0; i < orderedMags.length; i++) {
+        const isSelected = selectedRow && orderedMags[i] === selectedRow;
+        for (let c = 0; c < rowAnnotations.length; c++) {
+          const col = rowAnnotations[c];
+          const colW = annoColWidths[c];
+          const align = col.align || 'middle';
+          const xPos = align === 'start'
+            ? annoX + annoColOffsets[c] + 2
+            : annoX + annoColOffsets[c] + colW / 2;
+          const val = col.values[rOrder[i]] ?? '';
+          const color = col.colorFn ? col.colorFn(val) : (isSelected ? '#22d3ee' : '#94a3b8');
+          svg.append('text')
+            .attr('x', xPos)
+            .attr('y', marginTop + i * cellH + cellH / 2)
+            .attr('text-anchor', align)
+            .attr('dominant-baseline', 'central')
+            .attr('fill', color)
+            .attr('font-size', '8px')
+            .attr('font-family', 'JetBrains Mono, monospace')
+            .text(val);
+        }
+      }
+    }
+
     // Color legend
     const legendWidth = 120;
     const legendHeight = 10;
@@ -144,25 +210,54 @@
     const legendY = height - 4;
 
     const defs = svg.append('defs');
-    const gradient = defs.append('linearGradient').attr('id', 'heatmap-grad');
-    for (let i = 0; i <= 10; i++) {
-      const t = i / 10;
-      gradient.append('stop')
-        .attr('offset', `${i * 10}%`)
-        .attr('stop-color', colorScale(t));
+    const gradId = 'heatmap-grad-' + Math.random().toString(36).slice(2, 8);
+    const gradient = defs.append('linearGradient').attr('id', gradId);
+    if (colorScaleProp && legendLabel?.length === 3) {
+      // Discrete legend: 3 equal bands (for SCG absent/single/multi)
+      gradient.append('stop').attr('offset', '0%').attr('stop-color', colorScale(0));
+      gradient.append('stop').attr('offset', '33%').attr('stop-color', colorScale(0));
+      gradient.append('stop').attr('offset', '33%').attr('stop-color', colorScale(1));
+      gradient.append('stop').attr('offset', '66%').attr('stop-color', colorScale(1));
+      gradient.append('stop').attr('offset', '66%').attr('stop-color', colorScale(2));
+      gradient.append('stop').attr('offset', '100%').attr('stop-color', colorScale(2));
+    } else if (colorScaleProp) {
+      // Continuous custom scale — sample across the value range
+      let vMin = Infinity, vMax = -Infinity;
+      for (const row of orderedMatrix) {
+        for (const v of row) { if (v < vMin) vMin = v; if (v > vMax) vMax = v; }
+      }
+      for (let i = 0; i <= 10; i++) {
+        const t = i / 10;
+        const val = vMin + t * (vMax - vMin);
+        gradient.append('stop')
+          .attr('offset', `${i * 10}%`)
+          .attr('stop-color', colorScale(val));
+      }
+    } else {
+      for (let i = 0; i <= 10; i++) {
+        const t = i / 10;
+        gradient.append('stop')
+          .attr('offset', `${i * 10}%`)
+          .attr('stop-color', colorScale(t));
+      }
     }
 
     svg.append('rect')
       .attr('x', legendX).attr('y', legendY)
       .attr('width', legendWidth).attr('height', legendHeight)
-      .attr('fill', 'url(#heatmap-grad)').attr('rx', 2);
+      .attr('fill', `url(#${gradId})`).attr('rx', 2);
 
     const legendLow = legendLabel ? legendLabel[0] : '0%';
     const legendHigh = legendLabel ? legendLabel[1] : '100%';
+    const legendMid = legendLabel?.[2] || null;
     svg.append('text').attr('x', legendX).attr('y', legendY - 2)
       .attr('fill', '#64748b').attr('font-size', '9px').text(legendLow);
     svg.append('text').attr('x', legendX + legendWidth).attr('y', legendY - 2)
       .attr('text-anchor', 'end').attr('fill', '#64748b').attr('font-size', '9px').text(legendHigh);
+    if (legendMid) {
+      svg.append('text').attr('x', legendX + legendWidth / 2).attr('y', legendY - 2)
+        .attr('text-anchor', 'middle').attr('fill', '#64748b').attr('font-size', '9px').text(legendMid);
+    }
   }
 </script>
 

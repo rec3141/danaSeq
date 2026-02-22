@@ -1,13 +1,16 @@
 <script>
   import ContigScatter from '../components/charts/ContigScatter.svelte';
+  import ReglScatter from '../components/charts/ReglScatter.svelte';
+  import ContigDetail from '../components/ContigDetail.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
-  import { contigExplorer, loadContigExplorer } from '../stores/data.js';
+  import { contigExplorer, loadContigExplorer, loadContigGenes } from '../stores/data.js';
   import { onMount } from 'svelte';
 
   let explorerData = $derived($contigExplorer);
   let sizeBy = $state('length');
   let sizeScale = $state(1.0);
   let mode = $state('tsne');
+  let renderer = $state('plotly');  // 'plotly' | 'regl'
 
   // Color state: separate mode, binner source, taxonomy source + rank, metric, replicon
   let colorMode = $state('bins');   // 'bins' | 'taxa' | 'metric' | 'replicon'
@@ -55,8 +58,112 @@
     return idx >= 0 ? labels[idx] : labels[0];
   }
 
+  const rendererGroup = { values: ['regl', 'plotly'], labels: ['WebGL', 'Plotly'] };
+
   // Fixed pixel widths per button to prevent layout shift when cycling
-  const BW = { bin: '5.5rem', source: '5rem', rank: '4.5rem', metric: '4rem', replicon: '6rem', size: '4rem', mode: '4rem' };
+  const BW = { bin: '5.5rem', source: '5rem', rank: '4.5rem', metric: '4rem', replicon: '6rem', size: '4rem', mode: '4rem', renderer: '4.5rem' };
+
+  // Stable color map: always derived from FULL dataset so filtering doesn't shift colors
+  const PALETTE = ['#22d3ee','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c',
+                   '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8',
+                   '#94a3b8','#d4d4d8','#78716c'];
+
+  let stableColorMap = $derived.by(() => {
+    if (!explorerData?.contigs) return {};
+    const isCont = ['depth', 'length', 'gc'].includes(colorBy);
+    if (isCont) return {};
+    const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
+    const bgLabel = isBin ? 'unbinned' : 'Unknown';
+    const names = new Set();
+    for (const c of explorerData.contigs) names.add(c[colorBy] || bgLabel);
+    const sorted = [...names].filter(n => n !== bgLabel).sort();
+    const map = { [bgLabel]: '#475569' };
+    for (let i = 0; i < sorted.length; i++) map[sorted[i]] = PALETTE[i % PALETTE.length];
+    return map;
+  });
+
+  // Stable size extents: pre-transformed min/max from full dataset so sizes don't jump on filter
+  let fullSizeRange = $derived.by(() => {
+    if (!explorerData?.contigs) return null;
+    let sqrtDepMin = Infinity, sqrtDepMax = -Infinity;
+    let powLenMin = Infinity, powLenMax = -Infinity;
+    for (const c of explorerData.contigs) {
+      const sv = Math.sqrt(c.depth + 0.01);
+      if (sv < sqrtDepMin) sqrtDepMin = sv;
+      if (sv > sqrtDepMax) sqrtDepMax = sv;
+      const pv = Math.pow(c.length, 0.3);
+      if (pv < powLenMin) powLenMin = pv;
+      if (pv > powLenMax) powLenMax = pv;
+    }
+    return { depth: [sqrtDepMin, sqrtDepMax], length: [powLenMin, powLenMax] };
+  });
+
+  // ---- Filter state (log-scale dual-range sliders) ----
+  let lenMinPct = $state(0);
+  let lenMaxPct = $state(100);
+  let depMinPct = $state(0);
+  let depMaxPct = $state(100);
+
+  let dataExtents = $derived.by(() => {
+    if (!explorerData?.contigs?.length) return null;
+    let lMin = Infinity, lMax = -Infinity, dMin = Infinity, dMax = -Infinity;
+    for (const c of explorerData.contigs) {
+      if (c.length < lMin) lMin = c.length;
+      if (c.length > lMax) lMax = c.length;
+      if (c.depth < dMin) dMin = c.depth;
+      if (c.depth > dMax) dMax = c.depth;
+    }
+    return {
+      lMin: Math.max(1, lMin), lMax: Math.max(2, lMax),
+      dMin: Math.max(0.001, dMin), dMax: Math.max(0.01, dMax),
+    };
+  });
+
+  function pctToLog(pct, logMin, logMax) {
+    return Math.pow(10, logMin + (logMax - logMin) * pct / 100);
+  }
+
+  let lenRange = $derived.by(() => {
+    if (!dataExtents) return [0, Infinity];
+    const lo = Math.log10(dataExtents.lMin), hi = Math.log10(dataExtents.lMax);
+    return [pctToLog(lenMinPct, lo, hi), pctToLog(lenMaxPct, lo, hi)];
+  });
+  let depRange = $derived.by(() => {
+    if (!dataExtents) return [0, Infinity];
+    const lo = Math.log10(dataExtents.dMin), hi = Math.log10(dataExtents.dMax);
+    return [pctToLog(depMinPct, lo, hi), pctToLog(depMaxPct, lo, hi)];
+  });
+
+  let isFiltered = $derived(lenMinPct > 0 || lenMaxPct < 100 || depMinPct > 0 || depMaxPct < 100);
+
+  let filteredData = $derived.by(() => {
+    if (!explorerData?.contigs) return null;
+    if (!isFiltered) return explorerData;
+    const [lMin, lMax] = lenRange;
+    const [dMin, dMax] = depRange;
+    const filtered = explorerData.contigs.filter(c =>
+      c.length >= lMin && c.length <= lMax &&
+      c.depth >= dMin && c.depth <= dMax
+    );
+    return { ...explorerData, contigs: filtered };
+  });
+
+  function fmtLen(v) {
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + ' Mb';
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + ' Kb';
+    return Math.round(v) + ' bp';
+  }
+  function fmtDep(v) {
+    if (v >= 100) return Math.round(v) + 'x';
+    if (v >= 10) return v.toFixed(1) + 'x';
+    if (v >= 1) return v.toFixed(2) + 'x';
+    return v.toFixed(3) + 'x';
+  }
+
+  function resetFilters() {
+    lenMinPct = 0; lenMaxPct = 100;
+    depMinPct = 0; depMaxPct = 100;
+  }
 
   // Selection state
   let selectedIds = $state(null);  // null = no selection, [] would be empty lasso
@@ -64,6 +171,53 @@
   function handleSelection(ids) {
     selectedIds = ids;
   }
+
+  // ---- Detail panel state ----
+  let detailContigId = $state(null);
+  let detailGenes = $state(null);
+  let detailLoading = $state(false);
+
+  let detailContig = $derived.by(() => {
+    if (!detailContigId || !explorerData?.contigs) return null;
+    return explorerData.contigs.find(c => c.id === detailContigId) || null;
+  });
+
+  function handleContigClick(contigId) {
+    if (detailContigId === contigId) return; // already showing
+    detailContigId = contigId;
+    detailGenes = null;
+    detailLoading = true;
+    loadContigGenes(contigId).then(genes => {
+      // Only update if still showing this contig
+      if (detailContigId === contigId) {
+        detailGenes = genes;
+        detailLoading = false;
+      }
+    });
+  }
+
+  function closeDetail() {
+    detailContigId = null;
+    detailGenes = null;
+    detailLoading = false;
+  }
+
+  // Active bin info for tooltips and detail panel (null when not coloring by binner)
+  let activeBin = $derived.by(() => {
+    if (colorMode !== 'bins') return null;
+    const idx = binGroup.values.indexOf(binSource);
+    return { field: binSource, label: binGroup.labels[idx] || binSource };
+  });
+
+  // Auto-open detail panel with the longest contig on first load
+  let autoOpened = false;
+  $effect(() => {
+    if (explorerData?.contigs?.length && !autoOpened) {
+      autoOpened = true;
+      const longest = explorerData.contigs.reduce((a, b) => a.length > b.length ? a : b);
+      handleContigClick(longest.id);
+    }
+  });
 
   const RANKS = ['domain', 'phylum', 'class', 'order', 'family', 'genus'];
 
@@ -74,18 +228,18 @@
   let tableColumns = $derived([
     { key: 'id', label: 'Contig' },
     { key: 'length', label: 'Length', render: (v) => v.toLocaleString() },
-    { key: 'bin', label: 'Bin', render: (v) => v || '-' },
+    ...(activeBin ? [{ key: activeBin.field, label: activeBin.label, render: (v) => v || '-' }] : []),
     { key: 'depth', label: 'Depth' },
     { key: 'gc', label: 'GC%' },
     { key: `${taxSource}_domain`, label: getLabel(sourceGroup.values, sourceGroup.labels, taxSource),
       render: (v, row) => taxString(row, taxSource) },
   ]);
 
-  // Selected contigs lookup + table rows
+  // Selected contigs lookup + table rows (use filteredData)
   let selectedContigs = $derived.by(() => {
-    if (!explorerData?.contigs || !selectedIds?.length) return null;
+    if (!filteredData?.contigs || !selectedIds?.length) return null;
     const idSet = new Set(selectedIds);
-    return explorerData.contigs.filter(c => idSet.has(c.id));
+    return filteredData.contigs.filter(c => idSet.has(c.id));
   });
 
   let selectionStats = $derived.by(() => {
@@ -106,16 +260,35 @@
     };
   });
 
-  let tableRows = $derived.by(() => {
-    if (!explorerData?.contigs) return [];
-    const source = selectedContigs || explorerData.contigs;
-    return [...source]
-      .sort((a, b) => b.length - a.length)
-      .slice(0, 500);
+  // Full sorted source (for export — no 500 limit)
+  let tableSrc = $derived.by(() => {
+    if (!filteredData?.contigs) return [];
+    const source = selectedContigs || filteredData.contigs;
+    return [...source].sort((a, b) => b.length - a.length);
   });
+
+  let tableRows = $derived(tableSrc.slice(0, 500));
+
+  function exportTSV() {
+    if (!tableSrc.length) return;
+    const binField = activeBin?.field || 'bin';
+    const binLabel = activeBin?.label || 'DAS Tool';
+    const header = ['contig_id', 'length', binLabel, 'depth', 'gc', `${taxSource}_taxonomy`].join('\t');
+    const lines = tableSrc.map(row =>
+      [row.id, row.length, row[binField] || '', row.depth, row.gc ?? '', taxString(row, taxSource)].join('\t')
+    );
+    const blob = new Blob([header + '\n' + lines.join('\n') + '\n'], { type: 'text/tab-separated-values' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contigs_${selectedContigs ? 'selection' : 'all'}_${tableSrc.length}.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 </script>
 
-<div class="mb-4 flex items-center gap-3 flex-wrap text-xs">
+<div class="sticky top-14 z-10 bg-slate-950 pb-2 -mx-4 px-4 pt-1">
+<div class="mb-2 flex items-center gap-3 flex-wrap text-xs">
   <span class="text-slate-400">Color:</span>
   <button
     class="px-3 py-1 rounded-md border transition-colors text-center
@@ -193,21 +366,99 @@
   >
     {getLabel(modeGroup.values, modeGroup.labels, mode)} &#x25BE;
   </button>
+  <span class="text-slate-600">|</span>
+  <span class="text-slate-400">Renderer:</span>
+  <button
+    class="px-3 py-1 rounded-md border transition-colors text-center border-cyan-400 bg-cyan-400/10 text-cyan-400"
+    style="min-width: {BW.renderer}"
+    onclick={() => renderer = cycle(rendererGroup.values, renderer)}
+    title={`Click to cycle: ${rendererGroup.labels.join(' → ')}`}
+  >
+    {getLabel(rendererGroup.values, rendererGroup.labels, renderer)} &#x25BE;
+  </button>
+</div>
+
+{#if explorerData}
+  <div class="flex items-center gap-3 flex-wrap text-xs">
+    <span class="text-slate-400">Filter:</span>
+
+    <span class="text-slate-500">Length</span>
+    <span class="text-slate-500 w-14 text-right font-mono">{fmtLen(lenRange[0])}</span>
+    <div class="dual-range relative w-36 h-5 flex items-center">
+      <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
+      <div class="absolute h-1 bg-cyan-400/40 rounded" style="left: {lenMinPct}%; right: {100 - lenMaxPct}%"></div>
+      <input type="range" min="0" max="100" step="1"
+        bind:value={lenMinPct}
+        oninput={() => { if (lenMinPct > lenMaxPct - 2) lenMinPct = lenMaxPct - 2; }}
+      />
+      <input type="range" min="0" max="100" step="1"
+        bind:value={lenMaxPct}
+        oninput={() => { if (lenMaxPct < lenMinPct + 2) lenMaxPct = lenMinPct + 2; }}
+      />
+    </div>
+    <span class="text-slate-500 w-14 font-mono">{fmtLen(lenRange[1])}</span>
+
+    <span class="text-slate-600">|</span>
+
+    <span class="text-slate-500">Depth</span>
+    <span class="text-slate-500 w-14 text-right font-mono">{fmtDep(depRange[0])}</span>
+    <div class="dual-range relative w-36 h-5 flex items-center">
+      <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
+      <div class="absolute h-1 bg-cyan-400/40 rounded" style="left: {depMinPct}%; right: {100 - depMaxPct}%"></div>
+      <input type="range" min="0" max="100" step="1"
+        bind:value={depMinPct}
+        oninput={() => { if (depMinPct > depMaxPct - 2) depMinPct = depMaxPct - 2; }}
+      />
+      <input type="range" min="0" max="100" step="1"
+        bind:value={depMaxPct}
+        oninput={() => { if (depMaxPct < depMinPct + 2) depMaxPct = depMinPct + 2; }}
+      />
+    </div>
+    <span class="text-slate-500 w-14 font-mono">{fmtDep(depRange[1])}</span>
+
+    {#if isFiltered}
+      <span class="text-cyan-400 font-medium">{filteredData.contigs.length.toLocaleString()} / {explorerData.contigs.length.toLocaleString()}</span>
+      <button class="text-slate-500 hover:text-slate-300 underline" onclick={resetFilters}>reset</button>
+    {/if}
+  </div>
+{/if}
 </div>
 
 {#if !explorerData}
   <div class="flex flex-col items-center justify-center py-20">
     <div class="w-10 h-10 border-4 border-slate-700 border-t-cyan-400 rounded-full animate-spin"></div>
-    <p class="text-slate-400 text-sm mt-4">Loading contig data (2.4 MB)...</p>
+    <p class="text-slate-400 text-sm mt-4">Loading contig data...</p>
   </div>
 {:else}
-  <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 mb-6">
-    <ContigScatter data={explorerData} {colorBy} {sizeBy} {sizeScale} {mode} onselect={handleSelection} />
-    <div class="text-xs text-slate-500 mt-2">
-      {explorerData.contigs.length.toLocaleString()} contigs | WebGL rendering |
-      Fourth-root transformed TNF |
-      PCA variance explained: {explorerData.pca_variance_explained?.slice(0, 3).map(v => (v * 100).toFixed(1) + '%').join(', ')}
+  <div class="flex gap-4 mb-6">
+    <!-- Scatter plot -->
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[700px] flex flex-col {detailContigId ? 'flex-1 min-w-0' : 'w-full'}">
+      {#if renderer === 'regl'}
+        <ReglScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} sizeRange={fullSizeRange} onselect={handleSelection} onclick={handleContigClick} />
+      {:else}
+        <ContigScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} onselect={handleSelection} onclick={handleContigClick} />
+      {/if}
+      <div class="text-xs text-slate-500 mt-2 flex-shrink-0">
+        {filteredData.contigs.length.toLocaleString()} contigs |
+        {renderer === 'regl' ? 'regl-scatterplot' : 'Plotly scattergl'} |
+        Fourth-root transformed TNF |
+        {renderer === 'regl' ? 'Shift+drag to lasso | Click point for details' : 'Lasso via toolbar | Click point for details'}
+      </div>
     </div>
+
+    <!-- Detail panel (right side, half width) -->
+    {#if detailContigId}
+      <div class="w-1/2 min-w-[400px] max-w-[600px]">
+        <ContigDetail
+          contig={detailContig}
+          genes={detailGenes}
+          loading={detailLoading}
+          onclose={closeDetail}
+          {activeBin}
+          {taxSource}
+        />
+      </div>
+    {/if}
   </div>
 
   {#if selectionStats}
@@ -227,9 +478,61 @@
   {/if}
 
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-    <h3 class="text-sm font-medium text-slate-400 mb-2">
-      {selectedContigs ? `${selectedContigs.length.toLocaleString()} selected contigs` : `Top 500 contigs by length`}
-    </h3>
-    <DataTable columns={tableColumns} rows={tableRows} idKey="id" maxHeight="350px" />
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-medium text-slate-400">
+        {selectedContigs ? `${selectedContigs.length.toLocaleString()} selected contigs` : `Top 500 contigs by length`}
+        {#if tableSrc.length > 500}
+          <span class="text-slate-500 text-xs">({tableSrc.length.toLocaleString()} total)</span>
+        {/if}
+      </h3>
+      <button
+        class="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+        onclick={exportTSV}
+        title="Export all {tableSrc.length.toLocaleString()} contigs as TSV"
+      >TSV</button>
+    </div>
+    <DataTable columns={tableColumns} rows={tableRows} idKey="id" maxHeight="350px" onRowClick={(row) => handleContigClick(row.id)} selectedId={detailContigId} hideExport={true} />
   </div>
 {/if}
+
+<style>
+  .dual-range input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    pointer-events: none;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  .dual-range input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    pointer-events: all;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: #22d3ee;
+    cursor: pointer;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 3px rgba(0,0,0,0.4);
+  }
+  .dual-range input[type="range"]::-moz-range-thumb {
+    pointer-events: all;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: #22d3ee;
+    cursor: pointer;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 3px rgba(0,0,0,0.4);
+  }
+  .dual-range input[type="range"]::-webkit-slider-runnable-track {
+    height: 0;
+  }
+  .dual-range input[type="range"]::-moz-range-track {
+    height: 0;
+    background: transparent;
+  }
+</style>

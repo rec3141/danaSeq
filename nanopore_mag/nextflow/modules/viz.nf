@@ -23,8 +23,7 @@ process VIZ_PREPROCESS {
     mkdir -p data
     python3 ${projectDir}/viz/preprocess/preprocess.py \
         --results "${results}" \
-        --output data/ \
-        --skip-tsne
+        --output data/
 
     # Build static site (node/npm provided by conda env)
     cd ${projectDir}/viz

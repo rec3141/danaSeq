@@ -148,17 +148,56 @@ for gene in genes:
         gene['vsearch_coverage'] = hit['alnlen'] / gene['gene_length'] if gene['gene_length'] > 0 else 0.0
         gene['taxonomy'] = hit['taxonomy']
 
+# ── Deduplicate overlapping hits (keep best per region) ──────────────
+# barrnap runs 3 kingdom models (bac, arc, euk) so the same rRNA gene
+# region often has 2-3 overlapping hits. Keep the best by completeness,
+# then vsearch identity.
+
+def overlap_frac(a, b):
+    """Fraction of overlap between two intervals."""
+    ov = max(0, min(a['end'], b['end']) - max(a['start'], b['start']) + 1)
+    shorter = min(a['gene_length'], b['gene_length'])
+    return ov / shorter if shorter > 0 else 0
+
+# Group by contig+strand, sort by start
+from itertools import groupby
+genes_sorted = sorted(genes, key=lambda x: (x['contig_id'], x['strand'], x['start']))
+best_set = set()  # gene_ids of best hits
+
+for (cid, strand), grp in groupby(genes_sorted, key=lambda x: (x['contig_id'], x['strand'])):
+    cluster = []
+    for g in grp:
+        # Check if g overlaps with current cluster
+        merged = False
+        for cl in cluster:
+            if overlap_frac(g, cl[-1]) > 0.5:
+                cl.append(g)
+                merged = True
+                break
+        if not merged:
+            cluster.append([g])
+
+    # From each cluster, pick the best hit
+    for cl in cluster:
+        best = max(cl, key=lambda x: (x['gene_completeness'], x['vsearch_identity']))
+        best_set.add(best['gene_id'])
+
+# Mark each gene
+for g in genes:
+    g['best'] = g['gene_id'] in best_set
+
 # ── Write rrna_genes.tsv ─────────────────────────────────────────────
 with open('rrna_genes.tsv', 'w') as f:
     f.write('gene_id\tcontig_id\tstart\tend\tstrand\trrna_type\tkingdom\t'
             'gene_length\tgene_completeness\tbarrnap_score\t'
-            'best_match\tvsearch_identity\tvsearch_coverage\ttaxonomy\n')
+            'best_match\tvsearch_identity\tvsearch_coverage\ttaxonomy\tbest\n')
     for g in sorted(genes, key=lambda x: (x['contig_id'], x['start'])):
         f.write(f"{g['gene_id']}\t{g['contig_id']}\t{g['start']}\t{g['end']}\t"
                 f"{g['strand']}\t{g['rrna_type']}\t{g['kingdom']}\t"
                 f"{g['gene_length']}\t{g['gene_completeness']:.3f}\t{g['barrnap_score']}\t"
                 f"{g['best_match']}\t{g['vsearch_identity']:.1f}\t"
-                f"{g['vsearch_coverage']:.3f}\t{g['taxonomy']}\n")
+                f"{g['vsearch_coverage']:.3f}\t{g['taxonomy']}\t"
+                f"{'True' if g['best'] else 'False'}\n")
 
 # ── Write rrna_contigs.tsv ───────────────────────────────────────────
 contig_data = defaultdict(lambda: {

@@ -3,7 +3,8 @@
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
   import QualityBadge from '../components/ui/QualityBadge.svelte';
-  import { checkm2All, loadCheckm2All, contigExplorer, loadContigExplorer } from '../stores/data.js';
+  import D3Heatmap from '../components/charts/D3Heatmap.svelte';
+  import { checkm2All, loadCheckm2All, contigExplorer, loadContigExplorer, scgHeatmap } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
 
   let allBins = $derived($checkm2All);
@@ -53,12 +54,18 @@
     return counts;
   });
 
-  // Filtered bins
+  // Quality filter sliders
+  let minCompleteness = $state(0);
+  let maxContamination = $state(100);
+
+  // Filtered bins (binner + quality filters)
   let filteredBins = $derived.by(() => {
     if (!allBins) return [];
     return allBins.filter(b => {
       const bk = b.is_dastool ? 'dastool' : b.binner;
-      return activeBinners.has(bk);
+      return activeBinners.has(bk)
+        && b.completeness >= minCompleteness
+        && b.contamination <= maxContamination;
     });
   });
 
@@ -229,9 +236,9 @@
     const xvals = def.log ? allVals.map(v => Math.log10(v)) : allVals;
     const xbin = def.log ? binVals.map(v => Math.log10(v)) : binVals;
 
-    // Compute shared bin edges
-    const min = Math.min(...xvals);
-    const max = Math.max(...xvals);
+    // Compute shared bin edges (avoid spread on large arrays — stack overflow)
+    let min = Infinity, max = -Infinity;
+    for (const v of xvals) { if (v < min) min = v; if (v > max) max = v; }
     const nBins = 50;
     const step = (max - min) / nBins;
     const edges = Array.from({ length: nBins + 1 }, (_, i) => min + i * step);
@@ -316,10 +323,235 @@
     };
   });
 
+  // --- SCG Heatmap ---
+  let scgData = $derived($scgHeatmap);
+  let scgDomain = $state('bacteria');
+
+  function toggleScgDomain() {
+    scgDomain = scgDomain === 'bacteria' ? 'archaea' : 'bacteria';
+  }
+
+  // Sort-by cycling for SCG heatmap rows
+  const scgSortDefs = [
+    { key: 'clustered', label: 'Clustered' },
+    { key: 'name', label: 'A-Z' },
+    { key: 'completeness', label: 'Completeness' },
+    { key: 'contamination', label: 'Contamination' },
+    { key: 'quality', label: 'Quality' },
+    { key: 'size', label: 'Size' },
+    { key: 'taxonomy', label: 'Taxonomy' },
+  ];
+  let scgSortBy = $state('clustered');
+
+  function cycleScgSort() {
+    const keys = scgSortDefs.map(d => d.key);
+    scgSortBy = keys[(keys.indexOf(scgSortBy) + 1) % keys.length];
+  }
+
+  const scgBinnerDefs = [
+    { key: 'dastool',  prefix: 'dastool-' },
+    { key: 'semibin',  prefix: 'semibin_' },
+    { key: 'metabat',  prefix: 'metabat_' },
+    { key: 'maxbin',   prefix: 'maxbin_' },
+    { key: 'lorbin',   prefix: 'lorbin_' },
+    { key: 'comebin',  prefix: 'comebin_' },
+  ];
+
+  function scgMagBinner(id) {
+    for (const { key, prefix } of scgBinnerDefs) {
+      if (id.startsWith(prefix)) return key;
+    }
+    return 'unknown';
+  }
+
+  // Lookup map: bin name -> checkm2All record
+  let binMetaMap = $derived.by(() => {
+    if (!allBins) return {};
+    const map = {};
+    for (const b of allBins) {
+      map[b.name] = b;
+      if (b.dastool_name) map[b.dastool_name] = b;
+    }
+    return map;
+  });
+
+  let filteredScgData = $derived.by(() => {
+    if (!scgData?.[scgDomain]) return null;
+    const domain = scgData[scgDomain];
+    if (!domain.mag_ids?.length) return null;
+
+    // Filter rows by active binners + quality thresholds
+    const hasQualityFilter = minCompleteness > 0 || maxContamination < 100;
+    const rowIndices = domain.mag_ids
+      .map((id, i) => {
+        if (!activeBinners.has(scgMagBinner(id))) return -1;
+        const meta = binMetaMap[id];
+        if (meta) {
+          if (meta.completeness < minCompleteness) return -1;
+          if (meta.contamination > maxContamination) return -1;
+        } else if (hasQualityFilter) {
+          return -1; // Exclude bins without metadata when filters active
+        }
+        return i;
+      })
+      .filter(i => i >= 0);
+
+    if (rowIndices.length === 0) return null;
+
+    // Sort rows
+    let sortedRowIndices = rowIndices;
+    if (scgSortBy !== 'clustered') {
+      sortedRowIndices = [...rowIndices].sort((a, b) => {
+        const idA = domain.mag_ids[a];
+        const idB = domain.mag_ids[b];
+        const metaA = binMetaMap[idA];
+        const metaB = binMetaMap[idB];
+        switch (scgSortBy) {
+          case 'name':
+            return idA.localeCompare(idB);
+          case 'completeness':
+            return (metaB?.completeness ?? 0) - (metaA?.completeness ?? 0);
+          case 'contamination':
+            return (metaA?.contamination ?? 0) - (metaB?.contamination ?? 0);
+          case 'quality': {
+            const tierOrder = { HQ: 0, MQ: 1, LQ: 2 };
+            const tA = metaA ? qualityTier(metaA) : 'LQ';
+            const tB = metaB ? qualityTier(metaB) : 'LQ';
+            const d = (tierOrder[tA] ?? 3) - (tierOrder[tB] ?? 3);
+            return d !== 0 ? d : (metaB?.completeness ?? 0) - (metaA?.completeness ?? 0);
+          }
+          case 'size':
+            return (metaB?.genome_size ?? 0) - (metaA?.genome_size ?? 0);
+          case 'taxonomy': {
+            const taxA = metaA?.taxonomy?.[taxSource];
+            const taxB = metaB?.taxonomy?.[taxSource];
+            const linA = taxA ? ['domain', 'phylum', 'class', 'order', 'family', 'genus'].map(r => taxA[r]).filter(Boolean).join(';') : '';
+            const linB = taxB ? ['domain', 'phylum', 'class', 'order', 'family', 'genus'].map(r => taxB[r]).filter(Boolean).join(';') : '';
+            return linA.localeCompare(linB);
+          }
+          default: return 0;
+        }
+      });
+    }
+
+    // Sort columns (markers) alphabetically by name
+    const colIndices = domain.module_ids.map((_, i) => i);
+    colIndices.sort((a, b) => domain.module_names[a].localeCompare(domain.module_names[b]));
+
+    return {
+      mag_ids: sortedRowIndices.map(i => domain.mag_ids[i]),
+      module_ids: colIndices.map(i => domain.module_ids[i]),
+      module_names: colIndices.map(i => domain.module_names[i]),
+      matrix: sortedRowIndices.map(ri => colIndices.map(ci => domain.matrix[ri][ci])),
+      row_order: sortedRowIndices.map((_, i) => i),
+      col_order: colIndices.map((_, i) => i),
+    };
+  });
+
+  // Discrete color scale for SCG: 0=absent (dark), 1=single-copy (teal), 2+=multi-copy (amber)
+  function scgColorScale(val) {
+    if (val <= 0) return '#1e293b';   // slate-800 (absent)
+    if (val === 1) return '#059669';  // emerald-600 (single-copy)
+    return '#d97706';                 // amber-600 (multi-copy)
+  }
+
+  function scgTooltip(val, magId, modId, modName) {
+    const label = val === 0 ? 'Absent' : val === 1 ? 'Single-copy' : `Multi-copy (${val})`;
+    return `<strong>${modName}</strong><br>Bin: ${magId}<br>Copies: ${label}`;
+  }
+
+  function handleScgRowClick(magId) {
+    selectedMag.set(magId);
+  }
+
+  // Row annotations for SCG heatmap (right side metadata)
+  let scgRowAnnotations = $derived.by(() => {
+    if (!filteredScgData) return null;
+    const ids = filteredScgData.mag_ids;
+
+    const qualityColor = (v) => v === 'HQ' ? '#34d399' : v === 'MQ' ? '#fbbf24' : '#64748b';
+    const compColor = (v) => {
+      const n = parseFloat(v);
+      return n >= 90 ? '#34d399' : n >= 50 ? '#fbbf24' : '#64748b';
+    };
+    const contColor = (v) => {
+      const n = parseFloat(v);
+      return n < 5 ? '#34d399' : n < 10 ? '#fbbf24' : '#ef4444';
+    };
+
+    return [
+      {
+        label: 'Quality',
+        values: ids.map(id => {
+          const m = binMetaMap[id];
+          return m ? qualityTier(m) : '-';
+        }),
+        colorFn: qualityColor,
+      },
+      {
+        label: 'Comp%',
+        values: ids.map(id => {
+          const m = binMetaMap[id];
+          return m ? m.completeness.toFixed(0) : '-';
+        }),
+        colorFn: compColor,
+      },
+      {
+        label: 'Cont%',
+        values: ids.map(id => {
+          const m = binMetaMap[id];
+          return m ? m.contamination.toFixed(1) : '-';
+        }),
+        colorFn: contColor,
+      },
+      {
+        label: 'Size',
+        values: ids.map(id => {
+          const m = binMetaMap[id];
+          return m ? (m.genome_size / 1e6).toFixed(1) + 'M' : '-';
+        }),
+      },
+      {
+        label: `Tax (${taxSourceLabel()})`,
+        values: ids.map(id => {
+          const m = binMetaMap[id];
+          const tax = m?.taxonomy?.[taxSource];
+          if (!tax) return '-';
+          return ['domain', 'phylum', 'class', 'order', 'family', 'genus']
+            .map(r => tax[r]).filter(Boolean).join('; ') || '-';
+        }),
+        align: 'start',
+        width: 800,
+      },
+    ];
+  });
+
+  // TSV export for bin quality table
+  function exportTableTsv() {
+    if (!tableRows.length) return;
+    const header = tableColumns.map(c => c.label).join('\t');
+    const body = tableRows.map(r =>
+      tableColumns.map(c => {
+        const v = r[c.key];
+        if (c.key === 'size') return (v / 1e6).toFixed(2) + ' Mb';
+        if (c.key === 'n50') return (v / 1e3).toFixed(1) + ' Kb';
+        return v;
+      }).join('\t')
+    ).join('\n');
+    const blob = new Blob([header + '\n' + body], { type: 'text/tab-separated-values' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'bin_quality.tsv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
 </script>
 
 {#if allBins}
-  <div class="mb-4 flex items-center gap-3 flex-wrap text-xs">
+  <div class="sticky top-14 z-10 bg-slate-950 pb-2 -mx-4 px-4 pt-1">
+  <div class="flex items-center gap-3 flex-wrap text-xs">
     <span class="text-slate-400">Binners:</span>
     {#each binnerDefs as { key, label }}
       {#if binnerCounts[key]}
@@ -341,23 +573,40 @@
       onclick={cycleSource}
       title={`Click to cycle: ${taxSources.map(s => s.label).join(' \u2192 ')}`}
     >{taxSourceLabel()} &#x25BE;</button>
+    <span class="text-slate-600">|</span>
+    <label class="text-slate-400 flex items-center gap-1">
+      Comp &ge;
+      <input type="range" min="0" max="100" step="5" bind:value={minCompleteness}
+        class="w-28 h-1 accent-cyan-400" />
+      <span class="text-cyan-400 font-mono w-8">{minCompleteness}%</span>
+    </label>
+    <label class="text-slate-400 flex items-center gap-1">
+      Cont &le;
+      <input type="range" min="0" max="100" step="1" bind:value={maxContamination}
+        class="w-28 h-1 accent-cyan-400" />
+      <span class="text-cyan-400 font-mono w-8">{maxContamination}%</span>
+    </label>
+  </div>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 modebar-left">
-      <PlotlyChart
-        data={scatterData}
-        layout={scatterLayout}
-        onclick={handleClick}
-        config={{
-          modeBarButtonsToRemove: [
-            'select2d', 'lasso2d', 'autoScale2d',
-            'toggleSpikelines', 'hoverCompareCartesian', 'hoverClosestCartesian',
-            'zoomIn2d', 'zoomOut2d', 'zoom2d',
-          ],
-          modeBarOrientation: 'v',
-        }}
-      />
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 modebar-left flex flex-col">
+      <div class="flex-1 min-h-0">
+        <PlotlyChart
+          data={scatterData}
+          layout={scatterLayout}
+          onclick={handleClick}
+          config={{
+            responsive: true,
+            modeBarButtonsToRemove: [
+              'select2d', 'lasso2d', 'autoScale2d',
+              'toggleSpikelines', 'hoverCompareCartesian', 'hoverClosestCartesian',
+              'zoomIn2d', 'zoomOut2d', 'zoom2d',
+            ],
+            modeBarOrientation: 'v',
+          }}
+        />
+      </div>
       <div class="flex gap-4 mt-2 text-xs text-slate-400 justify-center">
         {#each Object.entries(binnerSymbols) as [name, sym]}
           <span class="flex items-center gap-1">
@@ -458,15 +707,55 @@
   </div>
 
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-    <h3 class="text-sm font-medium text-slate-400 mb-2">Bin Quality ({filteredBins.length} bins)</h3>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-medium text-slate-400">Bin Quality ({filteredBins.length} bins)</h3>
+      <button
+        class="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:border-slate-500"
+        onclick={exportTableTsv}
+        title="Export table as TSV"
+      >TSV</button>
+    </div>
     <DataTable
       columns={tableColumns}
       rows={tableRows}
       onRowClick={(row) => selectedMag.set(row.name)}
       selectedId={selected}
-      maxHeight="500px"
+      maxHeight="220px"
     />
   </div>
+
+  {#if filteredScgData}
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 mt-6">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-medium text-slate-400">
+          Single-Copy Gene Heatmap ({scgDomain === 'bacteria' ? 'Bacteria' : 'Archaea'}, {filteredScgData.mag_ids.length} bins × {filteredScgData.module_ids.length} markers)
+        </h3>
+        <div class="flex items-center gap-2">
+          <button
+            class="text-xs px-2 py-0.5 rounded border border-cyan-400 bg-cyan-400/10 text-cyan-400"
+            onclick={cycleScgSort}
+            title={`Sort rows: ${scgSortDefs.map(d => d.label).join(' \u2192 ')}`}
+          >Sort: {scgSortDefs.find(d => d.key === scgSortBy)?.label} &#x25BE;</button>
+          <button
+            class="text-xs px-2 py-0.5 rounded border border-cyan-400 bg-cyan-400/10 text-cyan-400"
+            onclick={toggleScgDomain}
+            title="Toggle between Bacteria and Archaea marker sets"
+          >{scgDomain === 'bacteria' ? 'Bacteria' : 'Archaea'} &#x25BE;</button>
+        </div>
+      </div>
+      <div class="overflow-auto" style="max-height: 700px;">
+        <D3Heatmap
+          data={filteredScgData}
+          onRowClick={handleScgRowClick}
+          tooltipFormat={scgTooltip}
+          legendLabel={['Absent', 'Multi-copy', 'Single-copy']}
+          selectedRow={selected}
+          rowAnnotations={scgRowAnnotations}
+          colorScale={scgColorScale}
+        />
+      </div>
+    </div>
+  {/if}
 {/if}
 
 <style>
