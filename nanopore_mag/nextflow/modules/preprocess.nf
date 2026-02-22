@@ -29,7 +29,7 @@ process CONCAT_READS {
     fi
 
     if [ "${params.dedupe}" = "true" ]; then
-        dedupe.sh in=${meta.id}_raw.fastq.gz out=${meta.id}.fastq.gz
+        dedupe.sh -Xmx${task.memory.toGiga()}g in=${meta.id}_raw.fastq.gz out=${meta.id}.fastq.gz
         rm -f ${meta.id}_raw.fastq.gz
     else
         mv ${meta.id}_raw.fastq.gz ${meta.id}.fastq.gz
