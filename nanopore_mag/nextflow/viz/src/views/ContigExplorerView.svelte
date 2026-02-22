@@ -82,6 +82,24 @@
     return map;
   });
 
+  // Stable coordinate extents: full-dataset bounds so filtering doesn't re-zoom
+  let coordExtents = $derived.by(() => {
+    if (!explorerData?.contigs?.length) return null;
+    const contigs = explorerData.contigs;
+    const modes = [['pca', 'pca_x', 'pca_y'], ['tsne', 'tsne_x', 'tsne_y'], ['umap', 'umap_x', 'umap_y']];
+    const result = {};
+    for (const [name, xKey, yKey] of modes) {
+      let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+      for (const c of contigs) {
+        const x = c[xKey] || 0, y = c[yKey] || 0;
+        if (x < xMin) xMin = x; if (x > xMax) xMax = x;
+        if (y < yMin) yMin = y; if (y > yMax) yMax = y;
+      }
+      result[name] = { xMin, xMax, yMin, yMax };
+    }
+    return result;
+  });
+
   // Stable size extents: pre-transformed min/max from full dataset so sizes don't jump on filter
   let fullSizeRange = $derived.by(() => {
     if (!explorerData?.contigs) return null;
@@ -434,9 +452,9 @@
     <!-- Scatter plot -->
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[700px] flex flex-col {detailContigId ? 'flex-1 min-w-0' : 'w-full'}">
       {#if renderer === 'regl'}
-        <ReglScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} sizeRange={fullSizeRange} onselect={handleSelection} onclick={handleContigClick} />
+        <ReglScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} sizeRange={fullSizeRange} {coordExtents} onselect={handleSelection} onclick={handleContigClick} />
       {:else}
-        <ContigScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} onselect={handleSelection} onclick={handleContigClick} />
+        <ContigScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} {coordExtents} onselect={handleSelection} onclick={handleContigClick} />
       {/if}
       <div class="text-xs text-slate-500 mt-2 flex-shrink-0">
         {filteredData.contigs.length.toLocaleString()} contigs |

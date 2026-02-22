@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
 
-  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, onselect = null, onclick = null } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, coordExtents = null, onselect = null, onclick = null } = $props();
   let container;
   let listenersAttached = false;
 
@@ -157,16 +157,30 @@
 
   $effect(() => {
     // Read all reactive props so Svelte tracks them as dependencies
-    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap];
+    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap, coordExtents];
     if (container && data) plot();
   });
 
   function plot() {
     const traces = getTraces(data, colorBy, sizeBy, sizeScale, mode);
+    // Use full-dataset coordinate extents so filtering doesn't re-zoom
+    const modeKey = mode === 'tsne' && data.has_tsne ? 'tsne' : mode === 'umap' && data.has_umap ? 'umap' : 'pca';
+    const ext = coordExtents?.[modeKey];
+    const pad = 0.05; // 5% padding
+    const xAxisCfg = { ...darkLayout.xaxis, uirevision: mode };
+    const yAxisCfg = { ...darkLayout.yaxis, uirevision: mode, scaleanchor: 'x', scaleratio: 1 };
+    if (ext) {
+      const xPad = (ext.xMax - ext.xMin) * pad;
+      const yPad = (ext.yMax - ext.yMin) * pad;
+      xAxisCfg.range = [ext.xMin - xPad, ext.xMax + xPad];
+      yAxisCfg.range = [ext.yMin - yPad, ext.yMax + yPad];
+      xAxisCfg.autorange = false;
+      yAxisCfg.autorange = false;
+    }
     const layout = {
       ...darkLayout,
-      xaxis: { ...darkLayout.xaxis, uirevision: mode },
-      yaxis: { ...darkLayout.yaxis, uirevision: mode, scaleanchor: 'x', scaleratio: 1 },
+      xaxis: xAxisCfg,
+      yaxis: yAxisCfg,
       uirevision: mode + '-' + colorBy,
     };
     Plotly.react(container, traces, layout, {

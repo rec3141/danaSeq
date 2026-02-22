@@ -3,7 +3,7 @@
   import createScatterplot from 'regl-scatterplot';
   import * as d3 from 'd3';
 
-  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, onselect = null, onclick = null } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, coordExtents = null, onselect = null, onclick = null } = $props();
 
   let canvasEl;
   let scatterplot;
@@ -16,6 +16,7 @@
   let tipShow = $state(false);
   let mouseX = 0, mouseY = 0;
   let hoveredIdx = -1;  // track hovered point for click
+  let prevMode = null;  // track embedding mode to detect coordinate changes
 
   const BIN_LABELS = { bin: 'DAS Tool', semibin_bin: 'SemiBin2', metabat_bin: 'MetaBAT2', maxbin_bin: 'MaxBin2', lorbin_bin: 'LorBin', comebin_bin: 'COMEBin' };
   const BG = [15/255, 23/255, 42/255, 1]; // #0f172a
@@ -126,17 +127,22 @@
     const valueB = new Float32Array(n);
 
     // Extract and normalize coordinates to [-1, 1] with uniform scale (1:1 aspect)
+    // Use full-dataset extents (from coordExtents) so filtering doesn't re-zoom
     for (let i = 0; i < n; i++) {
       x[i] = sorted[i][xKey] || 0;
       y[i] = sorted[i][yKey] || 0;
     }
-    const xExt = d3.extent(x);
-    const yExt = d3.extent(y);
-    const xSpan = xExt[1] - xExt[0] || 1;
-    const ySpan = yExt[1] - yExt[0] || 1;
+    const modeKey = mode === 'tsne' && data.has_tsne ? 'tsne' : mode === 'umap' && data.has_umap ? 'umap' : 'pca';
+    const ext = coordExtents?.[modeKey];
+    const xMin = ext ? ext.xMin : d3.min(x);
+    const xMax = ext ? ext.xMax : d3.max(x);
+    const yMin = ext ? ext.yMin : d3.min(y);
+    const yMax = ext ? ext.yMax : d3.max(y);
+    const xSpan = xMax - xMin || 1;
+    const ySpan = yMax - yMin || 1;
     const maxSpan = Math.max(xSpan, ySpan);
-    const xMid = (xExt[0] + xExt[1]) / 2;
-    const yMid = (yExt[0] + yExt[1]) / 2;
+    const xMid = (xMin + xMax) / 2;
+    const yMid = (yMin + yMax) / 2;
     const half = maxSpan * 0.55;
     for (let i = 0; i < n; i++) {
       x[i] = (x[i] - xMid) / half;
@@ -190,11 +196,10 @@
     if (sizeBy === 'fixed') {
       sizeCfg = { sizeBy: null, pointSize: 3 * sizeScale };
     } else {
-      // Match Plotly's absolute sizing: sqrt(depth)*0.8 or length^0.3*0.25, clamped at 1.5 min
+      // Log-scale for even visual spread (raw values are extremely skewed)
       const sfn = sizeBy === 'depth'
-        ? c => Math.max(1.5, Math.sqrt(c.depth) * 0.8)
-        : c => Math.max(1.5, Math.pow(c.length, 0.3) * 0.25);
-      // Normalize to [0,1] for regl but using absolute sizes as the basis
+        ? c => Math.log10(c.depth + 1)
+        : c => Math.log10(c.length + 1);
       let sMin = Infinity, sMax = -Infinity;
       for (let i = 0; i < n; i++) {
         const s = sfn(sorted[i]);
@@ -205,9 +210,16 @@
       for (let i = 0; i < n; i++) {
         valueB[i] = Math.max(0, Math.min(1, (sfn(sorted[i]) - sMin) / sRange));
       }
-      // Scale pointSize range to match the absolute pixel sizes from Plotly
-      sizeCfg = { sizeBy: 'valueB', pointSize: [sMin * sizeScale, sMax * sizeScale] };
+      // pointSize must be a lookup array, not a [min, max] range
+      const pMin = 2 * sizeScale, pMax = 10 * sizeScale;
+      const sizeMap = Array.from({length: 64}, (_, i) => pMin + (i / 63) * (pMax - pMin));
+      sizeCfg = { sizeBy: 'valueB', pointSize: sizeMap };
     }
+
+    // Save camera view before redraw (preserve zoom/pan across settings changes)
+    const modeChanged = mode !== prevMode;
+    const savedView = (!modeChanged && prevMode !== null) ? scatterplot.get('cameraView') : null;
+    prevMode = mode;
 
     scatterplot.set({ ...colorCfg, ...sizeCfg });
 
@@ -215,6 +227,11 @@
       zDataType: isCont ? 'continuous' : 'categorical',
       wDataType: 'continuous',
     });
+
+    // Restore camera after redraw (only if coordinates didn't change)
+    if (savedView) {
+      scatterplot.lookAt(savedView, { preventEvent: true });
+    }
   }
 
   onMount(() => {
@@ -224,7 +241,7 @@
   });
 
   $effect(() => {
-    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap];
+    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap, coordExtents];
     if (!canvasEl || !data) return;
     if (!scatterplot) init();
     draw();
