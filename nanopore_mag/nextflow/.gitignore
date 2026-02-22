@@ -6,3 +6,9 @@ test_results/
 results/
 .nextflow/
 .nextflow.log*
+
+# Site-specific configs (use computecanada.config as template)
+fir.config
+cedar.config
+narval.config
+niagara.config
