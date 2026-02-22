@@ -492,7 +492,8 @@ Reference databases live in `/data/scratch/refdbs/`, NOT in the pipeline's `data
 ```
 
 Current database paths for pipeline flags:
-- `--bakta_db /data/scratch/refdbs/bakta/light/db-light`
+- `--bakta_db /data/scratch/refdbs/bakta/db`
+- `--bakta_light_db /data/scratch/refdbs/bakta/db-light`
 - `--genomad_db /data/scratch/refdbs/genomad_db`
 - `--checkv_db /data/scratch/refdbs/checkv_db`
 - `--checkm2_db /data/scratch/refdbs/checkm2`
