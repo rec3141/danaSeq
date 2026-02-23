@@ -3,7 +3,7 @@
 process CONCAT_READS {
     tag "${meta.id}"
     label 'process_low'
-    memory = { params.dedupe ? params.dedupe_memory : 4.GB }
+    time  = { params.dedupe ? 4.h : 1.h }
     conda "${projectDir}/conda-envs/dana-bbmap"
     publishDir "${params.outdir}/concat", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/concat" : null
@@ -23,14 +23,21 @@ process CONCAT_READS {
     filesize=\$(stat -c%s ${meta.id}_raw.fastq.gz)
     if [ "\$filesize" -lt 1024 ]; then
         echo "[WARNING] ${meta.id}: concat size \${filesize} bytes < 1 KB, skipping" >&2
-        # Create empty output so Nextflow doesn't error, but downstream
-        # processes should filter on file size
         touch ${meta.id}.fastq.gz
         exit 0
     fi
 
     if [ "${params.dedupe}" = "true" ]; then
-        dedupe.sh -Xmx${task.memory.toGiga()}g in=${meta.id}_raw.fastq.gz out=${meta.id}.fastq.gz
+        # Deduplicate by read UUID only — same read basecalled twice shares a UUID
+        # but may have different header metadata (field order, timezone format, runid).
+        # BBMap dedupe uses full-header matching so misses these; awk on the first
+        # whitespace-delimited field (the UUID) is exact. Uses ~200 MB regardless
+        # of file size; pigz parallelises the output compression.
+        zcat ${meta.id}_raw.fastq.gz \\
+            | paste - - - - \\
+            | awk -F'\\t' '{id=\$1; sub(/^@/,"",id); sub(/ .*/,"",id); if (!seen[id]++) print}' \\
+            | tr '\\t' '\\n' \\
+            | pigz -p ${task.cpus} > ${meta.id}.fastq.gz
         rm -f ${meta.id}_raw.fastq.gz
     else
         mv ${meta.id}_raw.fastq.gz ${meta.id}.fastq.gz

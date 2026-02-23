@@ -4,3 +4,4 @@ channels:
   - bioconda
 dependencies:
   - bbmap=39.52
+  - pigz
