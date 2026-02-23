@@ -28,8 +28,10 @@ set -euo pipefail
 #   ./download-databases.sh --kraken2         # Download Kraken2 PlusPFP-8 (~8 GB)
 #   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
-#   ./download-databases.sh --docker            # Use Docker image instead of local conda
-#   ./download-databases.sh --docker --image IMG # Use a custom Docker image
+#   ./download-databases.sh --docker            # Use Docker to run tool CLIs
+#   ./download-databases.sh --apptainer         # Use Apptainer/Singularity (auto-pulls SIF)
+#   ./download-databases.sh --container         # Auto-detect: apptainer > singularity > docker
+#   ./download-databases.sh --docker --image IMG # Use a custom Docker/Apptainer image
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -39,13 +41,32 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_DIR="${SCRIPT_DIR}/databases"
 ENV_DIR="${SCRIPT_DIR}/conda-envs"
-USE_DOCKER=false
-DOCKER_IMAGE="ghcr.io/rec3141/danaseq-mag:latest"
+USE_CONTAINER=false
+CONTAINER_RUNTIME=""   # docker, apptainer, or singularity (set by --docker/--apptainer/--container)
+CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag:latest"
+SIF_PATH=""            # resolved path to .sif file (apptainer/singularity only)
 
-# Docker helper — runs a command inside the container with DB_DIR mounted at /data/db
-docker_run() {
-    docker run --rm --user "$(id -u):$(id -g)" --entrypoint "" \
-        -v "${DB_DIR}:/data/db" "${DOCKER_IMAGE}" "$@"
+# Container helper — runs a command inside Docker or Apptainer with DB_DIR mounted at /data/db
+container_run() {
+    case "$CONTAINER_RUNTIME" in
+        docker)
+            docker run --rm --user "$(id -u):$(id -g)" --entrypoint "" \
+                -v "${DB_DIR}:/data/db" "${CONTAINER_IMAGE}" "$@"
+            ;;
+        apptainer|singularity)
+            # Ensure SIF image exists
+            if [[ -z "$SIF_PATH" ]]; then
+                SIF_PATH="${SCRIPT_DIR}/.danaseq-mag.sif"
+                if [[ ! -f "$SIF_PATH" ]]; then
+                    echo "[INFO] Pulling container image (one-time download)..."
+                    echo "  Source: docker://${CONTAINER_IMAGE}"
+                    echo "  Destination: ${SIF_PATH}"
+                    "$CONTAINER_RUNTIME" pull "$SIF_PATH" "docker://${CONTAINER_IMAGE}"
+                fi
+            fi
+            "$CONTAINER_RUNTIME" exec --bind "${DB_DIR}:/data/db" "$SIF_PATH" "$@"
+            ;;
+    esac
 }
 
 # Detect conda/mamba — prefer pre-built envs, fall back to PATH (warning deferred to after arg parsing)
@@ -84,8 +105,12 @@ INTERACTIVE=true
 
 while (( $# )); do
     case "$1" in
-        --docker)    USE_DOCKER=true; shift ;;
-        --image)     DOCKER_IMAGE="$2"; shift 2 ;;
+        --docker)    USE_CONTAINER=true; CONTAINER_RUNTIME=docker; shift ;;
+        --apptainer|--singularity)
+                     USE_CONTAINER=true; CONTAINER_RUNTIME="${1#--}"; shift ;;
+        --container) USE_CONTAINER=true; CONTAINER_RUNTIME=auto; shift ;;
+        --image)     CONTAINER_IMAGE="$2"; shift 2 ;;
+        --sif)       SIF_PATH="$2"; shift 2 ;;
         --dir)       DB_DIR="$2"; shift 2 ;;
         --all)       DOWNLOAD_ALL=true; INTERACTIVE=false; shift ;;
         --genomad)   DOWNLOAD_GENOMAD=true; INTERACTIVE=false; shift ;;
@@ -131,9 +156,32 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_MARFERRET=true
 fi
 
-# Warn if no conda and not using Docker
-if [[ -z "$CONDA_CMD" ]] && ! $USE_DOCKER; then
-    echo "[WARNING] conda/mamba not found — tool-based downloads will require --docker" >&2
+# Auto-detect container runtime if --container was used
+if [[ "$CONTAINER_RUNTIME" == "auto" ]]; then
+    if command -v apptainer &>/dev/null; then
+        CONTAINER_RUNTIME=apptainer
+    elif command -v singularity &>/dev/null; then
+        CONTAINER_RUNTIME=singularity
+    elif command -v docker &>/dev/null; then
+        CONTAINER_RUNTIME=docker
+    else
+        echo "[ERROR] --container requires docker, apptainer, or singularity on PATH" >&2
+        exit 1
+    fi
+    echo "[INFO] Auto-detected container runtime: ${CONTAINER_RUNTIME}"
+fi
+
+# Validate chosen runtime is available
+if $USE_CONTAINER && [[ "$CONTAINER_RUNTIME" != "auto" ]]; then
+    if ! command -v "$CONTAINER_RUNTIME" &>/dev/null; then
+        echo "[ERROR] ${CONTAINER_RUNTIME} not found on PATH" >&2
+        exit 1
+    fi
+fi
+
+# Warn if no conda and not using a container
+if [[ -z "$CONDA_CMD" ]] && ! $USE_CONTAINER; then
+    echo "[WARNING] conda/mamba not found — tool-based downloads will require --docker or --apptainer" >&2
 fi
 
 # ============================================================================
@@ -290,12 +338,12 @@ download_genomad() {
     echo "[INFO] Downloading geNomad database (~3.5 GB)..."
     echo "  Destination: ${db_path}"
 
-    if $USE_DOCKER; then
-        docker_run genomad download-database /data/db
+    if $USE_CONTAINER; then
+        container_run genomad download-database /data/db
     else
         local genomad_bin="${ENV_DIR}/dana-mag-genomad/bin/genomad"
         if [ ! -x "${genomad_bin}" ]; then
-            echo "[ERROR] geNomad not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] geNomad not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         "${genomad_bin}" download-database "${DB_DIR}"
@@ -316,12 +364,12 @@ download_checkv() {
     echo "[INFO] Downloading CheckV database (~1.4 GB)..."
     echo "  Destination: ${db_path}"
 
-    if $USE_DOCKER; then
-        docker_run checkv download_database /data/db/checkv_db
+    if $USE_CONTAINER; then
+        container_run checkv download_database /data/db/checkv_db
     else
         local checkv_bin="${ENV_DIR}/dana-mag-checkv/bin/checkv"
         if [ ! -x "${checkv_bin}" ]; then
-            echo "[ERROR] CheckV not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] CheckV not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         "${checkv_bin}" download_database "${db_path}"
@@ -401,12 +449,12 @@ download_checkm2() {
     echo "  Destination: ${db_path}"
 
     mkdir -p "${db_path}"
-    if $USE_DOCKER; then
-        docker_run checkm2 database --download --path /data/db/checkm2_db
+    if $USE_CONTAINER; then
+        container_run checkm2 database --download --path /data/db/checkm2_db
     else
         local checkm2_bin="${ENV_DIR}/dana-mag-checkm2/bin/checkm2"
         if [ ! -x "${checkm2_bin}" ]; then
-            echo "[ERROR] CheckM2 not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] CheckM2 not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         "${checkm2_bin}" database --download --path "${db_path}"
@@ -429,13 +477,13 @@ download_kaiju() {
     echo "  Destination: ${db_path}"
 
     mkdir -p "${db_path}"
-    if $USE_DOCKER; then
+    if $USE_CONTAINER; then
         # kaiju-makedb downloads sequences and builds the FM-index
-        docker_run sh -c 'cd /data/db/kaiju_db && kaiju-makedb -s refseq_ref'
+        container_run sh -c 'cd /data/db/kaiju_db && kaiju-makedb -s refseq_ref'
     else
         local kaiju_makedb="${ENV_DIR}/dana-mag-kaiju/bin/kaiju-makedb"
         if [ ! -x "${kaiju_makedb}" ]; then
-            echo "[ERROR] Kaiju not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] Kaiju not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         # kaiju-makedb downloads sequences and builds the FM-index
@@ -460,13 +508,13 @@ download_macsyfinder() {
     echo "  Destination: ${db_path}"
 
     mkdir -p "${db_path}"
-    if $USE_DOCKER; then
-        docker_run msf_data install --target /data/db/macsyfinder_models TXSScan
-        docker_run msf_data install --target /data/db/macsyfinder_models CONJScan
+    if $USE_CONTAINER; then
+        container_run msf_data install --target /data/db/macsyfinder_models TXSScan
+        container_run msf_data install --target /data/db/macsyfinder_models CONJScan
     else
         local msf_data_bin="${ENV_DIR}/dana-mag-macsyfinder/bin/msf_data"
         if [ ! -x "${msf_data_bin}" ]; then
-            echo "[ERROR] MacSyFinder not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] MacSyFinder not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         "${msf_data_bin}" install --target "${db_path}" TXSScan
@@ -490,20 +538,20 @@ download_defensefinder() {
     echo "  Destination: ${db_path}"
 
     mkdir -p "${db_path}"
-    if $USE_DOCKER; then
-        docker_run defense-finder update --models-dir /data/db/defensefinder_models
+    if $USE_CONTAINER; then
+        container_run defense-finder update --models-dir /data/db/defensefinder_models
         # Workaround: CasFinder 3.1.1 model version incompatibility
         local cf_ver
         cf_ver=$(cat "${db_path}/CasFinder/metadata.yml" 2>/dev/null | grep -oP 'vers: \K.*' | head -1)
         if [ "${cf_ver}" = "3.1.1" ]; then
             echo "  Downgrading CasFinder 3.1.1 → 3.1.0 (model version compatibility fix)"
             rm -rf "${db_path}/CasFinder"
-            docker_run macsydata install --target /data/db/defensefinder_models CasFinder==3.1.0
+            container_run macsydata install --target /data/db/defensefinder_models CasFinder==3.1.0
         fi
     else
         local df_bin="${ENV_DIR}/dana-mag-defensefinder/bin/defense-finder"
         if [ ! -x "${df_bin}" ]; then
-            echo "[ERROR] DefenseFinder not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] DefenseFinder not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         "${df_bin}" update --models-dir "${db_path}"
@@ -539,12 +587,12 @@ download_bakta() {
     echo "  Destination: ${db_path}/db"
 
     mkdir -p "${db_path}"
-    if $USE_DOCKER; then
-        docker_run bakta_db download --output /data/db/bakta --type full
+    if $USE_CONTAINER; then
+        container_run bakta_db download --output /data/db/bakta --type full
     else
         local bakta_env="${ENV_DIR}/dana-mag-bakta"
         if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
-            echo "[ERROR] Bakta not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] Bakta not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
@@ -567,12 +615,12 @@ download_bakta_light() {
     echo "  Destination: ${db_path}/db-light"
 
     mkdir -p "${db_path}"
-    if $USE_DOCKER; then
-        docker_run bakta_db download --output /data/db/bakta --type light
+    if $USE_CONTAINER; then
+        container_run bakta_db download --output /data/db/bakta --type light
     else
         local bakta_env="${ENV_DIR}/dana-mag-bakta"
         if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
-            echo "[ERROR] Bakta not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] Bakta not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
@@ -622,14 +670,14 @@ download_eggnog() {
     echo "  Destination: ${db_path}"
 
     mkdir -p "${db_path}"
-    if $USE_DOCKER; then
+    if $USE_CONTAINER; then
         # Workaround: eggnog-mapper <=2.1.13 has broken download URLs
         # (eggnogdb.embl.de returns 404; eggnog5.embl.de is the working host)
-        docker_run sh -c "sed -i 's|eggnogdb.embl.de|eggnog5.embl.de|g' \$(which download_eggnog_data.py); download_eggnog_data.py --data_dir /data/db/eggnog_db -y"
+        container_run sh -c "sed -i 's|eggnogdb.embl.de|eggnog5.embl.de|g' \$(which download_eggnog_data.py); download_eggnog_data.py --data_dir /data/db/eggnog_db -y"
     else
         local emapper_bin="${ENV_DIR}/dana-mag-emapper/bin/download_eggnog_data.py"
         if [ ! -x "${emapper_bin}" ]; then
-            echo "[ERROR] eggNOG-mapper not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] eggNOG-mapper not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         # Workaround: eggnog-mapper <=2.1.13 has broken download URLs
@@ -655,22 +703,22 @@ download_dbcan() {
     echo "  Destination: ${db_path}"
 
     mkdir -p "${db_path}"
-    if $USE_DOCKER; then
+    if $USE_CONTAINER; then
         # Use AWS S3 mirror — bcb.unl.edu has persistent SSL cert issues
-        docker_run run_dbcan database --db_dir /data/db/dbcan_db --aws_s3
+        container_run run_dbcan database --db_dir /data/db/dbcan_db --aws_s3
         # Press HMM databases for HMMER (required before first run_dbcan use)
         echo "[INFO] Pressing HMM databases with hmmpress..."
         for hmm_name in dbCAN.hmm dbCAN-sub.hmm STP.hmm TF.hmm; do
             if [ -f "${db_path}/${hmm_name}" ] && [ ! -f "${db_path}/${hmm_name}.h3i" ]; then
                 echo "  Pressing ${hmm_name}..."
-                docker_run hmmpress "/data/db/dbcan_db/${hmm_name}"
+                container_run hmmpress "/data/db/dbcan_db/${hmm_name}"
             fi
         done
     else
         local run_dbcan="${ENV_DIR}/dana-mag-dbcan/bin/run_dbcan"
         local hmmpress="${ENV_DIR}/dana-mag-dbcan/bin/hmmpress"
         if [ ! -x "${run_dbcan}" ]; then
-            echo "[ERROR] dbCAN not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] dbCAN not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         # Use AWS S3 mirror — bcb.unl.edu has persistent SSL cert issues
@@ -725,12 +773,12 @@ download_metaeuk() {
 
     # Convert to MMseqs2 database format
     echo "[INFO] Creating MMseqs2 database (metaeuk createdb)..."
-    if $USE_DOCKER; then
-        docker_run metaeuk createdb /data/db/metaeuk_db/Eukaryota.fa /data/db/metaeuk_db/metaeuk_db
+    if $USE_CONTAINER; then
+        container_run metaeuk createdb /data/db/metaeuk_db/Eukaryota.fa /data/db/metaeuk_db/metaeuk_db
     else
         local metaeuk_bin="${ENV_DIR}/dana-mag-metaeuk/bin/metaeuk"
         if [ ! -x "${metaeuk_bin}" ]; then
-            echo "[ERROR] MetaEuk not installed. Run ./install.sh first or use --docker." >&2
+            echo "[ERROR] MetaEuk not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
         "${metaeuk_bin}" createdb "${fasta}" "${db_path}/metaeuk_db"

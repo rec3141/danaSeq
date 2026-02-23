@@ -41,8 +41,10 @@ set -euo pipefail
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE="danaseq-mag"
-USE_DOCKER=false
+CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag:latest"
+USE_CONTAINER=false
+CONTAINER_RUNTIME=""   # docker, apptainer, or singularity
+SIF_PATH=""            # resolved path to .sif file (apptainer/singularity only)
 NF_ARGS=()
 DB_ARGS=()
 MOUNTS=()
@@ -126,7 +128,11 @@ usage() {
     echo "  --outdir DIR     Output directory (will be created if needed)"
     echo ""
     echo "Mode:"
-    echo "  --docker         Run in Docker instead of local conda"
+    echo "  --docker         Run in Docker container"
+    echo "  --apptainer      Run in Apptainer/Singularity container"
+    echo "  --container      Auto-detect container runtime (apptainer > singularity > docker)"
+    echo "  --image IMAGE    Override container image [default: ghcr.io/rec3141/danaseq-mag:latest]"
+    echo "  --sif PATH       Use a specific .sif file (apptainer/singularity only)"
     echo ""
     echo "Shortcuts:"
     echo "  --all            Enable all optional modules (dedupe, bakta_extra, kraken2,"
@@ -225,8 +231,9 @@ while (( $# )); do
         -h|--help)
             usage ;;
         --help-pipeline)
-            if [[ "$USE_DOCKER" == true ]]; then
-                docker run --user "$(id -u):$(id -g)" "$IMAGE" \
+            if [[ "$USE_CONTAINER" == true ]]; then
+                # help-pipeline before runtime detection — just use docker if available
+                docker run --user "$(id -u):$(id -g)" "$CONTAINER_IMAGE" \
                     run /pipeline/main.nf --help
             else
                 mamba run -p "${SCRIPT_DIR}/conda-envs/dana-mag-flye" \
@@ -234,8 +241,22 @@ while (( $# )); do
             fi
             exit 0 ;;
         --docker)
-            USE_DOCKER=true
+            USE_CONTAINER=true; CONTAINER_RUNTIME=docker
             shift ;;
+        --apptainer|--singularity)
+            USE_CONTAINER=true; CONTAINER_RUNTIME="${1#--}"
+            shift ;;
+        --container)
+            USE_CONTAINER=true; CONTAINER_RUNTIME=auto
+            shift ;;
+        --image)
+            [[ -z "${2:-}" ]] && die "--image requires an image name"
+            CONTAINER_IMAGE="$2"
+            shift 2 ;;
+        --sif)
+            [[ -z "${2:-}" ]] && die "--sif requires a path to a .sif file"
+            SIF_PATH="$2"
+            shift 2 ;;
         --input)
             [[ -z "${2:-}" ]] && die "--input requires a directory path"
             INPUT_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
@@ -319,18 +340,56 @@ if [[ "$AUTO_SESSION" == true && -z "$RESUME_SESSION" ]]; then
 fi
 
 # ============================================================================
-# Docker mode
+# Container runtime detection
 # ============================================================================
 
-if [[ "$USE_DOCKER" == true ]]; then
-    # Mount input (read-only) and output
-    MOUNTS+=("-v" "${INPUT_HOST}:/data/input:ro")
-    MOUNTS+=("-v" "${OUTDIR_HOST}:/data/output")
+if [[ "$USE_CONTAINER" == true ]]; then
+    if [[ "$CONTAINER_RUNTIME" == "auto" ]]; then
+        if command -v apptainer &>/dev/null; then
+            CONTAINER_RUNTIME=apptainer
+        elif command -v singularity &>/dev/null; then
+            CONTAINER_RUNTIME=singularity
+        elif command -v docker &>/dev/null; then
+            CONTAINER_RUNTIME=docker
+        else
+            die "--container requires docker, apptainer, or singularity on PATH"
+        fi
+        echo "[INFO] Auto-detected container runtime: ${CONTAINER_RUNTIME}"
+    fi
+
+    if ! command -v "$CONTAINER_RUNTIME" &>/dev/null; then
+        die "${CONTAINER_RUNTIME} not found on PATH"
+    fi
+
+    # For apptainer/singularity, ensure we have a SIF image
+    if [[ "$CONTAINER_RUNTIME" == "apptainer" || "$CONTAINER_RUNTIME" == "singularity" ]]; then
+        if [[ -z "$SIF_PATH" ]]; then
+            SIF_PATH="${SCRIPT_DIR}/.danaseq-mag.sif"
+            if [[ ! -f "$SIF_PATH" ]]; then
+                echo "[INFO] Pulling container image (one-time download)..."
+                echo "  Source: docker://${CONTAINER_IMAGE}"
+                echo "  Destination: ${SIF_PATH}"
+                "$CONTAINER_RUNTIME" pull "$SIF_PATH" "docker://${CONTAINER_IMAGE}"
+            fi
+        fi
+        [[ -f "$SIF_PATH" ]] || die "SIF file not found: $SIF_PATH"
+    fi
+fi
+
+# ============================================================================
+# Container mode
+# ============================================================================
+
+if [[ "$USE_CONTAINER" == true ]]; then
+    # Collect bind mounts as "host:container[:opts]" pairs (runtime-agnostic)
+    BINDS=()
+    BINDS+=("${INPUT_HOST}:/data/input:ro")
+    BINDS+=("${OUTDIR_HOST}:/data/output")
     NF_ARGS=("--input" "/data/input" "--outdir" "/data/output" "${NF_ARGS[@]}")
 
     # Mount database directory and rewrite all host paths in NF_ARGS to container paths
     if [[ -n "${DB_DIR_HOST:-}" ]]; then
-        MOUNTS+=("-v" "${DB_DIR_HOST}:/data/db:ro")
+        BINDS+=("${DB_DIR_HOST}:/data/db:ro")
         for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
             NF_ARGS[$i]="${NF_ARGS[$i]//${DB_DIR_HOST}/\/data\/db}"
         done
@@ -338,7 +397,7 @@ if [[ "$USE_DOCKER" == true ]]; then
 
     # Mount store directory (read-write) and rewrite paths
     if [[ -n "${STORE_DIR_HOST:-}" ]]; then
-        MOUNTS+=("-v" "${STORE_DIR_HOST}:/data/store")
+        BINDS+=("${STORE_DIR_HOST}:/data/store")
         for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
             NF_ARGS[$i]="${NF_ARGS[$i]//${STORE_DIR_HOST}/\/data\/store}"
         done
@@ -347,28 +406,38 @@ if [[ "$USE_DOCKER" == true ]]; then
     # Persistent Nextflow directories for -resume support
     NF_CACHE="${OUTDIR_HOST}/.nextflow-cache"
     mkdir -p "${NF_CACHE}/work" "${NF_CACHE}/dotdir" 2>/dev/null || true
-    MOUNTS+=("-v" "${NF_CACHE}/work:/home/dana/work")
-    MOUNTS+=("-v" "${NF_CACHE}/dotdir:/home/dana/.nextflow")
+    BINDS+=("${NF_CACHE}/work:/home/dana/work")
+    BINDS+=("${NF_CACHE}/dotdir:/home/dana/.nextflow")
 
-    DOCKER_CMD=(
-        docker run
-        --user "$(id -u):$(id -g)"
-        "${MOUNTS[@]}"
-        "$IMAGE"
-        run /pipeline/main.nf
-        "${NF_ARGS[@]}"
-        -resume ${RESUME_SESSION}
-    )
+    # Build runtime-specific command
+    CONTAINER_CMD=()
+    case "$CONTAINER_RUNTIME" in
+        docker)
+            CONTAINER_CMD+=(docker run --user "$(id -u):$(id -g)")
+            for bind in "${BINDS[@]}"; do
+                CONTAINER_CMD+=("-v" "$bind")
+            done
+            CONTAINER_CMD+=("$CONTAINER_IMAGE" run /pipeline/main.nf)
+            ;;
+        apptainer|singularity)
+            CONTAINER_CMD+=("$CONTAINER_RUNTIME" run)
+            for bind in "${BINDS[@]}"; do
+                CONTAINER_CMD+=("--bind" "$bind")
+            done
+            CONTAINER_CMD+=("$SIF_PATH" run /pipeline/main.nf)
+            ;;
+    esac
+    CONTAINER_CMD+=("${NF_ARGS[@]}" -resume ${RESUME_SESSION})
 
-    echo "[INFO] Mode:   Docker"
+    echo "[INFO] Mode:   Container (${CONTAINER_RUNTIME})"
     echo "[INFO] Input:  $INPUT_HOST"
     echo "[INFO] Output: $OUTDIR_HOST"
-    echo "[INFO] Running: ${DOCKER_CMD[*]}"
+    echo "[INFO] Running: ${CONTAINER_CMD[*]}"
     echo ""
 
     mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
-    "${DOCKER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
+    "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
     # Capture session ID from Nextflow log and save self-invocation for reliable resume
     NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
