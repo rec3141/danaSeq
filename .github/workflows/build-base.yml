@@ -1,17 +1,11 @@
-name: Build and push container image
+name: Build base image (conda envs)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'nanopore_mag/nextflow/Dockerfile'
-      - 'nanopore_mag/nextflow/envs/**'
-      - '.github/workflows/build-container.yml'
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/danaseq-mag
+  IMAGE_NAME: ${{ github.repository_owner }}/danaseq-mag-base
 
 jobs:
   build:
@@ -66,9 +60,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: nanopore_mag/nextflow
-          file: nanopore_mag/nextflow/Dockerfile
+          file: nanopore_mag/nextflow/Dockerfile.base
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # No layer caching — the envs are too large for GitHub's 10 GB cache
-          # Each RUN is a separate layer so Docker can resume on retry
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max

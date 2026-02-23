@@ -1,0 +1,272 @@
+# ============================================================================
+# Dana MAG Assembly Pipeline - Base Image
+# ============================================================================
+#
+# Heavy base image containing all 35 conda environments and wrapper scripts.
+# Rebuilt on-demand (workflow_dispatch) when environment YAML files change.
+#
+# The thin pipeline image (Dockerfile) layers code on top of this image.
+#
+# Build:
+#   docker build -f Dockerfile.base -t danaseq-mag-base .
+#
+# ============================================================================
+
+FROM condaforge/miniforge3:latest
+
+LABEL maintainer="rec3141@gmail.com"
+LABEL description="Dana MAG Assembly Pipeline - Base image with all conda environments"
+LABEL org.opencontainers.image.source="https://github.com/rec3141/danaSeq"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        procps \
+        curl \
+        git \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================================
+# Install bioinformatics tools from pinned YAML files
+# ============================================================================
+
+COPY envs/ /tmp/envs/
+
+# Pre-create CheckM v1 data sentinel so the post-link script in checkm-genome
+# skips its 280 MB Zenodo download.  COMEBin and dRep both pull checkm-genome
+# as a transitive dep; without this the tarball is fetched twice at build time.
+# The real CheckM v1 data is downloaded with: download-databases.sh --checkm
+RUN for env in dana-mag-comebin dana-mag-drep; do \
+        mkdir -p /opt/conda/envs/${env}/checkm_data/genome_tree \
+        && touch /opt/conda/envs/${env}/checkm_data/genome_tree/genome_tree.derep.txt; \
+    done
+
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-flye     -f /tmp/envs/flye.yml        && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-mapping  -f /tmp/envs/mapping.yml      && mamba clean -afy
+# Use CPU-only PyTorch in Docker (~500MB vs ~5GB for GPU variant)
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-semibin  -f /tmp/envs/semibin-cpu.yml  && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-comebin  -f /tmp/envs/comebin-cpu.yml  && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-binning  -f /tmp/envs/binning.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-prokka   -f /tmp/envs/prokka.yml       && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-bakta    -f /tmp/envs/bakta.yml        && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-kaiju    -f /tmp/envs/kaiju.yml        && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-kofamscan -f /tmp/envs/kofamscan.yml    && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-emapper  -f /tmp/envs/emapper.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-dbcan    -f /tmp/envs/dbcan.yml         && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-genomad  -f /tmp/envs/genomad.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkv   -f /tmp/envs/checkv.yml       && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-integron   -f /tmp/envs/integron.yml     && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-islandpath   -f /tmp/envs/islandpath.yml    && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-macsyfinder    -f /tmp/envs/macsyfinder.yml    && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-defensefinder -f /tmp/envs/defensefinder.yml && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-checkm2       -f /tmp/envs/checkm2.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-bbmap        -f /tmp/envs/bbmap.yml         && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-tiara       -f /tmp/envs/tiara.yml        && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-whokaryote  -f /tmp/envs/whokaryote.yml   && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-metaeuk     -f /tmp/envs/metaeuk.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-kraken2     -f /tmp/envs/kraken2.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-rrna        -f /tmp/envs/rrna.yml         && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-pathway     -f /tmp/envs/pathway.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-marferret   -f /tmp/envs/marferret.yml    && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-viz         -f /tmp/envs/viz.yml          && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-metamdbg    -f /tmp/envs/metamdbg.yml     && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-myloasm     -f /tmp/envs/myloasm.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-derep       -f /tmp/envs/derep.yml        && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-drep        -f /tmp/envs/drep.yml         && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-instrain    -f /tmp/envs/instrain.yml     && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-strainy     -f /tmp/envs/strainy.yml      && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-floria      -f /tmp/envs/floria.yml       && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-skder       -f /tmp/envs/skder.yml        && mamba clean -afy
+
+# Clean up env YAML files
+RUN rm -rf /tmp/envs/
+
+# ============================================================================
+# Create wrapper scripts so tools are callable from PATH
+# ============================================================================
+
+RUN mkdir -p /usr/local/bin/dana-tools \
+    && for tool in flye filtlong nextflow java; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-flye/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in minimap2 samtools coverm; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-mapping/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in SemiBin2 LorBin; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-semibin/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in run_comebin.sh gen_cov_file.sh; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-comebin/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in metabat2 run_MaxBin.pl DAS_Tool jgi_summarize_bam_contig_depths; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-binning/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in prokka; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-prokka/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in bakta; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-bakta/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in exec_annotation; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-kofamscan/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in emapper.py download_eggnog_data.py; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-emapper/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in run_dbcan dbcan_build; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-dbcan/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in genomad; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-genomad/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in checkv; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-checkv/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in integron_finder; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-integron/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in kaiju kaiju-addTaxonNames kaiju2table; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-kaiju/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in hmmscan; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-islandpath/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in macsyfinder macsydata; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-macsyfinder/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in defense-finder; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-defensefinder/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in checkm2; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-checkm2/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in bbduk.sh dedupe.sh; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-bbmap/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in tiara; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-tiara/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in whokaryote.py; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-whokaryote/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in metaeuk; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-metaeuk/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in kraken2; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-kraken2/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in barrnap vsearch; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-rrna/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in KEGG-decoder; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-pathway/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in diamond; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-marferret/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in node npm python3; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-viz/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in metaMDBG; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-metamdbg/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in myloasm; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-myloasm/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in galah skani sourmash; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-derep/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in dRep; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-drep/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in inStrain; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-instrain/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in strainy; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-strainy/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in floria; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-floria/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in skder; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-skder/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done
+
+ENV PATH="/usr/local/bin/dana-tools:${PATH}"
+
+# ============================================================================
+# Writable home for non-root users (supports docker run --user)
+# ============================================================================
+
+RUN mkdir -p /home/dana && chmod 777 /home/dana
+ENV HOME=/home/dana

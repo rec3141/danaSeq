@@ -14,6 +14,7 @@ set -euo pipefail
 #   ./download-databases.sh --all              # Download all databases
 #   ./download-databases.sh --genomad          # Download geNomad database only
 #   ./download-databases.sh --checkv           # Download CheckV database only
+#   ./download-databases.sh --checkm            # Download CheckM v1 data (needed by dRep/COMEBin)
 #   ./download-databases.sh --checkm2          # Download CheckM2 database only
 #   ./download-databases.sh --kaiju            # Download Kaiju RefSeq database only
 #   ./download-databases.sh --macsyfinder      # Download MacSyFinder models (TXSScan + CONJScan)
@@ -54,6 +55,7 @@ fi
 # Parse arguments
 DOWNLOAD_GENOMAD=false
 DOWNLOAD_CHECKV=false
+DOWNLOAD_CHECKM=false
 DOWNLOAD_CHECKM2=false
 DOWNLOAD_KAIJU=false
 DOWNLOAD_MACSYFINDER=false
@@ -77,6 +79,7 @@ while (( $# )); do
         --all)       DOWNLOAD_ALL=true; INTERACTIVE=false; shift ;;
         --genomad)   DOWNLOAD_GENOMAD=true; INTERACTIVE=false; shift ;;
         --checkv)    DOWNLOAD_CHECKV=true; INTERACTIVE=false; shift ;;
+        --checkm)    DOWNLOAD_CHECKM=true; INTERACTIVE=false; shift ;;
         --checkm2)   DOWNLOAD_CHECKM2=true; INTERACTIVE=false; shift ;;
         --kaiju)     DOWNLOAD_KAIJU=true; INTERACTIVE=false; shift ;;
         --macsyfinder) DOWNLOAD_MACSYFINDER=true; INTERACTIVE=false; shift ;;
@@ -101,6 +104,7 @@ done
 if $DOWNLOAD_ALL; then
     DOWNLOAD_GENOMAD=true
     DOWNLOAD_CHECKV=true
+    DOWNLOAD_CHECKM=true
     DOWNLOAD_CHECKM2=true
     DOWNLOAD_KAIJU=true
     DOWNLOAD_MACSYFINDER=true
@@ -128,6 +132,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "--------" "----" "-----------"
     printf "  %-12s %-8s  %s\n" "genomad"  "~3.5 GB" "geNomad marker profiles + MMseqs2 (virus + plasmid detection)"
     printf "  %-12s %-8s  %s\n" "checkv"   "~1.4 GB" "CheckV reference genomes (viral quality assessment)"
+    printf "  %-12s %-8s  %s\n" "checkm"   "~280 MB" "CheckM v1 reference data (needed by dRep + COMEBin)"
     printf "  %-12s %-8s  %s\n" "checkm2"  "~3.5 GB" "CheckM2 DIAMOND db (MAG quality assessment)"
     printf "  %-12s %-8s  %s\n" "kaiju"    "~47 GB"  "Kaiju RefSeq protein db (contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "macsyfinder" "~50 MB" "MacSyFinder models: TXSScan + CONJScan (secretion + conjugation)"
@@ -150,6 +155,7 @@ show_databases() {
     echo "After downloading, pass database paths to the pipeline:"
     echo "  --genomad_db ${DB_DIR}/genomad_db"
     echo "  --checkv_db  ${DB_DIR}/checkv_db"
+    echo "  --checkm_data ${DB_DIR}/checkm_data"
     echo "  --checkm2_db ${DB_DIR}/checkm2_db"
     echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
     echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
@@ -181,67 +187,70 @@ if $INTERACTIVE; then
     echo "Select databases to download (space-separated, or 'all'):"
     echo "  1) genomad   - geNomad (virus + plasmid detection)"
     echo "  2) checkv    - CheckV (viral quality assessment)"
-    echo "  3) checkm2   - CheckM2 (MAG quality assessment)"
-    echo "  4) kaiju     - Kaiju RefSeq proteins (contig taxonomy, ~47 GB)"
-    echo "  5) macsyfinder - MacSyFinder models: TXSScan + CONJScan (~50 MB)"
-    echo "  6) defensefinder - DefenseFinder models: anti-phage defense (~100 MB)"
-    echo "  7) bakta       - Bakta full annotation database (~37 GB)"
-    echo "  8) bakta-light - Bakta light annotation database (~1.4 GB)"
-    echo "  9) kofam     - KOfam profiles (KEGG Orthology, ~4 GB)"
-    echo " 10) eggnog    - eggNOG-mapper DIAMOND db (~12 GB)"
-    echo " 11) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~2 GB)"
-    echo " 12) metaeuk   - MetaEuk OrthoDB v12 Eukaryota (~23 GB)"
-    echo " 13) kraken2   - Kraken2 PlusPFP-8 (contig taxonomy, ~8 GB)"
-    echo " 14) silva     - SILVA SSU + LSU NR99 (rRNA classification, ~900 MB)"
-    echo " 15) marferret - MarFERReT marine eukaryotic proteins (~9 GB)"
-    echo " 16) all       - All databases"
+    echo "  3) checkm    - CheckM v1 reference data (needed by dRep + COMEBin, ~280 MB)"
+    echo "  4) checkm2   - CheckM2 (MAG quality assessment)"
+    echo "  5) kaiju     - Kaiju RefSeq proteins (contig taxonomy, ~47 GB)"
+    echo "  6) macsyfinder - MacSyFinder models: TXSScan + CONJScan (~50 MB)"
+    echo "  7) defensefinder - DefenseFinder models: anti-phage defense (~100 MB)"
+    echo "  8) bakta       - Bakta full annotation database (~37 GB)"
+    echo "  9) bakta-light - Bakta light annotation database (~1.4 GB)"
+    echo " 10) kofam     - KOfam profiles (KEGG Orthology, ~4 GB)"
+    echo " 11) eggnog    - eggNOG-mapper DIAMOND db (~12 GB)"
+    echo " 12) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~2 GB)"
+    echo " 13) metaeuk   - MetaEuk OrthoDB v12 Eukaryota (~23 GB)"
+    echo " 14) kraken2   - Kraken2 PlusPFP-8 (contig taxonomy, ~8 GB)"
+    echo " 15) silva     - SILVA SSU + LSU NR99 (rRNA classification, ~900 MB)"
+    echo " 16) marferret - MarFERReT marine eukaryotic proteins (~9 GB)"
+    echo " 17) all       - All databases"
     echo ""
-    read -rp "Choice [1-16, or names]: " choice
+    read -rp "Choice [1-17, or names]: " choice
 
     case "$choice" in
         1|genomad)      DOWNLOAD_GENOMAD=true ;;
         2|checkv)       DOWNLOAD_CHECKV=true ;;
-        3|checkm2)      DOWNLOAD_CHECKM2=true ;;
-        4|kaiju)        DOWNLOAD_KAIJU=true ;;
-        5|macsyfinder)  DOWNLOAD_MACSYFINDER=true ;;
-        6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
-        7|bakta)        DOWNLOAD_BAKTA=true ;;
-        8|bakta-light)  DOWNLOAD_BAKTA_LIGHT=true ;;
-        9|kofam)        DOWNLOAD_KOFAM=true ;;
-        10|eggnog)      DOWNLOAD_EGGNOG=true ;;
-        11|dbcan)       DOWNLOAD_DBCAN=true ;;
-        12|metaeuk)     DOWNLOAD_METAEUK=true ;;
-        13|kraken2)     DOWNLOAD_KRAKEN2=true ;;
-        14|silva)       DOWNLOAD_SILVA=true ;;
-        15|marferret)   DOWNLOAD_MARFERRET=true ;;
-        16|all)         DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
+        3|checkm)       DOWNLOAD_CHECKM=true ;;
+        4|checkm2)      DOWNLOAD_CHECKM2=true ;;
+        5|kaiju)        DOWNLOAD_KAIJU=true ;;
+        6|macsyfinder)  DOWNLOAD_MACSYFINDER=true ;;
+        7|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
+        8|bakta)        DOWNLOAD_BAKTA=true ;;
+        9|bakta-light)  DOWNLOAD_BAKTA_LIGHT=true ;;
+        10|kofam)       DOWNLOAD_KOFAM=true ;;
+        11|eggnog)      DOWNLOAD_EGGNOG=true ;;
+        12|dbcan)       DOWNLOAD_DBCAN=true ;;
+        13|metaeuk)     DOWNLOAD_METAEUK=true ;;
+        14|kraken2)     DOWNLOAD_KRAKEN2=true ;;
+        15|silva)       DOWNLOAD_SILVA=true ;;
+        16|marferret)   DOWNLOAD_MARFERRET=true ;;
+        17|all)         DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
                 case "$item" in
                     1|genomad)      DOWNLOAD_GENOMAD=true ;;
                     2|checkv)       DOWNLOAD_CHECKV=true ;;
-                    3|checkm2)      DOWNLOAD_CHECKM2=true ;;
-                    4|kaiju)        DOWNLOAD_KAIJU=true ;;
-                    5|macsyfinder)  DOWNLOAD_MACSYFINDER=true ;;
-                    6|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
-                    7|bakta)        DOWNLOAD_BAKTA=true ;;
-                    8|bakta-light)  DOWNLOAD_BAKTA_LIGHT=true ;;
-                    9|kofam)        DOWNLOAD_KOFAM=true ;;
-                    10|eggnog)      DOWNLOAD_EGGNOG=true ;;
-                    11|dbcan)       DOWNLOAD_DBCAN=true ;;
-                    12|metaeuk)     DOWNLOAD_METAEUK=true ;;
-                    13|kraken2)     DOWNLOAD_KRAKEN2=true ;;
-                    14|silva)       DOWNLOAD_SILVA=true ;;
-                    15|marferret)   DOWNLOAD_MARFERRET=true ;;
-                    all)            DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
+                    3|checkm)       DOWNLOAD_CHECKM=true ;;
+                    4|checkm2)      DOWNLOAD_CHECKM2=true ;;
+                    5|kaiju)        DOWNLOAD_KAIJU=true ;;
+                    6|macsyfinder)  DOWNLOAD_MACSYFINDER=true ;;
+                    7|defensefinder) DOWNLOAD_DEFENSEFINDER=true ;;
+                    8|bakta)        DOWNLOAD_BAKTA=true ;;
+                    9|bakta-light)  DOWNLOAD_BAKTA_LIGHT=true ;;
+                    10|kofam)       DOWNLOAD_KOFAM=true ;;
+                    11|eggnog)      DOWNLOAD_EGGNOG=true ;;
+                    12|dbcan)       DOWNLOAD_DBCAN=true ;;
+                    13|metaeuk)     DOWNLOAD_METAEUK=true ;;
+                    14|kraken2)     DOWNLOAD_KRAKEN2=true ;;
+                    15|silva)       DOWNLOAD_SILVA=true ;;
+                    16|marferret)   DOWNLOAD_MARFERRET=true ;;
+                    all)            DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_BAKTA_LIGHT && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_MARFERRET; then
+    if ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_BAKTA_LIGHT && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_MARFERRET; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -305,6 +314,56 @@ download_checkv() {
     fi
     echo "[SUCCESS] CheckV database downloaded to ${db_path}"
     echo "  Use with: --checkv_db ${db_path}"
+}
+
+download_checkm() {
+    local db_path="${DB_DIR}/checkm_data"
+    if [ -d "${db_path}" ] && [ -f "${db_path}/genome_tree/genome_tree.derep.txt" ] \
+            && [ -s "${db_path}/genome_tree/genome_tree.derep.txt" ]; then
+        echo "[INFO] CheckM v1 data already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading CheckM v1 reference data (~280 MB)..."
+    echo "  Needed by dRep and COMEBin (transitive dependency on checkm-genome)"
+    echo "  Destination: ${db_path}"
+
+    mkdir -p "${db_path}"
+
+    local url="https://zenodo.org/record/7401545/files/checkm_data_2015_01_16.tar.gz"
+    local tarball="${db_path}/checkm_data_2015_01_16.tar.gz"
+    local expected_sha="971ec469348bd6c3d9eb96142f567f12443310fa06c1892643940f35f86ac92c"
+
+    wget -q --show-progress -O "${tarball}" "${url}"
+
+    # Verify checksum
+    local actual_sha
+    actual_sha=$(sha256sum "${tarball}" | cut -d' ' -f1)
+    if [ "${actual_sha}" != "${expected_sha}" ]; then
+        echo "[ERROR] SHA256 mismatch for ${tarball}" >&2
+        echo "  Expected: ${expected_sha}" >&2
+        echo "  Got:      ${actual_sha}" >&2
+        rm -f "${tarball}"
+        return 1
+    fi
+
+    tar -xzf "${tarball}" -C "${db_path}"
+    rm -f "${tarball}"
+
+    # Point each env that has checkm-genome to the shared data directory
+    for env_name in dana-mag-comebin dana-mag-drep; do
+        local env_path="${ENV_DIR}/${env_name}"
+        local checkm_bin="${env_path}/bin/checkm"
+        if [ -x "${checkm_bin}" ]; then
+            echo "  Setting checkm data root for ${env_name}..."
+            "${checkm_bin}" data setRoot "${db_path}" || true
+        fi
+    done
+
+    echo "[SUCCESS] CheckM v1 data downloaded to ${db_path}"
+    echo "  Use with: --checkm_data ${db_path}"
 }
 
 download_checkm2() {
@@ -751,6 +810,10 @@ if $DOWNLOAD_CHECKV; then
     ( download_checkv ) || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_CHECKM; then
+    ( download_checkm ) || failed=$((failed + 1))
+fi
+
 if $DOWNLOAD_CHECKM2; then
     ( download_checkm2 ) || failed=$((failed + 1))
 fi
@@ -813,6 +876,7 @@ else
     echo "Run the pipeline with database paths:"
     $DOWNLOAD_GENOMAD && echo "  --genomad_db ${DB_DIR}/genomad_db"
     $DOWNLOAD_CHECKV  && echo "  --checkv_db  ${DB_DIR}/checkv_db"
+    $DOWNLOAD_CHECKM  && echo "  --checkm_data ${DB_DIR}/checkm_data"
     $DOWNLOAD_CHECKM2 && echo "  --checkm2_db ${DB_DIR}/checkm2_db"
     $DOWNLOAD_KAIJU   && echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
     $DOWNLOAD_MACSYFINDER && echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
