@@ -76,7 +76,7 @@ If running on CPU-only nodes, use the `semibin-cpu.yml` and `comebin-cpu.yml` co
 | Process | CPUs | Mem | Actual Runtime | Partition | Notes |
 |---------|------|-----|---------------|-----------|-------|
 | BAKTA_BASIC | 8 | 24 GB | ~4h | b2 (12h) | Light DB, CDS-only (skips tRNA/rRNA/ncRNA/CRISPR) |
-| **BAKTA_EXTRA** | **8** | **24 GB** | **17h+ (still running)** | **b3 (1d)** | **Full DB; DIAMOND pseudo-gene search is bottleneck** |
+| **BAKTA_EXTRA** | **8** | **24 GB** | **~35.5h** | **b4 (3d)** | **Full DB; DIAMOND PSC (12h) + pseudo-gene (8.7h) + BLASTX (0.6h)** |
 | KOFAMSCAN | 8 | 24 GB | ~2-4h (est.) | b2 (12h) | HMM search, ~1.1M proteins |
 | EMAPPER | 8 | 24 GB | 5h+ (still running) | b2 (12h) | DIAMOND `--sensitive --iterate` on eggNOG DB |
 | DBCAN | 8 | 24 GB | ~1-2h (est.) | b1 (3h) | 3-method CAZyme consensus |
@@ -187,8 +187,8 @@ Assembly (12h) ──┬── Bakta Basic (4h) ──┬── DefenseFinder (5
                  └── rRNA (5h)
 ```
 
-**Minimum wall time** (unlimited parallelism): ~36h
-- Critical path: Assembly (12h) → Bakta Extra (24h+)
+**Minimum wall time** (unlimited parallelism): ~48h
+- Critical path: Assembly (12h) → Bakta Extra (35.5h)
 
 **Without Bakta Extra**: ~29h
 - Critical path: Assembly (12h) → Bakta Basic (4h) → eggNOG-mapper (12h+)

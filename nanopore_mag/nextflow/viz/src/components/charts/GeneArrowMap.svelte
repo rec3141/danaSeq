@@ -108,11 +108,12 @@
         .attr('stroke-width', 0.5)
         .attr('class', 'gene-arrow')
         .on('mouseenter', (event) => {
-          const label = f.g || f.n || 'hypothetical protein';
-          const product = f.p || 'hypothetical protein';
+          const gene = f.g || '';
+          const product = f.p || '';
+          const label = gene || product || 'hypothetical protein';
           const coords = `${f.s.toLocaleString()}..${f.e.toLocaleString()} (${f.d === 1 ? '+' : '-'})`;
           const lines = [label];
-          if (product !== label) lines.push(product);
+          if (product && product !== label) lines.push(product);
           lines.push(`${f.t.toUpperCase()} | ${coords} | ${(f.e - f.s + 1).toLocaleString()} bp`);
           tipText = lines.join('\n');
           const r = svgEl.getBoundingClientRect();

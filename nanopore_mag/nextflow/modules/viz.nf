@@ -18,12 +18,16 @@ process VIZ_PREPROCESS {
     def results = params.store_dir
         ? "${params.store_dir}/results_${file(params.outdir).name}"
         : "${params.outdir}"
+    def storeFlag = params.store_dir
+        ? "--store-dir ${params.store_dir}/results_${file(params.outdir).name}"
+        : ""
     """
     # Generate JSON data files
     mkdir -p data
     python3 ${projectDir}/viz/preprocess/preprocess.py \
         --results "${results}" \
-        --output data/
+        --output data/ \
+        ${storeFlag}
 
     # Build static site (node/npm provided by conda env)
     cd ${projectDir}/viz

@@ -8,7 +8,7 @@ Generates 12 JSON files from Nextflow pipeline results:
   eukaryotic.json, contig_explorer.json, contig_lengths.json
 
 Usage:
-  python3 preprocess.py --results <path> --output <path> [--skip-tsne]
+  python3 preprocess.py --results <path> --output <path> [--store-dir <path>] [--skip-tsne]
 """
 
 import argparse
@@ -31,6 +31,28 @@ def load_tsv(path, **kwargs):
         print(f"  [WARNING] Missing: {path}", file=sys.stderr)
         return None
     return pd.read_csv(path, sep='\t', **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Path resolution: storeDir (persistent cache) overlaid on results dir
+# ---------------------------------------------------------------------------
+_STORE_DIR = None   # set by main() when --store-dir is provided
+
+
+def resolve_path(results_dir, *parts):
+    """Return the best path for a results sub-path.
+
+    If --store-dir was given and the file exists there, use it.
+    Otherwise fall back to results_dir.  This lets preprocess.py
+    transparently pick up outputs that haven't been published yet
+    (e.g. BAKTA_EXTRA, metabolism sub-dirs).
+    """
+    rel = os.path.join(*parts)
+    if _STORE_DIR:
+        store_path = os.path.join(_STORE_DIR, rel)
+        if os.path.exists(store_path):
+            return store_path
+    return os.path.join(results_dir, rel)
 
 
 RANKS = ['domain', 'phylum', 'class', 'order', 'family', 'genus']
@@ -64,7 +86,7 @@ def build_taxonomy_maps(results_dir, kaiju_df):
                     kaiju_tax[row['contig_id']] = tax
 
     kraken2_tax = {}
-    kraken2_path = os.path.join(results_dir, 'taxonomy', 'kraken2', 'kraken2_contigs.tsv')
+    kraken2_path = resolve_path(results_dir, 'taxonomy', 'kraken2', 'kraken2_contigs.tsv')
     kraken2_df = load_tsv(kraken2_path)
     if kraken2_df is not None:
         for _, row in kraken2_df.iterrows():
@@ -78,7 +100,7 @@ def build_taxonomy_maps(results_dir, kaiju_df):
                     kraken2_tax[row['contig_id']] = tax
 
     rrna_tax = {}
-    rrna_path = os.path.join(results_dir, 'taxonomy', 'rrna', 'rrna_contigs.tsv')
+    rrna_path = resolve_path(results_dir, 'taxonomy', 'rrna', 'rrna_contigs.tsv')
     rrna_df = load_tsv(rrna_path)
     if rrna_df is not None:
         for _, row in rrna_df.iterrows():
@@ -122,6 +144,8 @@ def parse_args():
     p = argparse.ArgumentParser(description="Preprocess MAG pipeline results to JSON")
     p.add_argument('--results', '-r', required=True, help='Pipeline results directory')
     p.add_argument('--output', '-o', required=True, help='Output directory for JSON files')
+    p.add_argument('--store-dir', '-s', default=None,
+                   help='Persistent storeDir overlay (checked first for each file)')
     p.add_argument('--skip-tsne', action='store_true', help='Skip t-SNE (saves ~5 min)')
     return p.parse_args()
 
@@ -235,11 +259,11 @@ def build_contig_lengths(assembly_info, depths_df=None, results_dir=None):
             binned_contigs = set()
             if results_dir:
                 for binner in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']:
-                    btsv = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+                    btsv = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
                     bdf = load_tsv(btsv, header=None, names=['contig', 'bin'])
                     if bdf is not None:
                         binned_contigs.update(bdf['contig'].values)
-                c2b_path = os.path.join(results_dir, 'binning', 'dastool', 'contig2bin.tsv')
+                c2b_path = resolve_path(results_dir, 'binning', 'dastool', 'contig2bin.tsv')
                 c2b_df = load_tsv(c2b_path, header=None, names=['contig', 'bin'])
                 if c2b_df is not None:
                     binned_contigs.update(c2b_df['contig'].values)
@@ -252,7 +276,7 @@ def build_contig_lengths(assembly_info, depths_df=None, results_dir=None):
             result['scatter_log_depth'] = [round(float(np.log10(depths[i])), 4) for i in pos_idx]
             # GC% for coloring
             if results_dir:
-                gc_path = os.path.join(results_dir, 'assembly', 'gc.tsv')
+                gc_path = resolve_path(results_dir, 'assembly', 'gc.tsv')
                 gc_df = load_tsv(gc_path)
                 if gc_df is not None:
                     gc_map = dict(zip(gc_df['contig_id'], gc_df['gc_pct'].astype(float)))
@@ -406,7 +430,7 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
 
     # Per-binner contig2bin (keyed by raw bin name)
     for binner in binners:
-        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bins_path = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
         bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
         if bdf is not None:
             for _, row in bdf.iterrows():
@@ -567,7 +591,7 @@ def build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin):
         binner_contigs['dastool'] = dt_contigs
 
     for binner in binners:
-        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bins_path = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
         bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
         if bdf is not None:
             binner_contigs[binner] = set(bdf['contig'].values)
@@ -633,7 +657,7 @@ def _load_kegg_categories(results_dir):
 def build_kegg_heatmap(results_dir):
     """Build kegg_heatmap.json with Ward-clustered module completeness matrix."""
     print("Building kegg_heatmap.json ...")
-    path = os.path.join(results_dir, 'metabolism', 'modules', 'module_completeness.tsv')
+    path = resolve_path(results_dir, 'metabolism', 'modules', 'module_completeness.tsv')
     df = load_tsv(path)
     if df is None:
         return {'mag_ids': [], 'module_ids': [], 'module_names': [], 'matrix': [],
@@ -706,7 +730,7 @@ def build_scg_heatmap(results_dir):
     contig_to_bins = defaultdict(set)  # contig -> set of bin names
 
     # DAS Tool consensus (prefixed names like dastool-semibin_001)
-    c2b_path = os.path.join(results_dir, 'binning', 'dastool', 'contig2bin.tsv')
+    c2b_path = resolve_path(results_dir, 'binning', 'dastool', 'contig2bin.tsv')
     c2b_df = load_tsv(c2b_path, header=None, names=['contig', 'bin'])
     if c2b_df is not None:
         for _, row in c2b_df.iterrows():
@@ -714,7 +738,7 @@ def build_scg_heatmap(results_dir):
 
     # Per-binner maps
     for binner in binners:
-        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bins_path = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
         bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
         if bdf is not None:
             for _, row in bdf.iterrows():
@@ -722,7 +746,7 @@ def build_scg_heatmap(results_dir):
 
     result = {}
     for scg_set in ['bacteria', 'archaea']:
-        scg_path = os.path.join(results_dir, 'binning', 'dastool', f'{scg_set}.scg')
+        scg_path = resolve_path(results_dir, 'binning', 'dastool', f'{scg_set}.scg')
         scg_df = load_tsv(scg_path, header=None, names=['protein_id', 'scg_name'])
         if scg_df is None or scg_df.empty:
             result[scg_set] = {
@@ -844,7 +868,7 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
 
     # Add per-binner bins
     for binner in binners:
-        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bins_path = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
         bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
         if bdf is None:
             continue
@@ -999,7 +1023,7 @@ def build_eukaryotic(results_dir, assembly_info):
     len_map = dict(zip(assembly_info['#seq_name'], assembly_info['length']))
 
     # Tiara
-    tiara_path = os.path.join(results_dir, 'eukaryotic', 'tiara', 'tiara_output.tsv')
+    tiara_path = resolve_path(results_dir, 'eukaryotic', 'tiara', 'tiara_output.tsv')
     tiara_df = load_tsv(tiara_path)
     tiara_summary = Counter()
     tiara_size_weighted = Counter()
@@ -1011,7 +1035,7 @@ def build_eukaryotic(results_dir, assembly_info):
             tiara_size_weighted[cls] += length
 
     # Whokaryote
-    who_path = os.path.join(results_dir, 'eukaryotic', 'whokaryote', 'whokaryote_classifications.tsv')
+    who_path = resolve_path(results_dir, 'eukaryotic', 'whokaryote', 'whokaryote_classifications.tsv')
     who_df = load_tsv(who_path)
     who_summary = Counter()
     if who_df is not None:
@@ -1020,7 +1044,7 @@ def build_eukaryotic(results_dir, assembly_info):
             who_summary[cls] += 1
 
     # MarFERReT
-    mar_path = os.path.join(results_dir, 'eukaryotic', 'marferret', 'marferret_contigs.tsv')
+    mar_path = resolve_path(results_dir, 'eukaryotic', 'marferret', 'marferret_contigs.tsv')
     mar_df = load_tsv(mar_path)
     mar_taxonomy = Counter()
     mar_contigs = []
@@ -1059,7 +1083,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     from sklearn.preprocessing import StandardScaler
 
     # Load TNF (raw tetranucleotide frequencies — already relative abundance)
-    tnf_path = os.path.join(results_dir, 'assembly', 'tnf.tsv')
+    tnf_path = resolve_path(results_dir, 'assembly', 'tnf.tsv')
     tnf_df = load_tsv(tnf_path, header=None)
     if tnf_df is None:
         return {'contigs': [], 'has_tsne': False, 'has_umap': False}
@@ -1068,7 +1092,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     tnf_matrix = tnf_df.iloc[:, 1:].values.astype(float)
 
     # Load GC% from pipeline output (computed alongside TNF)
-    gc_path = os.path.join(results_dir, 'assembly', 'gc.tsv')
+    gc_path = resolve_path(results_dir, 'assembly', 'gc.tsv')
     gc_df = load_tsv(gc_path)
     if gc_df is not None:
         gc_map = dict(zip(gc_df['contig_id'], gc_df['gc_pct'].astype(float)))
@@ -1095,7 +1119,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
     binner_maps = {}
     for binner in binners:
-        bins_path = os.path.join(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bins_path = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
         bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
         if bdf is not None:
             bmap = dict(zip(bdf['contig'], bdf['bin']))
@@ -1126,20 +1150,20 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     # Default all contigs to 'chromosome', then overlay confident virus/plasmid/provirus
     replicon_map = {cid: 'chromosome' for cid in assembly_info['#seq_name'].values}
 
-    virus_summary_path = os.path.join(results_dir, 'mge', 'genomad', 'virus_summary.tsv')
+    virus_summary_path = resolve_path(results_dir, 'mge', 'genomad', 'virus_summary.tsv')
     virus_sum_df = load_tsv(virus_summary_path)
     if virus_sum_df is not None:
         for cid in virus_sum_df['seq_name'].values:
             replicon_map[cid] = 'virus'
 
-    plasmid_summary_path = os.path.join(results_dir, 'mge', 'genomad', 'plasmid_summary.tsv')
+    plasmid_summary_path = resolve_path(results_dir, 'mge', 'genomad', 'plasmid_summary.tsv')
     plasmid_sum_df = load_tsv(plasmid_summary_path)
     if plasmid_sum_df is not None:
         for cid in plasmid_sum_df['seq_name'].values:
             replicon_map[cid] = 'plasmid'
 
     # Proviruses: contigs hosting integrated phage (overrides chromosome)
-    provirus_path = os.path.join(results_dir, 'mge', 'genomad', 'provirus.tsv')
+    provirus_path = resolve_path(results_dir, 'mge', 'genomad', 'provirus.tsv')
     provirus_df = load_tsv(provirus_path)
     if provirus_df is not None:
         for source_seq in provirus_df['source_seq'].values:
@@ -1151,7 +1175,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
 
     # geNomad viral taxonomy (semicolon-delimited lineage per virus contig)
     genomad_tax = {}
-    genomad_tax_path = os.path.join(results_dir, 'mge', 'genomad', 'taxonomy.tsv')
+    genomad_tax_path = resolve_path(results_dir, 'mge', 'genomad', 'taxonomy.tsv')
     genomad_tax_df = load_tsv(genomad_tax_path)
     if genomad_tax_df is not None:
         for _, row in genomad_tax_df.iterrows():
@@ -1164,7 +1188,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
 
     # Tiara eukaryotic classification
     tiara_map = {}
-    tiara_path = os.path.join(results_dir, 'eukaryotic', 'tiara', 'tiara_output.tsv')
+    tiara_path = resolve_path(results_dir, 'eukaryotic', 'tiara', 'tiara_output.tsv')
     tiara_df = load_tsv(tiara_path)
     if tiara_df is not None:
         for _, row in tiara_df.iterrows():
@@ -1173,7 +1197,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
 
     # Whokaryote classification
     whokaryote_map = {}
-    whokaryote_path = os.path.join(results_dir, 'eukaryotic', 'whokaryote', 'whokaryote_classifications.tsv')
+    whokaryote_path = resolve_path(results_dir, 'eukaryotic', 'whokaryote', 'whokaryote_classifications.tsv')
     whokaryote_df = load_tsv(whokaryote_path)
     if whokaryote_df is not None:
         for _, row in whokaryote_df.iterrows():
@@ -1277,27 +1301,32 @@ def main():
     output_dir = args.output
     os.makedirs(output_dir, exist_ok=True)
 
+    global _STORE_DIR
+    _STORE_DIR = args.store_dir
+    if _STORE_DIR:
+        print(f"Store dir overlay: {_STORE_DIR}")
+
     print(f"Loading data from {results_dir} ...")
 
     # Load core data files
-    assembly_info = load_tsv(os.path.join(results_dir, 'assembly', 'assembly_info.txt'),
+    assembly_info = load_tsv(resolve_path(results_dir, 'assembly', 'assembly_info.txt'),
                              comment='#', header=None,
                              names=['#seq_name', 'length', 'cov.', 'circ.', 'repeat',
                                     'mult.', 'alt_group', 'graph_path'])
     # Assembly info has header line starting with #, reload properly
-    assembly_info = pd.read_csv(os.path.join(results_dir, 'assembly', 'assembly_info.txt'),
+    assembly_info = pd.read_csv(resolve_path(results_dir, 'assembly', 'assembly_info.txt'),
                                 sep='\t')
 
-    depths_df = load_tsv(os.path.join(results_dir, 'mapping', 'depths.txt'))
-    contig2bin = load_tsv(os.path.join(results_dir, 'binning', 'dastool', 'contig2bin.tsv'),
+    depths_df = load_tsv(resolve_path(results_dir, 'mapping', 'depths.txt'))
+    contig2bin = load_tsv(resolve_path(results_dir, 'binning', 'dastool', 'contig2bin.tsv'),
                           header=None, names=['contig', 'bin'])
-    dastool_summary = load_tsv(os.path.join(results_dir, 'binning', 'dastool', 'summary.tsv'))
-    checkm2_df = load_tsv(os.path.join(results_dir, 'binning', 'checkm2', 'quality_report.tsv'))
-    kaiju_df = load_tsv(os.path.join(results_dir, 'taxonomy', 'kaiju', 'kaiju_contigs.tsv'))
-    virus_df = load_tsv(os.path.join(results_dir, 'mge', 'genomad', 'virus_summary.tsv'))
-    plasmid_df = load_tsv(os.path.join(results_dir, 'mge', 'genomad', 'plasmid_summary.tsv'))
-    defense_df = load_tsv(os.path.join(results_dir, 'mge', 'defensefinder', 'systems.tsv'))
-    integron_df = load_tsv(os.path.join(results_dir, 'mge', 'integrons', 'integrons.tsv'),
+    dastool_summary = load_tsv(resolve_path(results_dir, 'binning', 'dastool', 'summary.tsv'))
+    checkm2_df = load_tsv(resolve_path(results_dir, 'binning', 'checkm2', 'quality_report.tsv'))
+    kaiju_df = load_tsv(resolve_path(results_dir, 'taxonomy', 'kaiju', 'kaiju_contigs.tsv'))
+    virus_df = load_tsv(resolve_path(results_dir, 'mge', 'genomad', 'virus_summary.tsv'))
+    plasmid_df = load_tsv(resolve_path(results_dir, 'mge', 'genomad', 'plasmid_summary.tsv'))
+    defense_df = load_tsv(resolve_path(results_dir, 'mge', 'defensefinder', 'systems.tsv'))
+    integron_df = load_tsv(resolve_path(results_dir, 'mge', 'integrons', 'integrons.tsv'),
                            comment='#')
 
     if assembly_info is None or depths_df is None or dastool_summary is None:

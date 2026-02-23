@@ -46,6 +46,9 @@ EXTRA_ARGS=""
 if [[ "${SKIP_TSNE:-}" == "1" ]]; then
     EXTRA_ARGS="--skip-tsne"
 fi
+if [[ -n "${STORE_DIR:-}" && -d "$STORE_DIR" ]]; then
+    EXTRA_ARGS="$EXTRA_ARGS --store-dir $STORE_DIR"
+fi
 
 mamba run -p "$CONDA_ENV" python3 "$SCRIPT_DIR/preprocess.py" \
     --results "$RESULTS_DIR" \
