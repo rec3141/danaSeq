@@ -35,11 +35,11 @@ COPY envs/ /tmp/envs/
 # Pre-create CheckM v1 data sentinel so the post-link script in checkm-genome
 # skips its 280 MB Zenodo download.  COMEBin and dRep both pull checkm-genome
 # as a transitive dep; without this the tarball is fetched twice at build time.
+# The post-link checks $CHECKM_DATA_DIR/genome_tree/genome_tree.derep.txt.
 # The real CheckM v1 data is downloaded with: download-databases.sh --checkm
-RUN for env in dana-mag-comebin dana-mag-drep; do \
-        mkdir -p /opt/conda/envs/${env}/checkm_data/genome_tree \
-        && touch /opt/conda/envs/${env}/checkm_data/genome_tree/genome_tree.derep.txt; \
-    done
+RUN mkdir -p /opt/checkm_data_stub/genome_tree \
+    && touch /opt/checkm_data_stub/genome_tree/genome_tree.derep.txt
+ENV CHECKM_DATA_DIR=/opt/checkm_data_stub
 
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-flye     -f /tmp/envs/flye.yml        && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-mapping  -f /tmp/envs/mapping.yml      && mamba clean -afy
@@ -77,6 +77,10 @@ RUN mamba env create -y -p /opt/conda/envs/dana-mag-instrain    -f /tmp/envs/ins
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-strainy     -f /tmp/envs/strainy.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-floria      -f /tmp/envs/floria.yml       && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-skder       -f /tmp/envs/skder.yml        && mamba clean -afy
+
+# Remove CheckM sentinel stub now that comebin + drep envs are installed
+ENV CHECKM_DATA_DIR=
+RUN rm -rf /opt/checkm_data_stub
 
 # Clean up env YAML files
 RUN rm -rf /tmp/envs/
