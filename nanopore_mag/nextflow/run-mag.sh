@@ -217,6 +217,8 @@ OUTDIR_HOST=""
 WORKDIR_HOST="/tmp/nanopore_mag_work"
 RESUME_SESSION=""
 AUTO_SESSION=true
+DB_DIR_HOST=""
+STORE_DIR_HOST=""
 
 while (( $# )); do
     case "$1" in
@@ -249,7 +251,13 @@ while (( $# )); do
         --db_dir)
             [[ -z "${2:-}" ]] && die "--db_dir requires a directory path"
             [[ -d "$2" ]] || die "--db_dir directory does not exist: $2"
-            resolve_db_dir "$(realpath "$2")"
+            DB_DIR_HOST="$(realpath "$2")"
+            resolve_db_dir "$DB_DIR_HOST"
+            shift 2 ;;
+        --store_dir)
+            [[ -z "${2:-}" ]] && die "--store_dir requires a directory path"
+            STORE_DIR_HOST="$(realpath -m "$2")"
+            NF_ARGS+=("--store_dir" "$STORE_DIR_HOST")
             shift 2 ;;
         --all)
             NF_ARGS+=(
@@ -319,6 +327,22 @@ if [[ "$USE_DOCKER" == true ]]; then
     MOUNTS+=("-v" "${INPUT_HOST}:/data/input:ro")
     MOUNTS+=("-v" "${OUTDIR_HOST}:/data/output")
     NF_ARGS=("--input" "/data/input" "--outdir" "/data/output" "${NF_ARGS[@]}")
+
+    # Mount database directory and rewrite all host paths in NF_ARGS to container paths
+    if [[ -n "${DB_DIR_HOST:-}" ]]; then
+        MOUNTS+=("-v" "${DB_DIR_HOST}:/data/db:ro")
+        for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+            NF_ARGS[$i]="${NF_ARGS[$i]//${DB_DIR_HOST}/\/data\/db}"
+        done
+    fi
+
+    # Mount store directory (read-write) and rewrite paths
+    if [[ -n "${STORE_DIR_HOST:-}" ]]; then
+        MOUNTS+=("-v" "${STORE_DIR_HOST}:/data/store")
+        for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+            NF_ARGS[$i]="${NF_ARGS[$i]//${STORE_DIR_HOST}/\/data\/store}"
+        done
+    fi
 
     # Persistent Nextflow directories for -resume support
     NF_CACHE="${OUTDIR_HOST}/.nextflow-cache"

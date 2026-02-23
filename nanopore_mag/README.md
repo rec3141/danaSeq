@@ -11,15 +11,18 @@ cd nextflow
 ./install.sh
 ./install.sh --check
 
-# Download databases (interactive menu or specify --genomad, --checkv, --checkm2, --kaiju, etc.)
+# Download databases (interactive menu or specify --genomad, --checkv, --checkm, --checkm2, --kaiju, etc.)
 ./download-databases.sh
 
 # Run (local conda, handles activation automatically)
 ./run-mag.sh --input /path/to/reads --outdir /path/to/output
 
-# Or with Docker
-docker build -t danaseq-mag .
+# Or with the pre-built Docker image (no local build needed)
+docker pull ghcr.io/rec3141/danaseq-mag:latest
 ./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
+
+# On HPC (Apptainer/Singularity)
+apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest
 
 # Show all options
 ./run-mag.sh --help
@@ -389,6 +392,7 @@ cd nextflow
 # Or download specific databases
 ./download-databases.sh --genomad          # ~3.5 GB  (virus + plasmid detection)
 ./download-databases.sh --checkv           # ~1.4 GB  (viral quality assessment)
+./download-databases.sh --checkm           # ~280 MB  (CheckM v1 data, needed by dRep + COMEBin)
 ./download-databases.sh --checkm2          # ~3.5 GB  (MAG quality assessment)
 ./download-databases.sh --kaiju            # ~47 GB   (protein-level taxonomy)
 ./download-databases.sh --kraken2          # ~8-70 GB (k-mer taxonomy, varies by DB)
@@ -429,6 +433,49 @@ cd nextflow
 **Integrated viz dashboard.** The pipeline automatically preprocesses all results into JSON and builds a static Svelte dashboard (`--run_viz`, on by default). Node.js and Python dependencies are bundled in a dedicated conda env (`dana-mag-viz`) for portability.
 
 **Twenty-seven isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
+
+## Docker / Container Image
+
+Pre-built images are published to GitHub Container Registry on every push to main:
+
+| Image | Purpose | Rebuild trigger |
+|-------|---------|-----------------|
+| `ghcr.io/rec3141/danaseq-mag-base:latest` | All 35 conda envs + wrapper scripts (~20 GB) | Manual (`workflow_dispatch`) |
+| `ghcr.io/rec3141/danaseq-mag:latest` | Pipeline code on top of base (~thin layer) | Push to `main` |
+
+The base image is rebuilt on-demand when conda environments change. The pipeline image rebuilds automatically on every push and takes under 5 minutes.
+
+```bash
+# Docker
+docker pull ghcr.io/rec3141/danaseq-mag:latest
+docker run --user $(id -u):$(id -g) \
+    -v /path/to/reads:/data/input:ro \
+    -v /path/to/output:/data/output \
+    ghcr.io/rec3141/danaseq-mag:latest \
+    run /pipeline/main.nf \
+        --input /data/input --outdir /data/output
+
+# Apptainer / Singularity (HPC)
+apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest
+apptainer run danaseq-mag.sif run /pipeline/main.nf --help
+
+# Or use run-mag.sh (handles Docker flags automatically)
+./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
+```
+
+### Building locally
+
+To rebuild the base image (e.g. after modifying env YAML files):
+
+```bash
+cd nextflow
+docker build -f Dockerfile.base -t danaseq-mag-base .
+docker build -t danaseq-mag .
+```
+
+The CI workflows are in `.github/workflows/`:
+- `build-base.yml` — builds `Dockerfile.base`, manual trigger only
+- `build-pipeline.yml` — builds `Dockerfile`, triggers on push to main (excludes `envs/` changes)
 
 ## Conda Environments
 

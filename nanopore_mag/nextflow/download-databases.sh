@@ -28,6 +28,8 @@ set -euo pipefail
 #   ./download-databases.sh --kraken2         # Download Kraken2 PlusPFP-8 (~8 GB)
 #   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
+#   ./download-databases.sh --docker            # Use Docker image instead of local conda
+#   ./download-databases.sh --docker --image IMG # Use a custom Docker image
 #   ./download-databases.sh --dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
@@ -37,8 +39,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_DIR="${SCRIPT_DIR}/databases"
 ENV_DIR="${SCRIPT_DIR}/conda-envs"
+USE_DOCKER=false
+DOCKER_IMAGE="ghcr.io/rec3141/danaseq-mag:latest"
 
-# Detect conda/mamba — prefer pre-built envs, fall back to PATH
+# Docker helper — runs a command inside the container with DB_DIR mounted at /data/db
+docker_run() {
+    docker run --rm --user "$(id -u):$(id -g)" --entrypoint "" \
+        -v "${DB_DIR}:/data/db" "${DOCKER_IMAGE}" "$@"
+}
+
+# Detect conda/mamba — prefer pre-built envs, fall back to PATH (warning deferred to after arg parsing)
 if [ -x "${ENV_DIR}/dana-mag-flye/bin/mamba" ]; then
     CONDA_CMD="${ENV_DIR}/dana-mag-flye/bin/mamba"
 elif [ -x "${ENV_DIR}/dana-mag-flye/bin/conda" ]; then
@@ -48,7 +58,6 @@ elif command -v mamba &>/dev/null; then
 elif command -v conda &>/dev/null; then
     CONDA_CMD="conda"
 else
-    echo "[WARNING] conda/mamba not found — bakta download will be skipped" >&2
     CONDA_CMD=""
 fi
 
@@ -75,6 +84,8 @@ INTERACTIVE=true
 
 while (( $# )); do
     case "$1" in
+        --docker)    USE_DOCKER=true; shift ;;
+        --image)     DOCKER_IMAGE="$2"; shift 2 ;;
         --dir)       DB_DIR="$2"; shift 2 ;;
         --all)       DOWNLOAD_ALL=true; INTERACTIVE=false; shift ;;
         --genomad)   DOWNLOAD_GENOMAD=true; INTERACTIVE=false; shift ;;
@@ -118,6 +129,11 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_KRAKEN2=true
     DOWNLOAD_SILVA=true
     DOWNLOAD_MARFERRET=true
+fi
+
+# Warn if no conda and not using Docker
+if [[ -z "$CONDA_CMD" ]] && ! $USE_DOCKER; then
+    echo "[WARNING] conda/mamba not found — tool-based downloads will require --docker" >&2
 fi
 
 # ============================================================================
@@ -274,13 +290,16 @@ download_genomad() {
     echo "[INFO] Downloading geNomad database (~3.5 GB)..."
     echo "  Destination: ${db_path}"
 
-    local genomad_bin="${ENV_DIR}/dana-mag-genomad/bin/genomad"
-    if [ ! -x "${genomad_bin}" ]; then
-        echo "[ERROR] geNomad not installed. Run ./install.sh first." >&2
-        return 1
+    if $USE_DOCKER; then
+        docker_run genomad download-database /data/db
+    else
+        local genomad_bin="${ENV_DIR}/dana-mag-genomad/bin/genomad"
+        if [ ! -x "${genomad_bin}" ]; then
+            echo "[ERROR] geNomad not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        "${genomad_bin}" download-database "${DB_DIR}"
     fi
-
-    "${genomad_bin}" download-database "${DB_DIR}"
     echo "[SUCCESS] geNomad database downloaded to ${db_path}"
     echo "  Use with: --genomad_db ${db_path}"
 }
@@ -297,13 +316,16 @@ download_checkv() {
     echo "[INFO] Downloading CheckV database (~1.4 GB)..."
     echo "  Destination: ${db_path}"
 
-    local checkv_bin="${ENV_DIR}/dana-mag-checkv/bin/checkv"
-    if [ ! -x "${checkv_bin}" ]; then
-        echo "[ERROR] CheckV not installed. Run ./install.sh first." >&2
-        return 1
+    if $USE_DOCKER; then
+        docker_run checkv download_database /data/db/checkv_db
+    else
+        local checkv_bin="${ENV_DIR}/dana-mag-checkv/bin/checkv"
+        if [ ! -x "${checkv_bin}" ]; then
+            echo "[ERROR] CheckV not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        "${checkv_bin}" download_database "${db_path}"
     fi
-
-    "${checkv_bin}" download_database "${db_path}"
     # CheckV may download to a versioned subdirectory (checkv-db-v*)
     # If so, move contents up to the expected path
     local downloaded_dir
@@ -378,14 +400,17 @@ download_checkm2() {
     echo "[INFO] Downloading CheckM2 database (~3.5 GB)..."
     echo "  Destination: ${db_path}"
 
-    local checkm2_bin="${ENV_DIR}/dana-mag-checkm2/bin/checkm2"
-    if [ ! -x "${checkm2_bin}" ]; then
-        echo "[ERROR] CheckM2 not installed. Run ./install.sh first." >&2
-        return 1
-    fi
-
     mkdir -p "${db_path}"
-    "${checkm2_bin}" database --download --path "${db_path}"
+    if $USE_DOCKER; then
+        docker_run checkm2 database --download --path /data/db/checkm2_db
+    else
+        local checkm2_bin="${ENV_DIR}/dana-mag-checkm2/bin/checkm2"
+        if [ ! -x "${checkm2_bin}" ]; then
+            echo "[ERROR] CheckM2 not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        "${checkm2_bin}" database --download --path "${db_path}"
+    fi
     echo "[SUCCESS] CheckM2 database downloaded to ${db_path}"
     echo "  Use with: --checkm2_db ${db_path}"
 }
@@ -403,16 +428,20 @@ download_kaiju() {
     echo "  This is a large download and will take a while."
     echo "  Destination: ${db_path}"
 
-    local kaiju_makedb="${ENV_DIR}/dana-mag-kaiju/bin/kaiju-makedb"
-    if [ ! -x "${kaiju_makedb}" ]; then
-        echo "[ERROR] Kaiju not installed. Run ./install.sh first." >&2
-        return 1
-    fi
-
     mkdir -p "${db_path}"
-    # kaiju-makedb downloads sequences and builds the FM-index
-    # -s refseq_ref: RefSeq reference genomes (bacteria, archaea, viruses)
-    (cd "${db_path}" && "${kaiju_makedb}" -s refseq_ref)
+    if $USE_DOCKER; then
+        # kaiju-makedb downloads sequences and builds the FM-index
+        docker_run sh -c 'cd /data/db/kaiju_db && kaiju-makedb -s refseq_ref'
+    else
+        local kaiju_makedb="${ENV_DIR}/dana-mag-kaiju/bin/kaiju-makedb"
+        if [ ! -x "${kaiju_makedb}" ]; then
+            echo "[ERROR] Kaiju not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        # kaiju-makedb downloads sequences and builds the FM-index
+        # -s refseq_ref: RefSeq reference genomes (bacteria, archaea, viruses)
+        (cd "${db_path}" && "${kaiju_makedb}" -s refseq_ref)
+    fi
     echo "[SUCCESS] Kaiju database downloaded to ${db_path}"
     echo "  Use with: --kaiju_db ${db_path}"
 }
@@ -430,15 +459,19 @@ download_macsyfinder() {
     echo "  Models: TXSScan (20 secretion systems), CONJScan (17 conjugation systems)"
     echo "  Destination: ${db_path}"
 
-    local msf_data_bin="${ENV_DIR}/dana-mag-macsyfinder/bin/msf_data"
-    if [ ! -x "${msf_data_bin}" ]; then
-        echo "[ERROR] MacSyFinder not installed. Run ./install.sh first." >&2
-        return 1
-    fi
-
     mkdir -p "${db_path}"
-    "${msf_data_bin}" install --target "${db_path}" TXSScan
-    "${msf_data_bin}" install --target "${db_path}" CONJScan
+    if $USE_DOCKER; then
+        docker_run msf_data install --target /data/db/macsyfinder_models TXSScan
+        docker_run msf_data install --target /data/db/macsyfinder_models CONJScan
+    else
+        local msf_data_bin="${ENV_DIR}/dana-mag-macsyfinder/bin/msf_data"
+        if [ ! -x "${msf_data_bin}" ]; then
+            echo "[ERROR] MacSyFinder not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        "${msf_data_bin}" install --target "${db_path}" TXSScan
+        "${msf_data_bin}" install --target "${db_path}" CONJScan
+    fi
     echo "[SUCCESS] MacSyFinder models downloaded to ${db_path}"
     echo "  Use with: --macsyfinder_models ${db_path}"
 }
@@ -456,26 +489,37 @@ download_defensefinder() {
     echo "  Models: ~280 anti-phage defense system HMM profiles"
     echo "  Destination: ${db_path}"
 
-    local df_bin="${ENV_DIR}/dana-mag-defensefinder/bin/defense-finder"
-    if [ ! -x "${df_bin}" ]; then
-        echo "[ERROR] DefenseFinder not installed. Run ./install.sh first." >&2
-        return 1
-    fi
-
     mkdir -p "${db_path}"
-    "${df_bin}" update --models-dir "${db_path}"
-    # Workaround: CasFinder 3.1.1 has model definition version 2.1 which is
-    # incompatible with macsyfinder 2.1.4 bundled with defense-finder 2.0.1
-    # (https://github.com/mdmparis/defense-finder/issues/91)
-    # Downgrade to 3.1.0 which uses compatible model definition version 2.0
-    local msf_data_bin="${ENV_DIR}/dana-mag-defensefinder/bin/macsydata"
-    if [ -x "${msf_data_bin}" ]; then
+    if $USE_DOCKER; then
+        docker_run defense-finder update --models-dir /data/db/defensefinder_models
+        # Workaround: CasFinder 3.1.1 model version incompatibility
         local cf_ver
         cf_ver=$(cat "${db_path}/CasFinder/metadata.yml" 2>/dev/null | grep -oP 'vers: \K.*' | head -1)
         if [ "${cf_ver}" = "3.1.1" ]; then
             echo "  Downgrading CasFinder 3.1.1 → 3.1.0 (model version compatibility fix)"
             rm -rf "${db_path}/CasFinder"
-            "${msf_data_bin}" install --target "${db_path}" CasFinder==3.1.0
+            docker_run macsydata install --target /data/db/defensefinder_models CasFinder==3.1.0
+        fi
+    else
+        local df_bin="${ENV_DIR}/dana-mag-defensefinder/bin/defense-finder"
+        if [ ! -x "${df_bin}" ]; then
+            echo "[ERROR] DefenseFinder not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        "${df_bin}" update --models-dir "${db_path}"
+        # Workaround: CasFinder 3.1.1 has model definition version 2.1 which is
+        # incompatible with macsyfinder 2.1.4 bundled with defense-finder 2.0.1
+        # (https://github.com/mdmparis/defense-finder/issues/91)
+        # Downgrade to 3.1.0 which uses compatible model definition version 2.0
+        local msf_data_bin="${ENV_DIR}/dana-mag-defensefinder/bin/macsydata"
+        if [ -x "${msf_data_bin}" ]; then
+            local cf_ver
+            cf_ver=$(cat "${db_path}/CasFinder/metadata.yml" 2>/dev/null | grep -oP 'vers: \K.*' | head -1)
+            if [ "${cf_ver}" = "3.1.1" ]; then
+                echo "  Downgrading CasFinder 3.1.1 → 3.1.0 (model version compatibility fix)"
+                rm -rf "${db_path}/CasFinder"
+                "${msf_data_bin}" install --target "${db_path}" CasFinder==3.1.0
+            fi
         fi
     fi
     echo "[SUCCESS] DefenseFinder models downloaded to ${db_path}"
@@ -494,15 +538,18 @@ download_bakta() {
     echo "[INFO] Downloading Bakta full database (~37 GB)..."
     echo "  Destination: ${db_path}/db"
 
-    local bakta_env="${ENV_DIR}/dana-mag-bakta"
-    if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
-        echo "[ERROR] Bakta not installed. Run ./install.sh first." >&2
-        return 1
-    fi
-
     mkdir -p "${db_path}"
-    # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
-    ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type full
+    if $USE_DOCKER; then
+        docker_run bakta_db download --output /data/db/bakta --type full
+    else
+        local bakta_env="${ENV_DIR}/dana-mag-bakta"
+        if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
+            echo "[ERROR] Bakta not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
+        ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type full
+    fi
     echo "[SUCCESS] Bakta full database downloaded to ${db_path}/db"
     echo "  Use with: --bakta_db ${db_path}/db"
 }
@@ -519,15 +566,18 @@ download_bakta_light() {
     echo "[INFO] Downloading Bakta light database (~1.4 GB)..."
     echo "  Destination: ${db_path}/db-light"
 
-    local bakta_env="${ENV_DIR}/dana-mag-bakta"
-    if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
-        echo "[ERROR] Bakta not installed. Run ./install.sh first." >&2
-        return 1
-    fi
-
     mkdir -p "${db_path}"
-    # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
-    ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type light
+    if $USE_DOCKER; then
+        docker_run bakta_db download --output /data/db/bakta --type light
+    else
+        local bakta_env="${ENV_DIR}/dana-mag-bakta"
+        if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
+            echo "[ERROR] Bakta not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
+        ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type light
+    fi
     echo "[SUCCESS] Bakta light database downloaded to ${db_path}/db-light"
     echo "  Use with: --bakta_light_db ${db_path}/db-light"
 }
@@ -571,18 +621,23 @@ download_eggnog() {
     echo "[INFO] Downloading eggNOG-mapper database (~12 GB)..."
     echo "  Destination: ${db_path}"
 
-    local emapper_bin="${ENV_DIR}/dana-mag-emapper/bin/download_eggnog_data.py"
-    if [ ! -x "${emapper_bin}" ]; then
-        echo "[ERROR] eggNOG-mapper not installed. Run ./install.sh first." >&2
-        return 1
-    fi
-
     mkdir -p "${db_path}"
-    # Workaround: eggnog-mapper <=2.1.13 has broken download URLs
-    # (eggnogdb.embl.de returns 404; eggnog5.embl.de is the working host)
-    # https://github.com/eggnogdb/eggnog-mapper/issues/571
-    sed -i "s|eggnogdb.embl.de|eggnog5.embl.de|g" "${emapper_bin}"
-    "${emapper_bin}" --data_dir "${db_path}" -y
+    if $USE_DOCKER; then
+        # Workaround: eggnog-mapper <=2.1.13 has broken download URLs
+        # (eggnogdb.embl.de returns 404; eggnog5.embl.de is the working host)
+        docker_run sh -c "sed -i 's|eggnogdb.embl.de|eggnog5.embl.de|g' \$(which download_eggnog_data.py); download_eggnog_data.py --data_dir /data/db/eggnog_db -y"
+    else
+        local emapper_bin="${ENV_DIR}/dana-mag-emapper/bin/download_eggnog_data.py"
+        if [ ! -x "${emapper_bin}" ]; then
+            echo "[ERROR] eggNOG-mapper not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        # Workaround: eggnog-mapper <=2.1.13 has broken download URLs
+        # (eggnogdb.embl.de returns 404; eggnog5.embl.de is the working host)
+        # https://github.com/eggnogdb/eggnog-mapper/issues/571
+        sed -i "s|eggnogdb.embl.de|eggnog5.embl.de|g" "${emapper_bin}"
+        "${emapper_bin}" --data_dir "${db_path}" -y
+    fi
     echo "[SUCCESS] eggNOG database downloaded to ${db_path}"
     echo "  Use with: --eggnog_db ${db_path}"
 }
@@ -599,26 +654,37 @@ download_dbcan() {
     echo "[INFO] Downloading dbCAN databases (~5 GB)..."
     echo "  Destination: ${db_path}"
 
-    local run_dbcan="${ENV_DIR}/dana-mag-dbcan/bin/run_dbcan"
-    local hmmpress="${ENV_DIR}/dana-mag-dbcan/bin/hmmpress"
-    if [ ! -x "${run_dbcan}" ]; then
-        echo "[ERROR] dbCAN not installed. Run ./install.sh first." >&2
-        return 1
-    fi
-
     mkdir -p "${db_path}"
-    # Use AWS S3 mirror — bcb.unl.edu has persistent SSL cert issues
-    # (https://github.com/bcb-unl/run_dbcan/issues/53)
-    "${run_dbcan}" database --db_dir "${db_path}" --aws_s3
-
-    # Press HMM databases for HMMER (required before first run_dbcan use)
-    echo "[INFO] Pressing HMM databases with hmmpress..."
-    for hmm in "${db_path}"/dbCAN.hmm "${db_path}"/dbCAN-sub.hmm "${db_path}"/STP.hmm "${db_path}"/TF.hmm; do
-        if [ -f "${hmm}" ] && [ ! -f "${hmm}.h3i" ]; then
-            echo "  Pressing $(basename "${hmm}")..."
-            "${hmmpress}" "${hmm}"
+    if $USE_DOCKER; then
+        # Use AWS S3 mirror — bcb.unl.edu has persistent SSL cert issues
+        docker_run run_dbcan database --db_dir /data/db/dbcan_db --aws_s3
+        # Press HMM databases for HMMER (required before first run_dbcan use)
+        echo "[INFO] Pressing HMM databases with hmmpress..."
+        for hmm_name in dbCAN.hmm dbCAN-sub.hmm STP.hmm TF.hmm; do
+            if [ -f "${db_path}/${hmm_name}" ] && [ ! -f "${db_path}/${hmm_name}.h3i" ]; then
+                echo "  Pressing ${hmm_name}..."
+                docker_run hmmpress "/data/db/dbcan_db/${hmm_name}"
+            fi
+        done
+    else
+        local run_dbcan="${ENV_DIR}/dana-mag-dbcan/bin/run_dbcan"
+        local hmmpress="${ENV_DIR}/dana-mag-dbcan/bin/hmmpress"
+        if [ ! -x "${run_dbcan}" ]; then
+            echo "[ERROR] dbCAN not installed. Run ./install.sh first or use --docker." >&2
+            return 1
         fi
-    done
+        # Use AWS S3 mirror — bcb.unl.edu has persistent SSL cert issues
+        # (https://github.com/bcb-unl/run_dbcan/issues/53)
+        "${run_dbcan}" database --db_dir "${db_path}" --aws_s3
+        # Press HMM databases for HMMER (required before first run_dbcan use)
+        echo "[INFO] Pressing HMM databases with hmmpress..."
+        for hmm in "${db_path}"/dbCAN.hmm "${db_path}"/dbCAN-sub.hmm "${db_path}"/STP.hmm "${db_path}"/TF.hmm; do
+            if [ -f "${hmm}" ] && [ ! -f "${hmm}.h3i" ]; then
+                echo "  Pressing $(basename "${hmm}")..."
+                "${hmmpress}" "${hmm}"
+            fi
+        done
+    fi
 
     echo "[SUCCESS] dbCAN database downloaded to ${db_path}"
     echo "  Use with: --dbcan_db ${db_path}"
@@ -642,12 +708,6 @@ download_metaeuk() {
     echo "  For systems with >128 GB RAM, download v12 manually from:"
     echo "  https://bioinf.uni-greifswald.de/bioinf/partitioned_odb12/Eukaryota.fa.gz"
 
-    local metaeuk_bin="${ENV_DIR}/dana-mag-metaeuk/bin/metaeuk"
-    if [ ! -x "${metaeuk_bin}" ]; then
-        echo "[ERROR] MetaEuk not installed. Run ./install.sh first." >&2
-        return 1
-    fi
-
     mkdir -p "${db_path}"
 
     # Download OrthoDB v11 Eukaryota protein FASTA (~2,000 eukaryotic genomes)
@@ -665,7 +725,16 @@ download_metaeuk() {
 
     # Convert to MMseqs2 database format
     echo "[INFO] Creating MMseqs2 database (metaeuk createdb)..."
-    "${metaeuk_bin}" createdb "${fasta}" "${db_path}/metaeuk_db"
+    if $USE_DOCKER; then
+        docker_run metaeuk createdb /data/db/metaeuk_db/Eukaryota.fa /data/db/metaeuk_db/metaeuk_db
+    else
+        local metaeuk_bin="${ENV_DIR}/dana-mag-metaeuk/bin/metaeuk"
+        if [ ! -x "${metaeuk_bin}" ]; then
+            echo "[ERROR] MetaEuk not installed. Run ./install.sh first or use --docker." >&2
+            return 1
+        fi
+        "${metaeuk_bin}" createdb "${fasta}" "${db_path}/metaeuk_db"
+    fi
 
     echo "[SUCCESS] MetaEuk database created at ${db_path}/metaeuk_db"
     echo "  Use with: --metaeuk_db ${db_path}/metaeuk_db"

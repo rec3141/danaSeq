@@ -38,9 +38,12 @@ cd danaSeq/nanopore_mag/nextflow
 # Run (local conda, handles activation automatically)
 ./run-mag.sh --input /path/to/reads --outdir /path/to/output
 
-# Or with Docker
-docker build -t danaseq-mag .
+# Or with the pre-built Docker image (no local build needed)
+docker pull ghcr.io/rec3141/danaseq-mag:latest
 ./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
+
+# On HPC (Apptainer/Singularity)
+apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest
 ```
 
 ### METTA assembly (Illumina short-read)
@@ -166,7 +169,8 @@ dānaSeq/
 │   │   ├── bin/                  Pipeline scripts (merge, map, MinPath, KEGG-Decoder, etc.)
 │   │   ├── viz/                  Interactive dashboard (Svelte + Vite + Plotly)
 │   │   ├── envs/                Conda YAML specs (27 environments)
-│   │   ├── Dockerfile           Self-contained Docker image
+│   │   ├── Dockerfile           Pipeline image (thin layer on base)
+│   │   ├── Dockerfile.base      Base image (all conda envs + wrapper scripts)
 │   │   └── test-data/           Bundled test data
 │   └── archive/                 Replaced bash scripts (reference only)
 │
