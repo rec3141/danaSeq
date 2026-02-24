@@ -116,25 +116,23 @@ export async function loadContigGenes(contigId) {
   return genesData?.[contigId] || null;
 }
 
-// Lazy load contig explorer + embeddings (separate files)
+// Lazy load contig explorer + embeddings (separate files per method)
 let contigLoading = false;
 export async function loadContigExplorer() {
   if (contigLoading || get(contigExplorer) !== null) return;
   contigLoading = true;
   try {
-    const [data, embeddings] = await Promise.all([
+    const [data, tsneEmb, umapEmb] = await Promise.all([
       fetchJSON('/data/contig_explorer.json'),
-      fetchJSON('/data/contig_embeddings.json').catch(() => null),
+      fetchJSON('/data/contig_tsne.json').catch(() => null),
+      fetchJSON('/data/contig_umap.json').catch(() => null),
     ]);
-    // Merge embeddings (t-SNE/UMAP) into contig records
-    if (embeddings && data?.contigs) {
+    // Merge embeddings into contig records (each file is {contig_id: [x, y]})
+    if (data?.contigs) {
       let nTsne = 0, nUmap = 0;
       for (const c of data.contigs) {
-        const emb = embeddings[c.id];
-        if (emb) {
-          if (emb.tsne_x !== undefined) { c.tsne_x = emb.tsne_x; c.tsne_y = emb.tsne_y; nTsne++; }
-          if (emb.umap_x !== undefined) { c.umap_x = emb.umap_x; c.umap_y = emb.umap_y; nUmap++; }
-        }
+        if (tsneEmb?.[c.id]) { c.tsne_x = tsneEmb[c.id][0]; c.tsne_y = tsneEmb[c.id][1]; nTsne++; }
+        if (umapEmb?.[c.id]) { c.umap_x = umapEmb[c.id][0]; c.umap_y = umapEmb[c.id][1]; nUmap++; }
       }
       data.has_tsne = nTsne > 0;
       data.has_umap = nUmap > 0;

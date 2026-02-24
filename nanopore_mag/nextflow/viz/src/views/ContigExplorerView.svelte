@@ -9,15 +9,15 @@
   let explorerData = $derived($contigExplorer);
   let sizeBy = $state('length');
   let sizeScale = $state(1.0);
-  let mode = $state('tsne');
+  let mode = $state('umap');
   let renderer = $state('plotly');  // 'plotly' | 'regl'
 
   // Color state: separate mode, binner source, taxonomy source + rank, metric, replicon
-  let colorMode = $state('bins');   // 'bins' | 'taxa' | 'metric' | 'replicon'
+  let colorMode = $state('metric');   // 'bins' | 'taxa' | 'metric' | 'replicon'
   let binSource = $state('bin');
   let taxSource = $state('kaiju');
   let taxRank = $state('phylum');
-  let metric = $state('depth');
+  let metric = $state('gc');
   let replicon = $state('replicon');
 
   // Derived colorBy from the active mode + sub-selections
@@ -57,6 +57,14 @@
     const idx = values.indexOf(current);
     return idx >= 0 ? labels[idx] : labels[0];
   }
+
+  // Auto-correct mode if the initial choice isn't available
+  $effect(() => {
+    if (!explorerData) return;
+    if (mode === 'umap' && !explorerData.has_umap && explorerData.has_tsne) mode = 'tsne';
+    else if (mode === 'tsne' && !explorerData.has_tsne && explorerData.has_umap) mode = 'umap';
+    else if (mode !== 'pca' && !explorerData.has_tsne && !explorerData.has_umap) mode = 'pca';
+  });
 
   const rendererGroup = { values: ['regl', 'plotly'], labels: ['WebGL', 'Plotly'] };
 

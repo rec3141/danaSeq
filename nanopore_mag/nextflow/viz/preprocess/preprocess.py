@@ -1346,49 +1346,45 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
         'transform': 'fourth_root',
     }
 
-    # Embeddings (t-SNE + UMAP) go in a separate file so skips don't clobber them
-    run_tsne = not skip_tsne
-    run_umap = not skip_umap
-    embeddings = None
-    if run_tsne or run_umap:
-        embeddings = {}
-        # t-SNE
-        if run_tsne:
-            try:
-                from sklearn.manifold import TSNE
-                print("  Running t-SNE on fourth-root transformed TNF ...")
-                tsne = TSNE(n_components=2, perplexity=30, random_state=42, max_iter=1000,
-                            learning_rate='auto', init='pca')
-                tsne_coords = tsne.fit_transform(pca_input)
-                print("  t-SNE complete.")
-                for i, cid in enumerate(contig_ids):
-                    embeddings.setdefault(cid, {})['tsne_x'] = round(float(tsne_coords[i, 0]), 4)
-                    embeddings[cid]['tsne_y'] = round(float(tsne_coords[i, 1]), 4)
-            except Exception as e:
-                print(f"  [WARNING] t-SNE failed: {e}", file=sys.stderr)
-        else:
-            print("  --skip-tsne: skipping t-SNE")
+    # Embeddings written as separate files so --skip-tsne / --skip-umap are independent
+    tsne_emb = None
+    umap_emb = None
 
-        # UMAP
-        if run_umap:
-            try:
-                import umap
-                print("  Running UMAP on fourth-root transformed TNF ...")
-                reducer = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1,
-                                    metric='euclidean', random_state=42)
-                umap_coords = reducer.fit_transform(pca_input)
-                print("  UMAP complete.")
-                for i, cid in enumerate(contig_ids):
-                    embeddings.setdefault(cid, {})['umap_x'] = round(float(umap_coords[i, 0]), 4)
-                    embeddings[cid]['umap_y'] = round(float(umap_coords[i, 1]), 4)
-            except Exception as e:
-                print(f"  [WARNING] UMAP failed: {e}", file=sys.stderr)
-        else:
-            print("  --skip-umap: skipping UMAP")
+    if not skip_tsne:
+        try:
+            from sklearn.manifold import TSNE
+            print("  Running t-SNE on fourth-root transformed TNF ...")
+            tsne = TSNE(n_components=2, perplexity=30, random_state=42, max_iter=1000,
+                        learning_rate='auto', init='pca')
+            tsne_coords = tsne.fit_transform(pca_input)
+            print("  t-SNE complete.")
+            tsne_emb = {}
+            for i, cid in enumerate(contig_ids):
+                tsne_emb[cid] = [round(float(tsne_coords[i, 0]), 4),
+                                 round(float(tsne_coords[i, 1]), 4)]
+        except Exception as e:
+            print(f"  [WARNING] t-SNE failed: {e}", file=sys.stderr)
     else:
-        print("  --skip-tsne --skip-umap: skipping embeddings (existing contig_embeddings.json preserved)")
+        print("  --skip-tsne: skipping t-SNE (existing contig_tsne.json preserved)")
 
-    return explorer, embeddings
+    if not skip_umap:
+        try:
+            import umap
+            print("  Running UMAP on fourth-root transformed TNF ...")
+            reducer = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1,
+                                metric='euclidean', random_state=42)
+            umap_coords = reducer.fit_transform(pca_input)
+            print("  UMAP complete.")
+            umap_emb = {}
+            for i, cid in enumerate(contig_ids):
+                umap_emb[cid] = [round(float(umap_coords[i, 0]), 4),
+                                 round(float(umap_coords[i, 1]), 4)]
+        except Exception as e:
+            print(f"  [WARNING] UMAP failed: {e}", file=sys.stderr)
+    else:
+        print("  --skip-umap: skipping UMAP (existing contig_umap.json preserved)")
+
+    return explorer, tsne_emb, umap_emb
 
 
 def main():
@@ -1498,19 +1494,19 @@ def main():
     print(f"  Wrote eukaryotic.json")
 
     # 11. contig_explorer.json (largest, do last)
-    contig_explorer, embeddings = build_contig_explorer(
+    contig_explorer, tsne_emb, umap_emb = build_contig_explorer(
         results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
         skip_tsne=args.skip_tsne, skip_umap=args.skip_umap, output_dir=output_dir)
     write_json_gz(os.path.join(output_dir, 'contig_explorer.json'), contig_explorer)
     print(f"  Wrote contig_explorer.json ({len(contig_explorer['contigs'])} contigs)")
-    if embeddings is not None:
-        write_json_gz(os.path.join(output_dir, 'contig_embeddings.json'), embeddings,
+    if tsne_emb is not None:
+        write_json_gz(os.path.join(output_dir, 'contig_tsne.json'), tsne_emb,
                       separators=(',', ':'))
-        n_tsne = sum(1 for v in embeddings.values() if 'tsne_x' in v)
-        n_umap = sum(1 for v in embeddings.values() if 'umap_x' in v)
-        print(f"  Wrote contig_embeddings.json (t-SNE: {n_tsne}, UMAP: {n_umap})")
-    else:
-        print(f"  Skipped contig_embeddings.json (--skip-tsne --skip-umap, existing file preserved)")
+        print(f"  Wrote contig_tsne.json ({len(tsne_emb)} contigs)")
+    if umap_emb is not None:
+        write_json_gz(os.path.join(output_dir, 'contig_umap.json'), umap_emb,
+                      separators=(',', ':'))
+        print(f"  Wrote contig_umap.json ({len(umap_emb)} contigs)")
 
     print("\nDone! All JSON files written to", output_dir)
 
