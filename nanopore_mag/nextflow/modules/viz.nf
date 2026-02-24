@@ -9,25 +9,50 @@ process VIZ_PREPROCESS {
 
     input:
     val(ready)           // barrier signal, not used in script
+    val(skip_tsne)       // true = skip t-SNE (preserves existing contig_embeddings.json)
 
     output:
     path("data"),  emit: json_data
     path("site"),  emit: static_site, optional: true
 
     script:
-    def results = params.store_dir
-        ? "${params.store_dir}/results_${file(params.outdir).name}"
-        : "${params.outdir}"
-    def storeFlag = params.store_dir
-        ? "--store-dir ${params.store_dir}/results_${file(params.outdir).name}"
-        : ""
+    // --results = publishDir root; --store-dir = storeDir root (resolve_path checks storeDir first)
+    def storeRoot = params.store_dir ?: ''
+    def storeFlag = storeRoot ? "--store-dir ${storeRoot}" : ""
+    def tsne_flag = skip_tsne ? '--skip-tsne' : ''
     """
     # Generate JSON data files
     mkdir -p data
     python3 ${projectDir}/viz/preprocess/preprocess.py \
-        --results "${results}" \
+        --results "${params.outdir}" \
         --output data/ \
-        ${storeFlag}
+        ${storeFlag} \
+        ${tsne_flag}
+
+    # Generate genes.json: prefer BAKTA_EXTRA > BAKTA_BASIC > PROKKA annotation,
+    # augmented with barrnap rRNA and Aragorn tRNA gene calls.
+    STORE="${storeRoot}"
+    OUT="${params.outdir}"
+    find_first() { for f in "\$@"; do [ -f "\${f}" ] && echo "\${f}" && return; done; }
+    ANNOT_TSV=\$(find_first \
+        "\${STORE:+\${STORE}/annotation/bakta/extra/annotation.tsv}" \
+        "\${OUT}/annotation/bakta/extra/annotation.tsv" \
+        "\${STORE:+\${STORE}/annotation/bakta/basic/annotation.tsv}" \
+        "\${OUT}/annotation/bakta/basic/annotation.tsv" \
+        "\${STORE:+\${STORE}/annotation/prokka/annotation.tsv}" \
+        "\${OUT}/annotation/prokka/annotation.tsv")
+    RRNA_TSV=\$(find_first \
+        "\${STORE:+\${STORE}/taxonomy/rrna/rrna_genes.tsv}" \
+        "\${OUT}/taxonomy/rrna/rrna_genes.tsv")
+    TRNA_TSV=\$(find_first \
+        "\${STORE:+\${STORE}/taxonomy/rrna/trna_genes.tsv}" \
+        "\${OUT}/taxonomy/rrna/trna_genes.tsv")
+    if [ -n "\${ANNOT_TSV}" ]; then
+        python3 ${projectDir}/viz/preprocess/genes_to_json.py \
+            "\${ANNOT_TSV}" data/genes.json "\${RRNA_TSV}" "\${TRNA_TSV}"
+    else
+        echo '{}' > data/genes.json
+    fi
 
     # Build static site (node/npm provided by conda env)
     cd ${projectDir}/viz

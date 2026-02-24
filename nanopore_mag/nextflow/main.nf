@@ -353,7 +353,10 @@ include { MAP_TO_BINS }         from './modules/metabolism'
 include { KEGG_MODULES }        from './modules/metabolism'
 include { MINPATH }             from './modules/metabolism'
 include { KEGG_DECODER }        from './modules/metabolism'
-include { VIZ_PREPROCESS }      from './modules/viz'
+include { VIZ_PREPROCESS as VIZ_STAGE1 } from './modules/viz'  // after TNF, with t-SNE
+include { VIZ_PREPROCESS as VIZ_STAGE2 } from './modules/viz'  // after BAKTA_BASIC, skip t-SNE
+include { VIZ_PREPROCESS as VIZ_STAGE3 } from './modules/viz'  // after DAS_Tool+CheckM2, skip t-SNE
+include { VIZ_PREPROCESS as VIZ_STAGE4 } from './modules/viz'  // after KEGG_MODULES, skip t-SNE
 
 // ============================================================================
 // Main workflow
@@ -671,16 +674,72 @@ workflow {
     }
 
     // 9. Viz dashboard: preprocess results into JSON + build static site
+    //    Fires incrementally at 3-4 checkpoints; only stage 1 computes t-SNE.
+    //    preprocess.py handles missing files gracefully (WARNING, not error).
+    //    --skip-tsne preserves existing contig_embeddings.json on subsequent runs.
     if (params.run_viz) {
-        // Collect barrier signals from terminal processes
-        ch_viz_ready = DASTOOL_CONSENSUS.out.summary.collect()
+        // Stage 1: assembly + TNF done — earliest useful snapshot, computes t-SNE
+        VIZ_STAGE1(CALCULATE_TNF.out.tnf.collect(), false)
+
+        // Stage 2: annotation done — adds protein/functional context
+        if (effective_annotator != 'none') {
+            VIZ_STAGE2(ch_proteins.collect(), true)
+        }
+
+        // Stage 3: binning + quality done — adds MAG assignments + CheckM2
+        ch_viz_stage3 = DASTOOL_CONSENSUS.out.summary.collect()
         if (params.checkm2_db) {
-            ch_viz_ready = ch_viz_ready.mix(CHECKM2.out.report.collect())
+            ch_viz_stage3 = ch_viz_stage3.mix(CHECKM2.out.report.collect())
+        }
+        VIZ_STAGE3(ch_viz_stage3.collect(), true)
+
+        // Stage 4: final — waits for ALL terminal processes to complete
+        ch_viz_stage4 = DASTOOL_CONSENSUS.out.summary.collect()
+        if (params.checkm2_db) {
+            ch_viz_stage4 = ch_viz_stage4.mix(CHECKM2.out.report.collect())
+        }
+        if (effective_annotator == 'bakta' && params.bakta_extra) {
+            ch_viz_stage4 = ch_viz_stage4.mix(BAKTA_EXTRA.out.tsv.collect())
+        }
+        if (params.run_genomad && params.genomad_db) {
+            ch_viz_stage4 = ch_viz_stage4.mix(GENOMAD_CLASSIFY.out.summary.collect())
+        }
+        if (params.run_integronfinder) {
+            ch_viz_stage4 = ch_viz_stage4.mix(INTEGRONFINDER.out.integrons.collect())
+        }
+        if (params.run_islandpath && effective_annotator != 'none') {
+            ch_viz_stage4 = ch_viz_stage4.mix(ISLANDPATH_DIMOB.out.islands.collect())
+        }
+        if (params.run_macsyfinder && effective_annotator != 'none' && params.macsyfinder_models) {
+            ch_viz_stage4 = ch_viz_stage4.mix(MACSYFINDER.out.systems.collect())
+        }
+        if (params.run_defensefinder && effective_annotator != 'none') {
+            ch_viz_stage4 = ch_viz_stage4.mix(DEFENSEFINDER.out.systems.collect())
+        }
+        if (params.run_eukaryotic) {
+            ch_viz_stage4 = ch_viz_stage4.mix(WHOKARYOTE_CLASSIFY.out.classifications.collect())
+            if (params.run_metaeuk && params.metaeuk_db && params.run_marferret && params.marferret_db) {
+                ch_viz_stage4 = ch_viz_stage4.mix(MARFERRET_CLASSIFY.out.contigs.collect())
+            }
+        }
+        if (params.run_kraken2 && params.kraken2_db) {
+            ch_viz_stage4 = ch_viz_stage4.mix(KRAKEN2_CLASSIFY.out.contig_taxonomy.collect())
+        }
+        if (params.run_rrna && params.silva_ssu_db) {
+            ch_viz_stage4 = ch_viz_stage4.mix(RNA_CLASSIFY.out.contig_classifications.collect())
+        }
+        if (params.run_sendsketch && params.sendsketch_address) {
+            ch_viz_stage4 = ch_viz_stage4.mix(SENDSKETCH_CLASSIFY.out.contig_taxonomy.collect())
+        }
+        if (params.run_kaiju && params.kaiju_db) {
+            ch_viz_stage4 = ch_viz_stage4.mix(KAIJU_CONTIG_CLASSIFY.out.contig_taxonomy.collect())
         }
         if (params.run_metabolism && effective_annotator != 'none') {
-            ch_viz_ready = ch_viz_ready.mix(KEGG_MODULES.out.modules.collect())
+            ch_viz_stage4 = ch_viz_stage4.mix(KEGG_MODULES.out.modules.collect())
+            ch_viz_stage4 = ch_viz_stage4.mix(MINPATH.out.pathways.collect())
+            ch_viz_stage4 = ch_viz_stage4.mix(KEGG_DECODER.out.output.collect())
         }
-        VIZ_PREPROCESS(ch_viz_ready.collect())
+        VIZ_STAGE4(ch_viz_stage4.collect(), true)
     }
 }
 

@@ -55,6 +55,23 @@ def resolve_path(results_dir, *parts):
     return os.path.join(results_dir, rel)
 
 
+def load_annotation_tsv(results_dir):
+    """Load best available annotation TSV: BAKTA_EXTRA > BAKTA_BASIC > PROKKA."""
+    candidates = [
+        resolve_path(results_dir, 'annotation', 'bakta', 'extra', 'annotation.tsv'),
+        resolve_path(results_dir, 'annotation', 'bakta', 'basic', 'annotation.tsv'),
+        resolve_path(results_dir, 'annotation', 'prokka', 'annotation.tsv'),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            print(f"  Loading annotation from: {path}")
+            return pd.read_csv(path, sep='\t', comment='#', header=None,
+                               names=['contig', 'type', 'start', 'stop', 'strand',
+                                      'locus_tag', 'gene', 'product', 'dbxrefs'])
+    print("  [WARNING] No annotation TSV found (BAKTA_EXTRA/BAKTA_BASIC/PROKKA)", file=sys.stderr)
+    return None
+
+
 RANKS = ['domain', 'phylum', 'class', 'order', 'family', 'genus']
 
 
@@ -287,7 +304,7 @@ def build_contig_lengths(assembly_info, depths_df=None, results_dir=None):
 
 
 def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
-               virus_df, plasmid_df, defense_df, integron_df):
+               virus_df, plasmid_df, defense_df, integron_df, annotation_df=None):
     """Build mags.json with per-MAG joined records."""
     print("Building mags.json ...")
 
@@ -342,6 +359,34 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
             if tax:
                 mag_taxonomy[mag_name] = tax
 
+    # Per-MAG gene counts from annotation TSV
+    mag_gene_stats = {}
+    if annotation_df is not None:
+        contig_genes = defaultdict(lambda: {'n_cds': 0, 'n_hypo': 0, 'n_trna': 0, 'n_ncrna': 0})
+        for _, row in annotation_df.iterrows():
+            contig = row['contig']
+            gene_type = str(row['type']).lower()
+            product = str(row.get('product', '')).lower()
+            if gene_type == 'cds':
+                contig_genes[contig]['n_cds'] += 1
+                if 'hypothetical' in product:
+                    contig_genes[contig]['n_hypo'] += 1
+            elif gene_type == 'trna':
+                contig_genes[contig]['n_trna'] += 1
+            elif gene_type in ('ncrna', 'tmrna', 'crispr'):
+                contig_genes[contig]['n_ncrna'] += 1
+        for mag_name_key, contigs_list in mag_contigs.items():
+            n_cds = sum(contig_genes[c]['n_cds'] for c in contigs_list)
+            n_hypo = sum(contig_genes[c]['n_hypo'] for c in contigs_list)
+            n_trna = sum(contig_genes[c]['n_trna'] for c in contigs_list)
+            n_ncrna = sum(contig_genes[c]['n_ncrna'] for c in contigs_list)
+            mag_gene_stats[mag_name_key] = {
+                'n_genes': n_cds,
+                'hypo_pct': round(n_hypo / n_cds * 100, 1) if n_cds > 0 else 0,
+                'n_trna': n_trna,
+                'n_ncrna': n_ncrna,
+            }
+
     for _, row in dastool_summary.iterrows():
         mag_name = row['bin']
         contigs = mag_contigs.get(mag_name, [])
@@ -385,6 +430,7 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
 
         tax = mag_taxonomy.get(mag_name, {})
 
+        gene_stats = mag_gene_stats.get(mag_name, {'n_genes': 0, 'hypo_pct': 0, 'n_trna': 0, 'n_ncrna': 0})
         mags.append({
             'name': mag_name,
             'binner': binner,
@@ -402,6 +448,10 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
             'n_plasmid': n_plasmid,
             'n_defense': n_defense,
             'n_integron': n_integron,
+            'n_genes': gene_stats['n_genes'],
+            'hypo_pct': gene_stats['hypo_pct'],
+            'n_trna': gene_stats['n_trna'],
+            'n_ncrna': gene_stats['n_ncrna'],
         })
 
     return mags
@@ -1347,8 +1397,9 @@ def main():
     print(f"  Wrote contig_lengths.json")
 
     # 3. mags.json
+    annotation_df = load_annotation_tsv(results_dir)
     mags = build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
-                      virus_df, plasmid_df, defense_df, integron_df)
+                      virus_df, plasmid_df, defense_df, integron_df, annotation_df)
     with open(os.path.join(output_dir, 'mags.json'), 'w') as f:
         json.dump(mags, f)
     print(f"  Wrote mags.json ({len(mags)} MAGs)")
