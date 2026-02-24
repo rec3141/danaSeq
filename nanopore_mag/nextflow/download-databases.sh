@@ -64,7 +64,15 @@ container_run() {
                     "$CONTAINER_RUNTIME" pull "$SIF_PATH" "docker://${CONTAINER_IMAGE}"
                 fi
             fi
-            "$CONTAINER_RUNTIME" exec --bind "${DB_DIR}:/data/db" "$SIF_PATH" "$@"
+            # Override host SSL env vars (RHEL sets REQUESTS_CA_BUNDLE to paths
+            # that don't exist inside the Debian-based container) — point to the
+            # container's own CA bundle so Python requests/urllib and wget all work
+            local container_ca="/etc/ssl/certs/ca-certificates.crt"
+            "$CONTAINER_RUNTIME" exec \
+                --env "REQUESTS_CA_BUNDLE=${container_ca}" \
+                --env "SSL_CERT_FILE=${container_ca}" \
+                --env "CURL_CA_BUNDLE=${container_ca}" \
+                --bind "${DB_DIR}:/data/db" "$SIF_PATH" "$@"
             ;;
     esac
 }
@@ -339,14 +347,14 @@ download_genomad() {
     echo "  Destination: ${db_path}"
 
     if $USE_CONTAINER; then
-        container_run genomad download-database /data/db
+        container_run genomad download-database /data/db || return 1
     else
         local genomad_bin="${ENV_DIR}/dana-mag-genomad/bin/genomad"
         if [ ! -x "${genomad_bin}" ]; then
             echo "[ERROR] geNomad not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
-        "${genomad_bin}" download-database "${DB_DIR}"
+        "${genomad_bin}" download-database "${DB_DIR}" || return 1
     fi
     echo "[SUCCESS] geNomad database downloaded to ${db_path}"
     echo "  Use with: --genomad_db ${db_path}"
@@ -365,14 +373,14 @@ download_checkv() {
     echo "  Destination: ${db_path}"
 
     if $USE_CONTAINER; then
-        container_run checkv download_database /data/db/checkv_db
+        container_run checkv download_database /data/db/checkv_db || return 1
     else
         local checkv_bin="${ENV_DIR}/dana-mag-checkv/bin/checkv"
         if [ ! -x "${checkv_bin}" ]; then
             echo "[ERROR] CheckV not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
-        "${checkv_bin}" download_database "${db_path}"
+        "${checkv_bin}" download_database "${db_path}" || return 1
     fi
     # CheckV may download to a versioned subdirectory (checkv-db-v*)
     # If so, move contents up to the expected path
@@ -450,14 +458,14 @@ download_checkm2() {
 
     mkdir -p "${db_path}"
     if $USE_CONTAINER; then
-        container_run checkm2 database --download --path /data/db/checkm2_db
+        container_run checkm2 database --download --path /data/db/checkm2_db || return 1
     else
         local checkm2_bin="${ENV_DIR}/dana-mag-checkm2/bin/checkm2"
         if [ ! -x "${checkm2_bin}" ]; then
             echo "[ERROR] CheckM2 not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
-        "${checkm2_bin}" database --download --path "${db_path}"
+        "${checkm2_bin}" database --download --path "${db_path}" || return 1
     fi
     echo "[SUCCESS] CheckM2 database downloaded to ${db_path}"
     echo "  Use with: --checkm2_db ${db_path}"
@@ -479,7 +487,7 @@ download_kaiju() {
     mkdir -p "${db_path}"
     if $USE_CONTAINER; then
         # kaiju-makedb downloads sequences and builds the FM-index
-        container_run sh -c 'cd /data/db/kaiju_db && kaiju-makedb -s refseq_ref'
+        container_run sh -c 'cd /data/db/kaiju_db && kaiju-makedb -s refseq_ref' || return 1
     else
         local kaiju_makedb="${ENV_DIR}/dana-mag-kaiju/bin/kaiju-makedb"
         if [ ! -x "${kaiju_makedb}" ]; then
@@ -488,7 +496,7 @@ download_kaiju() {
         fi
         # kaiju-makedb downloads sequences and builds the FM-index
         # -s refseq_ref: RefSeq reference genomes (bacteria, archaea, viruses)
-        (cd "${db_path}" && "${kaiju_makedb}" -s refseq_ref)
+        (cd "${db_path}" && "${kaiju_makedb}" -s refseq_ref) || return 1
     fi
     echo "[SUCCESS] Kaiju database downloaded to ${db_path}"
     echo "  Use with: --kaiju_db ${db_path}"
@@ -509,16 +517,16 @@ download_macsyfinder() {
 
     mkdir -p "${db_path}"
     if $USE_CONTAINER; then
-        container_run msf_data install --target /data/db/macsyfinder_models TXSScan
-        container_run msf_data install --target /data/db/macsyfinder_models CONJScan
+        container_run msf_data install --target /data/db/macsyfinder_models TXSScan || return 1
+        container_run msf_data install --target /data/db/macsyfinder_models CONJScan || return 1
     else
         local msf_data_bin="${ENV_DIR}/dana-mag-macsyfinder/bin/msf_data"
         if [ ! -x "${msf_data_bin}" ]; then
             echo "[ERROR] MacSyFinder not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
-        "${msf_data_bin}" install --target "${db_path}" TXSScan
-        "${msf_data_bin}" install --target "${db_path}" CONJScan
+        "${msf_data_bin}" install --target "${db_path}" TXSScan || return 1
+        "${msf_data_bin}" install --target "${db_path}" CONJScan || return 1
     fi
     echo "[SUCCESS] MacSyFinder models downloaded to ${db_path}"
     echo "  Use with: --macsyfinder_models ${db_path}"
@@ -539,14 +547,14 @@ download_defensefinder() {
 
     mkdir -p "${db_path}"
     if $USE_CONTAINER; then
-        container_run defense-finder update --models-dir /data/db/defensefinder_models
+        container_run defense-finder update --models-dir /data/db/defensefinder_models || return 1
         # Workaround: CasFinder 3.1.1 model version incompatibility
         local cf_ver
         cf_ver=$(cat "${db_path}/CasFinder/metadata.yml" 2>/dev/null | grep -oP 'vers: \K.*' | head -1)
         if [ "${cf_ver}" = "3.1.1" ]; then
             echo "  Downgrading CasFinder 3.1.1 → 3.1.0 (model version compatibility fix)"
             rm -rf "${db_path}/CasFinder"
-            container_run macsydata install --target /data/db/defensefinder_models CasFinder==3.1.0
+            container_run msf_data install --target /data/db/defensefinder_models CasFinder==3.1.0 || return 1
         fi
     else
         local df_bin="${ENV_DIR}/dana-mag-defensefinder/bin/defense-finder"
@@ -588,7 +596,7 @@ download_bakta() {
 
     mkdir -p "${db_path}"
     if $USE_CONTAINER; then
-        container_run bakta_db download --output /data/db/bakta --type full
+        container_run bakta_db download --output /data/db/bakta --type full || return 1
     else
         local bakta_env="${ENV_DIR}/dana-mag-bakta"
         if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
@@ -596,7 +604,7 @@ download_bakta() {
             return 1
         fi
         # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
-        ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type full
+        ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type full || return 1
     fi
     echo "[SUCCESS] Bakta full database downloaded to ${db_path}/db"
     echo "  Use with: --bakta_db ${db_path}/db"
@@ -616,7 +624,7 @@ download_bakta_light() {
 
     mkdir -p "${db_path}"
     if $USE_CONTAINER; then
-        container_run bakta_db download --output /data/db/bakta --type light
+        container_run bakta_db download --output /data/db/bakta --type light || return 1
     else
         local bakta_env="${ENV_DIR}/dana-mag-bakta"
         if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
@@ -624,7 +632,7 @@ download_bakta_light() {
             return 1
         fi
         # bakta_db requires AMRFinderPlus on PATH, so run inside the full conda env
-        ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type light
+        ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type light || return 1
     fi
     echo "[SUCCESS] Bakta light database downloaded to ${db_path}/db-light"
     echo "  Use with: --bakta_light_db ${db_path}/db-light"
@@ -673,7 +681,7 @@ download_eggnog() {
     if $USE_CONTAINER; then
         # Workaround: eggnog-mapper <=2.1.13 has broken download URLs
         # (eggnogdb.embl.de returns 404; eggnog5.embl.de is the working host)
-        container_run sh -c "sed -i 's|eggnogdb.embl.de|eggnog5.embl.de|g' \$(which download_eggnog_data.py); download_eggnog_data.py --data_dir /data/db/eggnog_db -y"
+        container_run sh -c "sed -i 's|eggnogdb.embl.de|eggnog5.embl.de|g' \$(which download_eggnog_data.py); download_eggnog_data.py --data_dir /data/db/eggnog_db -y" || return 1
     else
         local emapper_bin="${ENV_DIR}/dana-mag-emapper/bin/download_eggnog_data.py"
         if [ ! -x "${emapper_bin}" ]; then
@@ -684,7 +692,7 @@ download_eggnog() {
         # (eggnogdb.embl.de returns 404; eggnog5.embl.de is the working host)
         # https://github.com/eggnogdb/eggnog-mapper/issues/571
         sed -i "s|eggnogdb.embl.de|eggnog5.embl.de|g" "${emapper_bin}"
-        "${emapper_bin}" --data_dir "${db_path}" -y
+        "${emapper_bin}" --data_dir "${db_path}" -y || return 1
     fi
     echo "[SUCCESS] eggNOG database downloaded to ${db_path}"
     echo "  Use with: --eggnog_db ${db_path}"
@@ -705,13 +713,13 @@ download_dbcan() {
     mkdir -p "${db_path}"
     if $USE_CONTAINER; then
         # Use AWS S3 mirror — bcb.unl.edu has persistent SSL cert issues
-        container_run run_dbcan database --db_dir /data/db/dbcan_db --aws_s3
+        container_run run_dbcan database --db_dir /data/db/dbcan_db --aws_s3 || return 1
         # Press HMM databases for HMMER (required before first run_dbcan use)
         echo "[INFO] Pressing HMM databases with hmmpress..."
         for hmm_name in dbCAN.hmm dbCAN-sub.hmm STP.hmm TF.hmm; do
             if [ -f "${db_path}/${hmm_name}" ] && [ ! -f "${db_path}/${hmm_name}.h3i" ]; then
                 echo "  Pressing ${hmm_name}..."
-                container_run hmmpress "/data/db/dbcan_db/${hmm_name}"
+                container_run hmmpress "/data/db/dbcan_db/${hmm_name}" || return 1
             fi
         done
     else
@@ -723,13 +731,13 @@ download_dbcan() {
         fi
         # Use AWS S3 mirror — bcb.unl.edu has persistent SSL cert issues
         # (https://github.com/bcb-unl/run_dbcan/issues/53)
-        "${run_dbcan}" database --db_dir "${db_path}" --aws_s3
+        "${run_dbcan}" database --db_dir "${db_path}" --aws_s3 || return 1
         # Press HMM databases for HMMER (required before first run_dbcan use)
         echo "[INFO] Pressing HMM databases with hmmpress..."
         for hmm in "${db_path}"/dbCAN.hmm "${db_path}"/dbCAN-sub.hmm "${db_path}"/STP.hmm "${db_path}"/TF.hmm; do
             if [ -f "${hmm}" ] && [ ! -f "${hmm}.h3i" ]; then
                 echo "  Pressing $(basename "${hmm}")..."
-                "${hmmpress}" "${hmm}"
+                "${hmmpress}" "${hmm}" || return 1
             fi
         done
     fi
@@ -774,14 +782,14 @@ download_metaeuk() {
     # Convert to MMseqs2 database format
     echo "[INFO] Creating MMseqs2 database (metaeuk createdb)..."
     if $USE_CONTAINER; then
-        container_run metaeuk createdb /data/db/metaeuk_db/Eukaryota.fa /data/db/metaeuk_db/metaeuk_db
+        container_run metaeuk createdb /data/db/metaeuk_db/Eukaryota.fa /data/db/metaeuk_db/metaeuk_db || return 1
     else
         local metaeuk_bin="${ENV_DIR}/dana-mag-metaeuk/bin/metaeuk"
         if [ ! -x "${metaeuk_bin}" ]; then
             echo "[ERROR] MetaEuk not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
-        "${metaeuk_bin}" createdb "${fasta}" "${db_path}/metaeuk_db"
+        "${metaeuk_bin}" createdb "${fasta}" "${db_path}/metaeuk_db" || return 1
     fi
 
     echo "[SUCCESS] MetaEuk database created at ${db_path}/metaeuk_db"
