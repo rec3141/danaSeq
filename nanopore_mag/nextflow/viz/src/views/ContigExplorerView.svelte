@@ -9,7 +9,7 @@
   let explorerData = $derived($contigExplorer);
   let sizeBy = $state('length');
   let sizeScale = $state(1.0);
-  let mode = $state('umap');
+  let mode = $state('tsne');
   let renderer = $state('plotly');  // 'plotly' | 'regl'
 
   // Color state: separate mode, binner source, taxonomy source + rank, metric, replicon
@@ -61,8 +61,8 @@
   // Auto-correct mode if the initial choice isn't available
   $effect(() => {
     if (!explorerData) return;
-    if (mode === 'umap' && !explorerData.has_umap && explorerData.has_tsne) mode = 'tsne';
-    else if (mode === 'tsne' && !explorerData.has_tsne && explorerData.has_umap) mode = 'umap';
+    if (mode === 'tsne' && !explorerData.has_tsne && explorerData.has_umap) mode = 'umap';
+    else if (mode === 'umap' && !explorerData.has_umap && explorerData.has_tsne) mode = 'tsne';
     else if (mode !== 'pca' && !explorerData.has_tsne && !explorerData.has_umap) mode = 'pca';
   });
 
