@@ -183,6 +183,23 @@ def build_overview(results_dir, assembly_info, depths_df, dastool_summary, check
     n50 = int(sorted_lens[np.searchsorted(cumsum, total_size / 2)])
 
     # MAG counts by quality tier: prefer CheckM2, fall back to SCG
+    if dastool_summary is None:
+        n_mags = hq = mq = lq = 0
+        binner_counts = Counter()
+        overview = {
+            'assembly_size': total_size,
+            'n50': n50,
+            'n_contigs': n_contigs,
+            'n_mags': 0,
+            'hq': 0,
+            'mq': 0,
+            'lq': 0,
+            'n_virus': len(virus_df) if virus_df is not None else 0,
+            'n_plasmid': len(plasmid_df) if plasmid_df is not None else 0,
+            'binner_counts': {},
+        }
+        return overview
+
     n_mags = len(dastool_summary)
     hq = mq = lq = 0
     checkm2_lookup = {}
@@ -289,15 +306,15 @@ def build_contig_lengths(assembly_info, depths_df=None, results_dir=None):
             if binned_contigs:
                 pos_idx = np.array([i for i in pos_idx if contig_names[i] in binned_contigs])
             pos_idx.sort()
-            result['scatter_log_length'] = [round(float(np.log10(lengths[i])), 4) for i in pos_idx]
-            result['scatter_log_depth'] = [round(float(np.log10(depths[i])), 4) for i in pos_idx]
+            result['scatter_log_length'] = [round(float(np.log10(lengths[i])), 2) for i in pos_idx]
+            result['scatter_log_depth'] = [round(float(np.log10(depths[i])), 2) for i in pos_idx]
             # GC% for coloring
             if results_dir:
                 gc_path = resolve_path(results_dir, 'assembly', 'gc.tsv')
                 gc_df = load_tsv(gc_path)
                 if gc_df is not None:
                     gc_map = dict(zip(gc_df['contig_id'], gc_df['gc_pct'].astype(float)))
-                    result['scatter_gc'] = [round(float(gc_map.get(contig_names[i], 0)), 2) for i in pos_idx]
+                    result['scatter_gc'] = [round(float(gc_map.get(contig_names[i], 0)), 1) for i in pos_idx]
             print(f"  Length-coverage scatter: {len(pos_idx)} points")
 
     return result
@@ -307,6 +324,9 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
                virus_df, plasmid_df, defense_df, integron_df, annotation_df=None):
     """Build mags.json with per-MAG joined records."""
     print("Building mags.json ...")
+
+    if dastool_summary is None:
+        return []
 
     mags = []
     dastool_names = set(dastool_summary['bin'].values)
@@ -323,7 +343,10 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
         mag_contigs[mag].append(contig)
 
     # Parse sample names from depths header
-    depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
+    if depths_df is not None:
+        depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
+    else:
+        depth_cols = []
     sample_names = [re.sub(r'\.sorted\.bam$', '', c) for c in depth_cols]
 
     # Build virus/plasmid/defense/integron sets by contig
@@ -880,6 +903,9 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     """Build coverage.json with per-bin per-sample depth for all binners, Bray-Curtis clustered."""
     print("Building coverage.json ...")
 
+    if depths_df is None or dastool_summary is None:
+        return {'bins': [], 'samples': [], 'matrix': []}
+
     depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
     sample_names = [re.sub(r'\.sorted\.bam$', '', c) for c in depth_cols]
 
@@ -1255,10 +1281,11 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
         print(f"  Whokaryote: {len(whokaryote_map)} contigs ({dict(Counter(whokaryote_map.values()))})")
 
     depth_map = {}
-    depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
-    if depth_cols:
-        for _, row in depths_df.iterrows():
-            depth_map[row['contigName']] = float(row['totalAvgDepth'])
+    if depths_df is not None:
+        depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
+        if depth_cols:
+            for _, row in depths_df.iterrows():
+                depth_map[row['contigName']] = float(row['totalAvgDepth'])
 
     # StandardScaler + PCA on fourth-root transformed data
     print("  Running PCA on fourth-root transformed TNF ...")
@@ -1359,13 +1386,12 @@ def main():
     print(f"Loading data from {results_dir} ...")
 
     # Load core data files
-    assembly_info = load_tsv(resolve_path(results_dir, 'assembly', 'assembly_info.txt'),
-                             comment='#', header=None,
-                             names=['#seq_name', 'length', 'cov.', 'circ.', 'repeat',
-                                    'mult.', 'alt_group', 'graph_path'])
-    # Assembly info has header line starting with #, reload properly
-    assembly_info = pd.read_csv(resolve_path(results_dir, 'assembly', 'assembly_info.txt'),
-                                sep='\t')
+    _assembly_info_path = resolve_path(results_dir, 'assembly', 'assembly_info.txt')
+    try:
+        assembly_info = pd.read_csv(_assembly_info_path, sep='\t')
+    except Exception:
+        assembly_info = None
+        print(f"  [WARNING] Missing: {_assembly_info_path}", file=sys.stderr)
 
     depths_df = load_tsv(resolve_path(results_dir, 'mapping', 'depths.txt'))
     contig2bin = load_tsv(resolve_path(results_dir, 'binning', 'dastool', 'contig2bin.tsv'),
@@ -1379,9 +1405,14 @@ def main():
     integron_df = load_tsv(resolve_path(results_dir, 'mge', 'integrons', 'integrons.tsv'),
                            comment='#')
 
-    if assembly_info is None or depths_df is None or dastool_summary is None:
-        print("[ERROR] Missing critical input files (assembly_info, depths, dastool summary)")
+    if assembly_info is None:
+        print("[ERROR] Missing assembly_info.txt — cannot proceed without contig list")
         sys.exit(1)
+
+    if depths_df is None:
+        print("  [WARNING] depths.txt not found — depth/coverage fields will be empty", file=sys.stderr)
+    if dastool_summary is None:
+        print("  [WARNING] DAS_Tool summary not found — mags.json will be empty", file=sys.stderr)
 
     # 1. overview.json
     overview = build_overview(results_dir, assembly_info, depths_df, dastool_summary,
