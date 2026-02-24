@@ -260,6 +260,88 @@ results/
     └── trace.txt
 ```
 
+## Viz Dashboard
+
+The pipeline automatically builds an interactive dashboard when `--run_viz` is set (on by default). It covers assembly stats, MAG quality, taxonomy, coverage, MGEs, metabolic modules, and a contig explorer with t-SNE/UMAP embeddings.
+
+### Accessing the dashboard
+
+After `VIZ_PREPROCESS` completes, the preview server starts automatically on port **5174**:
+
+```
+http://<server-ip>:5174/
+```
+
+To find the server IP:
+```bash
+hostname -I | awk '{print $1}'
+```
+
+To manually restart the server (e.g. after a reboot):
+```bash
+cd nextflow/viz
+mamba run -p conda-envs/dana-mag-viz npm run serve
+```
+
+### Incremental updates
+
+The dashboard updates progressively as the pipeline runs — you do not need to wait for
+everything to finish. The pipeline fires four VIZ_PREPROCESS stages as key milestones
+complete:
+
+| Stage | Fires after | What updates |
+|-------|-------------|--------------|
+| Stage 1 | Assembly + mapping | Assembly stats, contig lengths, coverage, t-SNE/UMAP |
+| Stage 2 | Annotation + taxonomy | Taxonomy sunburst, gene features, rRNA/tRNA annotations |
+| Stage 3 | Binning + CheckM2 | MAGs table, completeness/contamination, KEGG heatmap |
+| Stage 4 | All terminal processes | MGE summary, eukaryotic analysis, full metabolic profiling |
+
+Subsequent stages use `--skip-tsne` to reuse the existing contig embeddings
+(`contig_embeddings.json`) rather than recomputing t-SNE from scratch.
+
+### Manual preprocessing (when pipeline is still running)
+
+```bash
+cd nextflow
+
+# Preprocess whatever results are present, skip t-SNE if embeddings already exist
+SKIP_TSNE=1 mamba run -p conda-envs/dana-mag-viz \
+    python3 viz/preprocess/preprocess.py \
+        --results /path/to/outdir \
+        --output viz/public/data/ \
+        --store-dir /path/to/store_dir \
+        --skip-tsne
+
+# Then rebuild and restart the site
+cd viz
+npm run build
+npm run serve
+```
+
+### JSON data files
+
+All JSON files are written as both uncompressed (`.json`) and gzip-compressed
+(`.json.gz`) sidecars. The browser fetches `.json.gz` first via the
+`DecompressionStream` API (Chrome 80+, Firefox 113+, Safari 16.4+) for fast
+load times with no server configuration needed.
+
+| File | Contents | Typical size (gzipped) |
+|------|----------|------------------------|
+| `overview.json` | Assembly + binning summary stats | <1 KB |
+| `mags.json` | Per-MAG quality, taxonomy, gene stats | <1 KB – 1 MB |
+| `checkm2_all.json` | CheckM2 quality for all binner bins | ~50–500 KB |
+| `taxonomy_sunburst.json` | Taxonomy hierarchy for sunburst plot | ~10–100 KB |
+| `kegg_heatmap.json` | KEGG module completeness matrix | ~10–100 KB |
+| `scg_heatmap.json` | Single-copy gene completeness matrix | ~10–100 KB |
+| `coverage.json` | Per-sample contig coverage matrix | ~10–500 KB |
+| `mge_summary.json` | MGE counts (virus, plasmid, integrons) | <10 KB |
+| `mge_per_bin.json` | Per-bin MGE summary | <10 KB |
+| `eukaryotic.json` | Tiara + Whokaryote classifications | ~10–100 KB |
+| `contig_lengths.json` | Length-coverage scatter data | ~0.6 MB (3.7 MB raw) |
+| `contig_explorer.json` | Per-contig GC, taxonomy, replicon, embeddings | ~5 MB (135 MB raw) |
+| `contig_embeddings.json` | t-SNE / UMAP coordinates | ~2 MB (11 MB raw) |
+| `genes.json` | Per-contig gene features (CDS, rRNA, tRNA) | ~2–15 MB |
+
 ## Parameters
 
 ### Assembly

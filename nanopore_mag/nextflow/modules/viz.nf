@@ -62,5 +62,13 @@ process VIZ_PREPROCESS {
     cp \${OLDPWD}/data/* public/data/
     npm run build
     cp -r dist \${OLDPWD}/site
+
+    # Start/restart the preview server (port 5174, all interfaces)
+    pkill -f "vite preview" 2>/dev/null || true
+    sleep 1
+    nohup npm run serve > /tmp/vite_preview.log 2>&1 &
+    disown \$!
+    _server_ip=\$(hostname -I | awk '{print \$1}')
+    echo "Viz dashboard: http://\${_server_ip}:5174/"
     """
 }
