@@ -17,6 +17,7 @@ FROM condaforge/miniforge3:latest
 LABEL maintainer="rec3141@gmail.com"
 LABEL description="Dana MAG Assembly Pipeline - Base image with all conda environments"
 LABEL org.opencontainers.image.source="https://github.com/rec3141/danaSeq"
+LABEL org.opencontainers.image.description="Internal build layer (conda envs + wrapper scripts). Do not pull directly — use ghcr.io/rec3141/danaseq-mag instead."
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \

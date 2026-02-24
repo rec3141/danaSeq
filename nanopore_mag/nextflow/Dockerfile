@@ -27,6 +27,7 @@ FROM ghcr.io/rec3141/danaseq-mag-base:latest
 LABEL maintainer="rec3141@gmail.com"
 LABEL description="Dana MAG Assembly Pipeline - Metagenome-assembled genome reconstruction"
 LABEL org.opencontainers.image.source="https://github.com/rec3141/danaSeq"
+LABEL org.opencontainers.image.description="danaSeq MAG Assembly Pipeline — Metagenome-assembled genome reconstruction from Oxford Nanopore long reads"
 
 # Copy pipeline code
 COPY . /pipeline/

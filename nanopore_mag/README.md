@@ -436,12 +436,17 @@ cd nextflow
 
 ## Docker / Container Image
 
-Pre-built images are published to GitHub Container Registry on every push to main:
+Pre-built images are published to GitHub Container Registry on every push to main.
+Pull the **pipeline image** — it contains everything (base envs + pipeline code):
+
+```bash
+docker pull ghcr.io/rec3141/danaseq-mag:latest
+```
 
 | Image | Purpose | Rebuild trigger |
 |-------|---------|-----------------|
-| `ghcr.io/rec3141/danaseq-mag-base:latest` | All 35 conda envs + wrapper scripts (~20 GB) | Manual (`workflow_dispatch`) |
-| `ghcr.io/rec3141/danaseq-mag:latest` | Pipeline code on top of base (~thin layer) | Push to `main` |
+| `ghcr.io/rec3141/danaseq-mag:latest` | **Pull this one.** Complete pipeline image. | Push to `main` |
+| `ghcr.io/rec3141/danaseq-mag-base:latest` | Internal build layer (conda envs). Do not pull directly. | Manual (`workflow_dispatch`) |
 
 The base image is rebuilt on-demand when conda environments change. The pipeline image rebuilds automatically on every push and takes under 5 minutes.
 
