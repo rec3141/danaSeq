@@ -419,32 +419,54 @@ process SENDSKETCH_CLASSIFY {
     script:
     def address = params.sendsketch_address
     """
-    # Run sendsketch against GTDB TaxServer
-    # format=2: includes full GTDB taxonomy lineage in last column
-    # persequence: one sketch per contig (not per file)
-    # records=1: top hit only
-    # color=f: no ANSI color codes in output
-    # printtaxa=t: include taxonomy column
-    # -Xmx4g: limit Java heap (sketching is lightweight)
-    set +e
-    sendsketch.sh \\
-        -Xmx4g \\
-        in="${contigs}" \\
-        address="${address}" \\
-        k=31 \\
-        format=2 \\
-        persequence \\
-        records=1 \\
-        color=f \\
-        printtaxa=t \\
-        out=sendsketch_raw.txt \\
-        2>sendsketch_stderr.txt
-    sketch_exit=\$?
-    set -e
+    # SendSketch has a hard limit of 100k sequences per request.
+    # Split assembly into chunks of 90k contigs, send each batch, concatenate.
+    BATCH_SIZE=90000
+    N_SEQS=\$(grep -c '^>' "${contigs}")
+    echo "[INFO] Assembly has \$N_SEQS contigs (batch size: \$BATCH_SIZE)" >&2
 
-    if [ \$sketch_exit -ne 0 ]; then
-        echo "[WARNING] sendsketch.sh exited with code \$sketch_exit" >&2
-        cat sendsketch_stderr.txt >&2
+    mkdir -p chunks
+    if [ "\$N_SEQS" -le "\$BATCH_SIZE" ]; then
+        ln -s "\$(readlink -f ${contigs})" chunks/chunk_000.fa
+    else
+        awk -v bs="\$BATCH_SIZE" -v dir="chunks" '
+            BEGIN { n=0; chunk=0; fn=sprintf("%s/chunk_%03d.fa", dir, chunk) }
+            /^>/ { if (n >= bs) { close(fn); chunk++; fn=sprintf("%s/chunk_%03d.fa", dir, chunk); n=0 } n++ }
+            { print > fn }
+        ' "${contigs}"
+    fi
+
+    # Run sendsketch on each chunk
+    > sendsketch_raw.txt
+    sketch_ok=true
+    for chunk in chunks/chunk_*.fa; do
+        echo "[INFO] Processing \$(basename \$chunk) ..." >&2
+        set +e
+        sendsketch.sh \\
+            -Xmx4g \\
+            in="\$chunk" \\
+            address="${address}" \\
+            k=31 \\
+            format=2 \\
+            persequence \\
+            records=1 \\
+            color=f \\
+            printtaxa=t \\
+            out=sendsketch_chunk.txt \\
+            2>sendsketch_stderr.txt
+        chunk_exit=\$?
+        set -e
+
+        if [ \$chunk_exit -ne 0 ]; then
+            echo "[WARNING] sendsketch.sh exited with code \$chunk_exit for \$(basename \$chunk)" >&2
+            cat sendsketch_stderr.txt >&2
+            sketch_ok=false
+            break
+        fi
+        cat sendsketch_chunk.txt >> sendsketch_raw.txt
+    done
+
+    if [ "\$sketch_ok" != "true" ]; then
         printf 'contig_id\\tstatus\\tANI\\tref_name\\tlineage\\n' > sendsketch_contigs.tsv
         exit 0
     fi
