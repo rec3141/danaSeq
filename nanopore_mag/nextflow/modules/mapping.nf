@@ -35,7 +35,7 @@ process MAP_READS {
 
 process CALCULATE_DEPTHS {
     tag "depths"
-    label 'process_medium'
+    label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-mapping"
     publishDir "${params.outdir}/mapping", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/mapping" : null
