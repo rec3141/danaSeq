@@ -20,9 +20,16 @@ export const error = writable(null);
 
 async function fetchJSON(url) {
   // Try pre-compressed .json.gz first — works with any static server, no server config needed.
-  // DecompressionStream is supported in all modern browsers (Chrome 80+, Firefox 113+, Safari 16.4+).
+  // If the server sets Content-Encoding: gzip (e.g. vite preview), the browser auto-decompresses
+  // and we can just parse directly. Otherwise we decompress manually via DecompressionStream.
   const gzRes = await fetch(url + '.gz');
   if (gzRes.ok) {
+    const ce = gzRes.headers.get('Content-Encoding');
+    if (ce && ce.includes('gzip')) {
+      // Browser already decompressed transparently
+      return gzRes.json();
+    }
+    // Manual decompression (plain static server, no Content-Encoding header)
     const ds = new DecompressionStream('gzip');
     const text = await new Response(gzRes.body.pipeThrough(ds)).text();
     return JSON.parse(text);
