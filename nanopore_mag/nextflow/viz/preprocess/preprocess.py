@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import gzip
 import json
 import os
 import re
@@ -31,6 +32,15 @@ def load_tsv(path, **kwargs):
         print(f"  [WARNING] Missing: {path}", file=sys.stderr)
         return None
     return pd.read_csv(path, sep='\t', **kwargs)
+
+
+def write_json_gz(path, data, **dump_kwargs):
+    """Write JSON to path and a gzip-compressed sidecar at path + '.gz'."""
+    text = json.dumps(data, **dump_kwargs)
+    with open(path, 'w') as f:
+        f.write(text)
+    with gzip.open(path + '.gz', 'wt', compresslevel=6) as f:
+        f.write(text)
 
 
 # ---------------------------------------------------------------------------
@@ -1417,48 +1427,41 @@ def main():
     # 1. overview.json
     overview = build_overview(results_dir, assembly_info, depths_df, dastool_summary,
                               checkm2_df, virus_df, plasmid_df, contig2bin)
-    with open(os.path.join(output_dir, 'overview.json'), 'w') as f:
-        json.dump(overview, f)
+    write_json_gz(os.path.join(output_dir, 'overview.json'), overview)
     print(f"  Wrote overview.json")
 
     # 2. contig_lengths.json
     contig_lengths = build_contig_lengths(assembly_info, depths_df, results_dir)
-    with open(os.path.join(output_dir, 'contig_lengths.json'), 'w') as f:
-        json.dump(contig_lengths, f)
+    write_json_gz(os.path.join(output_dir, 'contig_lengths.json'), contig_lengths)
     print(f"  Wrote contig_lengths.json")
 
     # 3. mags.json
     annotation_df = load_annotation_tsv(results_dir)
     mags = build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
                       virus_df, plasmid_df, defense_df, integron_df, annotation_df)
-    with open(os.path.join(output_dir, 'mags.json'), 'w') as f:
-        json.dump(mags, f)
+    write_json_gz(os.path.join(output_dir, 'mags.json'), mags)
     print(f"  Wrote mags.json ({len(mags)} MAGs)")
 
     # 4. checkm2_all.json
     checkm2_all = build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
                                      kaiju_df, virus_df, plasmid_df, defense_df, integron_df,
                                      assembly_info=assembly_info)
-    with open(os.path.join(output_dir, 'checkm2_all.json'), 'w') as f:
-        json.dump(checkm2_all, f)
+    write_json_gz(os.path.join(output_dir, 'checkm2_all.json'), checkm2_all)
     print(f"  Wrote checkm2_all.json ({len(checkm2_all)} bins)")
 
     # 5. taxonomy_sunburst.json
     sunburst = build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin)
-    with open(os.path.join(output_dir, 'taxonomy_sunburst.json'), 'w') as f:
-        json.dump(sunburst, f)
+    write_json_gz(os.path.join(output_dir, 'taxonomy_sunburst.json'), sunburst)
     print(f"  Wrote taxonomy_sunburst.json")
 
     # 6. kegg_heatmap.json
     kegg = build_kegg_heatmap(results_dir)
-    with open(os.path.join(output_dir, 'kegg_heatmap.json'), 'w') as f:
-        json.dump(kegg, f)
+    write_json_gz(os.path.join(output_dir, 'kegg_heatmap.json'), kegg)
     print(f"  Wrote kegg_heatmap.json ({len(kegg['mag_ids'])} MAGs × {len(kegg['module_ids'])} modules)")
 
     # 6b. scg_heatmap.json
     scg = build_scg_heatmap(results_dir)
-    with open(os.path.join(output_dir, 'scg_heatmap.json'), 'w') as f:
-        json.dump(scg, f)
+    write_json_gz(os.path.join(output_dir, 'scg_heatmap.json'), scg)
     bact_n = len(scg.get('bacteria', {}).get('mag_ids', []))
     bact_m = len(scg.get('bacteria', {}).get('module_ids', []))
     arch_n = len(scg.get('archaea', {}).get('mag_ids', []))
@@ -1467,38 +1470,33 @@ def main():
 
     # 7. coverage.json
     coverage = build_coverage(results_dir, dastool_summary, contig2bin, depths_df)
-    with open(os.path.join(output_dir, 'coverage.json'), 'w') as f:
-        json.dump(coverage, f)
+    write_json_gz(os.path.join(output_dir, 'coverage.json'), coverage)
     print(f"  Wrote coverage.json")
 
     # 8. mge_summary.json
     mge_summary = build_mge_summary(virus_df, plasmid_df, defense_df, integron_df)
-    with open(os.path.join(output_dir, 'mge_summary.json'), 'w') as f:
-        json.dump(mge_summary, f)
+    write_json_gz(os.path.join(output_dir, 'mge_summary.json'), mge_summary)
     print(f"  Wrote mge_summary.json")
 
     # 9. mge_per_bin.json
     mge_per_bin = build_mge_per_bin(contig2bin, virus_df, plasmid_df, defense_df, integron_df)
-    with open(os.path.join(output_dir, 'mge_per_bin.json'), 'w') as f:
-        json.dump(mge_per_bin, f)
+    write_json_gz(os.path.join(output_dir, 'mge_per_bin.json'), mge_per_bin)
     print(f"  Wrote mge_per_bin.json ({len(mge_per_bin)} bins)")
 
     # 10. eukaryotic.json
     eukaryotic = build_eukaryotic(results_dir, assembly_info)
-    with open(os.path.join(output_dir, 'eukaryotic.json'), 'w') as f:
-        json.dump(eukaryotic, f)
+    write_json_gz(os.path.join(output_dir, 'eukaryotic.json'), eukaryotic)
     print(f"  Wrote eukaryotic.json")
 
     # 11. contig_explorer.json (largest, do last)
     contig_explorer, embeddings = build_contig_explorer(
         results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
         skip_tsne=args.skip_tsne, output_dir=output_dir)
-    with open(os.path.join(output_dir, 'contig_explorer.json'), 'w') as f:
-        json.dump(contig_explorer, f)
+    write_json_gz(os.path.join(output_dir, 'contig_explorer.json'), contig_explorer)
     print(f"  Wrote contig_explorer.json ({len(contig_explorer['contigs'])} contigs)")
     if embeddings is not None:
-        with open(os.path.join(output_dir, 'contig_embeddings.json'), 'w') as f:
-            json.dump(embeddings, f, separators=(',', ':'))
+        write_json_gz(os.path.join(output_dir, 'contig_embeddings.json'), embeddings,
+                      separators=(',', ':'))
         n_tsne = sum(1 for v in embeddings.values() if 'tsne_x' in v)
         n_umap = sum(1 for v in embeddings.values() if 'umap_x' in v)
         print(f"  Wrote contig_embeddings.json (t-SNE: {n_tsne}, UMAP: {n_umap})")

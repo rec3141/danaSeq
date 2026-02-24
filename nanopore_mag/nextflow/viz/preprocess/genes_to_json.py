@@ -7,6 +7,7 @@ Output format: { "contig_1": [{ s, e, d, t, g, p }, ...], ... }
 Usage:
   python genes_to_json.py <bakta_annotation.tsv> <output.json> [rrna_genes.tsv] [trna_genes.tsv]
 """
+import gzip
 import json
 import os
 import sys
@@ -246,13 +247,17 @@ def main():
     for contig in genes:
         genes[contig].sort(key=lambda f: f['s'])
 
+    text = json.dumps(genes, separators=(',', ':'))
     with open(out_path, 'w') as f:
-        json.dump(genes, f, separators=(',', ':'))
+        f.write(text)
+    with gzip.open(out_path + '.gz', 'wt', compresslevel=6) as f:
+        f.write(text)
 
     n_contigs = len(genes)
     n_features = n_bakta + n_rrna + n_trna
     size_mb = os.path.getsize(out_path) / 1e6
-    print(f"  Wrote {out_path}: {n_contigs} contigs, {n_features} features, {size_mb:.1f} MB")
+    size_gz_mb = os.path.getsize(out_path + '.gz') / 1e6
+    print(f"  Wrote {out_path}: {n_contigs} contigs, {n_features} features, {size_mb:.1f} MB ({size_gz_mb:.1f} MB gzipped)")
 
 
 if __name__ == '__main__':

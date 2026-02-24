@@ -19,6 +19,15 @@ export const loading = writable(true);
 export const error = writable(null);
 
 async function fetchJSON(url) {
+  // Try pre-compressed .json.gz first — works with any static server, no server config needed.
+  // DecompressionStream is supported in all modern browsers (Chrome 80+, Firefox 113+, Safari 16.4+).
+  const gzRes = await fetch(url + '.gz');
+  if (gzRes.ok) {
+    const ds = new DecompressionStream('gzip');
+    const text = await new Response(gzRes.body.pipeThrough(ds)).text();
+    return JSON.parse(text);
+  }
+  // Fall back to plain JSON (older preprocess runs, dev environments)
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
   return res.json();

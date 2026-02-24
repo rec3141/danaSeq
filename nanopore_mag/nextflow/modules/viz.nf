@@ -52,6 +52,7 @@ process VIZ_PREPROCESS {
             "\${ANNOT_TSV}" data/genes.json "\${RRNA_TSV}" "\${TRNA_TSV}"
     else
         echo '{}' > data/genes.json
+        echo '{}' | gzip > data/genes.json.gz
     fi
 
     # Build static site (node/npm provided by conda env)
