@@ -42,14 +42,12 @@ cd nanopore_mag/nextflow
 # Or download specific databases
 ./download-databases.sh --genomad --checkv --checkm2 --kaiju
 
-# With Apptainer on HPC (no local conda needed, auto-pulls SIF)
-./download-databases.sh --apptainer --genomad --checkv --checkm2 --kaiju
+# With Apptainer on HPC (no local conda needed, auto-pulls SIF if --sif omitted)
+./download-databases.sh --apptainer --sif /path/to/danaseq-mag.sif \
+    --all --dir /path/to/databases
 
 # Or with Docker
 ./download-databases.sh --docker --genomad --checkv --checkm2 --kaiju
-
-# All databases at once (~150+ GB)
-./download-databases.sh --all
 
 # Custom download location (default: ./databases)
 ./download-databases.sh --dir /path/to/databases --genomad --checkv
