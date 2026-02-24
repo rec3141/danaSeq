@@ -915,7 +915,7 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     print("Building coverage.json ...")
 
     if depths_df is None or dastool_summary is None:
-        return {'bins': [], 'samples': [], 'matrix': []}
+        return {'bins': [], 'sample_names': [], 'matrix': []}
 
     depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
     sample_names = [re.sub(r'\.sorted\.bam$', '', c) for c in depth_cols]
