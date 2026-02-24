@@ -6,131 +6,104 @@ Named after the Buddhist concept of *dāna* (selfless giving), this pipeline pro
 
 A companion Illumina short-read pipeline (METTA) handles metagenomic assembly with multi-assembler consensus and MetaBAT2 binning.
 
-All pipelines are implemented in Nextflow DSL2 and run via conda or Docker with no hardcoded paths.
+All pipelines are implemented in Nextflow DSL2 and run via conda, Docker, or Apptainer with no hardcoded paths.
+
+## Getting Started
+
+### 1. Get the code
+
+```bash
+# Clone the repository
+git clone https://github.com/rec3141/danaSeq.git
+cd danaSeq
+
+# Or download a specific release
+gh release download v0.1.0-alpha --archive=tar.gz
+```
+
+### 2. Choose a runtime
+
+| Method | Best for | Setup |
+|--------|----------|-------|
+| **Conda** | Local/laptop development | `./install.sh && ./install.sh --check` |
+| **Docker** | Reproducible runs, CI | `docker pull ghcr.io/rec3141/danaseq-mag:latest` |
+| **Apptainer** | HPC clusters (auto-detected) | `apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest` |
+
+### 3. Download databases (MAG pipeline)
+
+Most MAG pipeline modules require reference databases. Download them before first use:
+
+```bash
+cd nanopore_mag/nextflow
+
+# Interactive menu (shows sizes and descriptions)
+./download-databases.sh
+
+# Or download specific databases
+./download-databases.sh --genomad --checkv --checkm2 --kaiju
+
+# With Apptainer on HPC (no local conda needed, auto-pulls SIF)
+./download-databases.sh --apptainer --genomad --checkv --checkm2 --kaiju
+
+# Or with Docker
+./download-databases.sh --docker --genomad --checkv --checkm2 --kaiju
+
+# All databases at once (~150+ GB)
+./download-databases.sh --all
+
+# Custom download location (default: ./databases)
+./download-databases.sh --dir /path/to/databases --genomad --checkv
+```
+
+See [`nanopore_mag/README.md`](nanopore_mag/README.md#databases) for the full database list with sizes.
 
 ## Quick Start
 
-### Real-time processing
+### Real-time processing ([details](nanopore_live/README.md))
 
 ```bash
-git clone https://github.com/rec3141/danaSeq.git
 cd danaSeq/nanopore_live/nextflow
 ./install.sh && ./install.sh --check
 
-# Run (local conda, handles activation automatically)
 ./run-realtime.sh --input /path/to/nanopore/run --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
     --run_prokka --run_sketch --run_tetra
-
-# Or with Docker
-docker build -t danaseq-realtime .
-./run-realtime.sh --docker --input /path/to/nanopore/run --outdir /path/to/output \
-    --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka
 ```
 
-### MAG assembly
+### MAG assembly ([details](nanopore_mag/README.md))
 
 ```bash
 cd danaSeq/nanopore_mag/nextflow
-./install.sh && ./install.sh --check
 
-# Run (local conda, handles activation automatically)
+# Local conda
+./install.sh && ./install.sh --check
 ./run-mag.sh --input /path/to/reads --outdir /path/to/output
 
-# Or with the pre-built Docker image (no local build needed)
-docker pull ghcr.io/rec3141/danaseq-mag:latest
+# Docker
 ./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
 
-# On HPC (Apptainer/Singularity)
+# Apptainer (HPC) — auto-pulls SIF on first run
+./run-mag.sh --apptainer --input /path/to/reads --outdir /path/to/output \
+    --db_dir /path/to/databases
+
+# Or pre-pull the SIF and pass it explicitly
 apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest
+./run-mag.sh --apptainer --sif ./danaseq-mag.sif \
+    --input /path/to/reads --outdir /path/to/output \
+    --db_dir /path/to/databases
 ```
 
-### METTA assembly (Illumina short-read)
+### METTA assembly — Illumina short-read ([details](illumina_mag/README.md))
 
 ```bash
 cd danaSeq/illumina_mag/nextflow
 ./install.sh && ./install.sh --check
 
-# Run (local conda, handles activation automatically)
 ./run-metta.sh --input /path/to/reads --outdir /path/to/output
-
-# Co-assembly mode
-./run-metta.sh --input /path/to/reads --outdir /path/to/output --coassembly
 
 # SLURM profile (Compute Canada)
 ./run-metta.sh --input /path/to/reads --outdir /path/to/output \
-    -profile slurm --slurm_account def-myaccount \
-    --conda_path ~/scratch/miniforge3/bin
-```
-
-### Kitchen sink — all modules (real-time)
-
-```bash
-cd danaSeq/nanopore_live/nextflow
-./run-realtime.sh --input /data/run1 --outdir /data/output \
-    --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka \
-    --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \
-    --run_sketch \
-    --run_tetra \
-    --run_db_integration \
-    --cleanup \
-    --min_readlen 1500 \
-    --keep_percent 80 \
-    --min_file_size 1000000
-```
-
-### Kitchen sink — all options (MAG)
-
-```bash
-cd danaSeq/nanopore_mag/nextflow
-./run-mag.sh --input /data/reads --outdir /data/output \
-    --dedupe \
-    --filtlong_size 40000000000 \
-    --min_overlap 1000 \
-    --annotator prokka \
-    --run_maxbin true \
-    --run_lorbin true \
-    --run_comebin true \
-    --lorbin_min_length 80000 \
-    --metabat_min_cls 50000 \
-    --checkm2_db /path/to/checkm2_db \
-    --genomad_db /path/to/genomad_db \
-    --checkv_db /path/to/checkv_db \
-    --kaiju_db /path/to/kaiju_db \
-    --run_kraken2 true --kraken2_db /path/to/kraken2_db \
-    --run_sendsketch true --sendsketch_address http://host:3068/sketch \
-    --run_rrna true --silva_ssu_db /path/to/SILVA_SSU.fasta \
-    --run_metabolism true \
-    --kofam_db /path/to/kofam_db \
-    --eggnog_db /path/to/eggnog_db \
-    --dbcan_db /path/to/dbcan_db \
-    --run_eukaryotic true --run_metaeuk true --metaeuk_db /path/to/metaeuk_db \
-    --run_marferret true --marferret_db /path/to/marferret_db \
-    --macsyfinder_models /path/to/macsyfinder_models \
-    --defensefinder_models /path/to/defensefinder_models \
-    --assembly_cpus 24 \
-    --assembly_memory '64 GB'
-```
-
-### Kitchen sink — all options (METTA)
-
-```bash
-cd danaSeq/illumina_mag/nextflow
-./run-metta.sh --input /data/reads --outdir /data/output \
-    --coassembly \
-    --min_readlen 70 \
-    --run_normalize true \
-    --run_tadpole true \
-    --run_megahit true \
-    --run_spades true \
-    --run_metaspades true \
-    --dedupe_identity 98 \
-    --metabat_min_cls 2000 \
-    --store_dir /scratch/metta_store \
-    --assembly_cpus 24 \
-    --assembly_memory '250 GB'
+    -profile slurm --slurm_account def-myaccount
 ```
 
 ### Test with bundled data
@@ -190,7 +163,7 @@ dānaSeq/
 
 ## Pipelines
 
-### Real-time processing (nanopore_live/)
+### [Real-time processing](nanopore_live/README.md)
 
 Processes FASTQ files as they arrive from Oxford Nanopore MinKNOW:
 
@@ -212,9 +185,7 @@ Key features:
 - HMM search against functional gene databases (FOAM, CANT-HYD, NCycDB, etc.)
 - Post-DB cleanup to compress/delete source files after import
 
-See `nanopore_live/README.md` for full details.
-
-### MAG assembly (nanopore_mag/)
+### [MAG assembly](nanopore_mag/README.md)
 
 Reconstructs metagenome-assembled genomes alongside real-time processing:
 
@@ -263,9 +234,7 @@ Key features:
 - CoverM for depth calculation (avoids MetaBAT2 integer overflow bug)
 - GPU-accelerated ML binners (local), CPU-only in Docker
 
-See `nanopore_mag/README.md` for full details.
-
-### METTA assembly (illumina_mag/)
+### [METTA assembly — Illumina short-read](illumina_mag/README.md)
 
 Processes Illumina paired-end metagenomic reads through multi-assembler consensus:
 
@@ -291,8 +260,6 @@ Key features:
 - **Per-sample and co-assembly modes**: `--coassembly` pools all samples
 - **SRA-safe**: Automatic fallbacks for SRA-stripped read headers
 - **SLURM support**: `-profile slurm` for Compute Canada HPC clusters
-
-See `illumina_mag/README.md` for full details.
 
 ## Input
 
