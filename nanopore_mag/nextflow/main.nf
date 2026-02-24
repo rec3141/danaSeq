@@ -353,10 +353,10 @@ include { MAP_TO_BINS }         from './modules/metabolism'
 include { KEGG_MODULES }        from './modules/metabolism'
 include { MINPATH }             from './modules/metabolism'
 include { KEGG_DECODER }        from './modules/metabolism'
-include { VIZ_PREPROCESS as VIZ_STAGE1 } from './modules/viz'  // after TNF, with t-SNE
-include { VIZ_PREPROCESS as VIZ_STAGE2 } from './modules/viz'  // after BAKTA_BASIC, skip t-SNE
-include { VIZ_PREPROCESS as VIZ_STAGE3 } from './modules/viz'  // after DAS_Tool+CheckM2, skip t-SNE
-include { VIZ_PREPROCESS as VIZ_STAGE4 } from './modules/viz'  // after KEGG_MODULES, skip t-SNE
+include { VIZ_PREPROCESS as VIZ_STAGE1 } from './modules/viz'  // after TNF, computes t-SNE + UMAP
+include { VIZ_PREPROCESS as VIZ_STAGE2 } from './modules/viz'  // after BAKTA_BASIC, skip embeddings
+include { VIZ_PREPROCESS as VIZ_STAGE3 } from './modules/viz'  // after DAS_Tool+CheckM2, skip embeddings
+include { VIZ_PREPROCESS as VIZ_STAGE4 } from './modules/viz'  // final barrier, skip embeddings
 
 // ============================================================================
 // Main workflow
@@ -678,22 +678,22 @@ workflow {
     //    preprocess.py handles missing files gracefully (WARNING, not error).
     //    --skip-tsne preserves existing contig_embeddings.json on subsequent runs.
     if (params.run_viz) {
-        // Stage 1: assembly + TNF done — earliest useful snapshot, computes t-SNE
-        VIZ_STAGE1(CALCULATE_TNF.out.tnf.collect(), false)
+        // Stage 1: assembly + TNF done — earliest useful snapshot, computes t-SNE + UMAP
+        VIZ_STAGE1(CALCULATE_TNF.out.tnf.collect(), false, false)
 
-        // Stage 2: annotation done — adds protein/functional context
+        // Stage 2: annotation done — adds protein/functional context; skip embeddings
         if (effective_annotator != 'none') {
-            VIZ_STAGE2(ch_proteins.collect(), true)
+            VIZ_STAGE2(ch_proteins.collect(), true, true)
         }
 
-        // Stage 3: binning + quality done — adds MAG assignments + CheckM2
+        // Stage 3: binning + quality done — adds MAG assignments + CheckM2; skip embeddings
         ch_viz_stage3 = DASTOOL_CONSENSUS.out.summary.collect()
         if (params.checkm2_db) {
             ch_viz_stage3 = ch_viz_stage3.mix(CHECKM2.out.report.collect())
         }
-        VIZ_STAGE3(ch_viz_stage3.collect(), true)
+        VIZ_STAGE3(ch_viz_stage3.collect(), true, true)
 
-        // Stage 4: final — waits for ALL terminal processes to complete
+        // Stage 4: final — waits for ALL terminal processes to complete; skip embeddings
         ch_viz_stage4 = DASTOOL_CONSENSUS.out.summary.collect()
         if (params.checkm2_db) {
             ch_viz_stage4 = ch_viz_stage4.mix(CHECKM2.out.report.collect())
@@ -739,7 +739,7 @@ workflow {
             ch_viz_stage4 = ch_viz_stage4.mix(MINPATH.out.pathways.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(KEGG_DECODER.out.output.collect())
         }
-        VIZ_STAGE4(ch_viz_stage4.collect(), true)
+        VIZ_STAGE4(ch_viz_stage4.collect(), true, true)
     }
 }
 

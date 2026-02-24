@@ -9,7 +9,8 @@ process VIZ_PREPROCESS {
 
     input:
     val(ready)           // barrier signal, not used in script
-    val(skip_tsne)       // true = skip t-SNE (preserves existing contig_embeddings.json)
+    val(skip_tsne)       // true = skip t-SNE (Stage 2+, embeddings already computed)
+    val(skip_umap)       // true = skip UMAP (Stage 2+, embeddings already computed)
 
     output:
     path("data"),  emit: json_data
@@ -20,6 +21,7 @@ process VIZ_PREPROCESS {
     def storeRoot = params.store_dir ?: ''
     def storeFlag = storeRoot ? "--store-dir ${storeRoot}" : ""
     def tsne_flag = skip_tsne ? '--skip-tsne' : ''
+    def umap_flag = skip_umap ? '--skip-umap' : ''
     """
     # Generate JSON data files
     mkdir -p data
@@ -27,7 +29,8 @@ process VIZ_PREPROCESS {
         --results "${params.outdir}" \
         --output data/ \
         ${storeFlag} \
-        ${tsne_flag}
+        ${tsne_flag} \
+        ${umap_flag}
 
     # Generate genes.json: prefer BAKTA_EXTRA > BAKTA_BASIC > PROKKA annotation,
     # augmented with barrnap rRNA and Aragorn tRNA gene calls.
