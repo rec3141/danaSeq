@@ -1447,6 +1447,38 @@ def main():
     write_json_gz(os.path.join(output_dir, 'mags.json'), mags)
     print(f"  Wrote mags.json ({len(mags)} MAGs)")
 
+    # 3b. genes.json (compact gene features for contig detail view)
+    print("Building genes.json ...")
+    from genes_to_json import load_bakta, load_rrna, load_trna
+    annot_candidates = [
+        resolve_path(results_dir, 'annotation', 'bakta', 'extra', 'annotation.tsv'),
+        resolve_path(results_dir, 'annotation', 'bakta', 'basic', 'annotation.tsv'),
+        resolve_path(results_dir, 'annotation', 'prokka', 'annotation.tsv'),
+    ]
+    annot_tsv = next((p for p in annot_candidates if os.path.exists(p)), None)
+    rrna_tsv = resolve_path(results_dir, 'taxonomy', 'rrna', 'rrna_genes.tsv')
+    trna_tsv = resolve_path(results_dir, 'taxonomy', 'rrna', 'trna_genes.tsv')
+    if annot_tsv:
+        genes, n_bakta = load_bakta(annot_tsv)
+        print(f"  Bakta: {n_bakta} features from {len(genes)} contigs")
+        if os.path.isfile(rrna_tsv):
+            rrna_genes, n_rrna = load_rrna(rrna_tsv)
+            for contig, feats in rrna_genes.items():
+                genes.setdefault(contig, []).extend(feats)
+            print(f"  rRNA: {n_rrna} features from {len(rrna_genes)} contigs")
+        if os.path.isfile(trna_tsv):
+            trna_genes, n_trna = load_trna(trna_tsv)
+            for contig, feats in trna_genes.items():
+                genes.setdefault(contig, []).extend(feats)
+            print(f"  tRNA/tmRNA: {n_trna} features from {len(trna_genes)} contigs")
+        for contig in genes:
+            genes[contig].sort(key=lambda f: f['s'])
+        write_json_gz(os.path.join(output_dir, 'genes.json'), genes, separators=(',', ':'))
+        print(f"  Wrote genes.json ({len(genes)} contigs)")
+    else:
+        write_json_gz(os.path.join(output_dir, 'genes.json'), {})
+        print("  No annotation found — wrote empty genes.json")
+
     # 4. checkm2_all.json
     checkm2_all = build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
                                      kaiju_df, virus_df, plasmid_df, defense_df, integron_df,
