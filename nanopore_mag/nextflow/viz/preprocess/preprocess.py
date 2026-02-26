@@ -190,6 +190,103 @@ def parse_args():
     return p.parse_args()
 
 
+def build_pipeline_status(results_dir):
+    """Parse .nextflow.log and trace.txt to build pipeline process status dict.
+
+    Returns a dict with:
+      processes: {PROCESS_NAME: "completed"|"failed"|"running"|"pending", ...}
+      pipeline_total: int
+      pipeline_completed: int
+      pipeline_running: int
+      pipeline_pending: int
+      pipeline_failed: int
+    Returns None if no log file is available.
+    """
+    log_path = os.path.join(results_dir, 'pipeline_info', 'nextflow.log')
+    if not os.path.isfile(log_path):
+        print("  [INFO] No nextflow.log found — skipping pipeline status", file=sys.stderr)
+        return None
+
+    print("Building pipeline status from nextflow.log ...")
+
+    # 1. Extract full process list from log
+    all_processes = set()
+    stored = set()
+    submitted = set()
+
+    with open(log_path, 'r', errors='replace') as f:
+        for line in f:
+            # Full process list: "Workflow process names [dsl2]: A, B, C"
+            m = re.search(r'Workflow process names \[dsl2\]:\s*(.+)', line)
+            if m:
+                all_processes = {p.strip() for p in m.group(1).split(',')}
+
+            # Stored (skipped via storeDir)
+            m = re.search(r'\[skipping\] Stored process > (\w+)', line)
+            if m:
+                stored.add(m.group(1))
+
+            # Submitted
+            m = re.search(r'Submitted process > (\w+)', line)
+            if m:
+                submitted.add(m.group(1))
+
+    # 2. Read trace.txt for execution statuses
+    trace_status = {}  # process_name -> status
+    trace_path = os.path.join(results_dir, 'pipeline_info', 'trace.txt')
+    if os.path.isfile(trace_path):
+        try:
+            trace_df = pd.read_csv(trace_path, sep='\t')
+            for _, row in trace_df.iterrows():
+                proc = str(row.get('process', ''))
+                status = str(row.get('status', '')).upper()
+                # A process may appear multiple times (e.g. MAP_READS ×N samples);
+                # mark as completed only if ALL instances completed
+                if proc not in trace_status:
+                    trace_status[proc] = status
+                elif status == 'FAILED':
+                    trace_status[proc] = 'FAILED'
+                elif trace_status[proc] == 'COMPLETED' and status == 'CACHED':
+                    pass  # keep COMPLETED
+        except Exception as e:
+            print(f"  [WARNING] Could not parse trace.txt: {e}", file=sys.stderr)
+
+    # 3. Merge: build final status for each process
+    # Exclude internal VIZ_STAGE processes (they're aliases for VIZ_PREPROCESS)
+    skip_procs = {'VIZ_STAGE1', 'VIZ_STAGE2', 'VIZ_STAGE3', 'VIZ_STAGE4', 'VIZ_PREPROCESS',
+                  'NCLB_CONVERSE', 'NCLB_GATHER', 'NCLB_INTEGRATE', 'NCLB_ELDERS'}
+    processes = {}
+    for proc in sorted(all_processes - skip_procs):
+        if proc in stored:
+            processes[proc] = 'completed'
+        elif proc in trace_status:
+            ts = trace_status[proc]
+            if ts in ('COMPLETED', 'CACHED'):
+                processes[proc] = 'completed'
+            elif ts == 'FAILED':
+                processes[proc] = 'failed'
+            else:
+                processes[proc] = 'running'
+        elif proc in submitted:
+            processes[proc] = 'running'
+        else:
+            processes[proc] = 'pending'
+
+    counts = Counter(processes.values())
+    result = {
+        'processes': processes,
+        'pipeline_total': len(processes),
+        'pipeline_completed': counts.get('completed', 0),
+        'pipeline_running': counts.get('running', 0),
+        'pipeline_pending': counts.get('pending', 0),
+        'pipeline_failed': counts.get('failed', 0),
+    }
+    print(f"  Pipeline: {result['pipeline_completed']}/{result['pipeline_total']} completed, "
+          f"{result['pipeline_running']} running, {result['pipeline_pending']} pending, "
+          f"{result['pipeline_failed']} failed")
+    return result
+
+
 def build_overview(results_dir, assembly_info, depths_df, dastool_summary, checkm2_df,
                    virus_df, plasmid_df, contig2bin):
     """Build overview.json with assembly stats and summary counts."""
@@ -1449,6 +1546,10 @@ def main():
     # 1. overview.json
     overview = build_overview(results_dir, assembly_info, depths_df, dastool_summary,
                               checkm2_df, virus_df, plasmid_df, contig2bin)
+    # Merge pipeline status from .nextflow.log (if available)
+    pipeline_status = build_pipeline_status(results_dir)
+    if pipeline_status:
+        overview.update(pipeline_status)
     write_json_gz(os.path.join(output_dir, 'overview.json'), overview)
     print(f"  Wrote overview.json")
 

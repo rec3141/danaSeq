@@ -1,6 +1,7 @@
 <script>
   import StatCard from '../components/layout/StatCard.svelte';
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
+  import PipelineDAG from '../components/charts/PipelineDAG.svelte';
   import { overview, contigLengths, mags } from '../stores/data.js';
 
   let overviewData = $derived($overview);
@@ -185,7 +186,7 @@
     <StatCard label="Plasmid Contigs" value={overviewData.n_plasmid.toLocaleString()} color="purple" />
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
       <PlotlyChart data={histogramData} layout={histogramLayout} />
     </div>
@@ -204,4 +205,21 @@
       {/if}
     </div>
   </div>
+
+  {#if overviewData?.processes}
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-medium text-slate-400">
+          Pipeline Status ({overviewData.pipeline_completed}/{overviewData.pipeline_total} processes)
+        </h3>
+        <div class="flex gap-3 text-xs">
+          <a href="pipeline_info/report.html" target="_blank" rel="noopener noreferrer"
+             class="text-slate-500 hover:text-cyan-400 transition-colors">Nextflow Report</a>
+          <a href="pipeline_info/timeline.html" target="_blank" rel="noopener noreferrer"
+             class="text-slate-500 hover:text-cyan-400 transition-colors">Timeline</a>
+        </div>
+      </div>
+      <PipelineDAG processes={overviewData.processes} />
+    </div>
+  {/if}
 {/if}

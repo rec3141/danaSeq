@@ -23,6 +23,9 @@ process VIZ_PREPROCESS {
     def vizDir = "${params.outdir}/viz"
     def vizPort = params.viz_port ?: 5174
     """
+    # Copy Nextflow log for pipeline status parsing
+    cp "${projectDir}/.nextflow.log" "${params.outdir}/pipeline_info/nextflow.log" 2>/dev/null || true
+
     # Write JSON data directly to outdir
     VIZ_DIR="${vizDir}"
     mkdir -p "\${VIZ_DIR}/data"
@@ -72,6 +75,8 @@ process VIZ_PREPROCESS {
     cp "\${VIZ_DIR}"/data/* public/data/
     npm run build
     cp -r dist "\${VIZ_DIR}/site"
+    # Copy pipeline_info (report, timeline, trace) into site for dashboard linking
+    cp -r "${params.outdir}/pipeline_info" "\${VIZ_DIR}/site/pipeline_info" 2>/dev/null || true
 
     # Start/restart the preview server (all interfaces, configurable port)
     # setsid creates a new session so the child is not in the Nextflow process group
