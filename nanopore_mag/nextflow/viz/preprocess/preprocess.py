@@ -101,8 +101,8 @@ def parse_lineage(lineage):
     return tax
 
 
-def build_taxonomy_maps(results_dir, kaiju_df):
-    """Build per-contig taxonomy dicts for Kaiju, Kraken2, and rRNA."""
+def build_taxonomy_maps(results_dir, kaiju_df, sendsketch_df=None):
+    """Build per-contig taxonomy dicts for Kaiju, Kraken2, rRNA, and SendSketch."""
     kaiju_tax = {}
     if kaiju_df is not None:
         for _, row in kaiju_df.iterrows():
@@ -139,7 +139,19 @@ def build_taxonomy_maps(results_dir, kaiju_df):
                 if any(tax.values()):
                     rrna_tax[row['contig_id']] = tax
 
-    return {'kaiju': kaiju_tax, 'kraken2': kraken2_tax, 'rrna': rrna_tax}
+    sendsketch_tax = {}
+    if sendsketch_df is not None:
+        for _, row in sendsketch_df.iterrows():
+            if row.get('status') != 'C':
+                continue
+            lineage = row.get('lineage', '')
+            if pd.notna(lineage) and lineage and lineage != 'Unclassified':
+                tax = parse_lineage(lineage)
+                tax = {k: strip_gtdb_prefix(v) for k, v in tax.items()}
+                if any(tax.values()):
+                    sendsketch_tax[row['contig_id']] = tax
+
+    return {'kaiju': kaiju_tax, 'kraken2': kraken2_tax, 'rrna': rrna_tax, 'sendsketch': sendsketch_tax}
 
 
 def majority_vote_taxonomy(contigs, tax_map, len_map=None):
@@ -493,7 +505,7 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
 
 def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
                       kaiju_df, virus_df, plasmid_df, defense_df, integron_df,
-                      assembly_info=None):
+                      assembly_info=None, sendsketch_df=None):
     """Build checkm2_all.json for all bins with quality, taxonomy, and MGE."""
     print("Building checkm2_all.json ...")
     if checkm2_df is None:
@@ -538,7 +550,7 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
             integron_contigs.add(row['ID_replicon'])
 
     # Per-source taxonomy maps
-    tax_maps = build_taxonomy_maps(results_dir, kaiju_df)
+    tax_maps = build_taxonomy_maps(results_dir, kaiju_df, sendsketch_df)
 
     # Contig length map for length-weighted composition
     len_map = {}
@@ -651,11 +663,11 @@ def _build_sunburst_tree(tax_map, len_map):
     return {'name': 'Life', 'children': to_hierarchy(tree)}
 
 
-def build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin):
+def build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin, sendsketch_df=None):
     """Build taxonomy_sunburst.json with per-source sunburst trees + composition."""
     print("Building taxonomy_sunburst.json ...")
     len_map = dict(zip(assembly_info['#seq_name'], assembly_info['length']))
-    tax_maps = build_taxonomy_maps(results_dir, kaiju_df)
+    tax_maps = build_taxonomy_maps(results_dir, kaiju_df, sendsketch_df)
 
     result = {'sunbursts': {}, 'composition': {}}
     for source, tmap in tax_maps.items():
@@ -1162,7 +1174,7 @@ def build_eukaryotic(results_dir, assembly_info):
 
 
 def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
-                          skip_tsne=False, skip_umap=False, output_dir=None):
+                          skip_tsne=False, skip_umap=False, output_dir=None, sendsketch_df=None):
     """Build contig_explorer.json with PCA + t-SNE + UMAP on fourth-root transformed TNF."""
     print("Building contig_explorer.json ...")
 
@@ -1214,20 +1226,24 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
             print(f"  {binner}: {len(set(bmap.values()))} bins, {len(bmap)} contigs")
 
     # Per-source taxonomy maps (shared helper)
-    tax_sources = build_taxonomy_maps(results_dir, kaiju_df)
+    tax_sources = build_taxonomy_maps(results_dir, kaiju_df, sendsketch_df)
     kaiju_tax = tax_sources['kaiju']
     kraken2_tax = tax_sources['kraken2']
     rrna_tax = tax_sources['rrna']
+    sendsketch_tax = tax_sources['sendsketch']
     print(f"  Kaiju taxonomy: {len(kaiju_tax)} contigs")
     print(f"  Kraken2 taxonomy: {len(kraken2_tax)} contigs")
     print(f"  rRNA taxonomy: {len(rrna_tax)} contigs")
+    print(f"  SendSketch taxonomy: {len(sendsketch_tax)} contigs")
 
-    # Merged (Kraken2 > rRNA > Kaiju priority)
+    # Merged (Kraken2 > SendSketch > rRNA > Kaiju priority)
     tax_map = {}
     for cid, tax in kaiju_tax.items():
         tax_map[cid] = {**tax, 'source': 'kaiju'}
     for cid, tax in rrna_tax.items():
         tax_map[cid] = {**tax, 'source': 'rrna'}
+    for cid, tax in sendsketch_tax.items():
+        tax_map[cid] = {**tax, 'source': 'sendsketch'}
     for cid, tax in kraken2_tax.items():
         tax_map[cid] = {**tax, 'source': 'kraken2'}
     sources = Counter(v['source'] for v in tax_map.values())
@@ -1322,7 +1338,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
             'pca_y': round(float(pca_coords[i, 1]), 4),
         }
         # Per-source taxonomy at all ranks
-        for prefix, src_map in [('kaiju', kaiju_tax), ('kraken2', kraken2_tax), ('rrna', rrna_tax)]:
+        for prefix, src_map in [('kaiju', kaiju_tax), ('kraken2', kraken2_tax), ('rrna', rrna_tax), ('sendsketch', sendsketch_tax)]:
             st = src_map.get(cid, {})
             for rank in RANKS:
                 rec[f'{prefix}_{rank}'] = st.get(rank, '')
@@ -1414,6 +1430,7 @@ def main():
     dastool_summary = load_tsv(resolve_path(results_dir, 'binning', 'dastool', 'summary.tsv'))
     checkm2_df = load_tsv(resolve_path(results_dir, 'binning', 'checkm2', 'quality_report.tsv'))
     kaiju_df = load_tsv(resolve_path(results_dir, 'taxonomy', 'kaiju', 'kaiju_contigs.tsv'))
+    sendsketch_df = load_tsv(resolve_path(results_dir, 'taxonomy', 'sendsketch', 'sendsketch_contigs.tsv'))
     virus_df = load_tsv(resolve_path(results_dir, 'mge', 'genomad', 'virus_summary.tsv'))
     plasmid_df = load_tsv(resolve_path(results_dir, 'mge', 'genomad', 'plasmid_summary.tsv'))
     defense_df = load_tsv(resolve_path(results_dir, 'mge', 'defensefinder', 'systems.tsv'))
@@ -1482,12 +1499,12 @@ def main():
     # 4. checkm2_all.json
     checkm2_all = build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
                                      kaiju_df, virus_df, plasmid_df, defense_df, integron_df,
-                                     assembly_info=assembly_info)
+                                     assembly_info=assembly_info, sendsketch_df=sendsketch_df)
     write_json_gz(os.path.join(output_dir, 'checkm2_all.json'), checkm2_all)
     print(f"  Wrote checkm2_all.json ({len(checkm2_all)} bins)")
 
     # 5. taxonomy_sunburst.json
-    sunburst = build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin)
+    sunburst = build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin, sendsketch_df)
     write_json_gz(os.path.join(output_dir, 'taxonomy_sunburst.json'), sunburst)
     print(f"  Wrote taxonomy_sunburst.json")
 
@@ -1528,7 +1545,8 @@ def main():
     # 11. contig_explorer.json (largest, do last)
     contig_explorer, tsne_emb, umap_emb = build_contig_explorer(
         results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
-        skip_tsne=args.skip_tsne, skip_umap=args.skip_umap, output_dir=output_dir)
+        skip_tsne=args.skip_tsne, skip_umap=args.skip_umap, output_dir=output_dir,
+        sendsketch_df=sendsketch_df)
     write_json_gz(os.path.join(output_dir, 'contig_explorer.json'), contig_explorer)
     print(f"  Wrote contig_explorer.json ({len(contig_explorer['contigs'])} contigs)")
     if tsne_emb is not None:
