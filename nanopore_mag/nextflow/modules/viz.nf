@@ -21,6 +21,7 @@ process VIZ_PREPROCESS {
     def tsne_flag = skip_tsne ? '--skip-tsne' : ''
     def umap_flag = skip_umap ? '--skip-umap' : ''
     def vizDir = "${params.outdir}/viz"
+    def vizPort = params.viz_port ?: 5174
     """
     # Write JSON data directly to outdir
     VIZ_DIR="${vizDir}"
@@ -69,13 +70,14 @@ process VIZ_PREPROCESS {
     npm run build
     cp -r dist "\${VIZ_DIR}/site"
 
-    # Start/restart the preview server (port 5174, all interfaces)
+    # Start/restart the preview server (all interfaces, configurable port)
     # setsid creates a new session so the child is not in the Nextflow process group
     # (nohup+disown alone still keeps the child in the same pgid, blocking task completion)
-    pkill -f "vite preview" 2>/dev/null || true
+    VIZ_PORT=${vizPort}
+    pkill -f "vite preview.*--port \${VIZ_PORT}" 2>/dev/null || true
     sleep 1
-    setsid nohup npm run serve > /tmp/vite_preview.log 2>&1 &
+    setsid nohup npx vite preview --host 0.0.0.0 --port \${VIZ_PORT} > /tmp/vite_preview_\${VIZ_PORT}.log 2>&1 &
     _server_ip=\$(hostname -I | awk '{print \$1}')
-    echo "Viz dashboard: http://\${_server_ip}:5174/"
+    echo "Viz dashboard: http://\${_server_ip}:\${VIZ_PORT}/"
     """
 }
