@@ -199,7 +199,7 @@ process BIN_LORBIN {
         for bin_file in lorbin_out/output_bins/bin.*.fa; do
             [ -e "\$bin_file" ] || continue
             bin_num=\$(basename "\$bin_file" .fa | grep -oP '\\d+\$')
-            bin_name=\$(printf 'lorbin_%03d' "\$bin_num")
+            bin_name=\$(printf 'lorbin_%03d' "\$((10#\$bin_num))")
             cp "\$bin_file" "bins/\${bin_name}.fa"
             grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
@@ -257,7 +257,7 @@ process BIN_COMEBIN {
         for bin_file in comebin_out/comebin_res/comebin_res_bins/*.fa; do
             [ -e "\$bin_file" ] || continue
             bin_num=\$(basename "\$bin_file" .fa | grep -oP '\\d+\$')
-            bin_name=\$(printf 'comebin_%03d' "\$bin_num")
+            bin_name=\$(printf 'comebin_%03d' "\$((10#\$bin_num))")
             cp "\$bin_file" "bins/\${bin_name}.fa"
             grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
