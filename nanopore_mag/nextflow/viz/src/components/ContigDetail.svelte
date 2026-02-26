@@ -156,11 +156,10 @@
         <table class="w-full text-xs">
           <thead class="sticky top-0 bg-slate-800">
             <tr class="text-slate-500 border-b border-slate-700">
+              <th class="text-left py-1 px-1 font-medium">ID</th>
               <th class="text-left py-1 px-1 font-medium">Type</th>
               <th class="text-left py-1 px-1 font-medium">Gene</th>
               <th class="text-left py-1 px-1 font-medium">Product</th>
-              <th class="text-right py-1 px-1 font-medium">Start</th>
-              <th class="text-right py-1 px-1 font-medium">End</th>
               <th class="text-right py-1 px-1 font-medium">bp</th>
               <th class="text-center py-1 px-1 font-medium">Str</th>
             </tr>
@@ -169,11 +168,10 @@
             {#each geneTable as f}
               {@const typeColor = f.t === 'cds' ? 'text-cyan-400' : f.t === 'rrna' ? 'text-amber-400' : f.t === 'trna' ? 'text-emerald-400' : f.t === 'tmrna' ? 'text-violet-400' : f.t === 'ncrna' ? 'text-pink-400' : f.t === 'crispr' ? 'text-red-400' : 'text-slate-400'}
               <tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
+                <td class="py-0.5 px-1 text-slate-400 font-mono text-[10px]">{f.id || '-'}</td>
                 <td class="py-0.5 px-1 {typeColor} font-mono text-[10px]">{f.t.toUpperCase()}</td>
                 <td class="py-0.5 px-1 text-cyan-400 font-mono">{f.g || '-'}</td>
                 <td class="py-0.5 px-1 text-slate-300 truncate max-w-[200px]" title={f.p}>{f.p || (f.t === 'cds' ? 'hypothetical protein' : '')}</td>
-                <td class="py-0.5 px-1 text-right text-slate-400 font-mono">{f.s.toLocaleString()}</td>
-                <td class="py-0.5 px-1 text-right text-slate-400 font-mono">{f.e.toLocaleString()}</td>
                 <td class="py-0.5 px-1 text-right text-slate-400 font-mono">{(f.e - f.s + 1).toLocaleString()}</td>
                 <td class="py-0.5 px-1 text-center text-slate-400">{f.d === 1 ? '+' : '-'}</td>
               </tr>

@@ -299,12 +299,6 @@
     });
   }
 
-  function closeDetail() {
-    detailContigId = null;
-    detailGenes = null;
-    detailLoading = false;
-  }
-
   // Active bin info for tooltips and detail panel (null when not coloring by binner)
   let activeBin = $derived.by(() => {
     if (colorMode !== 'bins') return null;
@@ -573,7 +567,7 @@
 {:else}
   <div class="flex gap-4 mb-6">
     <!-- Scatter plot -->
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[700px] flex flex-col {detailContigId ? 'flex-1 min-w-0' : 'w-full'}">
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[700px] flex flex-col flex-1 min-w-0">
       {#if renderer === 'regl'}
         <ReglScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} sizeRange={fullSizeRange} {coordExtents} onselect={handleSelection} onclick={handleContigClick} {searchMatchIds} />
       {:else}
@@ -587,19 +581,16 @@
       </div>
     </div>
 
-    <!-- Detail panel (right side, half width) -->
-    {#if detailContigId}
-      <div class="w-1/2 min-w-[400px] max-w-[600px]">
-        <ContigDetail
-          contig={detailContig}
-          genes={detailGenes}
-          loading={detailLoading}
-          onclose={closeDetail}
-          {activeBin}
-          {taxSource}
-        />
-      </div>
-    {/if}
+    <!-- Detail panel (right side, always visible) -->
+    <div class="w-1/2 min-w-[400px] max-w-[600px]">
+      <ContigDetail
+        contig={detailContig}
+        genes={detailGenes}
+        loading={detailLoading}
+        {activeBin}
+        {taxSource}
+      />
+    </div>
   </div>
 
   {#if selectionStats}

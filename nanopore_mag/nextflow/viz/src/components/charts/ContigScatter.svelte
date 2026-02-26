@@ -33,7 +33,8 @@
   function hoverText(c, colorBy) {
     let tax = c.kaiju_phylum || c.kraken2_phylum || c.rrna_phylum || '?';
     // If coloring by a taxonomy field, show that field's value
-    if (colorBy && !colorBy.endsWith('_bin') && colorBy !== 'bin' && c[colorBy] !== undefined) {
+    const CONTINUOUS_FIELDS = ['depth', 'length', 'gc'];
+    if (colorBy && !colorBy.endsWith('_bin') && colorBy !== 'bin' && !CONTINUOUS_FIELDS.includes(colorBy) && c[colorBy] !== undefined) {
       tax = c[colorBy] || '?';
     }
     const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
