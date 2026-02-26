@@ -152,12 +152,19 @@
   let lenRange = $derived.by(() => {
     if (!dataExtents) return [0, Infinity];
     const lo = Math.log10(dataExtents.lMin), hi = Math.log10(dataExtents.lMax);
-    return [pctToLog(lenMinPct, lo, hi), pctToLog(lenMaxPct, lo, hi)];
+    // Use exact extent values at boundaries to avoid log↔pow floating-point drift
+    return [
+      lenMinPct <= 0 ? dataExtents.lMin : pctToLog(lenMinPct, lo, hi),
+      lenMaxPct >= 100 ? dataExtents.lMax : pctToLog(lenMaxPct, lo, hi),
+    ];
   });
   let depRange = $derived.by(() => {
     if (!dataExtents) return [0, Infinity];
     const lo = Math.log10(dataExtents.dMin), hi = Math.log10(dataExtents.dMax);
-    return [pctToLog(depMinPct, lo, hi), pctToLog(depMaxPct, lo, hi)];
+    return [
+      depMinPct <= 0 ? dataExtents.dMin : pctToLog(depMinPct, lo, hi),
+      depMaxPct >= 100 ? dataExtents.dMax : pctToLog(depMaxPct, lo, hi),
+    ];
   });
 
   let isFiltered = $derived(lenMinPct > 0 || lenMaxPct < 100 || depMinPct > 0 || depMaxPct < 100);
