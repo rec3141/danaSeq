@@ -288,6 +288,7 @@
   </div>
   </div>
 
+  {#if filteredData?.mag_ids?.length}
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div bind:this={heatmapEl} class="lg:col-span-2 bg-slate-800 rounded-lg p-4 border border-slate-700 overflow-auto" style="max-height: 700px;">
       <div class="flex items-center justify-between mb-2">
@@ -401,4 +402,10 @@
   <div class="mt-4 text-xs text-slate-500">
     Ward hierarchical clustering on both axes. Color: dark = 0%, bright = 100% completeness.
   </div>
+  {:else}
+  <div class="flex flex-col items-center justify-center py-24 text-center">
+    <p class="text-slate-400 text-lg mb-2">No bins match the current filters</p>
+    <p class="text-slate-500 text-sm">Try adjusting the binner selection above, or run metabolism annotation to generate KEGG data.</p>
+  </div>
+  {/if}
 {/if}
