@@ -37,42 +37,61 @@
 
   const TYPE_ORDER = { cds: 0, rrna: 1, trna: 2, tmrna: 3, ncrna: 4, crispr: 5 };
 
-  // Depth coloring state
-  let colorByDepth = $state(false);
+  // Color mode: 'type', 'depth', or 'gc'
+  let colorMode = $state('type');
 
-  // Whether any genes have depth data
+  // Available color modes based on data
   let hasDepthData = $derived(genes?.some(f => f.dp != null) ?? false);
-
-  // Depth range for normalization (from current gene list)
-  let depthExtent = $derived.by(() => {
-    if (!genes?.length) return [0, 1];
-    let min = Infinity, max = -Infinity;
-    for (const f of genes) {
-      if (f.dp != null) {
-        if (f.dp < min) min = f.dp;
-        if (f.dp > max) max = f.dp;
-      }
-    }
-    if (!isFinite(min)) return [0, 1];
-    if (max === min) return [min, min + 1];
-    return [min, max];
+  let hasGcData = $derived(genes?.some(f => f.gc != null) ?? false);
+  let colorModes = $derived.by(() => {
+    const modes = [{ id: 'type', label: 'Type' }];
+    if (hasDepthData) modes.push({ id: 'depth', label: 'Depth' });
+    if (hasGcData) modes.push({ id: 'gc', label: 'GC%' });
+    return modes;
   });
 
-  // Warm sequential scale matching GeneArrowMap: light yellow → orange → dark red
-  function depthColor(dp) {
-    if (dp == null) return '#334155';
-    const t = Math.max(0, Math.min(1, (dp - depthExtent[0]) / (depthExtent[1] - depthExtent[0])));
-    if (t <= 0.5) {
-      const u = t * 2;
-      const r = Math.round(254 + (249 - 254) * u);
-      const g = Math.round(249 + (115 - 249) * u);
-      const b = Math.round(195 + (22 - 195) * u);
+  function cycleColorMode() {
+    const ids = colorModes.map(m => m.id);
+    const idx = ids.indexOf(colorMode);
+    colorMode = ids[(idx + 1) % ids.length];
+  }
+
+  // Compute median-centered stats for a field
+  function fieldStats(field) {
+    if (!genes?.length) return { min: 0, max: 1, median: 0.5 };
+    const vals = genes.filter(f => f[field] != null).map(f => f[field]).sort((a, b) => a - b);
+    if (!vals.length) return { min: 0, max: 1, median: 0.5 };
+    const min = vals[0];
+    let max = vals[vals.length - 1];
+    const median = vals.length % 2 === 0
+      ? (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2
+      : vals[Math.floor(vals.length / 2)];
+    if (max === min) max = min + 1;
+    return { min, max, median };
+  }
+
+  let depthStats = $derived(fieldStats('dp'));
+  let gcStats = $derived(fieldStats('gc'));
+
+  // Diverging scale: blue → white → red (median-centered)
+  function divergingColor(val, stats) {
+    if (val == null) return '#334155';
+    const { min, max, median } = stats;
+    const t = val <= median
+      ? (median > min ? 0.5 * (val - min) / (median - min) : 0.5)
+      : (max > median ? 0.5 + 0.5 * (val - median) / (max - median) : 0.5);
+    const tc = Math.max(0, Math.min(1, t));
+    if (tc <= 0.5) {
+      const u = tc * 2;
+      const r = Math.round(59 + (255 - 59) * u);
+      const g = Math.round(130 + (255 - 130) * u);
+      const b = Math.round(246 + (255 - 246) * u);
       return `rgb(${r},${g},${b})`;
     } else {
-      const u = (t - 0.5) * 2;
-      const r = Math.round(249 + (153 - 249) * u);
-      const g = Math.round(115 + (27 - 115) * u);
-      const b = Math.round(22 + (27 - 22) * u);
+      const u = (tc - 0.5) * 2;
+      const r = Math.round(255 + (220 - 255) * u);
+      const g = Math.round(255 + (38 - 255) * u);
+      const b = Math.round(255 + (38 - 255) * u);
       return `rgb(${r},${g},${b})`;
     }
   }
@@ -86,10 +105,12 @@
     if (!contig || !geneTable.length) return;
     const cols = ['contig_id', 'locus_tag', 'type', 'gene', 'product', 'start', 'end', 'length_bp', 'strand'];
     if (hasDepthData) cols.push('depth');
+    if (hasGcData) cols.push('gc_pct');
     const header = cols.join('\t');
     const lines = geneTable.map(f => {
       const row = [contig.id, f.id || '', f.t, f.g || '', f.p || (f.t === 'cds' ? 'hypothetical protein' : ''), f.s, f.e, f.e - f.s + 1, f.d === 1 ? '+' : '-'];
       if (hasDepthData) row.push(f.dp != null ? f.dp.toFixed(1) : '');
+      if (hasGcData) row.push(f.gc != null ? f.gc.toFixed(1) : '');
       return row.join('\t');
     });
     const blob = new Blob([header + '\n' + lines.join('\n') + '\n'], { type: 'text/tab-separated-values' });
@@ -176,7 +197,7 @@
     {#if genes?.length}
       <!-- Gene arrow map (fixed, not scrolled) -->
       <div class="px-3 pt-3 flex-shrink-0">
-        <GeneArrowMap features={genes} contigLength={contig.length} height={160} {colorByDepth} />
+        <GeneArrowMap features={genes} contigLength={contig.length} height={160} {colorMode} />
       </div>
 
       <!-- Stats bar -->
@@ -187,15 +208,15 @@
           {/each}
           <span class="text-slate-600">|</span>
           <span>{stats.named} / {stats.total} annotated</span>
-          {#if hasDepthData}
+          {#if colorModes.length > 1}
             <button
-              class="ml-auto px-2 py-0.5 rounded border transition-colors {colorByDepth ? 'border-orange-500 text-orange-400' : 'border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500'}"
-              onclick={() => colorByDepth = !colorByDepth}
-              title="Toggle arrow map coloring between feature type and read depth"
-            >{colorByDepth ? 'Color: Depth' : 'Color: Type'}</button>
+              class="ml-auto px-2 py-0.5 rounded border transition-colors {colorMode !== 'type' ? 'border-blue-500 text-blue-400' : 'border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500'}"
+              onclick={cycleColorMode}
+              title="Cycle arrow map coloring: Type → Depth → GC%"
+            >Color: {colorModes.find(m => m.id === colorMode)?.label}</button>
           {/if}
           <button
-            class="{hasDepthData ? '' : 'ml-auto '}px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+            class="{colorModes.length > 1 ? '' : 'ml-auto '}px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
             onclick={exportGenesTSV}
             title="Export gene annotations as TSV"
           >TSV</button>
@@ -211,11 +232,14 @@
               <th class="text-left py-1 px-1 font-medium">Type</th>
               <th class="text-left py-1 px-1 font-medium">Gene</th>
               <th class="text-left py-1 px-1 font-medium">Product</th>
-              {#if hasDepthData}
-                <th class="text-right py-1 px-1 font-medium" style="min-width: 72px">Depth</th>
-              {/if}
               <th class="text-right py-1 px-1 font-medium">bp</th>
               <th class="text-center py-1 px-1 font-medium">Str</th>
+              {#if hasDepthData}
+                <th class="text-left py-1 px-1 font-medium" style="min-width: 72px">Depth</th>
+              {/if}
+              {#if hasGcData}
+                <th class="text-left py-1 px-1 font-medium" style="min-width: 72px">GC%</th>
+              {/if}
             </tr>
           </thead>
           <tbody>
@@ -226,24 +250,40 @@
                 <td class="py-0.5 px-1 {typeColor} font-mono text-[10px]">{f.t.toUpperCase()}</td>
                 <td class="py-0.5 px-1 text-cyan-400 font-mono">{f.g || '-'}</td>
                 <td class="py-0.5 px-1 text-slate-300 truncate max-w-[200px]" title={f.p}>{f.p || (f.t === 'cds' ? 'hypothetical protein' : '')}</td>
+                <td class="py-0.5 px-1 text-right text-slate-400 font-mono">{(f.e - f.s + 1).toLocaleString()}</td>
+                <td class="py-0.5 px-1 text-center text-slate-400">{f.d === 1 ? '+' : '-'}</td>
                 {#if hasDepthData}
-                  <td class="py-0.5 px-1 text-right">
+                  <td class="py-0.5 px-1">
                     {#if f.dp != null}
-                      {@const barW = Math.max(2, Math.round(((f.dp - depthExtent[0]) / (depthExtent[1] - depthExtent[0])) * 40))}
-                      <div class="inline-flex items-center gap-1 justify-end">
+                      {@const barW = Math.max(2, Math.round(((f.dp - depthStats.min) / (depthStats.max - depthStats.min)) * 40))}
+                      <div class="inline-flex items-center gap-1">
+                        <span class="text-slate-400 font-mono text-[10px] w-8 text-right">{f.dp.toFixed(1)}</span>
                         <div
                           class="h-2.5 rounded-sm flex-shrink-0"
-                          style="width: {barW}px; background: {depthColor(f.dp)}"
+                          style="width: {barW}px; background: {divergingColor(f.dp, depthStats)}"
                         ></div>
-                        <span class="text-slate-400 font-mono text-[10px] w-8 text-right">{f.dp.toFixed(1)}</span>
                       </div>
                     {:else}
                       <span class="text-slate-600 text-[10px]">-</span>
                     {/if}
                   </td>
                 {/if}
-                <td class="py-0.5 px-1 text-right text-slate-400 font-mono">{(f.e - f.s + 1).toLocaleString()}</td>
-                <td class="py-0.5 px-1 text-center text-slate-400">{f.d === 1 ? '+' : '-'}</td>
+                {#if hasGcData}
+                  <td class="py-0.5 px-1">
+                    {#if f.gc != null}
+                      {@const barW = Math.max(2, Math.round(((f.gc - gcStats.min) / (gcStats.max - gcStats.min)) * 40))}
+                      <div class="inline-flex items-center gap-1">
+                        <span class="text-slate-400 font-mono text-[10px] w-8 text-right">{f.gc.toFixed(1)}</span>
+                        <div
+                          class="h-2.5 rounded-sm flex-shrink-0"
+                          style="width: {barW}px; background: {divergingColor(f.gc, gcStats)}"
+                        ></div>
+                      </div>
+                    {:else}
+                      <span class="text-slate-600 text-[10px]">-</span>
+                    {/if}
+                  </td>
+                {/if}
               </tr>
             {/each}
           </tbody>

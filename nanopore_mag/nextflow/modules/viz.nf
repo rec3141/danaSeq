@@ -54,9 +54,12 @@ process VIZ_PREPROCESS {
     GENE_DEPTHS=\$(find_first \
         "\${STORE:+\${STORE}/mapping/gene_depths.tsv}" \
         "\${OUT}/mapping/gene_depths.tsv")
+    ASSEMBLY=\$(find_first \
+        "\${STORE:+\${STORE}/assembly/assembly.fasta}" \
+        "\${OUT}/assembly/assembly.fasta")
     if [ -n "\${ANNOT_TSV}" ]; then
         python3 ${projectDir}/viz/preprocess/genes_to_json.py \
-            "\${ANNOT_TSV}" "\${VIZ_DIR}/data/genes.json" "\${RRNA_TSV}" "\${TRNA_TSV}" "\${GENE_DEPTHS}"
+            "\${ANNOT_TSV}" "\${VIZ_DIR}/data/genes.json" "\${RRNA_TSV}" "\${TRNA_TSV}" "\${GENE_DEPTHS}" "\${ASSEMBLY}"
     else
         echo '{}' > "\${VIZ_DIR}/data/genes.json"
         echo '{}' | gzip > "\${VIZ_DIR}/data/genes.json.gz"

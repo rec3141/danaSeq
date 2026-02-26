@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import * as d3 from 'd3';
 
-  let { features = [], contigLength = 0, height = 160, highlightId = null, colorByDepth = false } = $props();
+  // colorMode: 'type' (default), 'depth', or 'gc'
+  let { features = [], contigLength = 0, height = 160, highlightId = null, colorMode = 'type' } = $props();
   let svgEl;
   let containerEl;
 
@@ -15,24 +16,44 @@
     crispr: '#f87171',   // red
   };
 
-  const DEPTH_NO_DATA = '#334155';  // slate-700
+  const NO_DATA_COLOR = '#334155';  // slate-700
 
-  // Warm sequential scale: light yellow → orange → dark red
-  function depthColorScale(t) {
-    // t in [0,1]: interpolate through yellow → orange → dark red
+  // Diverging scale: blue → white → red (t in [0,1], 0.5 = median)
+  function divergingScale(t) {
     if (t <= 0.5) {
-      const u = t * 2; // 0→1 over first half
-      const r = Math.round(254 + (249 - 254) * u);
-      const g = Math.round(249 + (115 - 249) * u);
-      const b = Math.round(195 + (22 - 195) * u);
+      const u = t * 2;
+      const r = Math.round(59 + (255 - 59) * u);
+      const g = Math.round(130 + (255 - 130) * u);
+      const b = Math.round(246 + (255 - 246) * u);
       return `rgb(${r},${g},${b})`;
     } else {
-      const u = (t - 0.5) * 2; // 0→1 over second half
-      const r = Math.round(249 + (153 - 249) * u);
-      const g = Math.round(115 + (27 - 115) * u);
-      const b = Math.round(22 + (27 - 22) * u);
+      const u = (t - 0.5) * 2;
+      const r = Math.round(255 + (220 - 255) * u);
+      const g = Math.round(255 + (38 - 255) * u);
+      const b = Math.round(255 + (38 - 255) * u);
       return `rgb(${r},${g},${b})`;
     }
+  }
+
+  // Compute median-centered stats for a numeric field
+  function medianStats(features, field) {
+    const vals = features.filter(f => f[field] != null).map(f => f[field]).sort((a, b) => a - b);
+    if (!vals.length) return { min: 0, max: 1, median: 0.5 };
+    const min = vals[0];
+    let max = vals[vals.length - 1];
+    const median = vals.length % 2 === 0
+      ? (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2
+      : vals[Math.floor(vals.length / 2)];
+    if (max === min) max = min + 1;
+    return { min, max, median };
+  }
+
+  // Map a value to [0,1] through median (0.5 = median)
+  function medianNorm(val, stats) {
+    if (val <= stats.median) {
+      return stats.median > stats.min ? 0.5 * (val - stats.min) / (stats.median - stats.min) : 0.5;
+    }
+    return stats.max > stats.median ? 0.5 + 0.5 * (val - stats.median) / (stats.max - stats.median) : 0.5;
   }
 
   // Tooltip state
@@ -105,18 +126,9 @@
     const fwdY = plotH / 2 - gap - trackH / 2;
     const revY = plotH / 2 + gap + trackH / 2;
 
-    // Compute depth extent for depth color mode
-    let depthMin = Infinity, depthMax = -Infinity;
-    if (colorByDepth) {
-      for (const f of features) {
-        if (f.dp != null) {
-          if (f.dp < depthMin) depthMin = f.dp;
-          if (f.dp > depthMax) depthMax = f.dp;
-        }
-      }
-      if (!isFinite(depthMin)) { depthMin = 0; depthMax = 1; }
-      if (depthMax === depthMin) depthMax = depthMin + 1;
-    }
+    // Compute stats for diverging color modes
+    const field = colorMode === 'depth' ? 'dp' : colorMode === 'gc' ? 'gc' : null;
+    const stats = field ? medianStats(features, field) : null;
 
     // Only draw features visible in the current viewport
     const [domainMin, domainMax] = xScale.domain();
@@ -129,12 +141,13 @@
       const x2 = xScale(f.e);
       const y = f.d === 1 ? fwdY : revY;
       let color;
-      if (colorByDepth) {
-        if (f.dp != null) {
-          const t = (f.dp - depthMin) / (depthMax - depthMin);
-          color = depthColorScale(Math.max(0, Math.min(1, t)));
+      if (field && stats) {
+        const val = f[field];
+        if (val != null) {
+          const t = medianNorm(val, stats);
+          color = divergingScale(Math.max(0, Math.min(1, t)));
         } else {
-          color = DEPTH_NO_DATA;
+          color = NO_DATA_COLOR;
         }
       } else {
         color = COLORS[f.t] || COLORS.cds;
@@ -159,6 +172,7 @@
           if (product && product !== label) lines.push(product);
           let info = `${f.t.toUpperCase()} | ${coords} | ${(f.e - f.s + 1).toLocaleString()} bp`;
           if (f.dp != null) info += ` | depth: ${f.dp.toFixed(1)}×`;
+          if (f.gc != null) info += ` | GC: ${f.gc.toFixed(1)}%`;
           lines.push(info);
           tipText = lines.join('\n');
           const r = svgEl.getBoundingClientRect();
@@ -195,13 +209,13 @@
     axisG.selectAll('text').attr('fill', '#64748b').attr('font-size', '10px');
 
     // Legend
-    if (colorByDepth) {
-      // Continuous depth gradient legend
+    if (field && stats) {
+      // Continuous diverging gradient legend
+      const unit = field === 'dp' ? '×' : '%';
       const gradW = 100, gradH = 8;
       const legendG = g.append('g')
         .attr('transform', `translate(${plotW - gradW - 60}, -2)`);
 
-      // Gradient bar via small rects
       const nStops = 20;
       for (let i = 0; i < nStops; i++) {
         const t = i / (nStops - 1);
@@ -210,18 +224,21 @@
           .attr('y', 0)
           .attr('width', gradW / nStops + 0.5)
           .attr('height', gradH)
-          .attr('fill', depthColorScale(t));
+          .attr('fill', divergingScale(t));
       }
 
-      // Min/max labels
       legendG.append('text')
         .attr('x', -2).attr('y', 7)
         .attr('fill', '#94a3b8').attr('font-size', '9px').attr('text-anchor', 'end')
-        .text(depthMin.toFixed(0) + '×');
+        .text(stats.min.toFixed(0) + unit);
+      legendG.append('text')
+        .attr('x', gradW / 2).attr('y', 7)
+        .attr('fill', '#64748b').attr('font-size', '8px').attr('text-anchor', 'middle')
+        .text(stats.median.toFixed(0) + unit);
       legendG.append('text')
         .attr('x', gradW + 3).attr('y', 7)
         .attr('fill', '#94a3b8').attr('font-size', '9px')
-        .text(depthMax.toFixed(0) + '×');
+        .text(stats.max.toFixed(0) + unit);
     } else {
       const legendTypes = [...new Set(features.map(f => f.t))].sort();
       const legendG = g.append('g')
@@ -276,7 +293,7 @@
   onMount(() => { render(currentTransform); });
 
   $effect(() => {
-    const _deps = [features, contigLength, height, highlightId, colorByDepth];
+    const _deps = [features, contigLength, height, highlightId, colorMode];
     render(currentTransform);
   });
 </script>

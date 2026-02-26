@@ -1466,7 +1466,7 @@ def main():
 
     # 3b. genes.json (compact gene features for contig detail view)
     print("Building genes.json ...")
-    from genes_to_json import load_bakta, load_rrna, load_trna, load_gene_depths, merge_depths
+    from genes_to_json import load_bakta, load_rrna, load_trna, load_gene_depths, merge_depths, load_assembly, compute_gene_gc
     annot_candidates = [
         resolve_path(results_dir, 'annotation', 'bakta', 'extra', 'annotation.tsv'),
         resolve_path(results_dir, 'annotation', 'bakta', 'basic', 'annotation.tsv'),
@@ -1493,6 +1493,13 @@ def main():
             depth_map = load_gene_depths(gene_depths_tsv)
             n_merged = merge_depths(genes, depth_map)
             print(f"  Gene depths: {n_merged} features annotated with depth ({len(depth_map)} genes in depths file)")
+        assembly_fasta = resolve_path(results_dir, 'assembly', 'assembly.fasta')
+        if os.path.isfile(assembly_fasta):
+            print(f"  Loading assembly for GC% computation...")
+            assembly = load_assembly(assembly_fasta)
+            n_gc = compute_gene_gc(genes, assembly)
+            del assembly
+            print(f"  Gene GC: {n_gc} features annotated with GC%")
         for contig in genes:
             genes[contig].sort(key=lambda f: f['s'])
         write_json_gz(os.path.join(output_dir, 'genes.json'), genes, separators=(',', ':'))

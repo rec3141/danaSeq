@@ -216,6 +216,47 @@ def load_trna(tsv_path):
     return genes, n
 
 
+def load_assembly(fasta_path):
+    """Load assembly FASTA into dict of contig_id → sequence (uppercase)."""
+    seqs = {}
+    name = None
+    parts = []
+    with open(fasta_path) as f:
+        for line in f:
+            if line.startswith('>'):
+                if name is not None:
+                    seqs[name] = ''.join(parts)
+                name = line[1:].split()[0]
+                parts = []
+            else:
+                parts.append(line.rstrip().upper())
+    if name is not None:
+        seqs[name] = ''.join(parts)
+    return seqs
+
+
+def compute_gene_gc(genes, assembly):
+    """Add 'gc' field (GC% as int 0-100) to each feature using assembly sequences."""
+    n = 0
+    for contig, feats in genes.items():
+        seq = assembly.get(contig)
+        if not seq:
+            continue
+        seq_len = len(seq)
+        for feat in feats:
+            s = max(feat['s'] - 1, 0)  # 1-based to 0-based
+            e = min(feat['e'], seq_len)
+            if e <= s:
+                continue
+            subseq = seq[s:e]
+            gc_count = subseq.count('G') + subseq.count('C')
+            length = len(subseq)
+            if length > 0:
+                feat['gc'] = round(100 * gc_count / length, 1)
+                n += 1
+    return n
+
+
 def load_gene_depths(tsv_path):
     """Parse gene_depths.tsv into a dict of locus_tag → mean_depth."""
     depths = {}
@@ -248,7 +289,7 @@ def merge_depths(genes, depth_map):
 
 def main():
     if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <bakta.tsv> <output.json> [rrna_genes.tsv] [trna_genes.tsv] [gene_depths.tsv]", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <bakta.tsv> <output.json> [rrna_genes.tsv] [trna_genes.tsv] [gene_depths.tsv] [assembly.fasta]", file=sys.stderr)
         sys.exit(1)
 
     tsv_path = sys.argv[1]
@@ -256,6 +297,7 @@ def main():
     rrna_path = sys.argv[3] if len(sys.argv) > 3 else None
     trna_path = sys.argv[4] if len(sys.argv) > 4 else None
     depths_path = sys.argv[5] if len(sys.argv) > 5 else None
+    assembly_path = sys.argv[6] if len(sys.argv) > 6 else None
 
     genes, n_bakta = load_bakta(tsv_path)
     print(f"  Bakta: {n_bakta} features from {len(genes)} contigs")
@@ -279,6 +321,14 @@ def main():
         depth_map = load_gene_depths(depths_path)
         n_merged = merge_depths(genes, depth_map)
         print(f"  Gene depths: {n_merged} features annotated with depth ({len(depth_map)} genes in depths file)")
+
+    # Compute per-gene GC%
+    if assembly_path and os.path.isfile(assembly_path):
+        print(f"  Loading assembly for GC% computation...")
+        assembly = load_assembly(assembly_path)
+        n_gc = compute_gene_gc(genes, assembly)
+        del assembly  # free memory
+        print(f"  Gene GC: {n_gc} features annotated with GC%")
 
     # Sort features by start position within each contig
     for contig in genes:
