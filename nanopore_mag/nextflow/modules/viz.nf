@@ -70,10 +70,11 @@ process VIZ_PREPROCESS {
     cp -r dist "\${VIZ_DIR}/site"
 
     # Start/restart the preview server (port 5174, all interfaces)
+    # setsid creates a new session so the child is not in the Nextflow process group
+    # (nohup+disown alone still keeps the child in the same pgid, blocking task completion)
     pkill -f "vite preview" 2>/dev/null || true
     sleep 1
-    nohup npm run serve > /tmp/vite_preview.log 2>&1 &
-    disown \$!
+    setsid nohup npm run serve > /tmp/vite_preview.log 2>&1 &
     _server_ip=\$(hostname -I | awk '{print \$1}')
     echo "Viz dashboard: http://\${_server_ip}:5174/"
     """
