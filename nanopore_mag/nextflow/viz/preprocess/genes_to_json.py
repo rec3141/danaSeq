@@ -216,15 +216,46 @@ def load_trna(tsv_path):
     return genes, n
 
 
+def load_gene_depths(tsv_path):
+    """Parse gene_depths.tsv into a dict of locus_tag → mean_depth."""
+    depths = {}
+    with open(tsv_path) as f:
+        header = f.readline()
+        for line in f:
+            parts = line.rstrip('\n').split('\t')
+            if len(parts) < 5:
+                continue
+            locus_tag = parts[0]
+            try:
+                depth = float(parts[4])
+            except ValueError:
+                continue
+            depths[locus_tag] = depth
+    return depths
+
+
+def merge_depths(genes, depth_map):
+    """Add 'dp' (depth) field to features that have a matching locus_tag."""
+    n = 0
+    for contig, feats in genes.items():
+        for feat in feats:
+            locus_tag = feat.get('id')
+            if locus_tag and locus_tag in depth_map:
+                feat['dp'] = round(depth_map[locus_tag], 1)
+                n += 1
+    return n
+
+
 def main():
     if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <bakta.tsv> <output.json> [rrna_genes.tsv] [trna_genes.tsv]", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <bakta.tsv> <output.json> [rrna_genes.tsv] [trna_genes.tsv] [gene_depths.tsv]", file=sys.stderr)
         sys.exit(1)
 
     tsv_path = sys.argv[1]
     out_path = sys.argv[2]
     rrna_path = sys.argv[3] if len(sys.argv) > 3 else None
     trna_path = sys.argv[4] if len(sys.argv) > 4 else None
+    depths_path = sys.argv[5] if len(sys.argv) > 5 else None
 
     genes, n_bakta = load_bakta(tsv_path)
     print(f"  Bakta: {n_bakta} features from {len(genes)} contigs")
@@ -242,6 +273,12 @@ def main():
         for contig, feats in trna_genes.items():
             genes.setdefault(contig, []).extend(feats)
         print(f"  tRNA/tmRNA: {n_trna} features from {len(trna_genes)} contigs")
+
+    # Merge gene-level depths
+    if depths_path and os.path.isfile(depths_path):
+        depth_map = load_gene_depths(depths_path)
+        n_merged = merge_depths(genes, depth_map)
+        print(f"  Gene depths: {n_merged} features annotated with depth ({len(depth_map)} genes in depths file)")
 
     # Sort features by start position within each contig
     for contig in genes:

@@ -1466,7 +1466,7 @@ def main():
 
     # 3b. genes.json (compact gene features for contig detail view)
     print("Building genes.json ...")
-    from genes_to_json import load_bakta, load_rrna, load_trna
+    from genes_to_json import load_bakta, load_rrna, load_trna, load_gene_depths, merge_depths
     annot_candidates = [
         resolve_path(results_dir, 'annotation', 'bakta', 'extra', 'annotation.tsv'),
         resolve_path(results_dir, 'annotation', 'bakta', 'basic', 'annotation.tsv'),
@@ -1488,6 +1488,11 @@ def main():
             for contig, feats in trna_genes.items():
                 genes.setdefault(contig, []).extend(feats)
             print(f"  tRNA/tmRNA: {n_trna} features from {len(trna_genes)} contigs")
+        gene_depths_tsv = resolve_path(results_dir, 'mapping', 'gene_depths.tsv')
+        if os.path.isfile(gene_depths_tsv):
+            depth_map = load_gene_depths(gene_depths_tsv)
+            n_merged = merge_depths(genes, depth_map)
+            print(f"  Gene depths: {n_merged} features annotated with depth ({len(depth_map)} genes in depths file)")
         for contig in genes:
             genes[contig].sort(key=lambda f: f['s'])
         write_json_gz(os.path.join(output_dir, 'genes.json'), genes, separators=(',', ':'))

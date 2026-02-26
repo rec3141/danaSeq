@@ -50,9 +50,12 @@ process VIZ_PREPROCESS {
     TRNA_TSV=\$(find_first \
         "\${STORE:+\${STORE}/taxonomy/rrna/trna_genes.tsv}" \
         "\${OUT}/taxonomy/rrna/trna_genes.tsv")
+    GENE_DEPTHS=\$(find_first \
+        "\${STORE:+\${STORE}/mapping/gene_depths.tsv}" \
+        "\${OUT}/mapping/gene_depths.tsv")
     if [ -n "\${ANNOT_TSV}" ]; then
         python3 ${projectDir}/viz/preprocess/genes_to_json.py \
-            "\${ANNOT_TSV}" "\${VIZ_DIR}/data/genes.json" "\${RRNA_TSV}" "\${TRNA_TSV}"
+            "\${ANNOT_TSV}" "\${VIZ_DIR}/data/genes.json" "\${RRNA_TSV}" "\${TRNA_TSV}" "\${GENE_DEPTHS}"
     else
         echo '{}' > "\${VIZ_DIR}/data/genes.json"
         echo '{}' | gzip > "\${VIZ_DIR}/data/genes.json.gz"

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import * as d3 from 'd3';
 
-  let { features = [], contigLength = 0, height = 160, highlightId = null } = $props();
+  let { features = [], contigLength = 0, height = 160, highlightId = null, colorByDepth = false } = $props();
   let svgEl;
   let containerEl;
 
@@ -14,6 +14,26 @@
     ncrna:  '#f472b6',   // pink
     crispr: '#f87171',   // red
   };
+
+  const DEPTH_NO_DATA = '#334155';  // slate-700
+
+  // Warm sequential scale: light yellow → orange → dark red
+  function depthColorScale(t) {
+    // t in [0,1]: interpolate through yellow → orange → dark red
+    if (t <= 0.5) {
+      const u = t * 2; // 0→1 over first half
+      const r = Math.round(254 + (249 - 254) * u);
+      const g = Math.round(249 + (115 - 249) * u);
+      const b = Math.round(195 + (22 - 195) * u);
+      return `rgb(${r},${g},${b})`;
+    } else {
+      const u = (t - 0.5) * 2; // 0→1 over second half
+      const r = Math.round(249 + (153 - 249) * u);
+      const g = Math.round(115 + (27 - 115) * u);
+      const b = Math.round(22 + (27 - 22) * u);
+      return `rgb(${r},${g},${b})`;
+    }
+  }
 
   // Tooltip state
   let tipText = $state('');
@@ -85,6 +105,19 @@
     const fwdY = plotH / 2 - gap - trackH / 2;
     const revY = plotH / 2 + gap + trackH / 2;
 
+    // Compute depth extent for depth color mode
+    let depthMin = Infinity, depthMax = -Infinity;
+    if (colorByDepth) {
+      for (const f of features) {
+        if (f.dp != null) {
+          if (f.dp < depthMin) depthMin = f.dp;
+          if (f.dp > depthMax) depthMax = f.dp;
+        }
+      }
+      if (!isFinite(depthMin)) { depthMin = 0; depthMax = 1; }
+      if (depthMax === depthMin) depthMax = depthMin + 1;
+    }
+
     // Only draw features visible in the current viewport
     const [domainMin, domainMax] = xScale.domain();
 
@@ -95,7 +128,17 @@
       const x1 = xScale(f.s);
       const x2 = xScale(f.e);
       const y = f.d === 1 ? fwdY : revY;
-      const color = COLORS[f.t] || COLORS.cds;
+      let color;
+      if (colorByDepth) {
+        if (f.dp != null) {
+          const t = (f.dp - depthMin) / (depthMax - depthMin);
+          color = depthColorScale(Math.max(0, Math.min(1, t)));
+        } else {
+          color = DEPTH_NO_DATA;
+        }
+      } else {
+        color = COLORS[f.t] || COLORS.cds;
+      }
       const path = arrowPath(x1, x2, y, trackH, f.d);
       if (!path) continue;
 
@@ -114,7 +157,9 @@
           const coords = `${f.s.toLocaleString()}..${f.e.toLocaleString()} (${f.d === 1 ? '+' : '-'})`;
           const lines = [label];
           if (product && product !== label) lines.push(product);
-          lines.push(`${f.t.toUpperCase()} | ${coords} | ${(f.e - f.s + 1).toLocaleString()} bp`);
+          let info = `${f.t.toUpperCase()} | ${coords} | ${(f.e - f.s + 1).toLocaleString()} bp`;
+          if (f.dp != null) info += ` | depth: ${f.dp.toFixed(1)}×`;
+          lines.push(info);
           tipText = lines.join('\n');
           const r = svgEl.getBoundingClientRect();
           let tx = event.clientX - r.left;
@@ -150,19 +195,48 @@
     axisG.selectAll('text').attr('fill', '#64748b').attr('font-size', '10px');
 
     // Legend
-    const legendTypes = [...new Set(features.map(f => f.t))].sort();
-    const legendG = g.append('g')
-      .attr('transform', `translate(${plotW - legendTypes.length * 55}, -2)`);
-    legendTypes.forEach((t, i) => {
-      const lg = legendG.append('g').attr('transform', `translate(${i * 55}, 0)`);
-      lg.append('rect')
-        .attr('width', 8).attr('height', 8).attr('rx', 1)
-        .attr('fill', COLORS[t] || COLORS.cds).attr('opacity', 0.85);
-      lg.append('text')
-        .attr('x', 11).attr('y', 7)
+    if (colorByDepth) {
+      // Continuous depth gradient legend
+      const gradW = 100, gradH = 8;
+      const legendG = g.append('g')
+        .attr('transform', `translate(${plotW - gradW - 60}, -2)`);
+
+      // Gradient bar via small rects
+      const nStops = 20;
+      for (let i = 0; i < nStops; i++) {
+        const t = i / (nStops - 1);
+        legendG.append('rect')
+          .attr('x', i * (gradW / nStops))
+          .attr('y', 0)
+          .attr('width', gradW / nStops + 0.5)
+          .attr('height', gradH)
+          .attr('fill', depthColorScale(t));
+      }
+
+      // Min/max labels
+      legendG.append('text')
+        .attr('x', -2).attr('y', 7)
+        .attr('fill', '#94a3b8').attr('font-size', '9px').attr('text-anchor', 'end')
+        .text(depthMin.toFixed(0) + '×');
+      legendG.append('text')
+        .attr('x', gradW + 3).attr('y', 7)
         .attr('fill', '#94a3b8').attr('font-size', '9px')
-        .text(t.toUpperCase());
-    });
+        .text(depthMax.toFixed(0) + '×');
+    } else {
+      const legendTypes = [...new Set(features.map(f => f.t))].sort();
+      const legendG = g.append('g')
+        .attr('transform', `translate(${plotW - legendTypes.length * 55}, -2)`);
+      legendTypes.forEach((t, i) => {
+        const lg = legendG.append('g').attr('transform', `translate(${i * 55}, 0)`);
+        lg.append('rect')
+          .attr('width', 8).attr('height', 8).attr('rx', 1)
+          .attr('fill', COLORS[t] || COLORS.cds).attr('opacity', 0.85);
+        lg.append('text')
+          .attr('x', 11).attr('y', 7)
+          .attr('fill', '#94a3b8').attr('font-size', '9px')
+          .text(t.toUpperCase());
+      });
+    }
 
     // Attach zoom behavior to SVG
     // Allow panning beyond the contig extent so edge features can be centered
@@ -202,7 +276,7 @@
   onMount(() => { render(currentTransform); });
 
   $effect(() => {
-    const _deps = [features, contigLength, height, highlightId];
+    const _deps = [features, contigLength, height, highlightId, colorByDepth];
     render(currentTransform);
   });
 </script>

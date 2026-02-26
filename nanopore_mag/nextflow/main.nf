@@ -316,6 +316,7 @@ include { ASSEMBLY_FLYE }       from './modules/assembly'
 include { CALCULATE_TNF }       from './modules/assembly'
 include { MAP_READS }           from './modules/mapping'
 include { CALCULATE_DEPTHS }    from './modules/mapping'
+include { CALCULATE_GENE_DEPTHS } from './modules/mapping'
 include { BIN_SEMIBIN2 }        from './modules/binning'
 include { BIN_METABAT2 }        from './modules/binning'
 include { BIN_MAXBIN2 }         from './modules/binning'
@@ -560,6 +561,12 @@ workflow {
         .flatMap { meta, bam, bai -> [bam, bai] }
         .collect()
     CALCULATE_DEPTHS(ch_bam_files, ASSEMBLY_FLYE.out.assembly)
+
+    // 4b. Per-gene depths from all BAMs + annotation TSV
+    //     Discovers annotation TSV at runtime (same priority as viz.nf)
+    if (effective_annotator != 'none') {
+        CALCULATE_GENE_DEPTHS(ch_bam_files)
+    }
 
     // 5. Binners run in parallel; each emits [label, contig_bins.tsv]
     // New binners can be added by appending to ch_binner_results
