@@ -35,8 +35,8 @@
   // Cycle group definitions
   const binGroup =     { values: ['bin', 'semibin_bin', 'metabat_bin', 'maxbin_bin', 'lorbin_bin', 'comebin_bin'],
                          labels: ['DAS Tool', 'SemiBin2', 'MetaBAT2', 'MaxBin2', 'LorBin', 'COMEBin'] };
-  const sourceGroup =  { values: ['kaiju', 'kraken2', 'rrna', 'genomad'],
-                         labels: ['Kaiju', 'Kraken2', 'rRNA', 'geNomad'] };
+  const sourceGroup =  { values: ['kaiju', 'kraken2', 'sendsketch', 'rrna', 'genomad'],
+                         labels: ['Kaiju', 'Kraken2', 'BBSketch', 'rRNA', 'geNomad'] };
   const rankGroup =    { values: ['domain', 'phylum', 'class', 'order', 'family', 'genus'],
                          labels: ['Domain', 'Phylum', 'Class', 'Order', 'Family', 'Genus'] };
   const metricGroup =  { values: ['depth', 'length', 'gc'],
@@ -228,7 +228,7 @@
   // Search fields on each contig to check (contig ID + 24 taxonomy + 6 bin + replicon/tiara/whokaryote)
   const SEARCH_FIELDS = [
     'id',
-    ...['kaiju', 'kraken2', 'rrna', 'genomad'].flatMap(s =>
+    ...['kaiju', 'kraken2', 'sendsketch', 'rrna', 'genomad'].flatMap(s =>
       ['domain', 'phylum', 'class', 'order', 'family', 'genus'].map(r => `${s}_${r}`)
     ),
     'bin', 'semibin_bin', 'metabat_bin', 'maxbin_bin', 'lorbin_bin', 'comebin_bin',

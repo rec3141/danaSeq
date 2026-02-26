@@ -16,6 +16,7 @@
   const sourceDefs = [
     { key: 'kaiju', label: 'Kaiju' },
     { key: 'kraken2', label: 'Kraken2' },
+    { key: 'sendsketch', label: 'BBSketch' },
     { key: 'rrna', label: 'rRNA' },
   ];
 

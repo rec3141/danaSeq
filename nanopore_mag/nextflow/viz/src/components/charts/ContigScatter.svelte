@@ -31,7 +31,7 @@
   const BIN_LABELS = { bin: 'DAS Tool', semibin_bin: 'SemiBin2', metabat_bin: 'MetaBAT2', maxbin_bin: 'MaxBin2', lorbin_bin: 'LorBin', comebin_bin: 'COMEBin' };
 
   function hoverText(c, colorBy) {
-    let tax = c.kaiju_phylum || c.kraken2_phylum || c.rrna_phylum || '?';
+    let tax = c.kaiju_phylum || c.kraken2_phylum || c.sendsketch_phylum || c.rrna_phylum || '?';
     // If coloring by a taxonomy field, show that field's value
     const CONTINUOUS_FIELDS = ['depth', 'length', 'gc'];
     if (colorBy && !colorBy.endsWith('_bin') && colorBy !== 'bin' && !CONTINUOUS_FIELDS.includes(colorBy) && c[colorBy] !== undefined) {

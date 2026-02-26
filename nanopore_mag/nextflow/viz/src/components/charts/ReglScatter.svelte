@@ -69,7 +69,7 @@
       hoveredIdx = idx;
       const c = indexMap[idx];
       if (!c) return;
-      const tax = c.kaiju_phylum || c.kraken2_phylum || c.rrna_phylum || '?';
+      const tax = c.kaiju_phylum || c.kraken2_phylum || c.sendsketch_phylum || c.rrna_phylum || '?';
       const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
       const binPart = isBin ? ` | ${BIN_LABELS[colorBy] || colorBy}: ${c[colorBy] || 'none'}` : '';
       tipText = `${c.id} | ${c.length.toLocaleString()} bp | depth: ${c.depth} | GC: ${c.gc ?? '?'}%${binPart} | ${tax}`;
