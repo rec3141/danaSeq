@@ -126,7 +126,7 @@ RUN mkdir -p /usr/local/bin/dana-tools \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
-    && for tool in exec_annotation; do \
+    && for tool in exec_annotation hmmpress; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-kofamscan/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
@@ -136,7 +136,7 @@ RUN mkdir -p /usr/local/bin/dana-tools \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
-    && for tool in run_dbcan dbcan_build hmmpress; do \
+    && for tool in run_dbcan dbcan_build; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-dbcan/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \

@@ -69,6 +69,7 @@ container_run() {
             # container's own CA bundle so Python requests/urllib and wget all work
             local container_ca="/etc/ssl/certs/ca-certificates.crt"
             "$CONTAINER_RUNTIME" exec \
+                --writable-tmpfs \
                 --env "REQUESTS_CA_BUNDLE=${container_ca}" \
                 --env "SSL_CERT_FILE=${container_ca}" \
                 --env "CURL_CA_BUNDLE=${container_ca}" \
@@ -534,7 +535,7 @@ download_macsyfinder() {
 
 download_defensefinder() {
     local db_path="${DB_DIR}/defensefinder_models"
-    if [ -d "${db_path}" ] && ls "${db_path}"/*.hmm 1>/dev/null 2>&1; then
+    if [ -d "${db_path}/defense-finder-models" ] && [ -d "${db_path}/CasFinder" ]; then
         echo "[INFO] DefenseFinder models already exist at ${db_path}"
         echo "  Delete ${db_path} and re-run to force re-download."
         return 0
@@ -719,7 +720,7 @@ download_dbcan() {
         for hmm_name in dbCAN.hmm dbCAN-sub.hmm STP.hmm TF.hmm; do
             if [ -f "${db_path}/${hmm_name}" ] && [ ! -f "${db_path}/${hmm_name}.h3i" ]; then
                 echo "  Pressing ${hmm_name}..."
-                container_run hmmpress "/data/db/dbcan_db/${hmm_name}" || return 1
+                container_run /opt/conda/envs/dana-mag-kofamscan/bin/hmmpress "/data/db/dbcan_db/${hmm_name}" || return 1
             fi
         done
     else
@@ -999,21 +1000,21 @@ else
     echo "[SUCCESS] All selected databases downloaded to: ${DB_DIR}"
     echo ""
     echo "Run the pipeline with database paths:"
-    $DOWNLOAD_GENOMAD && echo "  --genomad_db ${DB_DIR}/genomad_db"
-    $DOWNLOAD_CHECKV  && echo "  --checkv_db  ${DB_DIR}/checkv_db"
-    $DOWNLOAD_CHECKM  && echo "  --checkm_data ${DB_DIR}/checkm_data"
-    $DOWNLOAD_CHECKM2 && echo "  --checkm2_db ${DB_DIR}/checkm2_db"
-    $DOWNLOAD_KAIJU   && echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
-    $DOWNLOAD_MACSYFINDER && echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
-    $DOWNLOAD_DEFENSEFINDER && echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
-    $DOWNLOAD_BAKTA         && echo "  --bakta_db         ${DB_DIR}/bakta/db"
-    $DOWNLOAD_BAKTA_LIGHT   && echo "  --bakta_light_db   ${DB_DIR}/bakta/db-light"
-    $DOWNLOAD_KOFAM   && echo "  --kofam_db   ${DB_DIR}/kofam_db"
-    $DOWNLOAD_EGGNOG  && echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
-    $DOWNLOAD_DBCAN   && echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
-    $DOWNLOAD_METAEUK && echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
-    $DOWNLOAD_KRAKEN2 && echo "  --kraken2_db ${DB_DIR}/kraken2_db"
-    $DOWNLOAD_SILVA   && echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
-    $DOWNLOAD_SILVA   && echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
-    $DOWNLOAD_MARFERRET && echo "  --marferret_db ${DB_DIR}/marferret_db"
+    ! $DOWNLOAD_GENOMAD || echo "  --genomad_db ${DB_DIR}/genomad_db"
+    ! $DOWNLOAD_CHECKV  || echo "  --checkv_db  ${DB_DIR}/checkv_db"
+    ! $DOWNLOAD_CHECKM  || echo "  --checkm_data ${DB_DIR}/checkm_data"
+    ! $DOWNLOAD_CHECKM2 || echo "  --checkm2_db ${DB_DIR}/checkm2_db"
+    ! $DOWNLOAD_KAIJU   || echo "  --kaiju_db   ${DB_DIR}/kaiju_db"
+    ! $DOWNLOAD_MACSYFINDER || echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
+    ! $DOWNLOAD_DEFENSEFINDER || echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
+    ! $DOWNLOAD_BAKTA         || echo "  --bakta_db         ${DB_DIR}/bakta/db"
+    ! $DOWNLOAD_BAKTA_LIGHT   || echo "  --bakta_light_db   ${DB_DIR}/bakta/db-light"
+    ! $DOWNLOAD_KOFAM   || echo "  --kofam_db   ${DB_DIR}/kofam_db"
+    ! $DOWNLOAD_EGGNOG  || echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
+    ! $DOWNLOAD_DBCAN   || echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
+    ! $DOWNLOAD_METAEUK || echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
+    ! $DOWNLOAD_KRAKEN2 || echo "  --kraken2_db ${DB_DIR}/kraken2_db"
+    ! $DOWNLOAD_SILVA   || echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
+    ! $DOWNLOAD_SILVA   || echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
+    ! $DOWNLOAD_MARFERRET || echo "  --marferret_db ${DB_DIR}/marferret_db"
 fi
