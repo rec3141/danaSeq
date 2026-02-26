@@ -76,7 +76,7 @@ work directories exist from prior runs. The old cached data is not consulted.
 ### `run-mag.sh` behavior
 
 `run-mag.sh` auto-detects the session ID from
-`<outdir>/pipeline_info/run_command.sh` if it exists. This means re-running
+`<outdir>/pipeline_info/run_command.txt` if it exists. This means re-running
 with the same `--outdir` will automatically resume the correct session. Using a
 **new** `--outdir` starts a new session (no cache reuse). You can override with
 `--session <uuid>`.

@@ -5,7 +5,7 @@ process CONCAT_READS {
     label 'process_low'
     time  = { params.dedupe ? 4.h : 1.h }
     conda "${projectDir}/conda-envs/dana-bbmap"
-    publishDir "${params.outdir}/concat", mode: 'link'
+    publishDir "${params.outdir}/concat", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/concat" : null
 
     input:

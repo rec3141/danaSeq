@@ -8,7 +8,7 @@ process GENOMAD_CLASSIFY {
     tag "genomad"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-genomad"
-    publishDir "${params.outdir}/mge/genomad", mode: 'link'
+    publishDir "${params.outdir}/mge/genomad", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/genomad" : null
 
     input:
@@ -85,7 +85,7 @@ process CHECKV_QUALITY {
     tag "checkv"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-checkv"
-    publishDir "${params.outdir}/mge/checkv", mode: 'link'
+    publishDir "${params.outdir}/mge/checkv", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/checkv" : null
 
     input:
@@ -151,7 +151,7 @@ process INTEGRONFINDER {
     tag "integronfinder"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-integron"
-    publishDir "${params.outdir}/mge/integrons", mode: 'link'
+    publishDir "${params.outdir}/mge/integrons", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/integrons" : null
 
     input:
@@ -213,7 +213,7 @@ process ISLANDPATH_DIMOB {
     tag "islandpath"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-islandpath"
-    publishDir "${params.outdir}/mge/islandpath", mode: 'link'
+    publishDir "${params.outdir}/mge/islandpath", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/islandpath" : null
 
     input:
@@ -255,7 +255,7 @@ process MACSYFINDER {
     tag "macsyfinder"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-macsyfinder"
-    publishDir "${params.outdir}/mge/macsyfinder", mode: 'link'
+    publishDir "${params.outdir}/mge/macsyfinder", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/macsyfinder" : null
 
     input:
@@ -322,7 +322,7 @@ process DEFENSEFINDER {
     tag "defensefinder"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-defensefinder"
-    publishDir "${params.outdir}/mge/defensefinder", mode: 'link'
+    publishDir "${params.outdir}/mge/defensefinder", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/defensefinder" : null
 
     input:

@@ -8,7 +8,7 @@ process KOFAMSCAN {
     tag "kofamscan"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
-    publishDir "${params.outdir}/metabolism/kofamscan", mode: 'link'
+    publishDir "${params.outdir}/metabolism/kofamscan", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/kofamscan" : null
 
     input:
@@ -54,7 +54,7 @@ process EMAPPER {
     tag "emapper"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-emapper"
-    publishDir "${params.outdir}/metabolism/emapper", mode: 'link'
+    publishDir "${params.outdir}/metabolism/emapper", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/emapper" : null
 
     input:
@@ -100,7 +100,7 @@ process DBCAN {
     tag "dbcan"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-dbcan"
-    publishDir "${params.outdir}/metabolism/dbcan", mode: 'link'
+    publishDir "${params.outdir}/metabolism/dbcan", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/dbcan" : null
 
     input:
@@ -163,7 +163,7 @@ process MERGE_ANNOTATIONS {
     tag "merge"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
-    publishDir "${params.outdir}/metabolism/merged", mode: 'link'
+    publishDir "${params.outdir}/metabolism/merged", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/merged" : null
 
     input:
@@ -194,8 +194,8 @@ process MAP_TO_BINS {
     tag "map_to_bins"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
-    publishDir "${params.outdir}/metabolism", mode: 'link', pattern: 'per_mag'
-    publishDir "${params.outdir}/metabolism/community", mode: 'link', pattern: 'community_annotations.tsv'
+    publishDir "${params.outdir}/metabolism", mode: 'link', enabled: !params.store_dir, pattern: 'per_mag'
+    publishDir "${params.outdir}/metabolism/community", mode: 'link', enabled: !params.store_dir, pattern: 'community_annotations.tsv'
     storeDir params.store_dir ? "${params.store_dir}/metabolism/per_mag" : null
 
     input:
@@ -229,7 +229,7 @@ process KEGG_MODULES {
     tag "kegg_modules"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-kofamscan"
-    publishDir "${params.outdir}/metabolism/modules", mode: 'link'
+    publishDir "${params.outdir}/metabolism/modules", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/modules" : null
 
     input:
@@ -256,7 +256,7 @@ process MINPATH {
     tag "minpath"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-pathway"
-    publishDir "${params.outdir}/metabolism/minpath", mode: 'link'
+    publishDir "${params.outdir}/metabolism/minpath", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/minpath" : null
 
     input:
@@ -286,7 +286,7 @@ process KEGG_DECODER {
     tag "kegg_decoder"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-pathway"
-    publishDir "${params.outdir}/metabolism/kegg_decoder", mode: 'link'
+    publishDir "${params.outdir}/metabolism/kegg_decoder", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/kegg_decoder" : null
 
     input:

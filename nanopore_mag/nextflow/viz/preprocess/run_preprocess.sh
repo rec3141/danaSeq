@@ -7,10 +7,10 @@ VIZ_DIR="$(dirname "$SCRIPT_DIR")"
 NEXTFLOW_DIR="$(dirname "$VIZ_DIR")"
 
 # Resolve results path: storeDir (persistent cache) preferred over publishDir
-# Priority: RESULTS_DIR env var > --store_dir from run_command.sh > --outdir > glob fallback
+# Priority: RESULTS_DIR env var > --store_dir from run_command.txt > --outdir > glob fallback
 if [[ -z "${RESULTS_DIR:-}" ]]; then
-    # Find most recent run_command.sh under any results_*/pipeline_info/
-    RUN_CMD=$(ls -t "${NEXTFLOW_DIR}"/results_*/pipeline_info/run_command.sh 2>/dev/null | head -1)
+    # Find most recent run_command.txt under any results_*/pipeline_info/
+    RUN_CMD=$(ls -t "${NEXTFLOW_DIR}"/results_*/pipeline_info/run_command.txt 2>/dev/null | head -1)
     if [[ -n "$RUN_CMD" ]]; then
         STORE_DIR=$(grep -oP '(?<=--store_dir )\S+' "$RUN_CMD" || true)
         OUTDIR=$(grep -oP '(?<=--outdir )\S+' "$RUN_CMD" || true)

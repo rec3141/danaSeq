@@ -117,7 +117,7 @@ save_run_command() {
     if [[ -n "$session" ]]; then
         save_args+=("--session" "$session")
     fi
-    printf '%s\n' "$(realpath "$0") ${save_args[*]}" >> "${outdir}/pipeline_info/run_command.sh"
+    printf '%s\n' "$(realpath "$0") ${save_args[*]}" >> "${outdir}/pipeline_info/run_command.txt"
 }
 
 usage() {
@@ -330,9 +330,9 @@ fi
 
 if [[ "$AUTO_SESSION" == true && -z "$RESUME_SESSION" ]]; then
     # Extract session ID from last run_command.sh entry (UUID after -resume)
-    if [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.sh" ]]; then
+    if [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.txt" ]]; then
         RESUME_SESSION=$(grep -oP '(?<=--session )[0-9a-f-]{36}' \
-            "${OUTDIR_HOST}/pipeline_info/run_command.sh" | tail -1 || true)
+            "${OUTDIR_HOST}/pipeline_info/run_command.txt" | tail -1 || true)
         if [[ -n "$RESUME_SESSION" ]]; then
             echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"
         fi

@@ -177,14 +177,14 @@ mamba run -p conda-envs/dana-mag-flye \
 `run-mag.sh` automatically records the Nextflow session ID in each run command saved to:
 
 ```
-<outdir>/pipeline_info/run_command.sh
+<outdir>/pipeline_info/run_command.txt
 ```
 
 To re-run (e.g. after adding a new process or fixing a bug), use the **last line** of that file:
 
 ```bash
 cd nextflow
-tail -1 <outdir>/pipeline_info/run_command.sh | bash
+bash -c "$(tail -1 <outdir>/pipeline_info/run_command.txt)"
 ```
 
 The saved command is a `run-mag.sh` invocation (not raw mamba/nextflow) with
@@ -192,15 +192,15 @@ The saved command is a `run-mag.sh` invocation (not raw mamba/nextflow) with
 To add new flags, just append them to the saved command.
 
 **Session handling:** `run-mag.sh` handles sessions three ways:
-1. **Auto-detect (default):** reads the last session ID from `run_command.sh` if it exists
+1. **Auto-detect (default):** reads the last session ID from `run_command.txt` if it exists
 2. **Explicit:** `--session <uuid>` to resume from a specific session
 3. **Post-run capture:** after each run, extracts the actual session UUID from `.nextflow.log`
-   and writes it into `run_command.sh` so future runs can resume from it
+   and writes it into `run_command.txt` so future runs can resume from it
 
 **Common pitfall:** changing `--input` path, `--assembly_cpus`, `--assembly_memory`, or other
 params will invalidate the task hash and force a full re-run. Assembly takes **hours** on real
 data (even "test" data with ~3 GB of reads). Always use the saved command from
-`run_command.sh` and only append new flags — never change existing ones.
+`run_command.txt` and only append new flags — never change existing ones.
 
 Only the processes whose script block changed will re-run; all others will be cached.
 
@@ -482,7 +482,7 @@ results/
 │   │   └── ...                    mge_summary, mge_per_bin, eukaryotic, contig_explorer, contig_lengths
 │   └── site/                      Static site (index.html + assets/)
 └── pipeline_info/
-    ├── run_command.sh         Exact re-runnable command (for -resume)
+    ├── run_command.txt         Exact re-runnable command (for -resume)
     ├── timeline.html
     ├── report.html
     └── trace.txt
@@ -493,7 +493,7 @@ results/
 ### Running the Pipeline (IMPORTANT)
 
 **Always use `./run-mag.sh` to launch the pipeline, never `nextflow run main.nf` directly.**
-`run-mag.sh` records every invocation to `<outdir>/pipeline_info/run_command.sh`, which is
+`run-mag.sh` records every invocation to `<outdir>/pipeline_info/run_command.txt`, which is
 essential for resuming runs with the exact same parameters. Running Nextflow directly skips
 this logging, making it impossible to reliably resume later.
 
