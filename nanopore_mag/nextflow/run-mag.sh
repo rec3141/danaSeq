@@ -421,7 +421,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             ;;
         apptainer|singularity)
             # Override host SSL env vars (RHEL CA paths don't exist in the Debian container)
-            local container_ca="/etc/ssl/certs/ca-certificates.crt"
+            container_ca="/etc/ssl/certs/ca-certificates.crt"
             CONTAINER_CMD+=("$CONTAINER_RUNTIME" run)
             CONTAINER_CMD+=("--env" "REQUESTS_CA_BUNDLE=${container_ca}")
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")

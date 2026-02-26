@@ -372,13 +372,16 @@ workflow {
     }
 
     // Check for nanopore barcode structure at any depth
-    def barcode_dirs = file("${params.input}/**/fastq_pass/barcode*", type: 'dir')
+    // Note: Nextflow's ** glob doesn't match fastq_pass as a direct child,
+    // so we check both the recursive and direct patterns
+    def barcode_dirs = file("${params.input}/**/fastq_pass/barcode*", type: 'dir') +
+                       file("${params.input}/fastq_pass/barcode*", type: 'dir')
     def flat_fastqs  = file("${params.input}/*.fastq.gz")
 
     if (barcode_dirs) {
         // Nanopore barcode structure detected — concat per barcode
         log.info "Detected nanopore barcode structure: ${barcode_dirs.size()} barcode directories"
-        ch_barcode_raw = Channel.fromPath("${params.input}/**/fastq_pass/barcode*", type: 'dir')
+        ch_barcode_raw = Channel.from(barcode_dirs)
             .flatMap { dir ->
                 def barcode = dir.name
                 // Extract flowcell ID from MinKNOW run dir name
