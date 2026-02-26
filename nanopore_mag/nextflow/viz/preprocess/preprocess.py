@@ -87,8 +87,8 @@ RANKS = ['domain', 'phylum', 'class', 'order', 'family', 'genus']
 
 def strip_gtdb_prefix(s):
     """Remove GTDB-style rank prefix like 'd__', 'p__', etc."""
-    if s and len(s) > 3 and s[1:3] == '__':
-        return s[3:]
+    if s and len(s) >= 3 and s[1:3] == '__':
+        return s[3:]  # empty string for bare prefixes like 'f__'
     return s
 
 
