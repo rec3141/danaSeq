@@ -6,7 +6,7 @@
 
 process GENOMAD_CLASSIFY {
     tag "genomad"
-    label 'process_high'
+    label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-genomad"
     publishDir "${params.outdir}/mge/genomad", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/mge/genomad" : null

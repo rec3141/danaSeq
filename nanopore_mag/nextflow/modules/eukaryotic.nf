@@ -92,7 +92,7 @@ process WHOKARYOTE_CLASSIFY {
 
 process METAEUK_PREDICT {
     tag "metaeuk"
-    label 'process_high'
+    label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-metaeuk"
     publishDir "${params.outdir}/eukaryotic/metaeuk", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/eukaryotic/metaeuk" : null

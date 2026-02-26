@@ -4,8 +4,7 @@ process VIZ_PREPROCESS {
     tag "viz_preprocess"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-viz"
-    publishDir "${params.outdir}/viz", mode: 'link'
-    // No storeDir — always regenerate when pipeline runs
+    // No publishDir or storeDir — writes directly to outdir/viz/
 
     input:
     val(ready)           // barrier signal, not used in script
@@ -13,8 +12,7 @@ process VIZ_PREPROCESS {
     val(skip_umap)       // true = skip UMAP (Stage 2+, embeddings already computed)
 
     output:
-    path("data"),  emit: json_data
-    path("site"),  emit: static_site, optional: true
+    val(true), emit: done
 
     script:
     // --results = publishDir root; --store-dir = storeDir root (resolve_path checks storeDir first)
@@ -22,12 +20,14 @@ process VIZ_PREPROCESS {
     def storeFlag = storeRoot ? "--store-dir ${storeRoot}" : ""
     def tsne_flag = skip_tsne ? '--skip-tsne' : ''
     def umap_flag = skip_umap ? '--skip-umap' : ''
+    def vizDir = "${params.outdir}/viz"
     """
-    # Generate JSON data files
-    mkdir -p data
+    # Write JSON data directly to outdir
+    VIZ_DIR="${vizDir}"
+    mkdir -p "\${VIZ_DIR}/data"
     python3 ${projectDir}/viz/preprocess/preprocess.py \
         --results "${params.outdir}" \
-        --output data/ \
+        --output "\${VIZ_DIR}/data/" \
         ${storeFlag} \
         ${tsne_flag} \
         ${umap_flag}
@@ -52,19 +52,19 @@ process VIZ_PREPROCESS {
         "\${OUT}/taxonomy/rrna/trna_genes.tsv")
     if [ -n "\${ANNOT_TSV}" ]; then
         python3 ${projectDir}/viz/preprocess/genes_to_json.py \
-            "\${ANNOT_TSV}" data/genes.json "\${RRNA_TSV}" "\${TRNA_TSV}"
+            "\${ANNOT_TSV}" "\${VIZ_DIR}/data/genes.json" "\${RRNA_TSV}" "\${TRNA_TSV}"
     else
-        echo '{}' > data/genes.json
-        echo '{}' | gzip > data/genes.json.gz
+        echo '{}' > "\${VIZ_DIR}/data/genes.json"
+        echo '{}' | gzip > "\${VIZ_DIR}/data/genes.json.gz"
     fi
 
     # Build static site (node/npm provided by conda env)
     cd ${projectDir}/viz
     npm ci --prefer-offline 2>/dev/null || npm install --no-audit --no-fund
     # Copy preprocessed JSON into public/data for build
-    cp \${OLDPWD}/data/* public/data/
+    cp "\${VIZ_DIR}"/data/* public/data/
     npm run build
-    cp -r dist \${OLDPWD}/site
+    cp -r dist "\${VIZ_DIR}/site"
 
     # Start/restart the preview server (port 5174, all interfaces)
     pkill -f "vite preview" 2>/dev/null || true

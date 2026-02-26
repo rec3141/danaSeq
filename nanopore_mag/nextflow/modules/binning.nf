@@ -2,7 +2,7 @@
 
 process BIN_SEMIBIN2 {
     tag "semibin2"
-    label 'process_high'
+    label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-semibin"
     publishDir "${params.outdir}/binning/semibin", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/binning/semibin" : null
@@ -143,7 +143,7 @@ process BIN_MAXBIN2 {
     for bin_file in maxbin_out/bin*.fasta; do
         [ -e "\$bin_file" ] || continue
         bin_num=\$(basename "\$bin_file" .fasta | grep -oP '\\d+\$')
-        bin_name=\$(printf 'maxbin_%03d' "\$bin_num")
+        bin_name=\$(printf 'maxbin_%03d' "\$((10#\$bin_num))")
         cp "\$bin_file" "bins/\${bin_name}.fa"
         grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
             printf '%s\\t%s\\n' "\$contig" "\$bin_name"
@@ -158,7 +158,7 @@ process BIN_MAXBIN2 {
 
 process BIN_LORBIN {
     tag "lorbin"
-    label 'process_high'
+    label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-semibin"
     publishDir "${params.outdir}/binning/lorbin", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/binning/lorbin" : null
@@ -218,7 +218,7 @@ process BIN_LORBIN {
 
 process BIN_COMEBIN {
     tag "comebin"
-    label 'process_high'
+    label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-comebin"
     publishDir "${params.outdir}/binning/comebin", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/binning/comebin" : null
@@ -405,7 +405,7 @@ process DASTOOL_CONSENSUS {
 
 process CHECKM2 {
     tag "checkm2"
-    label 'process_high'
+    label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-checkm2"
     publishDir "${params.outdir}/binning/checkm2", mode: 'link'
     storeDir params.store_dir ? "${params.store_dir}/binning/checkm2" : null
