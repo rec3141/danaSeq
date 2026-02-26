@@ -2,7 +2,10 @@
   import StatCard from '../components/layout/StatCard.svelte';
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import PipelineDAG from '../components/charts/PipelineDAG.svelte';
+  import PipelineDAGGraph from '../components/charts/PipelineDAGGraph.svelte';
   import { overview, contigLengths, mags } from '../stores/data.js';
+
+  let dagStyle = $state('graph');
 
   let overviewData = $derived($overview);
   let lenData = $derived($contigLengths);
@@ -212,14 +215,27 @@
         <h3 class="text-sm font-medium text-slate-400">
           Pipeline Status ({overviewData.pipeline_completed}/{overviewData.pipeline_total} processes)
         </h3>
-        <div class="flex gap-3 text-xs">
+        <div class="flex gap-3 text-xs items-center">
+          <button
+            class="px-2 py-0.5 rounded border transition-colors {dagStyle === 'grid' ? 'border-cyan-500 text-cyan-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}"
+            onclick={() => dagStyle = 'grid'}
+          >Grid</button>
+          <button
+            class="px-2 py-0.5 rounded border transition-colors {dagStyle === 'graph' ? 'border-cyan-500 text-cyan-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}"
+            onclick={() => dagStyle = 'graph'}
+          >Graph</button>
+          <span class="text-slate-700">|</span>
           <a href="pipeline_info/report.html" target="_blank" rel="noopener noreferrer"
              class="text-slate-500 hover:text-cyan-400 transition-colors">Nextflow Report</a>
           <a href="pipeline_info/timeline.html" target="_blank" rel="noopener noreferrer"
              class="text-slate-500 hover:text-cyan-400 transition-colors">Timeline</a>
         </div>
       </div>
-      <PipelineDAG processes={overviewData.processes} />
+      {#if dagStyle === 'graph'}
+        <PipelineDAGGraph processes={overviewData.processes} />
+      {:else}
+        <PipelineDAG processes={overviewData.processes} />
+      {/if}
     </div>
   {/if}
 {/if}
