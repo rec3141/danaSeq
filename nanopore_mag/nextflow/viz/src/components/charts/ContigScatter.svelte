@@ -176,8 +176,9 @@
     const modeKey = mode === 'tsne' && data.has_tsne ? 'tsne' : mode === 'umap' && data.has_umap ? 'umap' : 'pca';
     const ext = coordExtents?.[modeKey];
     const pad = 0.05; // 5% padding
-    const xAxisCfg = { ...darkLayout.xaxis, uirevision: mode };
-    const yAxisCfg = { ...darkLayout.yaxis, uirevision: mode, scaleanchor: 'x', scaleratio: 1 };
+    const axisRevision = mode + (ext ? '-ext' : '');
+    const xAxisCfg = { ...darkLayout.xaxis, uirevision: axisRevision };
+    const yAxisCfg = { ...darkLayout.yaxis, uirevision: axisRevision, scaleanchor: 'x', scaleratio: 1 };
     if (ext) {
       const xPad = (ext.xMax - ext.xMin) * pad;
       const yPad = (ext.yMax - ext.yMin) * pad;
