@@ -447,7 +447,7 @@ download_checkm() {
 
 download_checkm2() {
     local db_path="${DB_DIR}/checkm2_db"
-    if [ -d "${db_path}" ] && ls "${db_path}"/*.dmnd 1>/dev/null 2>&1; then
+    if [ -d "${db_path}" ] && find "${db_path}" -maxdepth 2 -name '*.dmnd' 2>/dev/null | grep -q .; then
         echo "[INFO] CheckM2 database already exists at ${db_path}"
         echo "  Delete ${db_path} and re-run to force re-download."
         return 0
