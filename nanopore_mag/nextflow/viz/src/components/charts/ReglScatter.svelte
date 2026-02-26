@@ -3,7 +3,7 @@
   import createScatterplot from 'regl-scatterplot';
   import * as d3 from 'd3';
 
-  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, coordExtents = null, onselect = null, onclick = null } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null } = $props();
 
   let canvasEl;
   let scatterplot;
@@ -90,6 +90,19 @@
         if (c) onclick(c.id);
       }
     });
+  }
+
+  function applySearchFilter() {
+    if (!scatterplot || !indexMap.length) return;
+    if (searchMatchIds) {
+      const indices = [];
+      for (let i = 0; i < indexMap.length; i++) {
+        if (searchMatchIds.has(indexMap[i].id)) indices.push(i);
+      }
+      scatterplot.filter(indices, { preventEvent: true });
+    } else {
+      scatterplot.unfilter({ preventEvent: true });
+    }
   }
 
   function draw() {
@@ -226,12 +239,13 @@
     scatterplot.draw({ x, y, valueA, valueB }, {
       zDataType: isCont ? 'continuous' : 'categorical',
       wDataType: 'continuous',
+    }).then(() => {
+      // Restore camera after redraw (only if coordinates didn't change)
+      if (savedView) {
+        scatterplot.lookAt(savedView, { preventEvent: true });
+      }
+      applySearchFilter();
     });
-
-    // Restore camera after redraw (only if coordinates didn't change)
-    if (savedView) {
-      scatterplot.lookAt(savedView, { preventEvent: true });
-    }
   }
 
   onMount(() => {
@@ -245,6 +259,12 @@
     if (!canvasEl || !data) return;
     if (!scatterplot) init();
     draw();
+  });
+
+  // Re-apply search filter when only searchMatchIds changes (no full redraw needed)
+  $effect(() => {
+    const _deps = [searchMatchIds];
+    applySearchFilter();
   });
 </script>
 

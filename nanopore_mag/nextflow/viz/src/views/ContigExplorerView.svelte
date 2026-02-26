@@ -3,7 +3,7 @@
   import ReglScatter from '../components/charts/ReglScatter.svelte';
   import ContigDetail from '../components/ContigDetail.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
-  import { contigExplorer, loadContigExplorer, loadContigGenes } from '../stores/data.js';
+  import { contigExplorer, loadContigExplorer, loadContigGenes, loadAllGenes, buildGeneSearchIndex } from '../stores/data.js';
   import { onMount } from 'svelte';
 
   let explorerData = $derived($contigExplorer);
@@ -196,7 +196,77 @@
   function resetFilters() {
     lenMinPct = 0; lenMaxPct = 100;
     depMinPct = 0; depMaxPct = 100;
+    searchQuery = '';
   }
+
+  // ---- Search state ----
+  let searchQuery = $state('');
+  let searchDebounced = $state('');
+  let geneIndex = $state(null);
+  let geneIndexLoading = $state(false);
+  let debounceTimer;
+
+  // Debounce search input (300ms)
+  $effect(() => {
+    const q = searchQuery;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => { searchDebounced = q; }, 300);
+    return () => clearTimeout(debounceTimer);
+  });
+
+  // Trigger gene loading on first keystroke
+  $effect(() => {
+    if (searchQuery.length > 0 && !geneIndex && !geneIndexLoading) {
+      geneIndexLoading = true;
+      loadAllGenes().then(allGenes => {
+        geneIndex = buildGeneSearchIndex(allGenes);
+        geneIndexLoading = false;
+      });
+    }
+  });
+
+  // Search fields on each contig to check (contig ID + 24 taxonomy + 6 bin + replicon/tiara/whokaryote)
+  const SEARCH_FIELDS = [
+    'id',
+    ...['kaiju', 'kraken2', 'rrna', 'genomad'].flatMap(s =>
+      ['domain', 'phylum', 'class', 'order', 'family', 'genus'].map(r => `${s}_${r}`)
+    ),
+    'bin', 'semibin_bin', 'metabat_bin', 'maxbin_bin', 'lorbin_bin', 'comebin_bin',
+    'replicon', 'tiara', 'whokaryote',
+  ];
+
+  // Compute matching contig IDs
+  let searchMatchIds = $derived.by(() => {
+    const q = searchDebounced.trim().toLowerCase();
+    if (!q || !filteredData?.contigs) return null;
+
+    const matched = new Set();
+    const contigs = filteredData.contigs;
+
+    // Phase 1: search contig fields
+    for (const c of contigs) {
+      for (const field of SEARCH_FIELDS) {
+        const val = c[field];
+        if (val && String(val).toLowerCase().includes(q)) {
+          matched.add(c.id);
+          break; // short-circuit on first match
+        }
+      }
+    }
+
+    // Phase 2: search gene index (for contigs not already matched)
+    if (geneIndex) {
+      for (const c of contigs) {
+        if (matched.has(c.id)) continue;
+        const geneStr = geneIndex.get(c.id);
+        if (geneStr && geneStr.includes(q)) {
+          matched.add(c.id);
+        }
+      }
+    }
+
+    return matched;
+  });
 
   // Selection state
   let selectedIds = $state(null);  // null = no selection, [] would be empty lasso
@@ -294,9 +364,17 @@
   });
 
   // Full sorted source (for export — no 500 limit)
+  // Priority: lasso selection > search matches > all filtered contigs
   let tableSrc = $derived.by(() => {
     if (!filteredData?.contigs) return [];
-    const source = selectedContigs || filteredData.contigs;
+    let source;
+    if (selectedContigs) {
+      source = selectedContigs;
+    } else if (searchMatchIds) {
+      source = filteredData.contigs.filter(c => searchMatchIds.has(c.id));
+    } else {
+      source = filteredData.contigs;
+    }
     return [...source].sort((a, b) => b.length - a.length);
   });
 
@@ -449,8 +527,38 @@
     </div>
     <span class="text-slate-500 w-14 font-mono">{fmtDep(depRange[1])}</span>
 
-    {#if isFiltered}
-      <span class="text-cyan-400 font-medium">{filteredData.contigs.length.toLocaleString()} / {explorerData.contigs.length.toLocaleString()}</span>
+    <span class="text-slate-600">|</span>
+
+    <div class="relative flex items-center">
+      <input
+        type="text"
+        bind:value={searchQuery}
+        placeholder="contig, taxon, bin, gene..."
+        class="w-48 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-slate-200 text-xs placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+      />
+      {#if searchQuery}
+        <button
+          class="absolute right-1 text-slate-500 hover:text-slate-300"
+          onclick={() => { searchQuery = ''; }}
+          title="Clear search"
+        >
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      {/if}
+    </div>
+    {#if geneIndexLoading}
+      <span class="text-slate-500 text-xs italic">loading genes...</span>
+    {/if}
+    {#if searchMatchIds}
+      <span class="text-amber-400 font-medium">{searchMatchIds.size.toLocaleString()} matches</span>
+    {/if}
+
+    {#if isFiltered || searchMatchIds}
+      {#if isFiltered}
+        <span class="text-cyan-400 font-medium">{filteredData.contigs.length.toLocaleString()} / {explorerData.contigs.length.toLocaleString()}</span>
+      {/if}
       <button class="text-slate-500 hover:text-slate-300 underline" onclick={resetFilters}>reset</button>
     {/if}
   </div>
@@ -467,9 +575,9 @@
     <!-- Scatter plot -->
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[700px] flex flex-col {detailContigId ? 'flex-1 min-w-0' : 'w-full'}">
       {#if renderer === 'regl'}
-        <ReglScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} sizeRange={fullSizeRange} {coordExtents} onselect={handleSelection} onclick={handleContigClick} />
+        <ReglScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} sizeRange={fullSizeRange} {coordExtents} onselect={handleSelection} onclick={handleContigClick} {searchMatchIds} />
       {:else}
-        <ContigScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} {coordExtents} onselect={handleSelection} onclick={handleContigClick} />
+        <ContigScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} {coordExtents} onselect={handleSelection} onclick={handleContigClick} {searchMatchIds} />
       {/if}
       <div class="text-xs text-slate-500 mt-2 flex-shrink-0">
         {filteredData.contigs.length.toLocaleString()} contigs |
@@ -513,7 +621,7 @@
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
     <div class="flex items-center justify-between mb-2">
       <h3 class="text-sm font-medium text-slate-400">
-        {selectedContigs ? `${selectedContigs.length.toLocaleString()} selected contigs` : `Top 500 contigs by length`}
+        {selectedContigs ? `${selectedContigs.length.toLocaleString()} selected contigs` : searchMatchIds ? `${searchMatchIds.size.toLocaleString()} matching contigs` : `Top 500 contigs by length`}
         {#if tableSrc.length > 500}
           <span class="text-slate-500 text-xs">({tableSrc.length.toLocaleString()} total)</span>
         {/if}

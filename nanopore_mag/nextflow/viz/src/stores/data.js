@@ -123,6 +123,47 @@ export async function loadContigGenes(contigId) {
   return genesData?.[contigId] || null;
 }
 
+// Load all genes at once (for search index). Reuses genesData closure.
+let genesLoadPromise = null;
+export async function loadAllGenes() {
+  if (genesData) return genesData;
+  if (genesLoadPromise) return genesLoadPromise;
+  genesLoadPromise = (async () => {
+    if (!genesData && !genesLoading) {
+      genesLoading = true;
+      try {
+        genesData = await fetchJSON('/data/genes.json');
+      } catch (e) {
+        console.warn('Gene data not available:', e.message);
+        genesData = {};
+      } finally {
+        genesLoading = false;
+      }
+    }
+    while (genesLoading) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    return genesData;
+  })();
+  return genesLoadPromise;
+}
+
+// Build search index: Map<contigId, string> where string = lowercased gene names + products joined by \0
+export function buildGeneSearchIndex(allGenes) {
+  const index = new Map();
+  for (const [contigId, genes] of Object.entries(allGenes)) {
+    const parts = [];
+    for (const gene of genes) {
+      if (gene.g) parts.push(gene.g);
+      if (gene.p) parts.push(gene.p);
+    }
+    if (parts.length) {
+      index.set(contigId, parts.join('\0').toLowerCase());
+    }
+  }
+  return index;
+}
+
 // Lazy load contig explorer + embeddings (separate files per method)
 let contigLoading = false;
 export async function loadContigExplorer() {

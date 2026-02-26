@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
 
-  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, coordExtents = null, onselect = null, onclick = null } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null } = $props();
   let container;
   let listenersAttached = false;
 
@@ -41,7 +41,7 @@
     return `${c.id}<br>Length: ${c.length.toLocaleString()} bp<br>Depth: ${c.depth}<br>GC: ${c.gc ?? '?'}%${binLine}<br>Tax: ${tax}`;
   }
 
-  function getTraces(data, colorBy, sizeBy, sizeScale, mode) {
+  function getTraces(data, colorBy, sizeBy, sizeScale, mode, searchMatchIds) {
     if (!data || !data.contigs.length) return [];
 
     const contigs = data.contigs;
@@ -68,9 +68,13 @@
       const sizes = contigs.map(c => markerSize(c, sizeBy, sizeScale));
       const colors = contigs.map(cm.fn);
 
+      const opacity = searchMatchIds
+        ? contigs.map(c => searchMatchIds.has(c.id) ? 0.85 : 0.005)
+        : 0.75;
       const markerOpts = {
         size: sizes,
         color: colors,
+        opacity,
         colorscale: cm.scale,
         showscale: true,
         colorbar: {
@@ -101,12 +105,13 @@
       if (isBinField) key = key || 'unbinned';
       else key = key || 'Unknown';
 
-      if (!groups[key]) groups[key] = { x: [], y: [], text: [], sizes: [], ids: [] };
+      if (!groups[key]) groups[key] = { x: [], y: [], text: [], sizes: [], ids: [], contigIds: [] };
       groups[key].x.push(c[xKey]);
       groups[key].y.push(c[yKey]);
       groups[key].text.push(hoverText(c, colorBy));
       groups[key].sizes.push(markerSize(c, sizeBy, sizeScale));
       groups[key].ids.push(c.id);
+      groups[key].contigIds.push(c.id);
     }
 
     // Use stable colorMap from parent (derived from full unfiltered dataset) if available,
@@ -128,6 +133,10 @@
 
     return entries.map(([name, g]) => {
       const isBackground = name === 'unbinned' || name === 'Unknown';
+      const baseOpacity = isBackground ? 0.25 : 0.75;
+      const opacity = searchMatchIds
+        ? g.contigIds.map(id => searchMatchIds.has(id) ? baseOpacity : 0.005)
+        : baseOpacity;
       return {
         type: 'scattergl',
         mode: 'markers',
@@ -139,7 +148,7 @@
         marker: {
           size: g.sizes,
           color: isBackground ? '#475569' : (effectiveColorMap[name] || '#94a3b8'),
-          opacity: isBackground ? 0.25 : 0.75,
+          opacity,
           line: { width: 0 },
         },
         hoverinfo: 'text',
@@ -157,12 +166,12 @@
 
   $effect(() => {
     // Read all reactive props so Svelte tracks them as dependencies
-    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap, coordExtents];
+    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap, coordExtents, searchMatchIds];
     if (container && data) plot();
   });
 
   function plot() {
-    const traces = getTraces(data, colorBy, sizeBy, sizeScale, mode);
+    const traces = getTraces(data, colorBy, sizeBy, sizeScale, mode, searchMatchIds);
     // Use full-dataset coordinate extents so filtering doesn't re-zoom
     const modeKey = mode === 'tsne' && data.has_tsne ? 'tsne' : mode === 'umap' && data.has_umap ? 'umap' : 'pca';
     const ext = coordExtents?.[modeKey];
@@ -181,7 +190,7 @@
       ...darkLayout,
       xaxis: xAxisCfg,
       yaxis: yAxisCfg,
-      uirevision: mode + '-' + colorBy,
+      uirevision: mode + '-' + colorBy + (ext ? '-ext' : ''),
     };
     Plotly.react(container, traces, layout, {
       responsive: true,
