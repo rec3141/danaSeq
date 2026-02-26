@@ -161,12 +161,16 @@
     let xlo = Infinity, xhi = -Infinity, ylo = Infinity, yhi = -Infinity;
     for (const v of lx) { if (v < xlo) xlo = v; if (v > xhi) xhi = v; }
     for (const v of ly) { if (v < ylo) ylo = v; if (v > yhi) yhi = v; }
+    const xpad = (xhi - xlo) * 0.05 || 0.5;
+    const ypad = (yhi - ylo) * 0.05 || 0.5;
     const xticks = logTicksForRange(xlo, xhi, ' bp');
     const yticks = logTicksForRange(ylo, yhi, 'x');
     return {
       title: { text: 'Length vs Coverage', font: { size: 14 } },
-      xaxis: { title: 'Contig length', tickvals: xticks.vals, ticktext: xticks.text },
-      yaxis: { title: 'Coverage (depth)', tickvals: yticks.vals, ticktext: yticks.text },
+      xaxis: { title: 'Contig length', tickvals: xticks.vals, ticktext: xticks.text,
+               range: [xlo - xpad, xhi + xpad], autorange: false },
+      yaxis: { title: 'Coverage (depth)', tickvals: yticks.vals, ticktext: yticks.text,
+               range: [ylo - ypad, yhi + ypad], autorange: false },
     };
   });
 </script>
@@ -187,7 +191,7 @@
     </div>
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
       {#if scatterData.length}
-        <PlotlyChart data={scatterData} layout={scatterLayout} config={{ displayModeBar: false }} />
+        <PlotlyChart data={scatterData} layout={scatterLayout} />
       {:else}
         <p class="text-slate-500 text-sm py-8 text-center">No coverage data available</p>
       {/if}
