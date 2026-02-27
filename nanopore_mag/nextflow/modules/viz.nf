@@ -84,7 +84,7 @@ process VIZ_PREPROCESS {
     VIZ_PORT=${vizPort}
     pkill -f "vite preview.*--port \${VIZ_PORT}" 2>/dev/null || true
     sleep 1
-    setsid nohup npx vite preview --host 0.0.0.0 --port \${VIZ_PORT} > /tmp/vite_preview_\${VIZ_PORT}.log 2>&1 &
+    setsid nohup npm run serve -- --host 0.0.0.0 --port \${VIZ_PORT} > /tmp/vite_preview_\${VIZ_PORT}.log 2>&1 &
     _server_ip=\$(hostname -I | awk '{print \$1}')
     echo "Viz dashboard: http://\${_server_ip}:\${VIZ_PORT}/"
     """
