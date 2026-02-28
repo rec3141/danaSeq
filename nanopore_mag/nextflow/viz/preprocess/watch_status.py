@@ -467,20 +467,23 @@ def build_enhanced_status(results_dir, work_base):
 
         enhanced_processes[proc_name] = proc_info
 
-    # Recount with warning status
+    # Recount with warning/skipped status
     status_values = [p['status'] for p in enhanced_processes.values()]
     counts = Counter(status_values)
 
+    n_skipped = counts.get('skipped', 0)
+    active_total = len(enhanced_processes) - n_skipped
     pipeline_active = counts.get('running', 0) > 0 or counts.get('pending', 0) > 0
 
     return {
         'processes': enhanced_processes,
-        'pipeline_total': len(enhanced_processes),
+        'pipeline_total': active_total,
         'pipeline_completed': counts.get('completed', 0) + counts.get('warning', 0),
         'pipeline_running': counts.get('running', 0),
         'pipeline_pending': counts.get('pending', 0),
         'pipeline_failed': counts.get('failed', 0),
         'pipeline_warning': counts.get('warning', 0),
+        'pipeline_skipped': n_skipped,
         'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'pipeline_active': pipeline_active,
     }

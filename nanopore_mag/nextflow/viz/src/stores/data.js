@@ -49,10 +49,12 @@ async function refreshPipelineStatus() {
         processes: Object.fromEntries(
           Object.entries(data.processes).map(([k, v]) => [k, v.status])
         ),
+        pipeline_total: data.pipeline_total,
         pipeline_completed: data.pipeline_completed,
         pipeline_running: data.pipeline_running,
         pipeline_pending: data.pipeline_pending,
         pipeline_failed: data.pipeline_failed,
+        pipeline_skipped: data.pipeline_skipped,
       } : curr);
       if (!data.pipeline_active) stopStatusPolling();
     }

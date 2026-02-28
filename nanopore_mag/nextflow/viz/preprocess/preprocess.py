@@ -256,6 +256,7 @@ def build_pipeline_status(results_dir):
     skip_procs = {'VIZ_STAGE1', 'VIZ_STAGE2', 'VIZ_STAGE3', 'VIZ_STAGE4', 'VIZ_PREPROCESS',
                   'NCLB_CONVERSE', 'NCLB_GATHER', 'NCLB_INTEGRATE', 'NCLB_ELDERS'}
     processes = {}
+    has_running = False
     for proc in sorted(all_processes - skip_procs):
         if proc in stored:
             processes[proc] = 'completed'
@@ -267,23 +268,36 @@ def build_pipeline_status(results_dir):
                 processes[proc] = 'failed'
             else:
                 processes[proc] = 'running'
+                has_running = True
         elif proc in submitted:
             processes[proc] = 'running'
+            has_running = True
         else:
             processes[proc] = 'pending'
 
+    # 4. Reclassify "pending" → "skipped" when the pipeline is done.
+    # A process listed in the workflow but never submitted/stored/traced was
+    # excluded by conditional logic (e.g. --annotator bakta skips PROKKA).
+    if not has_running:
+        for proc in processes:
+            if processes[proc] == 'pending':
+                processes[proc] = 'skipped'
+
     counts = Counter(processes.values())
+    n_skipped = counts.get('skipped', 0)
+    active_total = len(processes) - n_skipped
     result = {
         'processes': processes,
-        'pipeline_total': len(processes),
+        'pipeline_total': active_total,
         'pipeline_completed': counts.get('completed', 0),
         'pipeline_running': counts.get('running', 0),
         'pipeline_pending': counts.get('pending', 0),
         'pipeline_failed': counts.get('failed', 0),
+        'pipeline_skipped': n_skipped,
     }
     print(f"  Pipeline: {result['pipeline_completed']}/{result['pipeline_total']} completed, "
           f"{result['pipeline_running']} running, {result['pipeline_pending']} pending, "
-          f"{result['pipeline_failed']} failed")
+          f"{result['pipeline_failed']} failed, {n_skipped} skipped")
     return result
 
 
