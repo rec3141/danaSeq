@@ -620,7 +620,22 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
     """Build checkm2_all.json for all bins with quality, taxonomy, and MGE."""
     print("Building checkm2_all.json ...")
     if checkm2_df is None:
-        return []
+        # Fall back to DAS_Tool SCG-based quality from bin_quality.tsv
+        bq_path = resolve_path(results_dir, 'binning', 'dastool', 'bin_quality.tsv')
+        bq_df = load_tsv(bq_path)
+        if bq_df is None:
+            return []
+        print("  [INFO] No CheckM2 data — using DAS_Tool SCG quality as fallback")
+        # bin_quality.tsv has raw binner bins; summary.tsv has dastool- consensus bins
+        combined = pd.concat([bq_df, dastool_summary], ignore_index=True)
+        checkm2_df = pd.DataFrame({
+            'Name': combined['bin'],
+            'Completeness': combined['SCG_completeness'].astype(float),
+            'Contamination': combined['SCG_redundancy'].astype(float),
+            'Genome_Size': combined['size'].astype(int),
+            'Contig_N50': combined['N50'].astype(int),
+            'GC_Content': 0.0,
+        })
 
     dastool_names = set(dastool_summary['bin'].values)
 
