@@ -105,7 +105,7 @@ def main():
         x="tsne_x", y="tsne_y",
         color="assembler",
         size="log_length",
-        size_max=12,
+        size_max=6,
         hover_data={
             "contig": True,
             "length": ":,",
@@ -129,10 +129,12 @@ def main():
         width=1200, height=800,
         legend_title_text="Assembler",
         template="plotly_white",
+        dragmode="pan",
     )
     fig.update_traces(marker=dict(line=dict(width=0.3, color="DarkSlateGrey")))
 
-    fig.write_html(args.out, include_plotlyjs=True)
+    fig.write_html(args.out, include_plotlyjs=True,
+                   config={"scrollZoom": True})
     print(f"Saved interactive plot: {args.out}")
 
     # Summary stats
