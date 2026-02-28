@@ -252,12 +252,13 @@ process BIN_COMEBIN {
         touch comebin_bins.tsv
     elif [ -d comebin_out/comebin_res/comebin_res_bins ]; then
         # Convert COMEBin FASTA bins to DAS_Tool format TSV (contig\\tbin)
-        # Extract bin number from filename for consistent naming
+        # COMEBin uses sparse bin numbers (0, 11, 768, 4926, ...) — renumber sequentially
         > comebin_bins.tsv
+        bin_num=0
         for bin_file in comebin_out/comebin_res/comebin_res_bins/*.fa; do
             [ -e "\$bin_file" ] || continue
-            bin_num=\$(basename "\$bin_file" .fa | grep -oP '\\d+\$')
-            bin_name=\$(printf 'comebin_%03d' "\$((10#\$bin_num))")
+            bin_num=\$((bin_num + 1))
+            bin_name=\$(printf 'comebin_%03d' \$bin_num)
             cp "\$bin_file" "bins/\${bin_name}.fa"
             grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
