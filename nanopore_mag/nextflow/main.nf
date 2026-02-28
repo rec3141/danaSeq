@@ -6,7 +6,7 @@ nextflow.enable.dsl = 2
 // ============================================================================
 //
 // Nextflow implementation of the MAG assembly and binning workflow.
-// Co-assembles all reads with Flye, maps reads back, runs five binners
+// Co-assembles all reads (Flye, metaMDBG, or myloasm), maps reads back, runs five binners
 // (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin) in parallel, integrates with DAS_Tool,
 // classifies contigs as prokaryotic/eukaryotic/organellar (Tiara + Whokaryote),
 // detects mobile genetic elements (viruses, plasmids, proviruses) with geNomad + CheckV,
@@ -41,6 +41,7 @@ def helpMessage() {
                          When active, outputs go directly to store_dir (publishDir ignored).
 
     Assembly:
+      --assembler STR    Assembler to use: 'flye', 'metamdbg', or 'myloasm' [default: flye]
       --min_overlap N    Flye --min-overlap [default: 1000]
       --polish           Enable Flye polishing iterations [default: true]
       --dedupe           Enable BBDuk deduplication before assembly
@@ -310,9 +311,17 @@ if (effective_annotator != 'none') {
     log.info "Annotator: ${effective_annotator}"
 }
 
+if (!(params.assembler in ['flye', 'metamdbg', 'myloasm'])) {
+    log.error "ERROR: Invalid --assembler '${params.assembler}'. Choose from: flye, metamdbg, myloasm"
+    System.exit(1)
+}
+log.info "Assembler: ${params.assembler}"
+
 // Import modules
 include { CONCAT_READS }        from './modules/preprocess'
 include { ASSEMBLY_FLYE }       from './modules/assembly'
+include { ASSEMBLY_METAMDBG }   from './modules/assembly'
+include { ASSEMBLY_MYLOASM }    from './modules/assembly'
 include { CALCULATE_TNF }       from './modules/assembly'
 include { MAP_READS }           from './modules/mapping'
 include { CALCULATE_DEPTHS }    from './modules/mapping'
@@ -411,24 +420,40 @@ workflow {
         error "ERROR: No FASTQ files found in ${params.input}. Expected either *.fastq.gz or fastq_pass/barcode*/ structure.\nRun with --help for usage."
     }
 
-    // 2. Co-assembly: fan-in all reads into one Flye assembly
+    // 2. Co-assembly: fan-in all reads into one assembly
     ch_all_reads = ch_reads.map { meta, fastq -> fastq }.collect()
-    ASSEMBLY_FLYE(ch_all_reads)
+
+    if (params.assembler == 'flye') {
+        ASSEMBLY_FLYE(ch_all_reads)
+        ch_assembly = ASSEMBLY_FLYE.out.assembly
+        ch_asm_info = ASSEMBLY_FLYE.out.info
+        ch_asm_graph = ASSEMBLY_FLYE.out.graph
+    } else if (params.assembler == 'metamdbg') {
+        ASSEMBLY_METAMDBG(ch_all_reads)
+        ch_assembly = ASSEMBLY_METAMDBG.out.assembly
+        ch_asm_info = ASSEMBLY_METAMDBG.out.info
+        ch_asm_graph = ASSEMBLY_METAMDBG.out.graph
+    } else if (params.assembler == 'myloasm') {
+        ASSEMBLY_MYLOASM(ch_all_reads)
+        ch_assembly = ASSEMBLY_MYLOASM.out.assembly
+        ch_asm_info = ASSEMBLY_MYLOASM.out.info
+        ch_asm_graph = ASSEMBLY_MYLOASM.out.graph
+    }
 
     // 2b. Tetranucleotide frequencies from assembly
-    CALCULATE_TNF(ASSEMBLY_FLYE.out.assembly)
+    CALCULATE_TNF(ch_assembly)
 
     // 2c. Gene annotation on co-assembly (optional: prokka, bakta, or none)
     ch_proteins = Channel.empty()
     ch_gff      = Channel.empty()
 
     if (effective_annotator == 'prokka') {
-        PROKKA_ANNOTATE(ASSEMBLY_FLYE.out.assembly)
+        PROKKA_ANNOTATE(ch_assembly)
         ch_proteins = PROKKA_ANNOTATE.out.proteins
         ch_gff      = PROKKA_ANNOTATE.out.gff
     } else if (effective_annotator == 'bakta') {
         // Fast path: basic annotation with light DB (minutes) — feeds all downstream tools
-        BAKTA_BASIC(ASSEMBLY_FLYE.out.assembly)
+        BAKTA_BASIC(ch_assembly)
         ch_proteins = BAKTA_BASIC.out.proteins
         ch_gff      = BAKTA_BASIC.out.gff
 
@@ -437,7 +462,7 @@ workflow {
         // fast path that all downstream tools depend on (priority inversion fix).
         if (params.bakta_extra) {
             ch_assembly_after_basic = BAKTA_BASIC.out.proteins
-                .combine(ASSEMBLY_FLYE.out.assembly)
+                .combine(ch_assembly)
                 .map { prot, asm -> asm }
             BAKTA_EXTRA(ch_assembly_after_basic)
         }
@@ -445,7 +470,7 @@ workflow {
 
     // 2c2. Kaiju taxonomy — primary: six-frame translation on contigs (no annotation dependency)
     if (params.run_kaiju && params.kaiju_db) {
-        KAIJU_CONTIG_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+        KAIJU_CONTIG_CLASSIFY(ch_assembly)
     }
 
     // 2c2a. Kaiju taxonomy — secondary: protein-level via annotation .faa + .gff (per-gene detail)
@@ -455,33 +480,33 @@ workflow {
 
     // 2c2b. Kraken2 k-mer taxonomy (runs directly on contigs — no annotation dependency)
     if (params.run_kraken2 && params.kraken2_db) {
-        KRAKEN2_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+        KRAKEN2_CLASSIFY(ch_assembly)
     }
 
     // 2c2c. BBSketch/sendsketch MinHash taxonomy (GTDB TaxServer — no annotation dependency)
     if (params.run_sendsketch && params.sendsketch_address) {
-        SENDSKETCH_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+        SENDSKETCH_CLASSIFY(ch_assembly)
     }
 
     // 2c2d. RNA gene classification (rRNA: barrnap + SILVA; tRNA/tmRNA: Aragorn)
     if (params.run_rrna && params.silva_ssu_db) {
-        RNA_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+        RNA_CLASSIFY(ch_assembly)
     }
 
     // 2c3. Eukaryotic contig classification (Tiara + Whokaryote) + MetaEuk gene prediction
     if (params.run_eukaryotic) {
         // Tiara: deep learning k-mer NN — runs on contigs directly
-        TIARA_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+        TIARA_CLASSIFY(ch_assembly)
 
         // Whokaryote: gene structure RF — uses annotation GFF if available.
         // Patched whokaryote handles both Prodigal and standard GFF3 (Bakta, PGAP).
-        WHOKARYOTE_CLASSIFY(ASSEMBLY_FLYE.out.assembly, ch_gff)
+        WHOKARYOTE_CLASSIFY(ch_assembly, ch_gff)
 
         // MetaEuk: eukaryotic gene prediction (multi-exon, intron-aware, homology-based)
         // Filters to union of Tiara non-prokaryotic + Whokaryote eukaryotic contigs
         if (params.run_metaeuk && params.metaeuk_db) {
             METAEUK_PREDICT(
-                ASSEMBLY_FLYE.out.assembly,
+                ch_assembly,
                 TIARA_CLASSIFY.out.classifications,
                 WHOKARYOTE_CLASSIFY.out.classifications
             )
@@ -499,7 +524,7 @@ workflow {
 
     // 2d. Mobile genetic element detection (geNomad + CheckV)
     if (params.run_genomad && params.genomad_db) {
-        GENOMAD_CLASSIFY(ASSEMBLY_FLYE.out.assembly)
+        GENOMAD_CLASSIFY(ch_assembly)
 
         if (params.run_checkv && params.checkv_db) {
             CHECKV_QUALITY(GENOMAD_CLASSIFY.out.virus_fasta)
@@ -508,12 +533,12 @@ workflow {
 
     // 2e. Integron detection (IntegronFinder)
     if (params.run_integronfinder) {
-        INTEGRONFINDER(ASSEMBLY_FLYE.out.assembly)
+        INTEGRONFINDER(ch_assembly)
     }
 
     // 2f. Genomic island detection (IslandPath-DIMOB, requires annotation .gff + .faa + assembly)
     if (params.run_islandpath && effective_annotator != 'none') {
-        ISLANDPATH_DIMOB(ASSEMBLY_FLYE.out.assembly, ch_gff, ch_proteins)
+        ISLANDPATH_DIMOB(ch_assembly, ch_gff, ch_proteins)
     }
 
     // 2g. Secretion system + conjugation detection (MacSyFinder, requires .faa)
@@ -555,7 +580,7 @@ workflow {
     }
 
     // 3. Map each sample back to assembly: fan-out
-    ch_map_input = ch_reads.combine(ASSEMBLY_FLYE.out.assembly)
+    ch_map_input = ch_reads.combine(ch_assembly)
     MAP_READS(ch_map_input)
 
     // 4. Calculate depths from all BAMs: fan-in
@@ -563,7 +588,7 @@ workflow {
     ch_bam_files = MAP_READS.out.bam
         .flatMap { meta, bam, bai -> [bam, bai] }
         .collect()
-    CALCULATE_DEPTHS(ch_bam_files, ASSEMBLY_FLYE.out.assembly)
+    CALCULATE_DEPTHS(ch_bam_files, ch_assembly)
 
     // 4b. Per-gene depths from all BAMs + annotation TSV
     //     Discovers annotation TSV at runtime (same priority as viz.nf)
@@ -577,21 +602,21 @@ workflow {
 
     // SemiBin2 (optional, BAM-based)
     if (params.run_semibin) {
-        BIN_SEMIBIN2(ASSEMBLY_FLYE.out.assembly, ch_bam_files)
+        BIN_SEMIBIN2(ch_assembly, ch_bam_files)
         ch_binner_results = ch_binner_results.mix(
             BIN_SEMIBIN2.out.bins.map { ['semibin', it] }
         )
     }
 
     // MetaBAT2 (depth-based)
-    BIN_METABAT2(ASSEMBLY_FLYE.out.assembly, CALCULATE_DEPTHS.out.jgi_depth)
+    BIN_METABAT2(ch_assembly, CALCULATE_DEPTHS.out.jgi_depth)
     ch_binner_results = ch_binner_results.mix(
         BIN_METABAT2.out.bins.map { ['metabat', it] }
     )
 
     // MaxBin2 (optional, depth-based)
     if (params.run_maxbin) {
-        BIN_MAXBIN2(ASSEMBLY_FLYE.out.assembly, CALCULATE_DEPTHS.out.jgi_depth)
+        BIN_MAXBIN2(ch_assembly, CALCULATE_DEPTHS.out.jgi_depth)
         ch_binner_results = ch_binner_results.mix(
             BIN_MAXBIN2.out.bins.map { ['maxbin', it] }
         )
@@ -599,7 +624,7 @@ workflow {
 
     // LorBin (optional, BAM-based — deep learning binner for long reads)
     if (params.run_lorbin) {
-        BIN_LORBIN(ASSEMBLY_FLYE.out.assembly, ch_bam_files)
+        BIN_LORBIN(ch_assembly, ch_bam_files)
         ch_binner_results = ch_binner_results.mix(
             BIN_LORBIN.out.bins.map { ['lorbin', it] }
         )
@@ -607,7 +632,7 @@ workflow {
 
     // COMEBin (optional, BAM-based — contrastive multi-view deep learning binner)
     if (params.run_comebin) {
-        BIN_COMEBIN(ASSEMBLY_FLYE.out.assembly, ch_bam_files)
+        BIN_COMEBIN(ch_assembly, ch_bam_files)
         ch_binner_results = ch_binner_results.mix(
             BIN_COMEBIN.out.bins.map { ['comebin', it] }
         )
@@ -618,7 +643,7 @@ workflow {
     ch_bin_files  = ch_binner_results.collect { it[1] }
 
     DASTOOL_CONSENSUS(
-        ASSEMBLY_FLYE.out.assembly,
+        ch_assembly,
         ch_bin_files,
         ch_bin_labels
     )

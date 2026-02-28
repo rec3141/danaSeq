@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**dānaSeq MAG Assembly** is a metagenome-assembled genome (MAG) reconstruction pipeline that runs alongside the real-time processing pipeline. It co-assembles nanopore reads with Flye, maps reads back, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus.
+**dānaSeq MAG Assembly** is a metagenome-assembled genome (MAG) reconstruction pipeline that runs alongside the real-time processing pipeline. It co-assembles nanopore reads (Flye, metaMDBG, or myloasm — selectable via `--assembler`), maps reads back, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus.
 
 The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scripts are preserved in the parent directory for reference but are not actively maintained.
 
@@ -18,7 +18,7 @@ nanopore_mag/
 │   ├── main.nf                 Pipeline entry point
 │   ├── nextflow.config         Params, profiles, resources
 │   ├── modules/
-│   │   ├── assembly.nf         ASSEMBLY_FLYE, CALCULATE_TNF
+│   │   ├── assembly.nf         ASSEMBLY_FLYE, ASSEMBLY_METAMDBG, ASSEMBLY_MYLOASM, CALCULATE_TNF
 │   │   ├── mapping.nf          MAP_READS, CALCULATE_DEPTHS
 │   │   ├── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
@@ -269,7 +269,7 @@ directive or in the output file copy logic (e.g. wrong filename pattern in the s
 ```
 Sample FASTQs (N files)
          │ collect()
-   ASSEMBLY_FLYE          Fan-in: all reads → 1 co-assembly
+   ASSEMBLY_{FLYE|METAMDBG|MYLOASM}   Fan-in: all reads → 1 co-assembly (--assembler)
          ├──────────────────────┬──────────────────────┬──────────────────┬───────────────────┐
    MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY   INTEGRONFINDER   KRAKEN2_CLASSIFY   SENDSKETCH_CLASSIFY   RRNA_CLASSIFY
          │ collect()        │                │
@@ -502,7 +502,7 @@ this logging, making it impossible to reliably resume later.
 1. Add a process to `modules/binning.nf` that outputs `path("LABEL_bins.tsv")` in DAS_Tool format (contig\tbin, tab-separated)
 2. In `main.nf`, invoke the process and mix its output into `ch_binner_results`:
    ```groovy
-   BIN_NEWTOOL(ASSEMBLY_FLYE.out.assembly, CALCULATE_DEPTHS.out.jgi_depth)
+   BIN_NEWTOOL(ch_assembly, CALCULATE_DEPTHS.out.jgi_depth)
    ch_binner_results = ch_binner_results.mix(
        BIN_NEWTOOL.out.bins.map { ['newtool', it] }
    )
