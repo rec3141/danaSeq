@@ -179,14 +179,15 @@
     if (s === 'completed' || s === 'stored') return { fill: 'rgba(34,211,238,0.15)', stroke: '#22d3ee', text: '#22d3ee' };
     if (s === 'running')   return { fill: 'rgba(251,191,36,0.15)', stroke: '#fbbf24', text: '#fbbf24' };
     if (s === 'failed')    return { fill: 'rgba(248,113,113,0.15)', stroke: '#f87171', text: '#f87171' };
+    if (s === 'warning')   return { fill: 'rgba(251,191,36,0.15)', stroke: '#f59e0b', text: '#f59e0b' };
     return { fill: 'rgba(100,116,139,0.1)', stroke: '#475569', text: '#64748b' };
   }
 
   function edgeColor(from, to) {
     const sf = processes[from];
     const st = processes[to];
-    if (sf === 'completed' || sf === 'stored') {
-      if (st === 'completed' || st === 'stored') return '#22d3ee';
+    if (sf === 'completed' || sf === 'stored' || sf === 'warning') {
+      if (st === 'completed' || st === 'stored' || st === 'warning') return '#22d3ee';
       if (st === 'running') return '#fbbf24';
     }
     return '#334155';

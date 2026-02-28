@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import NavBar from './components/layout/NavBar.svelte';
   import LoadingSpinner from './components/ui/LoadingSpinner.svelte';
-  import { loading, error, loadAllData } from './stores/data.js';
+  import { loading, error, loadAllData, startStatusPolling } from './stores/data.js';
 
   import OverviewView from './views/OverviewView.svelte';
   import QualityView from './views/QualityView.svelte';
@@ -23,7 +23,7 @@
   onMount(() => {
     updateHash();
     window.addEventListener('hashchange', updateHash);
-    loadAllData();
+    loadAllData().then(() => startStatusPolling());
     return () => window.removeEventListener('hashchange', updateHash);
   });
 </script>

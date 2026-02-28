@@ -35,9 +35,11 @@ CONDA_ENV="${SCRIPT_DIR}/conda-envs/dana-mag-viz"
 # Defaults
 OUTDIR=""
 STORE_DIR=""
+WORK_DIR=""
 PORT=5174
 PREPROCESS=false
 SERVE=true
+WATCH=false
 SKIP_TSNE=false
 SKIP_UMAP=false
 
@@ -55,6 +57,8 @@ while [[ $# -gt 0 ]]; do
         --skip-tsne|--skip_tsne) SKIP_TSNE=true; shift ;;
         --skip-umap|--skip_umap) SKIP_UMAP=true; shift ;;
         --no-serve)     SERVE=false; shift ;;
+        --watch)        WATCH=true; shift ;;
+        --work-dir|--workdir) WORK_DIR="$2"; shift 2 ;;
         -h|--help)      usage 0 ;;
         *)              echo "Unknown option: $1" >&2; usage 1 ;;
     esac
@@ -158,4 +162,29 @@ if $SERVE; then
     echo ""
     echo "  Viz dashboard: http://${SERVER_IP}:${PORT}/"
     echo ""
+fi
+
+# --- Watch (optional live status updates) ------------------------------------
+if $WATCH; then
+    if [[ -z "$WORK_DIR" ]]; then
+        # Try to auto-detect from the last run command
+        WORK_DIR=$(grep -oP '(?<=-w )\S+' "${OUTDIR}/pipeline_info/run_command.txt" 2>/dev/null | tail -1 || true)
+        if [[ -z "$WORK_DIR" ]]; then
+            WORK_DIR="/tmp/nanopore_mag_work"
+        fi
+    fi
+    echo "==> Starting pipeline status watcher..."
+    echo "    Work dir: $WORK_DIR"
+    $PYTHON "${VIZ_DIR}/preprocess/watch_status.py" \
+        --results "$OUTDIR" \
+        --output "$VIZ_DATA" \
+        --work-dir "$WORK_DIR" \
+        --interval 30 &
+    WATCHER_PID=$!
+    echo "    Watcher PID: $WATCHER_PID"
+    # Also copy to public/ so vite preview serves it
+    while kill -0 $WATCHER_PID 2>/dev/null; do
+        cp "${VIZ_DATA}/pipeline_status.json" "${VIZ_DIR}/public/data/pipeline_status.json" 2>/dev/null || true
+        sleep 30
+    done &
 fi

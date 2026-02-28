@@ -3,13 +3,15 @@
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import PipelineDAG from '../components/charts/PipelineDAG.svelte';
   import PipelineDAGGraph from '../components/charts/PipelineDAGGraph.svelte';
-  import { overview, contigLengths, mags } from '../stores/data.js';
+  import PipelineInfoBox from '../components/PipelineInfoBox.svelte';
+  import { overview, contigLengths, mags, pipelineStatus } from '../stores/data.js';
 
   let dagStyle = $state('graph');
 
   let overviewData = $derived($overview);
   let lenData = $derived($contigLengths);
   let magsData = $derived($mags);
+  let liveStatus = $derived($pipelineStatus);
 
   function formatBp(n) {
     if (n >= 1e9) return (n / 1e9).toFixed(1) + ' Gbp';
@@ -208,6 +210,8 @@
       {/if}
     </div>
   </div>
+
+  <PipelineInfoBox status={liveStatus} />
 
   {#if overviewData?.processes}
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">

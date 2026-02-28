@@ -484,7 +484,40 @@ echo ""
 
 mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
+# Resolve Python for the watcher (use viz conda env if available)
+WATCHER_PYTHON="${SCRIPT_DIR}/conda-envs/dana-mag-viz/bin/python3"
+if [[ ! -x "$WATCHER_PYTHON" ]]; then
+    WATCHER_PYTHON="python3"
+fi
+
+# Start pipeline status watcher (writes pipeline_status.json for live dashboard)
+VIZ_DATA_DIR="${OUTDIR_HOST}/viz/data"
+mkdir -p "$VIZ_DATA_DIR"
+WATCHER_PID=""
+if [[ -x "$(command -v "$WATCHER_PYTHON" 2>/dev/null)" ]]; then
+    $WATCHER_PYTHON "${SCRIPT_DIR}/viz/preprocess/watch_status.py" \
+        --results "$OUTDIR_HOST" \
+        --output "$VIZ_DATA_DIR" \
+        --work-dir "$WORKDIR_HOST" \
+        --interval 30 &
+    WATCHER_PID=$!
+    echo "[INFO] Started pipeline watcher (PID: $WATCHER_PID)"
+fi
+
 "${LOCAL_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
+
+# Stop the watcher (write final status, then exit)
+if [[ -n "$WATCHER_PID" ]]; then
+    # Let it write one final status update
+    $WATCHER_PYTHON "${SCRIPT_DIR}/viz/preprocess/watch_status.py" \
+        --results "$OUTDIR_HOST" \
+        --output "$VIZ_DATA_DIR" \
+        --work-dir "$WORKDIR_HOST" \
+        --once 2>/dev/null || true
+    kill "$WATCHER_PID" 2>/dev/null || true
+    wait "$WATCHER_PID" 2>/dev/null || true
+    echo "[INFO] Pipeline watcher stopped"
+fi
 
 # Capture session ID from Nextflow log and save self-invocation for reliable resume
 NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)

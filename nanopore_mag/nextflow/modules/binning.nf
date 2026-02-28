@@ -2,7 +2,7 @@
 
 process BIN_SEMIBIN2 {
     tag "semibin2"
-    label 'process_medium'
+    label 'process_gpu'
     conda "${projectDir}/conda-envs/dana-mag-semibin"
     publishDir "${params.outdir}/binning/semibin", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/semibin" : null
@@ -158,7 +158,7 @@ process BIN_MAXBIN2 {
 
 process BIN_LORBIN {
     tag "lorbin"
-    label 'process_medium'
+    label 'process_gpu'
     conda "${projectDir}/conda-envs/dana-mag-semibin"
     publishDir "${params.outdir}/binning/lorbin", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/lorbin" : null
@@ -218,7 +218,7 @@ process BIN_LORBIN {
 
 process BIN_COMEBIN {
     tag "comebin"
-    label 'process_medium'
+    label 'process_gpu'
     conda "${projectDir}/conda-envs/dana-mag-comebin"
     publishDir "${params.outdir}/binning/comebin", mode: 'link', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/comebin" : null

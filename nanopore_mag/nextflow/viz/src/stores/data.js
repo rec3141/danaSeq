@@ -18,6 +18,47 @@ export const contigExplorer = writable(null);
 export const loading = writable(true);
 export const error = writable(null);
 
+// Live pipeline status (polled from pipeline_status.json)
+export const pipelineStatus = writable(null);
+
+let statusPollTimer = null;
+
+export async function startStatusPolling(intervalMs = 30000) {
+  if (statusPollTimer) return;
+  await refreshPipelineStatus();
+  statusPollTimer = setInterval(refreshPipelineStatus, intervalMs);
+}
+
+export function stopStatusPolling() {
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer);
+    statusPollTimer = null;
+  }
+}
+
+async function refreshPipelineStatus() {
+  try {
+    // Cache-bust so vite preview doesn't serve stale data
+    const res = await fetch('/data/pipeline_status.json?t=' + Date.now());
+    if (res.ok) {
+      const data = await res.json();
+      pipelineStatus.set(data);
+      // Update overview store's process statuses for DAG coloring
+      overview.update(curr => curr ? {
+        ...curr,
+        processes: Object.fromEntries(
+          Object.entries(data.processes).map(([k, v]) => [k, v.status])
+        ),
+        pipeline_completed: data.pipeline_completed,
+        pipeline_running: data.pipeline_running,
+        pipeline_pending: data.pipeline_pending,
+        pipeline_failed: data.pipeline_failed,
+      } : curr);
+      if (!data.pipeline_active) stopStatusPolling();
+    }
+  } catch (e) { /* pipeline_status.json may not exist yet */ }
+}
+
 async function fetchJSON(url) {
   // Try pre-compressed .json.gz first — works with any static server, no server config needed.
   // If the server sets Content-Encoding: gzip (e.g. vite preview), the browser auto-decompresses
