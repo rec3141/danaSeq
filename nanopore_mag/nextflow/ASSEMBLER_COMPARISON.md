@@ -42,6 +42,32 @@ Five binners were used in all runs: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin
 
 metaMDBG and myloasm ran with reduced resources (test profile); Flye required standard resources (crashed at 8 GB during polishing).
 
+## Pairwise Assembly Overlap
+
+Assemblies were aligned pairwise with minimap2 (asm5 mode, primary alignments only, contigs >= 5 Kbp). The table shows what fraction of the query assembly aligns to the reference.
+
+| Query -> Reference | Contigs | Mbp aligned / total | % aligned |
+|----|----|----|-----|
+| flye -> metamdbg | 8,771 / 8,771 (100%) | 99.2 / 145.2 | 68.3% |
+| metamdbg -> flye | 6,310 / 6,310 (100%) | 73.6 / 77.1 | 95.4% |
+| flye -> myloasm | 9,646 / 9,646 (100%) | 132.9 / 153.0 | 86.8% |
+| myloasm -> flye | 17,555 / 17,555 (100%) | 201.3 / 250.8 | 80.3% |
+| metamdbg -> myloasm | 6,292 / 6,292 (100%) | 70.2 / 77.2 | 90.9% |
+| myloasm -> metamdbg | 16,343 / 16,343 (100%) | 153.0 / 238.7 | 64.1% |
+
+metaMDBG is nearly entirely contained in both Flye (95.4%) and myloasm (90.9%). myloasm has the most unique sequence: ~86 Mbp not in metaMDBG and ~50 Mbp not in Flye.
+
+## t-SNE + k-means Clustering
+
+t-SNE on tetranucleotide frequencies (37,811 contigs >= 5 Kbp) with k=128 k-means clustering shows:
+
+- **37 clusters** dominated (>66%) by myloasm, totaling 9,944 contigs / 120.6 Mbp
+- **0 clusters** dominated by Flye or metaMDBG alone
+- **47 clusters** shared roughly equally (no assembler >50%), totaling 228.6 Mbp
+- **1 near-exclusive cluster** (>90% myloasm): 246 contigs / 2.5 Mbp
+
+sendsketch against NCBI nt on a myloasm-dominated cluster (136 contigs near myloasm_contig_06013) returned zero hits for 135/136 contigs — this cluster represents novel, low-coverage organisms that only myloasm recovered.
+
 ## Takeaways
 
 - **Flye** produces the most high-quality bins (15 HQ) and best N50 (16 Kbp), with the most circular contigs (252). Best for quality-focused analysis. Requires the most memory.
