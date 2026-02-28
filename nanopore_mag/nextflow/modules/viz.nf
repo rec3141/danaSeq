@@ -79,12 +79,13 @@ process VIZ_PREPROCESS {
     cp -r "${params.outdir}/pipeline_info" "\${VIZ_DIR}/site/pipeline_info" 2>/dev/null || true
 
     # Start/restart the preview server (all interfaces, configurable port)
-    # setsid creates a new session so the child is not in the Nextflow process group
-    # (nohup+disown alone still keeps the child in the same pgid, blocking task completion)
+    # setsid creates a new session so the child is not in the Nextflow process group.
+    # All three fds must be redirected so the inherited tee pipe is fully closed;
+    # otherwise npm holds the pipe open and tee (hence the Nextflow task) blocks forever.
     VIZ_PORT=${vizPort}
     pkill -f "vite preview.*--port \${VIZ_PORT}" 2>/dev/null || true
     sleep 1
-    setsid nohup npm run serve -- --host 0.0.0.0 --port \${VIZ_PORT} > /tmp/vite_preview_\${VIZ_PORT}.log 2>&1 &
+    setsid nohup npm run serve -- --host 0.0.0.0 --port \${VIZ_PORT} </dev/null > /tmp/vite_preview_\${VIZ_PORT}.log 2>&1 &
     _server_ip=\$(hostname -I | awk '{print \$1}')
     echo "Viz dashboard: http://\${_server_ip}:\${VIZ_PORT}/"
     """
