@@ -32,6 +32,57 @@ from preprocess import build_pipeline_status
 
 
 # ---------------------------------------------------------------------------
+# Pipeline timing from beforeScript/afterScript
+# ---------------------------------------------------------------------------
+
+def parse_pipeline_timing(timing_path):
+    """Parse pipeline_timing.tsv written by beforeScript/afterScript.
+
+    Each line is either:
+      PROC_NAME\tSTART\t2026-02-27T09:30:15+00:00
+      PROC_NAME\tEND\t2026-02-27T13:22:28+00:00\t0
+
+    For each process, keeps the LAST START and LAST END (handles retries).
+
+    Returns: {proc_name: {'start': ISO str, 'end': ISO str or None, 'exit_code': int or None}}
+    """
+    timing = {}
+    if not os.path.isfile(timing_path):
+        return timing
+
+    try:
+        with open(timing_path, 'r', errors='replace') as f:
+            for line in f:
+                parts = line.strip().split('\t')
+                if len(parts) < 3:
+                    continue
+                proc_name, event, timestamp = parts[0], parts[1], parts[2]
+
+                if proc_name not in timing:
+                    timing[proc_name] = {'start': None, 'end': None, 'exit_code': None}
+
+                # Strip timezone suffix for consistent ISO format
+                ts = timestamp.replace('+00:00', '').replace('Z', '')
+                # Also strip any other timezone offset like +05:00
+                if len(ts) > 19 and ('+' in ts[19:] or ts[19:].startswith('-')):
+                    ts = ts[:19]
+
+                if event == 'START':
+                    timing[proc_name]['start'] = ts
+                elif event == 'END':
+                    timing[proc_name]['end'] = ts
+                    if len(parts) >= 4:
+                        try:
+                            timing[proc_name]['exit_code'] = int(parts[3])
+                        except ValueError:
+                            pass
+    except Exception:
+        pass
+
+    return timing
+
+
+# ---------------------------------------------------------------------------
 # Work directory resolution from .nextflow.log
 # ---------------------------------------------------------------------------
 
@@ -361,9 +412,16 @@ def build_enhanced_status(results_dir, work_base):
             'pipeline_failed': 0,
             'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'pipeline_active': False,
+            'timing': {},
+            'pipeline_start': None,
+            'pipeline_end': None,
         }
 
     log_path = os.path.join(results_dir, 'pipeline_info', 'nextflow.log')
+
+    # Parse pipeline timing from beforeScript/afterScript
+    timing_path = os.path.join(results_dir, 'pipeline_info', 'pipeline_timing.tsv')
+    raw_timing = parse_pipeline_timing(timing_path)
 
     # Parse work dirs and submit times
     work_hashes = parse_work_dirs(log_path)
@@ -467,6 +525,23 @@ def build_enhanced_status(results_dir, work_base):
 
         enhanced_processes[proc_name] = proc_info
 
+    # Build timing dict: only processes that actually ran (have timing data)
+    timing = {}
+    for proc_name in enhanced_processes:
+        if proc_name in raw_timing:
+            t = raw_timing[proc_name]
+            timing[proc_name] = {
+                'start': t['start'],
+                'end': t.get('end'),
+                'exit_code': t.get('exit_code'),
+            }
+
+    # Compute pipeline time bounds
+    all_starts = [t['start'] for t in timing.values() if t.get('start')]
+    all_ends = [t['end'] for t in timing.values() if t.get('end')]
+    pipeline_start = min(all_starts) if all_starts else None
+    pipeline_end = max(all_ends) if all_ends else None
+
     # Recount with warning/skipped status
     status_values = [p['status'] for p in enhanced_processes.values()]
     counts = Counter(status_values)
@@ -486,6 +561,9 @@ def build_enhanced_status(results_dir, work_base):
         'pipeline_skipped': n_skipped,
         'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'pipeline_active': pipeline_active,
+        'timing': timing,
+        'pipeline_start': pipeline_start,
+        'pipeline_end': pipeline_end,
     }
 
 
