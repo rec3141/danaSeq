@@ -17,7 +17,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.manifold import TSNE
-import plotly.express as px
+import plotly.graph_objects as go
+from sklearn.cluster import KMeans
 
 
 def load_assembler(label, results_dir):
@@ -60,6 +61,7 @@ def main():
     parser.add_argument("--perplexity", type=float, default=30, help="t-SNE perplexity")
     parser.add_argument("--min-length", type=int, default=5000,
                         help="Minimum contig length to include (default: 5000)")
+    parser.add_argument("--kmeans", type=int, default=128, help="Number of k-means clusters")
     args = parser.parse_args()
 
     # Load all assemblers
@@ -98,40 +100,98 @@ def main():
 
     # Log-transform length for sizing
     df["log_length"] = np.log10(df["length"])
+    sizes = (df["log_length"] - df["log_length"].min()) / (df["log_length"].max() - df["log_length"].min()) * 5 + 1.5
 
-    # Build interactive plot
-    fig = px.scatter(
-        df,
-        x="tsne_x", y="tsne_y",
-        color="assembler",
-        size="log_length",
-        size_max=6,
-        hover_data={
-            "contig": True,
-            "length": ":,",
-            "cov.": ":.1f",
-            "circ.": True,
-            "assembler": True,
-            "tsne_x": False,
-            "tsne_y": False,
-            "log_length": False,
-        },
-        title=f"t-SNE of Tetranucleotide Frequencies — {len(df)} contigs >= {args.min_length} bp",
-        labels={"tsne_x": "t-SNE 1", "tsne_y": "t-SNE 2"},
-        opacity=0.6,
-        color_discrete_map={
-            "flye": "#636EFA",
-            "metamdbg": "#EF553B",
-            "myloasm": "#00CC96",
-        },
-    )
+    # k-means clustering on t-SNE embedding
+    k = args.kmeans
+    print(f"Running k-means (k={k})...")
+    km = KMeans(n_clusters=k, random_state=42, n_init=10)
+    df["cluster"] = km.fit_predict(embedding)
+
+    # Hover text (shared by both layers)
+    hover = [
+        f"<b>{r.contig}</b><br>assembler: {r.assembler}<br>cluster: {r.cluster}"
+        f"<br>length: {r.length:,}<br>cov: {r['cov.']:.1f}<br>circ: {r['circ.']}"
+        for _, r in df.iterrows()
+    ]
+
+    # --- Layer 1: color by assembler ---
+    asm_colors = {"flye": "#636EFA", "metamdbg": "#EF553B", "myloasm": "#00CC96"}
+    asm_traces = []
+    for asm in ["flye", "metamdbg", "myloasm"]:
+        mask = df["assembler"] == asm
+        asm_traces.append(go.Scattergl(
+            x=df.loc[mask, "tsne_x"], y=df.loc[mask, "tsne_y"],
+            mode="markers",
+            name=asm,
+            marker=dict(size=sizes[mask], color=asm_colors[asm], opacity=0.6,
+                        line=dict(width=0.3, color="DarkSlateGrey")),
+            text=[hover[i] for i in mask[mask].index],
+            hoverinfo="text",
+            visible=True,
+        ))
+
+    # --- Layer 2: color by cluster ---
+    # Generate distinct colors via a cyclical palette
+    palette = [
+        '#e6194b','#3cb44b','#ffe119','#4363d8','#f58231','#911eb4','#42d4f4',
+        '#f032e6','#bfef45','#fabed4','#469990','#dcbeff','#9A6324','#fffac8',
+        '#800000','#aaffc3','#808000','#ffd8b1','#000075','#a9a9a9','#000000',
+        '#e6beff','#1abc9c','#e74c3c','#2ecc71','#3498db','#9b59b6','#f39c12',
+    ]
+    cluster_traces = []
+    for ci in sorted(df["cluster"].unique()):
+        mask = df["cluster"] == ci
+        color = palette[ci % len(palette)]
+        cluster_traces.append(go.Scattergl(
+            x=df.loc[mask, "tsne_x"], y=df.loc[mask, "tsne_y"],
+            mode="markers",
+            name=f"cluster {ci}",
+            marker=dict(size=sizes[mask], color=color, opacity=0.6,
+                        line=dict(width=0.3, color="DarkSlateGrey")),
+            text=[hover[i] for i in mask[mask].index],
+            hoverinfo="text",
+            visible=False,
+            legendgroup=f"c{ci}",
+        ))
+
+    fig = go.Figure(data=asm_traces + cluster_traces)
+
+    n_asm = len(asm_traces)
+    n_clust = len(cluster_traces)
+
     fig.update_layout(
         width=1200, height=800,
-        legend_title_text="Assembler",
         template="plotly_white",
         dragmode="pan",
+        title=f"t-SNE of Tetranucleotide Frequencies — {len(df)} contigs >= {args.min_length} bp",
+        xaxis_title="t-SNE 1", yaxis_title="t-SNE 2",
+        legend_title_text="Assembler",
+        updatemenus=[dict(
+            type="buttons",
+            direction="left",
+            x=0.0, y=1.12,
+            xanchor="left",
+            buttons=[
+                dict(
+                    label="Color: Assembler",
+                    method="update",
+                    args=[
+                        {"visible": [True]*n_asm + [False]*n_clust},
+                        {"legend_title_text": "Assembler", "showlegend": True},
+                    ],
+                ),
+                dict(
+                    label="Color: Cluster",
+                    method="update",
+                    args=[
+                        {"visible": [False]*n_asm + [True]*n_clust},
+                        {"legend_title_text": f"Cluster (k={k})", "showlegend": True},
+                    ],
+                ),
+            ],
+        )],
     )
-    fig.update_traces(marker=dict(line=dict(width=0.3, color="DarkSlateGrey")))
 
     fig.write_html(args.out, include_plotlyjs=True,
                    config={"scrollZoom": True})
