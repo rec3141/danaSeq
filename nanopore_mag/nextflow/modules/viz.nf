@@ -40,7 +40,7 @@ process VIZ_PREPROCESS {
     # augmented with barrnap rRNA and Aragorn tRNA gene calls.
     STORE="${storeRoot}"
     OUT="${params.outdir}"
-    find_first() { for f in "\$@"; do [ -f "\${f}" ] && echo "\${f}" && return; done; }
+    find_first() { for f in "\$@"; do [ -f "\${f}" ] && echo "\${f}" && return 0; done; return 0; }
     ANNOT_TSV=\$(find_first \
         "\${STORE:+\${STORE}/annotation/bakta/extra/annotation.tsv}" \
         "\${OUT}/annotation/bakta/extra/annotation.tsv" \
