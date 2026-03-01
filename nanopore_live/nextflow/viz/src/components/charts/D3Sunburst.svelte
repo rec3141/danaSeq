@@ -98,6 +98,11 @@
       .text('Community')
       .on('click', () => zoomTo(root));
 
+    function isDescendant(node, ancestor) {
+      // In partition layout, descendants have angular range within ancestor's range
+      return node.x0 >= ancestor.x0 && node.x1 <= ancestor.x1 && node.depth > ancestor.depth;
+    }
+
     function zoomTo(target) {
       currentRoot = target;
 
@@ -113,10 +118,15 @@
 
       paths.transition(t)
         .tween('data', d => {
-          const ix0 = d3.interpolate(d._cx0, Math.max(0, xScale(d.x0)));
-          const ix1 = d3.interpolate(d._cx1, Math.max(0, xScale(d.x1)));
-          const iy0 = d3.interpolate(d._cy0, Math.max(0, yScale(d.y0)));
-          const iy1 = d3.interpolate(d._cy1, Math.max(0, yScale(d.y1)));
+          const show = target === root ? d.depth > 0 : isDescendant(d, target);
+          const tx0 = show ? xScale(d.x0) : 0;
+          const tx1 = show ? xScale(d.x1) : 0;
+          const ty0 = show ? Math.max(0, yScale(d.y0)) : 0;
+          const ty1 = show ? Math.max(0, yScale(d.y1)) : 0;
+          const ix0 = d3.interpolate(d._cx0, tx0);
+          const ix1 = d3.interpolate(d._cx1, tx1);
+          const iy0 = d3.interpolate(d._cy0, ty0);
+          const iy1 = d3.interpolate(d._cy1, ty1);
           return t => {
             d._cx0 = ix0(t); d._cx1 = ix1(t);
             d._cy0 = iy0(t); d._cy1 = iy1(t);
@@ -127,17 +137,14 @@
           const relDepth = d.depth - target.depth;
           return relDepth <= 0 ? 0 : Math.max(0.3, 1 - (relDepth - 1) * 0.08);
         })
-        .attr('display', function(d) {
-          // Hide arcs outside the target's subtree or too small
-          const nx0 = Math.max(0, xScale(d.x0));
-          const nx1 = Math.max(0, xScale(d.x1));
-          if (nx1 - nx0 < 0.001) return 'none';
-          if (d.y1 <= target.y0) return 'none';
-          return null;
+        .on('end', function(d) {
+          const show = target === root ? d.depth > 0 : isDescendant(d, target);
+          d3.select(this).attr('display', show ? null : 'none');
         });
 
       // Update center label
-      centerText.text(target === root ? 'Community' : target.data.name);
+      const path = target.ancestors().map(a => a.data.name).reverse().slice(1).join(' > ');
+      centerText.text(target === root ? 'Community' : path || target.data.name);
     }
   }
 </script>
