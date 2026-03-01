@@ -106,7 +106,7 @@
     const entries = Object.entries(groups).sort((a, b) => {
       if (a[0] === 'Unknown') return -1;
       if (b[0] === 'Unknown') return 1;
-      return a[1].x.length - b[1].x.length;
+      return a[0].localeCompare(b[0]);
     });
 
     return entries.map(([name, g]) => {

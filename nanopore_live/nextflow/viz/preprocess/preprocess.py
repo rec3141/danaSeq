@@ -266,24 +266,91 @@ def compute_grid_layout(samples_list):
     return grid
 
 
-def build_taxonomy_sunburst(all_taxonomy):
-    """Build hierarchical sunburst data from per-sample taxonomy."""
-    # Aggregate across all samples
-    total = defaultdict(int)
-    for sample_tax in all_taxonomy.values():
-        for phylum, count in sample_tax.items():
-            total[phylum] += count
+STANDARD_RANKS = frozenset({'R2', 'D', 'K', 'P', 'C', 'O', 'F', 'G', 'S'})
 
-    children = [
-        {'name': phylum, 'value': count}
-        for phylum, count in sorted(total.items(), key=lambda x: -x[1])
-        if count > 0
-    ]
 
+def query_sunburst_data(db_path):
+    """Query full taxonomy lineage data for sunburst tree construction.
+
+    Returns a dict mapping filtered taxonomy path tuples to direct read counts,
+    plus a name->rank mapping for standard ranks.
+    """
+    path_counts = {}  # tuple(filtered_path) -> direct count
+    name_rank = {}    # taxon_name -> rank letter
+    try:
+        con = duckdb.connect(db_path, read_only=True)
+        try:
+            rows = con.execute("""
+                SELECT name, rank, taxonomy, SUM(CAST(direct AS INTEGER)) as cnt
+                FROM krakenreport
+                WHERE rank IN ('R2', 'D', 'K', 'P', 'C', 'O', 'F', 'G', 'S')
+                GROUP BY name, rank, taxonomy
+            """).fetchall()
+            for name, rank, taxonomy, cnt in rows:
+                clean = name.strip()
+                name_rank[clean] = rank
+                if cnt and cnt > 0 and taxonomy:
+                    path_counts[(taxonomy, clean)] = \
+                        path_counts.get((taxonomy, clean), 0) + cnt
+        except Exception:
+            pass
+        con.close()
+    except Exception:
+        pass
+    return path_counts, name_rank
+
+
+def build_taxonomy_sunburst(all_path_counts, all_name_rank):
+    """Build hierarchical sunburst tree from aggregated taxonomy data.
+
+    Uses direct counts at each node (not clade) so the sunburst correctly
+    sums children upward without double-counting.
+    """
+    # Build tree from filtered taxonomy paths
+    tree = {}  # nested dict: name -> {'_count': int, '_children': {name: ...}}
+
+    for (taxonomy, leaf_name), count in all_path_counts.items():
+        parts = [p.strip() for p in taxonomy.split(';')]
+        # Filter to standard-rank names only (+ the leaf itself)
+        filtered = [p for p in parts if p in all_name_rank]
+        if not filtered:
+            continue
+
+        # Walk down tree, creating nodes as needed
+        node = tree
+        for part in filtered:
+            if part not in node:
+                node[part] = {'_count': 0, '_children': {}}
+            if part == filtered[-1]:
+                node[part]['_count'] += count
+            node = node[part]['_children']
+
+    # Convert nested dict to D3-compatible sunburst format
+    def to_sunburst(children_dict):
+        result = []
+        for name, data in children_dict.items():
+            node = {'name': name}
+            child_list = to_sunburst(data['_children'])
+            if child_list:
+                node['children'] = child_list
+            if data['_count'] > 0:
+                node['value'] = data['_count']
+            # Skip nodes with no value and no children
+            if 'children' in node or 'value' in node:
+                result.append(node)
+        # Sort by subtree total (descending)
+        def subtree_total(n):
+            v = n.get('value', 0)
+            for c in n.get('children', []):
+                v += subtree_total(c)
+            return v
+        result.sort(key=subtree_total, reverse=True)
+        return result
+
+    children = to_sunburst(tree)
     return {
         'name': 'Community',
         'children': children,
-        'value': sum(c['value'] for c in children),
     }
 
 
@@ -444,6 +511,8 @@ def main():
     all_phylum_tax = {}
     all_class_tax = {}
     all_function = {}
+    all_sunburst_paths = {}   # (taxonomy, leaf_name) -> total direct count
+    all_sunburst_names = {}   # name -> rank
 
     for i, s in enumerate(samples):
         sid = s['id']
@@ -452,6 +521,12 @@ def main():
         stats = query_sample_stats(s['db_path'])
         phylum_tax, class_tax, class_to_phylum = query_taxonomy(s['db_path'])
         func = query_function(s['db_path'])
+
+        # Collect full taxonomy lineage for sunburst
+        sb_paths, sb_names = query_sunburst_data(s['db_path'])
+        all_sunburst_names.update(sb_names)
+        for key, cnt in sb_paths.items():
+            all_sunburst_paths[key] = all_sunburst_paths.get(key, 0) + cnt
 
         # Extract start time from first fastq
         start_time = extract_start_time(s['dir'])
@@ -507,8 +582,9 @@ def main():
         'total_bases': sum(s.get('total_bases', 0) for s in samples_list),
     }
 
-    # Build taxonomy sunburst
-    sunburst = build_taxonomy_sunburst({k: v for k, v in all_phylum_tax.items() if k in sample_ids})
+    # Build taxonomy sunburst (full hierarchy from all standard ranks)
+    print("[INFO] Building taxonomy sunburst...", file=sys.stderr)
+    sunburst = build_taxonomy_sunburst(all_sunburst_paths, all_sunburst_names)
 
     # Write outputs
     def write_json(filename, data):
