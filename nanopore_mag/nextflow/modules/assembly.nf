@@ -4,7 +4,7 @@ process ASSEMBLY_FLYE {
     tag "co-assembly"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-flye"
-    publishDir "${params.outdir}/assembly", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
@@ -83,7 +83,7 @@ process ASSEMBLY_METAMDBG {
     tag "co-assembly-metamdbg"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-metamdbg"
-    publishDir "${params.outdir}/assembly", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
@@ -188,7 +188,7 @@ process ASSEMBLY_MYLOASM {
     tag "co-assembly-myloasm"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-myloasm"
-    publishDir "${params.outdir}/assembly", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
@@ -289,7 +289,7 @@ process CALCULATE_TNF {
     tag "tnf"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-flye"
-    publishDir "${params.outdir}/assembly", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:

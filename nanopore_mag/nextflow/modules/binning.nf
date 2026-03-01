@@ -4,7 +4,7 @@ process BIN_SEMIBIN2 {
     tag "semibin2"
     label 'process_gpu'
     conda "${projectDir}/conda-envs/dana-mag-semibin"
-    publishDir "${params.outdir}/binning/semibin", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/binning/semibin", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/semibin" : null
 
     input:
@@ -61,7 +61,7 @@ process BIN_METABAT2 {
     tag "metabat2"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/metabat", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/binning/metabat", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/metabat" : null
 
     input:
@@ -110,7 +110,7 @@ process BIN_MAXBIN2 {
     tag "maxbin2"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/maxbin", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/binning/maxbin", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/maxbin" : null
 
     input:
@@ -160,7 +160,7 @@ process BIN_LORBIN {
     tag "lorbin"
     label 'process_gpu'
     conda "${projectDir}/conda-envs/dana-mag-semibin"
-    publishDir "${params.outdir}/binning/lorbin", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/binning/lorbin", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/lorbin" : null
 
     input:
@@ -220,7 +220,7 @@ process BIN_COMEBIN {
     tag "comebin"
     label 'process_gpu'
     conda "${projectDir}/conda-envs/dana-mag-comebin"
-    publishDir "${params.outdir}/binning/comebin", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/binning/comebin", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/comebin" : null
 
     input:
@@ -279,7 +279,7 @@ process DASTOOL_CONSENSUS {
     tag "dastool"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/dastool", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/binning/dastool", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/dastool" : null
 
     input:
@@ -408,7 +408,7 @@ process CHECKM2 {
     tag "checkm2"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-checkm2"
-    publishDir "${params.outdir}/binning/checkm2", mode: 'link', enabled: !params.store_dir
+    publishDir "${params.outdir}/binning/checkm2", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/checkm2" : null
 
     input:
