@@ -207,6 +207,24 @@ export function buildGeneSearchIndex(allGenes) {
   return index;
 }
 
+// Lazy load per-sample depth data (sidecar to contig_explorer)
+export const sampleDepths = writable(null);
+
+let sampleDepthsLoading = false;
+export async function loadSampleDepths() {
+  if (sampleDepthsLoading || get(sampleDepths) !== null) return;
+  sampleDepthsLoading = true;
+  try {
+    const data = await fetchJSON('/data/contig_sample_depths.json');
+    sampleDepths.set(data);
+  } catch (e) {
+    console.warn('Per-sample depth data not available:', e.message);
+    sampleDepths.set({ samples: [], depths: {} });
+  } finally {
+    sampleDepthsLoading = false;
+  }
+}
+
 // Lazy load contig explorer + embeddings (separate files per method)
 let contigLoading = false;
 export async function loadContigExplorer() {

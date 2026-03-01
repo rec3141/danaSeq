@@ -525,6 +525,15 @@ Module files are in `nextflow/modules/*.nf`. Each process has:
 - **DAS_Tool hanging:** On very small assemblies, DAS_Tool's ruby SCG annotation script can hang. The `set +e` error handling catches this on retry.
 - **Docker GPU:** The Docker image uses CPU-only PyTorch. For GPU SemiBin2 in Docker, build with `semibin.yml` instead of `semibin-cpu.yml` and use `--gpus all`.
 
+## Development Rules
+
+### NEVER pollute the source tree with pipeline results or data files
+- **NEVER** write preprocess output, pipeline results, or data files into `viz/public/data/` or any directory under `nextflow/viz/`
+- Pipeline results go to `/data/scratch/<pipeline_name>/<unique_run_name>/`
+- For vite preview/dev testing, serve data from `/tmp/viz/<unique_run_name>/`
+- The `viz/public/data/` directory should only contain committed placeholder/example files, NOT real run data
+- Mixing data from different runs in the dev directory causes subtle ID mismatch bugs
+
 ## Common Issues
 
 ### No FASTQ files found

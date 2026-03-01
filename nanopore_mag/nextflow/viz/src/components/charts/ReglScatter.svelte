@@ -3,7 +3,7 @@
   import createScatterplot from 'regl-scatterplot';
   import * as d3 from 'd3';
 
-  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, sampleDepthData = null, selectedSample = '' } = $props();
 
   let canvasEl;
   let scatterplot;
@@ -72,7 +72,13 @@
       const tax = c.kaiju_phylum || c.kraken2_phylum || c.sendsketch_phylum || c.rrna_phylum || '?';
       const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
       const binPart = isBin ? ` | ${BIN_LABELS[colorBy] || colorBy}: ${c[colorBy] || 'none'}` : '';
-      tipText = `${c.id} | ${c.length.toLocaleString()} bp | depth: ${c.depth} | GC: ${c.gc ?? '?'}%${binPart} | ${tax}`;
+      let depthPart = `depth: ${c.depth}x`;
+      if (colorBy === 'sample_depth' && sampleDepthData?.depths && selectedSample) {
+        const sIdx = sampleDepthData.samples.indexOf(selectedSample);
+        const sDepth = sIdx >= 0 ? (sampleDepthData.depths[c.id]?.[sIdx] ?? 0) : 0;
+        depthPart = `${selectedSample}: ${sDepth.toFixed(2)}x | total: ${c.depth}x`;
+      }
+      tipText = `${c.id} | ${c.length.toLocaleString()} bp | ${depthPart} | GC: ${c.gc ?? '?'}%${binPart} | ${tax}`;
       tipX = mouseX;
       tipY = mouseY - 16;
       tipShow = true;
@@ -113,13 +119,28 @@
     if (mode === 'tsne' && data.has_tsne) { xKey = 'tsne_x'; yKey = 'tsne_y'; }
     if (mode === 'umap' && data.has_umap) { xKey = 'umap_x'; yKey = 'umap_y'; }
 
-    const isCont = !!CONTINUOUS[colorBy];
+    // Build effective continuous map (add sample_depth dynamically)
+    let effectiveContinuous = CONTINUOUS;
+    if (colorBy === 'sample_depth' && sampleDepthData?.depths && selectedSample) {
+      const sIdx = sampleDepthData.samples.indexOf(selectedSample);
+      if (sIdx >= 0) {
+        effectiveContinuous = {
+          ...CONTINUOUS,
+          sample_depth: c => Math.log10((sampleDepthData.depths[c.id]?.[sIdx] ?? 0) + 0.01),
+        };
+      }
+    }
+    const isCont = !!effectiveContinuous[colorBy];
     const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
     const bgLabel = isBin ? 'unbinned' : 'Unknown';
 
-    // Sort: background points first (drawn underneath)
+    // Sort: low-value / background points first (drawn underneath),
+    // high-value / foreground points last (drawn on top)
     let sorted;
-    if (!isCont) {
+    if (isCont) {
+      const fn = effectiveContinuous[colorBy];
+      sorted = [...contigs].sort((a, b) => fn(a) - fn(b));
+    } else {
       sorted = [...contigs];
       sorted.sort((a, b) => {
         const aIsBg = !(a[colorBy]) || a[colorBy] === bgLabel;
@@ -128,8 +149,6 @@
         if (!aIsBg && bIsBg) return 1;
         return 0;
       });
-    } else {
-      sorted = contigs;
     }
     indexMap = sorted;
 
@@ -165,12 +184,20 @@
     // ---- Color encoding ----
     let colorCfg;
     if (isCont) {
-      const fn = CONTINUOUS[colorBy];
+      const fn = effectiveContinuous[colorBy];
       const raw = new Float64Array(n);
       for (let i = 0; i < n; i++) raw[i] = fn(sorted[i]);
-      const [vMin, vMax] = d3.extent(raw);
+      // Use global fixed range for sample_depth (consistent across samples),
+      // per-data extent for other continuous modes
+      let vMin, vMax;
+      if (colorBy === 'sample_depth' && sampleDepthData?.maxDepth != null) {
+        vMin = Math.log10(0.01);
+        vMax = Math.log10(sampleDepthData.maxDepth + 0.01);
+      } else {
+        [vMin, vMax] = d3.extent(raw);
+      }
       const vRange = vMax - vMin || 1;
-      for (let i = 0; i < n; i++) valueA[i] = (raw[i] - vMin) / vRange;
+      for (let i = 0; i < n; i++) valueA[i] = Math.max(0, Math.min(1, (raw[i] - vMin) / vRange));
       colorCfg = { colorBy: 'valueA', pointColor: VIRIDIS, opacityBy: null, opacity: 0.75 };
     } else {
       // Use stable colorMap from parent (derived from full unfiltered dataset)
@@ -255,7 +282,7 @@
   });
 
   $effect(() => {
-    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap, coordExtents];
+    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap, coordExtents, sampleDepthData, selectedSample];
     if (!canvasEl || !data) return;
     if (!scatterplot) init();
     draw();

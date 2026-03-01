@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
 
-  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, sampleDepthData = null, selectedSample = '' } = $props();
   let container;
   let listenersAttached = false;
 
@@ -30,19 +30,25 @@
 
   const BIN_LABELS = { bin: 'DAS Tool', semibin_bin: 'SemiBin2', metabat_bin: 'MetaBAT2', maxbin_bin: 'MaxBin2', lorbin_bin: 'LorBin', comebin_bin: 'COMEBin' };
 
-  function hoverText(c, colorBy) {
+  function hoverText(c, colorBy, sampleDepthData, selectedSample) {
     let tax = c.kaiju_phylum || c.kraken2_phylum || c.sendsketch_phylum || c.rrna_phylum || '?';
     // If coloring by a taxonomy field, show that field's value
-    const CONTINUOUS_FIELDS = ['depth', 'length', 'gc'];
+    const CONTINUOUS_FIELDS = ['depth', 'length', 'gc', 'sample_depth'];
     if (colorBy && !colorBy.endsWith('_bin') && colorBy !== 'bin' && !CONTINUOUS_FIELDS.includes(colorBy) && c[colorBy] !== undefined) {
       tax = c[colorBy] || '?';
     }
     const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
     const binLine = isBin ? `<br>${BIN_LABELS[colorBy] || colorBy}: ${c[colorBy] || 'none'}` : '';
-    return `${c.id}<br>Length: ${c.length.toLocaleString()} bp<br>Depth: ${c.depth}<br>GC: ${c.gc ?? '?'}%${binLine}<br>Tax: ${tax}`;
+    let depthLine = `Depth: ${c.depth}x`;
+    if (colorBy === 'sample_depth' && sampleDepthData?.depths && selectedSample) {
+      const sIdx = sampleDepthData.samples.indexOf(selectedSample);
+      const sDepth = sIdx >= 0 ? (sampleDepthData.depths[c.id]?.[sIdx] ?? 0) : 0;
+      depthLine = `${selectedSample}: ${sDepth.toFixed(2)}x | Total: ${c.depth}x`;
+    }
+    return `${c.id}<br>Length: ${c.length.toLocaleString()} bp<br>${depthLine}<br>GC: ${c.gc ?? '?'}%${binLine}<br>Tax: ${tax}`;
   }
 
-  function getTraces(data, colorBy, sizeBy, sizeScale, mode, searchMatchIds) {
+  function getTraces(data, colorBy, sizeBy, sizeScale, mode, searchMatchIds, sampleDepthData, selectedSample) {
     if (!data || !data.contigs.length) return [];
 
     const contigs = data.contigs;
@@ -60,17 +66,32 @@
       length: { fn: c => Math.log10(c.length + 1),   title: 'log\u2081\u2080(length)', scale: 'Viridis' },
       gc:     { fn: c => c.gc,                        title: 'GC%',                     scale: 'Viridis' },
     };
+    // Dynamic sample_depth mode
+    if (colorBy === 'sample_depth' && sampleDepthData?.depths && selectedSample) {
+      const sIdx = sampleDepthData.samples.indexOf(selectedSample);
+      if (sIdx >= 0) {
+        const globalLogMax = Math.log10((sampleDepthData.maxDepth ?? 0) + 0.01);
+        continuousModes['sample_depth'] = {
+          fn: c => Math.log10((sampleDepthData.depths[c.id]?.[sIdx] ?? 0) + 0.01),
+          title: `log\u2081\u2080(sample depth)`,
+          scale: 'Viridis',
+          fixedRange: [Math.log10(0.01), globalLogMax],
+        };
+      }
+    }
     if (continuousModes[colorBy]) {
       const cm = continuousModes[colorBy];
-      const x = contigs.map(c => c[xKey]);
-      const y = contigs.map(c => c[yKey]);
-      const text = contigs.map(c => hoverText(c, colorBy));
-      const customdata = contigs.map(c => c.id);
-      const sizes = contigs.map(c => markerSize(c, sizeBy, sizeScale));
-      const colors = contigs.map(cm.fn);
+      // Sort by color value ascending so high-value points draw on top
+      const sorted = [...contigs].sort((a, b) => cm.fn(a) - cm.fn(b));
+      const x = sorted.map(c => c[xKey]);
+      const y = sorted.map(c => c[yKey]);
+      const text = sorted.map(c => hoverText(c, colorBy, sampleDepthData, selectedSample));
+      const customdata = sorted.map(c => c.id);
+      const sizes = sorted.map(c => markerSize(c, sizeBy, sizeScale));
+      const colors = sorted.map(cm.fn);
 
       const opacity = searchMatchIds
-        ? contigs.map(c => searchMatchIds.has(c.id) ? 0.85 : 0.005)
+        ? sorted.map(c => searchMatchIds.has(c.id) ? 0.85 : 0.005)
         : 0.75;
       const markerOpts = {
         size: sizes,
@@ -89,6 +110,11 @@
         },
         line: { width: 0 },
       };
+      // Fixed color range for cross-sample consistency
+      if (cm.fixedRange) {
+        markerOpts.cmin = cm.fixedRange[0];
+        markerOpts.cmax = cm.fixedRange[1];
+      }
       return [{
         type: 'scattergl',
         mode: 'markers',
@@ -109,7 +135,7 @@
       if (!groups[key]) groups[key] = { x: [], y: [], text: [], sizes: [], ids: [], contigIds: [] };
       groups[key].x.push(c[xKey]);
       groups[key].y.push(c[yKey]);
-      groups[key].text.push(hoverText(c, colorBy));
+      groups[key].text.push(hoverText(c, colorBy, sampleDepthData, selectedSample));
       groups[key].sizes.push(markerSize(c, sizeBy, sizeScale));
       groups[key].ids.push(c.id);
       groups[key].contigIds.push(c.id);
@@ -167,12 +193,12 @@
 
   $effect(() => {
     // Read all reactive props so Svelte tracks them as dependencies
-    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap, coordExtents, searchMatchIds];
+    const _deps = [data, colorBy, sizeBy, sizeScale, mode, colorMap, coordExtents, searchMatchIds, sampleDepthData, selectedSample];
     if (container && data) plot();
   });
 
   function plot() {
-    const traces = getTraces(data, colorBy, sizeBy, sizeScale, mode, searchMatchIds);
+    const traces = getTraces(data, colorBy, sizeBy, sizeScale, mode, searchMatchIds, sampleDepthData, selectedSample);
     // Use full-dataset coordinate extents so filtering doesn't re-zoom
     const modeKey = mode === 'tsne' && data.has_tsne ? 'tsne' : mode === 'umap' && data.has_umap ? 'umap' : 'pca';
     const ext = coordExtents?.[modeKey];

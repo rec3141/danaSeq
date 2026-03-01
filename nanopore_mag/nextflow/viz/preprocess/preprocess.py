@@ -1434,11 +1434,20 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
         print(f"  Whokaryote: {len(whokaryote_map)} contigs ({dict(Counter(whokaryote_map.values()))})")
 
     depth_map = {}
+    sample_depth_raw = None  # raw per-sample depths keyed by depths_df contigName
+    sample_names = None
     if depths_df is not None:
         depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
         if depth_cols:
+            n_samples = len(depth_cols)
             for _, row in depths_df.iterrows():
-                depth_map[row['contigName']] = float(row['totalAvgDepth'])
+                depth_map[row['contigName']] = float(row['totalAvgDepth']) * n_samples
+            # Per-sample depths (only meaningful with 2+ samples)
+            if len(depth_cols) > 1:
+                sample_names = [re.sub(r'\.sorted\.bam$', '', c) for c in depth_cols]
+                sample_depth_raw = {}
+                for _, row in depths_df.iterrows():
+                    sample_depth_raw[row['contigName']] = [round(float(row[col]), 4) for col in depth_cols]
 
     # StandardScaler + PCA on fourth-root transformed data
     print("  Running PCA on fourth-root transformed TNF ...")
@@ -1526,7 +1535,20 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     else:
         print("  --skip-umap: skipping UMAP (existing contig_umap.json preserved)")
 
-    return explorer, tsne_emb, umap_emb
+    # Build final sample_depths keyed by explorer's contig_ids (authoritative IDs)
+    # so keys are guaranteed to match contig_explorer.json records
+    sample_depths = None
+    if sample_depth_raw is not None:
+        sample_depth_map = {}
+        for cid in contig_ids:
+            vals = sample_depth_raw.get(cid)
+            if vals is not None:
+                sample_depth_map[cid] = vals
+        global_max = max((v for vals in sample_depth_map.values() for v in vals), default=0)
+        sample_depths = {'samples': sample_names, 'depths': sample_depth_map, 'maxDepth': round(global_max, 4)}
+        print(f"  Per-sample depths: {len(sample_names)} samples, {len(sample_depth_map)} contigs, maxDepth={global_max:.2f}")
+
+    return explorer, tsne_emb, umap_emb, sample_depths
 
 
 def main():
@@ -1685,7 +1707,7 @@ def main():
     print(f"  Wrote eukaryotic.json")
 
     # 11. contig_explorer.json (largest, do last)
-    contig_explorer, tsne_emb, umap_emb = build_contig_explorer(
+    contig_explorer, tsne_emb, umap_emb, sample_depths = build_contig_explorer(
         results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
         skip_tsne=args.skip_tsne, skip_umap=args.skip_umap, output_dir=output_dir,
         sendsketch_df=sendsketch_df)
@@ -1699,6 +1721,10 @@ def main():
         write_json_gz(os.path.join(output_dir, 'contig_umap.json'), umap_emb,
                       separators=(',', ':'))
         print(f"  Wrote contig_umap.json ({len(umap_emb)} contigs)")
+    if sample_depths is not None:
+        write_json_gz(os.path.join(output_dir, 'contig_sample_depths.json'), sample_depths,
+                      separators=(',', ':'))
+        print(f"  Wrote contig_sample_depths.json ({len(sample_depths['samples'])} samples, {len(sample_depths['depths'])} contigs)")
 
     print("\nDone! All JSON files written to", output_dir)
 

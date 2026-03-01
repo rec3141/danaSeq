@@ -3,7 +3,7 @@
   import ReglScatter from '../components/charts/ReglScatter.svelte';
   import ContigDetail from '../components/ContigDetail.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
-  import { contigExplorer, loadContigExplorer, loadContigGenes, loadAllGenes, buildGeneSearchIndex } from '../stores/data.js';
+  import { contigExplorer, loadContigExplorer, loadContigGenes, loadAllGenes, buildGeneSearchIndex, sampleDepths, loadSampleDepths } from '../stores/data.js';
   import { onMount } from 'svelte';
 
   let explorerData = $derived($contigExplorer);
@@ -20,12 +20,41 @@
   let metric = $state('gc');
   let replicon = $state('replicon');
 
+  // Per-sample depth state
+  let selectedSample = $state('');
+  let sampleDepthData = $derived($sampleDepths);
+  let sampleNames = $derived(sampleDepthData?.samples?.length ? sampleDepthData.samples : []);
+  let hasSamples = $derived(sampleNames.length > 0);
+
+  // Per-sample nonzero contig counts for dropdown labels
+  let sampleCounts = $derived.by(() => {
+    if (!sampleDepthData?.depths || !sampleNames.length) return {};
+    const depths = sampleDepthData.depths;
+    const keys = Object.keys(depths);
+    const counts = {};
+    for (let si = 0; si < sampleNames.length; si++) {
+      let nz = 0;
+      for (const k of keys) {
+        if (depths[k][si] > 0) nz++;
+      }
+      counts[sampleNames[si]] = nz;
+    }
+    return counts;
+  });
+
+  // Trigger lazy load of per-sample depths when user enters depth metric mode
+  $effect(() => {
+    if (colorMode === 'metric' && metric === 'depth') {
+      loadSampleDepths();
+    }
+  });
+
   // Derived colorBy from the active mode + sub-selections
   let colorBy = $derived(
     colorMode === 'bins' ? binSource :
     colorMode === 'taxa' ? `${taxSource}_${taxRank}` :
     colorMode === 'replicon' ? replicon :
-    metric
+    (metric === 'depth' && selectedSample) ? 'sample_depth' : metric
   );
 
   onMount(() => {
@@ -78,7 +107,7 @@
 
   let stableColorMap = $derived.by(() => {
     if (!explorerData?.contigs) return {};
-    const isCont = ['depth', 'length', 'gc'].includes(colorBy);
+    const isCont = ['depth', 'length', 'gc', 'sample_depth'].includes(colorBy);
     if (isCont) return {};
     const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
     const bgLabel = isBin ? 'unbinned' : 'Unknown';
@@ -440,6 +469,17 @@
   >
     {colorMode === 'metric' ? getLabel(metricGroup.values, metricGroup.labels, metric) : 'Metric'} &#x25BE;
   </button>
+  {#if colorMode === 'metric' && metric === 'depth' && hasSamples}
+    <select
+      class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer"
+      bind:value={selectedSample}
+    >
+      <option value="">Total depth</option>
+      {#each sampleNames as name}
+        <option value={name}>{name} ({(sampleCounts[name] || 0).toLocaleString()})</option>
+      {/each}
+    </select>
+  {/if}
   <span class="text-slate-600">|</span>
   <span class="text-slate-400">Size:</span>
   <button
@@ -569,9 +609,9 @@
     <!-- Scatter plot -->
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[700px] flex flex-col flex-1 min-w-0">
       {#if renderer === 'regl'}
-        <ReglScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} sizeRange={fullSizeRange} {coordExtents} onselect={handleSelection} onclick={handleContigClick} {searchMatchIds} />
+        <ReglScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} sizeRange={fullSizeRange} {coordExtents} onselect={handleSelection} onclick={handleContigClick} {searchMatchIds} {sampleDepthData} {selectedSample} />
       {:else}
-        <ContigScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} {coordExtents} onselect={handleSelection} onclick={handleContigClick} {searchMatchIds} />
+        <ContigScatter data={filteredData} {colorBy} {sizeBy} {sizeScale} {mode} colorMap={stableColorMap} {coordExtents} onselect={handleSelection} onclick={handleContigClick} {searchMatchIds} {sampleDepthData} {selectedSample} />
       {/if}
       <div class="text-xs text-slate-500 mt-2 flex-shrink-0">
         {filteredData.contigs.length.toLocaleString()} contigs |
