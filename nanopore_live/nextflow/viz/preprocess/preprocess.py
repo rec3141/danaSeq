@@ -139,10 +139,14 @@ def query_taxonomy(db_path):
     """Get per-sample taxonomy at phylum and class level from krakenreport.
 
     Uses clade 'reads' count (all reads in subtree) rather than 'direct'
-    count (reads at exactly that rank) so dominant phylum/class are consistent.
+    count (reads at exactly that rank).
+
+    Returns (phylum_tax, class_tax, class_to_phylum) where class_to_phylum
+    maps each class name to its parent phylum name via the taxonomy lineage.
     """
     phylum_tax = {}
     class_tax = {}
+    class_to_phylum = {}
     try:
         con = duckdb.connect(db_path, read_only=True)
         try:
@@ -159,25 +163,32 @@ def query_taxonomy(db_path):
                 if clean_name and count > 0:
                     phylum_tax[clean_name] = count
 
-            # Class level (clade counts)
+            # Class level (clade counts) + taxonomy lineage for parent phylum
             rows = con.execute("""
-                SELECT name, SUM(reads) as count
+                SELECT name, SUM(reads) as count, MAX(taxonomy) as taxonomy
                 FROM krakenreport
                 WHERE rank = 'C'
                 GROUP BY name
                 ORDER BY count DESC
             """).fetchall()
-            for name, count in rows:
+            for name, count, taxonomy in rows:
                 clean_name = name.strip()
                 if clean_name and count > 0:
                     class_tax[clean_name] = count
+                    # Extract parent phylum from lineage
+                    if taxonomy:
+                        parts = [p.strip() for p in taxonomy.split(';')]
+                        for p in parts:
+                            if p in phylum_tax:
+                                class_to_phylum[clean_name] = p
+                                break
         except Exception:
             pass  # No krakenreport table — leave phylum/class empty
         con.close()
     except Exception as e:
         print(f"  [WARNING] Failed to query taxonomy from {db_path}: {e}", file=sys.stderr)
 
-    return phylum_tax, class_tax
+    return phylum_tax, class_tax, class_to_phylum
 
 
 def query_function(db_path):
@@ -439,7 +450,7 @@ def main():
         print(f"  [{i+1}/{len(samples)}] {sid}...", file=sys.stderr, end='', flush=True)
 
         stats = query_sample_stats(s['db_path'])
-        phylum_tax, class_tax = query_taxonomy(s['db_path'])
+        phylum_tax, class_tax, class_to_phylum = query_taxonomy(s['db_path'])
         func = query_function(s['db_path'])
 
         # Extract start time from first fastq
@@ -449,10 +460,16 @@ def main():
 
         # Compute derived fields
         stats['diversity'] = shannon_diversity(phylum_tax)
-        if phylum_tax:
-            stats['dominant_phylum'] = max(phylum_tax, key=phylum_tax.get)
         if class_tax:
-            stats['dominant_class'] = max(class_tax, key=class_tax.get)
+            dominant_class = max(class_tax, key=class_tax.get)
+            stats['dominant_class'] = dominant_class
+            # Derive phylum from dominant class's lineage for consistency
+            if dominant_class in class_to_phylum:
+                stats['dominant_phylum'] = class_to_phylum[dominant_class]
+            elif phylum_tax:
+                stats['dominant_phylum'] = max(phylum_tax, key=phylum_tax.get)
+        elif phylum_tax:
+            stats['dominant_phylum'] = max(phylum_tax, key=phylum_tax.get)
 
         all_stats[sid] = stats
         all_phylum_tax[sid] = phylum_tax
