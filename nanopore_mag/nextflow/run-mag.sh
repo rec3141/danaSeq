@@ -403,10 +403,14 @@ if [[ "$USE_CONTAINER" == true ]]; then
         done
     fi
 
-    # Persistent Nextflow directories for -resume support
+    # Mount work directory and pass -w so Nextflow uses the same filesystem as outdir
+    # (avoids cross-device link errors when publishing results)
+    mkdir -p "${WORKDIR_HOST}" 2>/dev/null || true
+    BINDS+=("${WORKDIR_HOST}:/data/work")
+
+    # Persistent Nextflow .nextflow directory for -resume support
     NF_CACHE="${OUTDIR_HOST}/.nextflow-cache"
-    mkdir -p "${NF_CACHE}/work" "${NF_CACHE}/dotdir" 2>/dev/null || true
-    BINDS+=("${NF_CACHE}/work:/home/dana/work")
+    mkdir -p "${NF_CACHE}/dotdir" 2>/dev/null || true
     BINDS+=("${NF_CACHE}/dotdir:/home/dana/.nextflow")
 
     # Build runtime-specific command
@@ -432,7 +436,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=("$SIF_PATH" run /pipeline/main.nf)
             ;;
     esac
-    CONTAINER_CMD+=("${NF_ARGS[@]}" -resume ${RESUME_SESSION})
+    CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}" -resume ${RESUME_SESSION})
 
     echo "[INFO] Mode:   Container (${CONTAINER_RUNTIME})"
     echo "[INFO] Input:  $INPUT_HOST"
