@@ -341,6 +341,7 @@
         selectedId={$selectedSample}
         idKey="id"
         maxHeight="300px"
+        exportFilename="sample_stats"
         actionLabel={(row) => $cartItems.has(row.id) ? 'In Cart' : '+ Cart'}
         actionFn={(row) => toggleCart(row.id)}
         actionStyle={(row) => $cartItems.has(row.id)

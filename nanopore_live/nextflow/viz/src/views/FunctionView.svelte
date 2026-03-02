@@ -133,14 +133,14 @@
   <!-- Function summary table -->
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
     <h3 class="text-sm font-semibold text-slate-300 mb-2">Functional Summary</h3>
-    <DataTable columns={funcColumns} rows={funcTableRows} maxHeight="300px" />
+    <DataTable columns={funcColumns} rows={funcTableRows} maxHeight="300px" exportFilename="functional_summary" />
   </div>
 
   <!-- Top EC numbers -->
   {#if topEc.length}
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <h3 class="text-sm font-semibold text-slate-300 mb-2">Top EC Numbers</h3>
-      <DataTable columns={ecColumns} rows={topEc} maxHeight="300px" idKey="ec" />
+      <DataTable columns={ecColumns} rows={topEc} maxHeight="300px" idKey="ec" exportFilename="top_ec_numbers" />
     </div>
   {/if}
 </div>

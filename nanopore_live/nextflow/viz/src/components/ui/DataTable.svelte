@@ -1,6 +1,7 @@
 <script>
   let { columns = [], rows = [], onRowClick = null, selectedId = null, idKey = 'id',
-        maxHeight = '400px', hideExport = false, actionLabel = null, actionFn = null, actionStyle = null } = $props();
+        maxHeight = '400px', hideExport = false, exportFilename = 'table',
+        actionLabel = null, actionFn = null, actionStyle = null } = $props();
 
   let sortCol = $state(null);
   let sortAsc = $state(true);
@@ -30,7 +31,8 @@
     const blob = new Blob([header + '\n' + body], { type: 'text/tab-separated-values' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'table.tsv'; a.click();
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url; a.download = `${exportFilename}_${date}.tsv`; a.click();
     URL.revokeObjectURL(url);
   }
 </script>

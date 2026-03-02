@@ -354,6 +354,34 @@ def build_taxonomy_sunburst(all_path_counts, all_name_rank):
     }
 
 
+def build_taxonomy_parent_map(all_path_counts, all_name_rank):
+    """Build a global parent map from taxonomy lineage paths.
+
+    Returns {taxon_name: parent_taxon_name} for all standard-rank taxa.
+    """
+    parents = {}
+    for (taxonomy, leaf_name), _count in all_path_counts.items():
+        parts = [p.strip() for p in taxonomy.split(';')]
+        filtered = [p for p in parts if p in all_name_rank]
+        for i, name in enumerate(filtered):
+            if i > 0 and name not in parents:
+                parents[name] = filtered[i - 1]
+    return parents
+
+
+def filter_sample_sunburst(path_counts, min_frac=0.001):
+    """Filter per-sample sunburst data to taxa with >min_frac of total reads.
+
+    Collapses (taxonomy, leaf_name) to {leaf_name: count} and filters.
+    """
+    # Sum direct counts per taxon name
+    taxon_counts = {}
+    for (taxonomy, leaf_name), count in path_counts.items():
+        taxon_counts[leaf_name] = taxon_counts.get(leaf_name, 0) + count
+    total = sum(taxon_counts.values()) or 1
+    return {k: v for k, v in taxon_counts.items() if v / total >= min_frac}
+
+
 def compute_sample_tsne(sketch_distances_file, sample_ids):
     """Compute t-SNE from comparesketch distance matrix.
 
@@ -414,7 +442,7 @@ def compute_sample_tsne(sketch_distances_file, sample_ids):
     id_list = sorted(sample_ids)
     n = len(id_list)
     id_to_idx = {sid: i for i, sid in enumerate(id_list)}
-    dist_matrix = np.full((n, n), 50.0)  # default distance for missing pairs
+    dist_matrix = np.full((n, n), 100.0)  # max distance for unrelated pairs (no ANI hit)
     np.fill_diagonal(dist_matrix, 0)
 
     for (s1, s2), dist in distances.items():
@@ -426,8 +454,14 @@ def compute_sample_tsne(sketch_distances_file, sample_ids):
     # t-SNE on distance matrix
     perplexity = min(30, max(2, n // 3))
     tsne = TSNE(n_components=2, metric='precomputed', perplexity=perplexity,
-                random_state=42, n_iter=1000)
+                random_state=42, max_iter=1000, init='random')
     coords = tsne.fit_transform(dist_matrix)
+
+    # If taller than wide, swap axes so the layout is landscape
+    x_span = coords[:, 0].max() - coords[:, 0].min()
+    y_span = coords[:, 1].max() - coords[:, 1].min()
+    if y_span > x_span:
+        coords = coords[:, ::-1]  # swap x and y
 
     return {id_list[i]: [float(coords[i, 0]), float(coords[i, 1])] for i in range(n)}
 
@@ -513,6 +547,7 @@ def main():
     all_function = {}
     all_sunburst_paths = {}   # (taxonomy, leaf_name) -> total direct count
     all_sunburst_names = {}   # name -> rank
+    all_sample_sunburst = {}  # sample_id -> {taxon: direct_count} (filtered >0.1%)
 
     for i, s in enumerate(samples):
         sid = s['id']
@@ -527,6 +562,9 @@ def main():
         all_sunburst_names.update(sb_names)
         for key, cnt in sb_paths.items():
             all_sunburst_paths[key] = all_sunburst_paths.get(key, 0) + cnt
+
+        # Per-sample filtered sunburst counts for cart filtering
+        all_sample_sunburst[sid] = filter_sample_sunburst(sb_paths)
 
         # Extract start time from first fastq
         start_time = extract_start_time(s['dir'])
@@ -586,6 +624,9 @@ def main():
     print("[INFO] Building taxonomy sunburst...", file=sys.stderr)
     sunburst = build_taxonomy_sunburst(all_sunburst_paths, all_sunburst_names)
 
+    # Build parent map for client-side cart-filtered sunburst
+    parent_map = build_taxonomy_parent_map(all_sunburst_paths, all_sunburst_names)
+
     # Write outputs
     def write_json(filename, data):
         path = os.path.join(args.output, filename)
@@ -600,10 +641,22 @@ def main():
     if sample_tsne:
         embeddings['tsne'] = sample_tsne
     write_json('sample_tsne.json', embeddings)
-    write_json('sample_taxonomy.json', {
-        k: {'phylum': all_phylum_tax.get(k, {}), 'class': all_class_tax.get(k, {})}
-        for k in sample_ids
-    })
+    # Include rank map for client-side rank-level aggregation
+    rank_map = {k: v for k, v in all_sunburst_names.items()}
+
+    tax_data = {
+        'parents': parent_map,
+        'ranks': rank_map,
+        'samples': {
+            k: {
+                'phylum': all_phylum_tax.get(k, {}),
+                'class': all_class_tax.get(k, {}),
+                'direct': all_sample_sunburst.get(k, {}),
+            }
+            for k in sample_ids
+        },
+    }
+    write_json('sample_taxonomy.json', tax_data)
     write_json('taxonomy_sunburst.json', sunburst)
     write_json('sample_function.json', {k: v for k, v in all_function.items() if k in sample_ids})
     write_json('metadata.json', metadata)

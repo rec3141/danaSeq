@@ -100,6 +100,7 @@
       selectedId={$selectedSample}
       idKey="id"
       maxHeight="300px"
+      exportFilename="sample_locations"
     />
   {/if}
 </div>

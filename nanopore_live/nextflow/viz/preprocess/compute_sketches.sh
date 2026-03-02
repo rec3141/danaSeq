@@ -43,6 +43,10 @@ fi
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
+# Persistent sketch dir next to output so work survives restarts
+SKETCH_DIR="$(dirname "$OUTPUT_TSV")/sketches"
+mkdir -p "$SKETCH_DIR"
+
 # Locate BBMap tools
 BBMAP_DIR=""
 
@@ -89,12 +93,13 @@ COMPARESKETCH="$BBMAP_DIR/comparesketch.sh"
 
 echo "[INFO] Using BBMap tools from: $BBMAP_DIR"
 
-# Phase 1: Sketch each sample (streaming — no temp FASTA copies)
-echo "[INFO] Phase 1: Sketching individual samples..."
-SKETCH_DIR="$TMPDIR/sketches"
-mkdir -p "$SKETCH_DIR"
+# Phase 1: Sketch each sample (streaming, parallel)
+echo "[INFO] Phase 1: Sketching individual samples ($THREADS parallel)..."
 
-SAMPLE_COUNT=0
+# Build job list, skipping samples that already have sketch files
+JOBFILE="$TMPDIR/sketch_jobs.tsv"
+> "$JOBFILE"
+SKIPPED=0
 for sample_dir in "$INPUT_DIR"/*/; do
   sample_name="$(basename "$sample_dir")"
   for barcode_dir in "$sample_dir"/barcode*/; do
@@ -103,27 +108,52 @@ for sample_dir in "$INPUT_DIR"/*/; do
     fa_dir="$barcode_dir/fa"
     [[ -d "$fa_dir" ]] || continue
 
-    # Find non-empty FASTA files
-    fa_files=()
-    while IFS= read -r -d '' f; do
-      [[ -s "$f" ]] && fa_files+=("$f")
-    done < <(find "$fa_dir" -name "*.fa" -print0 2>/dev/null)
+    safe_name="${sample_name}_${barcode}"
 
-    if [[ ${#fa_files[@]} -gt 0 ]]; then
-      safe_name="${sample_name}_${barcode}"
-      # Stream concatenated FASTAs into sketch.sh — no temp copy needed
-      # in=stdin.fa tells BBMap the input is FASTA format (not FASTQ)
-      cat "${fa_files[@]}" | "$SKETCH" in=stdin.fa out="$SKETCH_DIR/${safe_name}.sketch" \
-        name="$safe_name" threads=1 -Xmx1g 2>/dev/null
-      SAMPLE_COUNT=$((SAMPLE_COUNT + 1))
-      if (( SAMPLE_COUNT % 50 == 0 )); then
-        echo "  [INFO] Sketched $SAMPLE_COUNT samples..."
-      fi
+    # Skip if sketch already exists
+    if [[ -s "$SKETCH_DIR/${safe_name}.sketch" ]]; then
+      SKIPPED=$((SKIPPED + 1))
+      continue
+    fi
+
+    # Check for non-empty FASTA files
+    if find "$fa_dir" -name "*.fa" -size +0c -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+      printf '%s\t%s\n' "$safe_name" "$fa_dir"
     fi
   done
-done
+done >> "$JOBFILE"
 
-echo "[INFO] Sketched $SAMPLE_COUNT samples"
+TOTAL_JOBS="$(wc -l < "$JOBFILE")"
+echo "[INFO] Found $TOTAL_JOBS samples to sketch ($SKIPPED already done)"
+
+# Run sketches in parallel using background jobs with a concurrency limiter
+DONE_COUNT=0
+RUNNING=0
+
+while IFS=$'\t' read -r safe_name fa_dir; do
+  (
+    find "$fa_dir" -name "*.fa" -size +0c -print0 2>/dev/null \
+      | xargs -0 cat \
+      | "$SKETCH" in=stdin.fa out="$SKETCH_DIR/${safe_name}.sketch" \
+          name="$safe_name" threads=1 -Xmx1g 2>/dev/null
+  ) &
+  RUNNING=$((RUNNING + 1))
+
+  if (( RUNNING >= THREADS )); then
+    wait -n 2>/dev/null || true
+    RUNNING=$((RUNNING - 1))
+    DONE_COUNT=$((DONE_COUNT + 1))
+    if (( DONE_COUNT % 50 == 0 )); then
+      echo "  [INFO] Sketched ~$DONE_COUNT / $TOTAL_JOBS samples..."
+    fi
+  fi
+done < "$JOBFILE"
+
+# Wait for remaining jobs
+wait 2>/dev/null || true
+
+SAMPLE_COUNT="$(find "$SKETCH_DIR" -name "*.sketch" | wc -l)"
+echo "[INFO] Sketched $SAMPLE_COUNT total samples"
 
 if [[ $SAMPLE_COUNT -lt 2 ]]; then
   echo "[WARNING] Need at least 2 samples for all-vs-all comparison. Skipping."
@@ -138,10 +168,10 @@ echo "[INFO] Sketch files total: $sketch_size"
 echo "[INFO] Phase 2: Running comparesketch alltoall ($SAMPLE_COUNT samples, $THREADS threads)..."
 cd "$SKETCH_DIR"
 "$COMPARESKETCH" alltoall *.sketch \
-  format=3 \
+  format=3 ow \
   out="$OUTPUT_TSV" \
   threads="$THREADS" \
-  2>&1 | grep -v "^$" | head -20
+  2>&1 | grep -v "^$" | head -20 || true
 
 echo "[INFO] Sketch distances written to: $OUTPUT_TSV"
 if [[ -f "$OUTPUT_TSV" ]]; then

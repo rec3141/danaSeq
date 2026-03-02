@@ -156,6 +156,6 @@
     </div>
 
     <!-- Full metadata table -->
-    <DataTable columns={tableColumns} rows={mergedData} maxHeight="300px" />
+    <DataTable columns={tableColumns} rows={mergedData} maxHeight="300px" exportFilename="environmental_metadata" />
   {/if}
 </div>
