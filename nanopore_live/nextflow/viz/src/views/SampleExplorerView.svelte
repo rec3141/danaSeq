@@ -78,12 +78,21 @@
 
   // Embedding mode: cycle between available embeddings (derived from data)
   const EMBED_LABELS = { grid: 'Grid', tsne: 't-SNE' };
-  let embedIdx = $state(0);
+  let embedIdx = $state(-1); // -1 = uninitialized, will auto-pick on data load
   let availableModes = $derived.by(() => {
     if (!$sampleTsne) return ['grid'];
     return Object.keys($sampleTsne).filter(k => $sampleTsne[k] && Object.keys($sampleTsne[k]).length > 0);
   });
-  let embedMode = $derived(availableModes[embedIdx % availableModes.length] || 'grid');
+
+  // Default to t-SNE when available
+  $effect(() => {
+    if (embedIdx === -1 && availableModes.length > 0) {
+      const tsneIdx = availableModes.indexOf('tsne');
+      embedIdx = tsneIdx >= 0 ? tsneIdx : 0;
+    }
+  });
+
+  let embedMode = $derived(availableModes[Math.max(0, embedIdx) % availableModes.length] || 'grid');
 
   function cycleEmbed() {
     embedIdx++;

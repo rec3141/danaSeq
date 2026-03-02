@@ -65,11 +65,13 @@
       hoveredIdx = idx;
       const c = indexMap[idx];
       if (!c) return;
-      const parts = [c[idField] || c.id];
+      const parts = [];
+      if (c.sample) parts.push(c.sample);
       if (c.length != null) parts.push(`${c.length.toLocaleString()} bp`);
       if (c.read_count != null) parts.push(`${c.read_count.toLocaleString()} reads`);
       if (c.gc != null) parts.push(`GC: ${typeof c.gc === 'number' ? c.gc.toFixed(1) : c.gc}%`);
       if (c[colorBy] != null && !CONTINUOUS[colorBy]) parts.push(`${colorBy}: ${c[colorBy]}`);
+      if (!parts.length) parts.push(c[idField] || c.id);
       tipText = parts.join(' | ');
       tipX = mouseX; tipY = mouseY - 16; tipShow = true;
     });

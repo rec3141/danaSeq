@@ -56,7 +56,7 @@ def extract_reads(db_path, sample_id, max_per_sample):
         # Check what tables exist
         tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
 
-        if 'tetra_data' not in tables or 'stats' not in tables:
+        if 'tetra_data' not in tables:
             con.close()
             return [], []
 
@@ -68,57 +68,89 @@ def extract_reads(db_path, sample_id, max_per_sample):
             con.close()
             return [], []
 
-        # Join tetra + stats + kraken
-        tetra_col_str = ', '.join(f't."{c}"' for c in tetra_cols)
+        # Check which optional columns exist in stats
+        has_stats = 'stats' in tables
+        stats_cols = set()
+        if has_stats:
+            stats_cols = {r[0] for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='stats'"
+            ).fetchall()}
+
+        has_gc = 'gc' in stats_cols
+        has_length = 'length' in stats_cols
         has_kraken = 'kraken' in tables
 
-        if has_kraken:
-            query = f"""
-                SELECT s.seqid, s.length, s.gc,
-                       k.taxa_name,
-                       {tetra_col_str}
-                FROM stats s
-                JOIN tetra_data t ON s.seqid = t.seqid
-                LEFT JOIN kraken k ON s.seqid = k.seqid
-                LIMIT {max_per_sample}
-            """
-        else:
-            query = f"""
-                SELECT s.seqid, s.length, s.gc,
-                       NULL as taxa_name,
-                       {tetra_col_str}
-                FROM stats s
-                JOIN tetra_data t ON s.seqid = t.seqid
-                LIMIT {max_per_sample}
-            """
+        # Build SELECT clause dynamically
+        tetra_col_str = ', '.join(f't."{c}"' for c in tetra_cols)
 
+        select_parts = ['t.seqid']
+        if has_stats and has_length:
+            select_parts.append('s.length')
+        else:
+            select_parts.append('NULL as length')
+        if has_stats and has_gc:
+            select_parts.append('s.gc')
+        else:
+            select_parts.append('NULL as gc')
+        if has_kraken:
+            select_parts.append('k.taxa_name')
+        else:
+            select_parts.append('NULL as taxa_name')
+        select_parts.append(tetra_col_str)
+
+        select_str = ', '.join(select_parts)
+
+        # Build FROM/JOIN clause
+        from_str = 'tetra_data t'
+        if has_stats:
+            from_str += ' LEFT JOIN stats s ON t.seqid = s.seqid'
+        if has_kraken:
+            from_str += ' LEFT JOIN kraken k ON t.seqid = k.seqid'
+
+        query = f"SELECT {select_str} FROM {from_str} LIMIT {max_per_sample}"
         rows = con.execute(query).fetchall()
+
+        # GC tetramers for estimation when gc column is missing
+        gc_tetras = set()
+        for nt in tetra_cols:
+            gc_count = nt.count('G') + nt.count('C')
+            if gc_count >= 3:  # mostly GC content
+                gc_tetras.add(nt)
+        gc_indices = [i for i, c in enumerate(tetra_cols) if c in gc_tetras]
 
         for row in rows:
             seqid = row[0]
             length = row[1]
             gc = row[2]
             taxa_name = row[3]
+            tetra_values = [float(v) if v is not None else 0.0 for v in row[4:]]
+
+            # Estimate GC from tetramer frequencies if not available
+            if gc is None and tetra_values:
+                # Sum of tetramers weighted by their GC content
+                gc_est = sum(
+                    tetra_values[i] * (tetra_cols[i].count('G') + tetra_cols[i].count('C')) / 4.0
+                    for i in range(len(tetra_cols))
+                ) * 100
+                gc = round(gc_est, 1)
+            elif gc is not None:
+                gc = round(gc, 1)
 
             # Parse taxonomy
             kraken_phylum = None
             kraken_class = None
             kraken_domain = None
             if taxa_name:
-                # Extract taxon name (remove taxid suffix)
                 import re
                 match = re.match(r'(.+?)(?:\s*\(taxid \d+\))?$', str(taxa_name))
                 name = match.group(1).strip() if match else str(taxa_name).strip()
-                kraken_phylum = name  # simplified: use full name as phylum
-
-            # Tetramer values
-            tetra_values = [float(v) if v is not None else 0.0 for v in row[4:]]
+                kraken_phylum = name
 
             reads.append({
                 'id': seqid,
                 'sample': sample_id,
                 'length': length,
-                'gc': round(gc, 1) if gc else None,
+                'gc': gc,
                 'kraken_phylum': kraken_phylum,
                 'kraken_domain': kraken_domain,
                 'kraken_class': kraken_class,
@@ -182,7 +214,7 @@ def main():
     # Compute t-SNE
     perplexity = min(30, max(5, len(all_reads) // 10))
     tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42,
-                n_iter=1000, learning_rate='auto', init='pca')
+                max_iter=1000, learning_rate='auto', init='pca')
     coords = tsne.fit_transform(tetra_matrix)
 
     # Add coordinates to reads

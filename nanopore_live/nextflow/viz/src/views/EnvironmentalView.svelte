@@ -7,14 +7,43 @@
 
   let xVar = $state('temperature_c');
   let yVar = $state('diversity');
-  let colorBy = $state('station');
-  let sizeBy = $state('fixed');
   let sizeScale = $state(1.0);
   let lassoIds = $state(null);
   let boxXVar = $derived(categoricalCols.includes(xVar) ? xVar : categoricalCols[0] || 'station');
 
   const PALETTE = ['#22d3ee','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c',
                    '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8'];
+
+  // Cycling button helpers
+  function cycle(values, current) {
+    const idx = values.indexOf(current);
+    return values[(idx + 1) % values.length];
+  }
+  function getLabel(values, labels, current) {
+    const idx = values.indexOf(current);
+    return idx >= 0 ? labels[idx] : labels[0];
+  }
+
+  // Color-by groups
+  const runInfoGroup = { values: ['station', 'flowcell'], labels: ['Station', 'Flowcell'] };
+  const taxGroup     = { values: ['dominant_phylum', 'dominant_class'], labels: ['Phylum', 'Class'] };
+
+  const BW = { runInfo: '5rem', taxonomy: '4.5rem', metadata: '5rem', size: '4.5rem' };
+
+  let colorMode = $state('runInfo');  // 'runInfo' | 'taxonomy' | 'metadata'
+  let runInfoField = $state('station');
+  let taxField = $state('dominant_phylum');
+  let metaField = $state(null);  // set from dynamic metadata
+
+  let colorBy = $derived(
+    colorMode === 'runInfo' ? runInfoField :
+    colorMode === 'taxonomy' ? taxField :
+    metaField || 'station'
+  );
+
+  // Size cycling
+  const sizeGroup = { values: ['fixed', 'read_count', 'total_bases', 'diversity'], labels: ['Fixed', 'Reads', 'Bases', 'Diversity'] };
+  let sizeBy = $state('fixed');
 
   // Discover all metadata columns, classify as numeric or categorical
   let allColumns = $derived.by(() => {
@@ -44,6 +73,25 @@
 
   // Categorical columns for color-by and boxplot x-axis
   let categoricalCols = $derived([...allColumns.categorical, 'station', 'dominant_phylum', 'dominant_class', 'flowcell'].filter((v, i, a) => a.indexOf(v) === i));
+
+  // Dynamic metadata group (categorical cols not covered by runInfo/taxonomy)
+  let metaGroup = $derived.by(() => {
+    const covered = new Set(['station', 'flowcell', 'dominant_phylum', 'dominant_class']);
+    const vals = [], labs = [];
+    for (const col of categoricalCols) {
+      if (covered.has(col)) continue;
+      vals.push(col);
+      labs.push(col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()));
+    }
+    return { values: vals, labels: labs };
+  });
+
+  // Initialize metaField when metadata loads
+  $effect(() => {
+    if (metaField === null && metaGroup.values.length > 0) {
+      metaField = metaGroup.values[0];
+    }
+  });
 
   // Merge samples with metadata for plotting
   let mergedData = $derived.by(() => {
@@ -265,13 +313,32 @@
     }
   }
 
-  // Metadata table
+  // Metadata table — show all useful columns from merged data
   let tableColumns = $derived.by(() => {
     const cols = [{ key: 'id', label: 'Sample' }];
-    for (const c of allColumns.numeric) {
-      cols.push({ key: c, label: c, render: v => v != null ? (typeof v === 'number' ? v.toFixed(2) : v) : '-' });
+    // Sample-level fields
+    const sampleFields = [
+      { key: 'flowcell', label: 'Flowcell' },
+      { key: 'read_count', label: 'Reads', render: v => v != null ? Number(v).toLocaleString() : '-' },
+      { key: 'total_bases', label: 'Bases', render: v => v != null ? `${(v / 1e6).toFixed(1)}M` : '-' },
+      { key: 'gc', label: 'GC%', render: v => typeof v === 'number' ? v.toFixed(1) : '-' },
+      { key: 'diversity', label: 'Shannon H', render: v => typeof v === 'number' ? v.toFixed(2) : '-' },
+      { key: 'dominant_phylum', label: 'Phylum' },
+      { key: 'dominant_class', label: 'Class' },
+    ];
+    for (const f of sampleFields) cols.push(f);
+    // All metadata columns (categorical + numeric)
+    const skip = new Set(['id', 'lat', 'lon', ...sampleFields.map(f => f.key)]);
+    for (const c of categoricalCols) {
+      if (skip.has(c)) continue;
+      cols.push({ key: c, label: c });
+      skip.add(c);
     }
-    cols.push({ key: 'diversity', label: 'Shannon H', render: v => v != null ? v.toFixed(2) : '-' });
+    for (const c of allColumns.numeric) {
+      if (skip.has(c)) continue;
+      cols.push({ key: c, label: c, render: v => typeof v === 'number' ? v.toFixed(2) : (v ?? '-') });
+      skip.add(c);
+    }
     return cols;
   });
 </script>
@@ -283,8 +350,9 @@
       <p class="text-sm">Provide a metadata TSV with numeric columns (temperature_c, salinity_psu, depth_m, etc.) to enable environmental plots.</p>
     </div>
   {:else}
-    <!-- Variable selectors -->
-    <div class="flex items-center gap-3 flex-wrap text-xs">
+    <!-- Controls -->
+    <div class="flex items-center gap-2 flex-wrap text-xs">
+      <!-- Axis selectors (dropdowns — many options) -->
       <select bind:value={xVar}
         class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
         {#each [...categoricalCols, ...continuousCols] as col}
@@ -297,27 +365,61 @@
           <option value={col}>Y: {col}</option>
         {/each}
       </select>
-      <select bind:value={colorBy}
-        class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
-        {#each categoricalCols as col}
-          <option value={col}>Color: {col}</option>
-        {/each}
-      </select>
-      <select bind:value={sizeBy}
-        class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
-        <option value="fixed">Size: Fixed</option>
-        {#each continuousCols as col}
-          <option value={col}>Size: {col}</option>
-        {/each}
-      </select>
+
+      <span class="text-slate-600 mx-1">|</span>
+
+      <!-- Color cycling buttons -->
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center
+          {colorMode === 'runInfo' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        style="min-width: {BW.runInfo}"
+        onclick={() => { if (colorMode === 'runInfo') runInfoField = cycle(runInfoGroup.values, runInfoField); else colorMode = 'runInfo'; }}
+        title={`Click to cycle: ${runInfoGroup.labels.join(' → ')}`}
+      >
+        {colorMode === 'runInfo' ? getLabel(runInfoGroup.values, runInfoGroup.labels, runInfoField) : 'Run Info'} &#x25BE;
+      </button>
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center
+          {colorMode === 'taxonomy' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        style="min-width: {BW.taxonomy}"
+        onclick={() => { if (colorMode === 'taxonomy') taxField = cycle(taxGroup.values, taxField); else colorMode = 'taxonomy'; }}
+        title={`Click to cycle: ${taxGroup.labels.join(' → ')}`}
+      >
+        {colorMode === 'taxonomy' ? getLabel(taxGroup.values, taxGroup.labels, taxField) : 'Taxonomy'} &#x25BE;
+      </button>
+      {#if metaGroup.values.length > 0}
+        <button
+          class="px-3 py-1 rounded-md border transition-colors text-center
+            {colorMode === 'metadata' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+          style="min-width: {BW.metadata}"
+          onclick={() => { if (colorMode === 'metadata') metaField = cycle(metaGroup.values, metaField); else colorMode = 'metadata'; }}
+          title={`Click to cycle: ${metaGroup.labels.join(' → ')}`}
+        >
+          {colorMode === 'metadata' ? getLabel(metaGroup.values, metaGroup.labels, metaField) : 'Metadata'} &#x25BE;
+        </button>
+      {/if}
+
+      <span class="text-slate-600 mx-1">|</span>
+
+      <!-- Size cycling button -->
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center border-cyan-400 bg-cyan-400/10 text-cyan-400"
+        style="min-width: {BW.size}"
+        onclick={() => sizeBy = cycle(sizeGroup.values, sizeBy)}
+        title={`Click to cycle: ${sizeGroup.labels.join(' → ')}`}
+      >
+        {getLabel(sizeGroup.values, sizeGroup.labels, sizeBy)} &#x25BE;
+      </button>
       <div class="text-slate-400 flex items-center gap-1">
-        Size
         <div class="single-range relative w-16 h-5 flex items-center">
           <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
           <input type="range" min="0.3" max="3" step="0.1" bind:value={sizeScale} />
         </div>
         <span class="text-slate-500 w-8 font-mono">{sizeScale.toFixed(1)}x</span>
       </div>
+
+      <span class="text-slate-600 mx-1">|</span>
+
       <span class="text-slate-500">
         {mergedData.length} samples
         {#if $cartActive && $cartItems.size > 0}

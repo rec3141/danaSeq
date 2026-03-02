@@ -41,15 +41,25 @@
     return (3 + t * 27) * sizeScale; // 3px to 30px full range
   }
 
+  function fmtVal(v) {
+    if (v == null) return '-';
+    if (typeof v === 'number') return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
+    return String(v);
+  }
+
+  function fmtLabel(key) {
+    return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  }
+
   function tooltipContent(m) {
     const label = m.station || m.id;
     const parts = [`<b>${label}</b>`];
     if (m.station) parts.push(`<span style="color:#64748b">${m.id}</span>`);
     if (m.date) parts.push(`Date: ${m.date}`);
     if (m.depth_m != null) parts.push(`Depth: ${m.depth_m}m`);
-    if (m.read_count != null) parts.push(`Reads: ${m.read_count.toLocaleString()}`);
-    if (m.dominant_phylum) parts.push(`Dominant: ${m.dominant_phylum}`);
-    if (m.diversity != null) parts.push(`Shannon H: ${m.diversity.toFixed(2)}`);
+    // Show current color and size selections
+    if (colorBy && m[colorBy] != null) parts.push(`${fmtLabel(colorBy)}: ${fmtVal(m[colorBy])}`);
+    if (sizeBy !== 'fixed' && sizeBy !== colorBy && m[sizeBy] != null) parts.push(`${fmtLabel(sizeBy)}: ${fmtVal(m[sizeBy])}`);
     return `<div style="color:#e2e8f0;font-family:Inter,sans-serif;font-size:11px;line-height:1.4">${parts.join('<br>')}</div>`;
   }
 

@@ -6,19 +6,36 @@
   import { cartItems, cartActive } from '../stores/cart.js';
   import { selectedRead } from '../stores/selection.js';
 
-  let colorBy = $state('sample');
   let loading = $state(true);
 
-  const colorOptions = [
-    { value: 'sample', label: 'Sample' },
-    { value: 'kraken_domain', label: 'Domain' },
-    { value: 'kraken_phylum', label: 'Phylum' },
-    { value: 'kraken_class', label: 'Class' },
-    { value: 'kraken_order', label: 'Order' },
-    { value: 'kraken_family', label: 'Family' },
-    { value: 'gc', label: 'GC%' },
-    { value: 'length', label: 'Read Length' },
-  ];
+  // Cycling button helpers
+  function cycle(values, current) {
+    const idx = values.indexOf(current);
+    return values[(idx + 1) % values.length];
+  }
+  function getLabel(values, labels, current) {
+    const idx = values.indexOf(current);
+    return idx >= 0 ? labels[idx] : labels[0];
+  }
+
+  // Color-by groups
+  const taxGroup =    { values: ['kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_domain'],
+                        labels: ['Phylum', 'Class', 'Order', 'Family', 'Domain'] };
+  const metricGroup = { values: ['gc', 'length'], labels: ['GC%', 'Length'] };
+
+  const BW = { sample: '4.5rem', taxonomy: '4.5rem', metric: '4.5rem' };
+
+  let colorMode = $state('sample'); // 'sample' | 'taxonomy' | 'metric'
+  let taxRank = $state('kraken_phylum');
+  let metric = $state('gc');
+
+  let sizeScale = $state(0.6);
+
+  let colorBy = $derived(
+    colorMode === 'sample' ? 'sample' :
+    colorMode === 'taxonomy' ? taxRank :
+    metric
+  );
 
   onMount(async () => {
     await loadReadExplorer();
@@ -81,16 +98,47 @@
     {/if}
 
     <!-- Controls -->
-    <div class="flex items-center gap-3 text-xs">
-      <select bind:value={colorBy}
-        class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
-        {#each colorOptions as opt}
-          <option value={opt.value}>{opt.label}</option>
-        {/each}
-      </select>
+    <div class="flex items-center gap-2 text-xs">
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center
+          {colorMode === 'sample' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        style="min-width: {BW.sample}"
+        onclick={() => colorMode = 'sample'}
+      >
+        Sample
+      </button>
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center
+          {colorMode === 'taxonomy' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        style="min-width: {BW.taxonomy}"
+        onclick={() => { if (colorMode === 'taxonomy') taxRank = cycle(taxGroup.values, taxRank); else colorMode = 'taxonomy'; }}
+        title={`Click to cycle: ${taxGroup.labels.join(' → ')}`}
+      >
+        {colorMode === 'taxonomy' ? getLabel(taxGroup.values, taxGroup.labels, taxRank) : 'Taxonomy'} &#x25BE;
+      </button>
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center
+          {colorMode === 'metric' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        style="min-width: {BW.metric}"
+        onclick={() => { if (colorMode === 'metric') metric = cycle(metricGroup.values, metric); else colorMode = 'metric'; }}
+        title={`Click to cycle: ${metricGroup.labels.join(' → ')}`}
+      >
+        {colorMode === 'metric' ? getLabel(metricGroup.values, metricGroup.labels, metric) : 'Metric'} &#x25BE;
+      </button>
+      <span class="text-slate-600 mx-1">|</span>
+
+      <div class="text-slate-400 flex items-center gap-1">
+        Size
+        <div class="single-range relative w-16 h-5 flex items-center">
+          <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
+          <input type="range" min="0.2" max="3" step="0.1" bind:value={sizeScale} />
+        </div>
+        <span class="text-slate-500 w-8 font-mono">{sizeScale.toFixed(1)}x</span>
+      </div>
+
       {#if scatterData?.points}
-        <span class="text-xs text-slate-500">
-          {scatterData.points.length.toLocaleString()} reads displayed
+        <span class="text-slate-500 ml-1">
+          {scatterData.points.length.toLocaleString()} reads
         </span>
       {/if}
     </div>
@@ -103,7 +151,7 @@
             data={scatterData}
             {colorBy}
             sizeBy="fixed"
-            sizeScale={0.6}
+            {sizeScale}
             mode="tsne"
             {searchMatchIds}
             exportName={`danaseq_read_tsne_color-${colorBy}`}
@@ -140,3 +188,38 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .single-range input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+  .single-range input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: #22d3ee;
+    cursor: pointer;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 3px rgba(0,0,0,0.4);
+  }
+  .single-range input[type="range"]::-moz-range-thumb {
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: #22d3ee;
+    cursor: pointer;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 3px rgba(0,0,0,0.4);
+  }
+  .single-range input[type="range"]::-webkit-slider-runnable-track { height: 0; }
+  .single-range input[type="range"]::-moz-range-track { height: 0; background: transparent; }
+</style>

@@ -5,10 +5,33 @@
   import { cartItems, cartActive, toggleCart, addToCart } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
 
-  let colorBy = $state('dominant_phylum');
+  // Cycling button helpers
+  function cycle(values, current) {
+    const idx = values.indexOf(current);
+    return values[(idx + 1) % values.length];
+  }
+  function getLabel(values, labels, current) {
+    const idx = values.indexOf(current);
+    return idx >= 0 ? labels[idx] : labels[0];
+  }
+
+  // Color-by groups
+  const infoGroup =   { values: ['flowcell', 'station'], labels: ['Flowcell', 'Station'] };
+  const taxGroup =    { values: ['dominant_phylum', 'dominant_class'], labels: ['Phylum', 'Class'] };
+  const metricGroup = { values: ['read_count', 'diversity'], labels: ['Reads', 'Diversity'] };
+  const sizeGroup =   { values: ['fixed', 'read_count', 'total_bases', 'diversity'], labels: ['Fixed', 'Reads', 'Bases', 'Diversity'] };
+
+  const BW = { info: '4.5rem', taxonomy: '4.5rem', metric: '4.5rem', metadata: '5rem', size: '4rem' };
+
+  let colorMode = $state('taxonomy'); // 'info' | 'taxonomy' | 'metric' | 'metadata'
+  let infoField = $state('flowcell');
+  let taxField = $state('dominant_phylum');
+  let metricField = $state('read_count');
+  let metaField = $state('');
+
   let sizeBy = $state('fixed');
   let sizeScale = $state(1.0);
-  let nudgeIdx = $state(3); // index into NUDGE_STEPS
+  let nudgeIdx = $state(3);
   const NUDGE_STEPS = [0, 1, 10, 100, 1000];
   let nudgeMeters = $derived(NUDGE_STEPS[nudgeIdx]);
 
@@ -21,10 +44,10 @@
   let depthMinPct = $state(0);
   let depthMaxPct = $state(100);
 
-  // Auto-detect metadata columns for color/size (exclude lat/lon)
+  // Auto-detect metadata columns
   let metaColumns = $derived.by(() => {
     if (!$metadata) return [];
-    const cols = new Map(); // key -> { numeric: count, total: count }
+    const cols = new Map();
     for (const m of Object.values($metadata)) {
       for (const [k, v] of Object.entries(m)) {
         if (k === 'lat' || k === 'lon') continue;
@@ -36,42 +59,30 @@
     }
     return [...cols.entries()].map(([k, c]) => ({
       key: k,
-      continuous: c.numeric > c.total * 0.8, // >80% numeric = continuous
+      continuous: c.numeric > c.total * 0.8,
     })).sort((a, b) => a.key.localeCompare(b.key));
   });
 
-  // Build color and size option lists
-  let colorOptions = $derived.by(() => {
-    const opts = [
-      { value: 'dominant_phylum', label: 'Phylum' },
-      { value: 'dominant_class', label: 'Class' },
-      { value: 'flowcell', label: 'Flowcell' },
-      { value: 'station', label: 'Station' },
-      { value: 'read_count', label: 'Read Count' },
-      { value: 'diversity', label: 'Diversity' },
-    ];
-    const existing = new Set(opts.map(o => o.value));
+  // Dynamic metadata group (columns not already covered by built-in groups)
+  let metaGroup = $derived.by(() => {
+    const covered = new Set(['dominant_phylum', 'dominant_class', 'flowcell', 'station', 'read_count', 'diversity', 'date', 'total_bases']);
+    const vals = [], labs = [];
     for (const col of metaColumns) {
-      if (existing.has(col.key) || col.key === 'date') continue;
-      opts.push({ value: col.key, label: col.key });
+      if (covered.has(col.key)) continue;
+      vals.push(col.key);
+      labs.push(col.key);
     }
-    return opts;
+    return { values: vals, labels: labs };
   });
 
-  let sizeOptions = $derived.by(() => {
-    const opts = [
-      { value: 'fixed', label: 'Fixed' },
-      { value: 'read_count', label: 'Reads' },
-      { value: 'total_bases', label: 'Bases' },
-      { value: 'diversity', label: 'Diversity' },
-    ];
-    const existing = new Set(opts.map(o => o.value));
-    for (const col of metaColumns) {
-      if (!col.continuous || existing.has(col.key)) continue;
-      opts.push({ value: col.key, label: col.key });
-    }
-    return opts;
-  });
+  // Derived colorBy from cycling state
+  let colorBy = $derived(
+    colorMode === 'info' ? infoField :
+    colorMode === 'taxonomy' ? taxField :
+    colorMode === 'metric' ? metricField :
+    colorMode === 'metadata' ? (metaField || metaGroup.values[0] || 'station') :
+    'dominant_phylum'
+  );
 
   // Is current colorBy continuous?
   let colorIsContinuous = $derived.by(() => {
@@ -80,7 +91,7 @@
     return ['read_count', 'total_bases', 'diversity'].includes(colorBy);
   });
 
-  // log2 read count filter ceiling (derived from data)
+  // log2 read count filter ceiling
   let log2Ceil = $derived.by(() => {
     if (!allMarkers.length) return 21;
     const maxReads = Math.max(...allMarkers.map(m => m.read_count || 0));
@@ -104,7 +115,7 @@
     return limits.min + (limits.max - limits.min) * pct / 100;
   }
 
-  // All markers (before filters) — include all metadata fields
+  // All markers (before filters)
   let allMarkers = $derived.by(() => {
     if (!$samples || !$metadata) return [];
     return $samples.map(s => {
@@ -120,29 +131,23 @@
         dominant_phylum: s.dominant_phylum,
         dominant_class: s.dominant_class,
         diversity: s.diversity,
-        ...m, // all metadata fields (station, date, depth_m, temperature_c, etc.)
+        ...m,
       };
     }).filter(Boolean);
   });
 
-  // Filtered markers (cart + range filters)
+  // Filtered markers
   let markers = $derived.by(() => {
     let filtered = allMarkers;
-
-    // Cart filter
     if ($cartActive && $cartItems.size > 0) {
       filtered = filtered.filter(m => $cartItems.has(m.id));
     }
-
-    // Read count filter (log2 scale)
     filtered = filtered.filter(m => {
       const rc = m.read_count || 0;
       if (rc === 0) return log2Min === 0;
       const l = Math.log2(Math.max(1, rc));
       return l >= log2Min && l <= log2Max;
     });
-
-    // Depth filter (only if we have depth data)
     if (hasDepthData) {
       const dMin = pctToVal(depthMinPct, depthLimits);
       const dMax = pctToVal(depthMaxPct, depthLimits);
@@ -151,21 +156,18 @@
         return m.depth_m >= dMin && m.depth_m <= dMax;
       });
     }
-
     return filtered;
   });
 
-  // Color map: categorical = discrete palette, continuous = not used (LeafletMap handles by value)
+  // Color map
   let markerColorMap = $derived.by(() => {
     if (colorIsContinuous) {
-      // For continuous, generate a color scale from marker values
       const vals = markers.map(m => m[colorBy]).filter(v => v != null && typeof v === 'number');
       if (!vals.length) return {};
       const min = Math.min(...vals);
       const max = Math.max(...vals);
       const range = max - min || 1;
       const map = {};
-      // Use Viridis-like interpolation via simple gradient
       for (const m of markers) {
         const v = m[colorBy];
         if (v == null || typeof v !== 'number') { map[m.id] = '#475569'; continue; }
@@ -174,7 +176,6 @@
       }
       return map;
     }
-    // Categorical
     const map = {};
     const values = [...new Set(markers.map(m => {
       const v = m[colorBy];
@@ -185,7 +186,6 @@
   });
 
   function viridisColor(t) {
-    // Simplified viridis: dark purple -> blue -> teal -> green -> yellow
     const r = Math.round(Math.min(255, Math.max(0, 68 + t * 187)));
     const g = Math.round(Math.min(255, Math.max(0, 1 + t * 230)));
     const b = Math.round(Math.min(255, Math.max(0, 84 + (t < 0.5 ? t * 200 : (1 - t) * 200))));
@@ -200,7 +200,6 @@
   let noGeoData = $derived(!$metadata || allMarkers.length === 0);
   let hasDepthData = $derived(allMarkers.some(m => m.depth_m != null));
 
-  // Selected sample detail (merges sample data + metadata)
   let selectedDetail = $derived.by(() => {
     if (!$selectedSample || !$samples) return null;
     const s = $samples.find(s => s.id === $selectedSample);
@@ -246,27 +245,76 @@
     </div>
   {:else}
     <!-- Controls -->
-    <div class="flex items-center gap-3 flex-wrap text-xs">
-      <select bind:value={colorBy}
-        class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
-        {#each colorOptions as opt}
-          <option value={opt.value}>Color: {opt.label}</option>
-        {/each}
-      </select>
-      <select bind:value={sizeBy}
-        class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
-        {#each sizeOptions as opt}
-          <option value={opt.value}>Size: {opt.label}</option>
-        {/each}
-      </select>
+    <div class="flex items-center gap-2 flex-wrap text-xs">
+      <!-- Color cycling buttons -->
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center
+          {colorMode === 'info' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        style="min-width: {BW.info}"
+        onclick={() => { if (colorMode === 'info') infoField = cycle(infoGroup.values, infoField); else colorMode = 'info'; }}
+        title={`Click to cycle: ${infoGroup.labels.join(' → ')}`}
+      >
+        {colorMode === 'info' ? getLabel(infoGroup.values, infoGroup.labels, infoField) : 'Run Info'} &#x25BE;
+      </button>
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center
+          {colorMode === 'taxonomy' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        style="min-width: {BW.taxonomy}"
+        onclick={() => { if (colorMode === 'taxonomy') taxField = cycle(taxGroup.values, taxField); else colorMode = 'taxonomy'; }}
+        title={`Click to cycle: ${taxGroup.labels.join(' → ')}`}
+      >
+        {colorMode === 'taxonomy' ? getLabel(taxGroup.values, taxGroup.labels, taxField) : 'Taxonomy'} &#x25BE;
+      </button>
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center
+          {colorMode === 'metric' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        style="min-width: {BW.metric}"
+        onclick={() => { if (colorMode === 'metric') metricField = cycle(metricGroup.values, metricField); else colorMode = 'metric'; }}
+        title={`Click to cycle: ${metricGroup.labels.join(' → ')}`}
+      >
+        {colorMode === 'metric' ? getLabel(metricGroup.values, metricGroup.labels, metricField) : 'Metric'} &#x25BE;
+      </button>
+      {#if metaGroup.values.length > 0}
+        <button
+          class="px-3 py-1 rounded-md border transition-colors text-center
+            {colorMode === 'metadata' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+          style="min-width: {BW.metadata}"
+          onclick={() => {
+            if (colorMode === 'metadata') {
+              metaField = cycle(metaGroup.values, metaField || metaGroup.values[0]);
+            } else {
+              colorMode = 'metadata';
+              if (!metaField) metaField = metaGroup.values[0];
+            }
+          }}
+          title={`Click to cycle: ${metaGroup.labels.join(' → ')}`}
+        >
+          {colorMode === 'metadata' ? getLabel(metaGroup.values, metaGroup.labels, metaField || metaGroup.values[0]) : 'Metadata'} &#x25BE;
+        </button>
+      {/if}
+
+      <span class="text-slate-600 mx-1">|</span>
+
+      <!-- Size cycling button -->
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center border-cyan-400 bg-cyan-400/10 text-cyan-400"
+        style="min-width: {BW.size}"
+        onclick={() => sizeBy = cycle(sizeGroup.values, sizeBy)}
+        title={`Click to cycle: ${sizeGroup.labels.join(' → ')}`}
+      >
+        {getLabel(sizeGroup.values, sizeGroup.labels, sizeBy)} &#x25BE;
+      </button>
       <div class="text-slate-400 flex items-center gap-1">
-        Size
         <div class="single-range relative w-16 h-5 flex items-center">
           <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
           <input type="range" min="0.3" max="3" step="0.1" bind:value={sizeScale} />
         </div>
         <span class="text-slate-500 w-8 font-mono">{sizeScale.toFixed(1)}x</span>
       </div>
+
+      <span class="text-slate-600 mx-1">|</span>
+
+      <!-- Nudge -->
       <div class="text-slate-400 flex items-center gap-1">
         Nudge
         <div class="single-range relative w-16 h-5 flex items-center">
@@ -276,7 +324,7 @@
         <span class="text-slate-500 w-12 font-mono">{nudgeMeters === 0 ? 'off' : nudgeMeters >= 1000 ? `${nudgeMeters/1000}km` : `${nudgeMeters}m`}</span>
       </div>
 
-      <!-- Reads dual-range slider (log2 scale) -->
+      <!-- Reads dual-range slider -->
       <div class="flex items-center gap-1 text-slate-400">
         <span>Reads</span>
         <span class="text-slate-500 w-10 text-right font-mono">{readFilterLabel(log2Min)}</span>
