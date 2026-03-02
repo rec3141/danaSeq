@@ -23,6 +23,12 @@ process VIZ_PREPROCESS {
     def vizDir = "${params.outdir}/viz"
     def vizPort = params.viz_port ?: 5174
     """
+    # Ensure the viz conda env's Python is used (has numpy, pandas, scipy, etc.)
+    # In container mode, conda is disabled and the wrapper may not be on PATH
+    if [ -d /opt/conda/envs/dana-mag-viz/bin ]; then
+        export PATH="/opt/conda/envs/dana-mag-viz/bin:\$PATH"
+    fi
+
     # Copy Nextflow log for pipeline status parsing
     cp "${projectDir}/.nextflow.log" "${params.outdir}/pipeline_info/nextflow.log" 2>/dev/null || true
 
