@@ -121,11 +121,12 @@ save_run_command() {
 }
 
 usage() {
-    echo "Usage: $0 --input DIR --outdir DIR [pipeline options]"
+    echo "Usage: $0 --input DIR [--outdir DIR | --store_dir DIR] [pipeline options]"
     echo ""
     echo "Required:"
     echo "  --input DIR      Directory containing reads (*.fastq.gz or barcode structure)"
     echo "  --outdir DIR     Output directory (will be created if needed)"
+    echo "                   Defaults to --store_dir if not specified"
     echo ""
     echo "Mode:"
     echo "  --docker         Run in Docker container"
@@ -312,7 +313,14 @@ NF_ARGS=("${DB_ARGS[@]}" "${NF_ARGS[@]}")
 # ============================================================================
 
 [[ -z "$INPUT_HOST" ]] && die "--input is required. Run with --help for usage."
-[[ -z "$OUTDIR_HOST" ]] && die "--outdir is required. Run with --help for usage."
+
+# Default --outdir to --store_dir when only store_dir is set
+if [[ -z "$OUTDIR_HOST" && -n "$STORE_DIR_HOST" ]]; then
+    OUTDIR_HOST="$STORE_DIR_HOST"
+    NF_ARGS+=("--outdir" "$OUTDIR_HOST")
+    echo "[INFO] No --outdir specified, using --store_dir: $OUTDIR_HOST"
+fi
+[[ -z "$OUTDIR_HOST" ]] && die "--outdir (or --store_dir) is required. Run with --help for usage."
 
 # Input directory must exist
 [[ -d "$INPUT_HOST" ]] || die "Input directory does not exist: $INPUT_HOST"
