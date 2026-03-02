@@ -24,7 +24,7 @@
     };
     const mergedConfig = {
       responsive: true, displaylogo: false, displayModeBar: 'hover',
-      toImageButtonOptions: { format: 'png', filename: exportName, scale: 4 },
+      toImageButtonOptions: { format: 'svg', filename: exportName },
       ...config,
     };
     Plotly.react(container, traces, mergedLayout, mergedConfig);

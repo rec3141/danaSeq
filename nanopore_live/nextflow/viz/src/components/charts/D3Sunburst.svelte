@@ -2,8 +2,27 @@
   import { onMount } from 'svelte';
   import * as d3 from 'd3';
 
-  let { data = null, colorDepth = 2 } = $props();
+  let { data = null, colorDepth = 2, exportName = 'danaseq_sunburst' } = $props();
   let container;
+
+  function exportSvg() {
+    const svg = container?.querySelector('svg');
+    if (!svg) return;
+    const clone = svg.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    // Add dark background rect so export looks correct
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    const vb = clone.getAttribute('viewBox')?.split(' ').map(Number) || [0, 0, 500, 500];
+    bg.setAttribute('x', vb[0]); bg.setAttribute('y', vb[1]);
+    bg.setAttribute('width', vb[2]); bg.setAttribute('height', vb[3]);
+    bg.setAttribute('fill', '#1e293b');
+    clone.insertBefore(bg, clone.firstChild);
+    const blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${exportName}.svg`; a.click();
+    URL.revokeObjectURL(url);
+  }
 
   onMount(() => { if (data) render(data); });
 
@@ -70,9 +89,8 @@
         d3.select(this).attr('fill-opacity', 1).attr('stroke', '#e2e8f0').attr('stroke-width', 1);
         const pct = ((d.value / root.value) * 100).toFixed(1);
         const pathStr = d.ancestors().map(a => a.data.name).reverse().slice(1).join(' > ');
-        const valStr = d.value >= 1e6 ? `${(d.value / 1e6).toFixed(1)}M` : d.value.toLocaleString();
         tooltip.style('opacity', 1)
-          .html(`<strong>${d.data.name}</strong><br><span style="color:#64748b">${pathStr}</span><br>${pct}% &middot; ${valStr} reads`);
+          .html(`<strong>${d.data.name}</strong><br><span style="color:#64748b">${pathStr}</span><br>${pct}%`);
       })
       .on('mousemove', function (event) {
         const rect = container.getBoundingClientRect();
@@ -149,4 +167,14 @@
   }
 </script>
 
-<div bind:this={container} class="relative w-full"></div>
+<div bind:this={container} class="relative w-full">
+  <button
+    class="absolute top-1 right-1 z-10 p-1 rounded text-slate-500 hover:text-cyan-400 hover:bg-slate-800/80 transition-colors"
+    onclick={exportSvg}
+    title="Download SVG"
+  >
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4 0l-4 4m0 0l-4-4m4 4V4"/>
+    </svg>
+  </button>
+</div>

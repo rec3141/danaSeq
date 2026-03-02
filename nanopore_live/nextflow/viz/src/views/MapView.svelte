@@ -15,9 +15,9 @@
   const PALETTE = ['#22d3ee','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c',
                    '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8'];
 
-  // Range filter state (percentile, 0-100)
-  let readMinPct = $state(0);
-  let readMaxPct = $state(100);
+  // Range filter state
+  let log2Min = $state(0);
+  let log2Max = $state(21);
   let depthMinPct = $state(0);
   let depthMaxPct = $state(100);
 
@@ -80,12 +80,19 @@
     return ['read_count', 'total_bases', 'diversity'].includes(colorBy);
   });
 
-  // Compute absolute limits from data
-  let readLimits = $derived.by(() => {
-    if (!allMarkers.length) return { min: 0, max: 1 };
-    const vals = allMarkers.map(m => m.read_count || 0).sort((a, b) => a - b);
-    return { min: vals[0], max: vals[vals.length - 1] };
+  // log2 read count filter ceiling (derived from data)
+  let log2Ceil = $derived.by(() => {
+    if (!allMarkers.length) return 21;
+    const maxReads = Math.max(...allMarkers.map(m => m.read_count || 0));
+    return Math.ceil(Math.log2(Math.max(1, maxReads)));
   });
+
+  function readFilterLabel(log2val) {
+    const v = Math.round(Math.pow(2, log2val));
+    if (v >= 1e6) return `${(v/1e6).toFixed(1)}M`;
+    if (v >= 1e3) return `${(v/1e3).toFixed(0)}K`;
+    return String(v);
+  }
 
   let depthLimits = $derived.by(() => {
     const vals = allMarkers.filter(m => m.depth_m != null).map(m => m.depth_m).sort((a, b) => a - b);
@@ -95,12 +102,6 @@
 
   function pctToVal(pct, limits) {
     return limits.min + (limits.max - limits.min) * pct / 100;
-  }
-
-  function fmtVal(v) {
-    if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-    if (v >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
-    return Math.round(v).toString();
   }
 
   // All markers (before filters) — include all metadata fields
@@ -114,6 +115,8 @@
         lat: m.lat,
         lon: m.lon,
         read_count: s.read_count,
+        total_bases: s.total_bases,
+        flowcell: s.flowcell,
         dominant_phylum: s.dominant_phylum,
         dominant_class: s.dominant_class,
         diversity: s.diversity,
@@ -131,12 +134,12 @@
       filtered = filtered.filter(m => $cartItems.has(m.id));
     }
 
-    // Read count filter
-    const rMin = pctToVal(readMinPct, readLimits);
-    const rMax = pctToVal(readMaxPct, readLimits);
+    // Read count filter (log2 scale)
     filtered = filtered.filter(m => {
       const rc = m.read_count || 0;
-      return rc >= rMin && rc <= rMax;
+      if (rc === 0) return log2Min === 0;
+      const l = Math.log2(Math.max(1, rc));
+      return l >= log2Min && l <= log2Max;
     });
 
     // Depth filter (only if we have depth data)
@@ -209,16 +212,29 @@
   const tableColumns = [
     { key: 'id', label: 'Sample' },
     { key: 'station', label: 'Station' },
-    { key: 'lat', label: 'Lat', render: v => v?.toFixed(4) ?? '-' },
-    { key: 'lon', label: 'Lon', render: v => v?.toFixed(4) ?? '-' },
+    { key: 'lat', label: 'Lat', render: v => typeof v === 'number' ? v.toFixed(4) : '-' },
+    { key: 'lon', label: 'Lon', render: v => typeof v === 'number' ? v.toFixed(4) : '-' },
     { key: 'depth_m', label: 'Depth (m)' },
     { key: 'date', label: 'Date' },
     { key: 'read_count', label: 'Reads', render: v => v?.toLocaleString() ?? '-' },
     { key: 'dominant_phylum', label: 'Dominant' },
   ];
 
+  let lassoIds = $state(null);
+
   function handleMarkerClick(id) {
     selectedSample.set(id);
+  }
+
+  function handleSelect(ids) {
+    lassoIds = ids;
+  }
+
+  function addLassoToCart() {
+    if (lassoIds) {
+      for (const id of lassoIds) addToCart(id);
+      lassoIds = null;
+    }
   }
 </script>
 
@@ -260,19 +276,19 @@
         <span class="text-slate-500 w-12 font-mono">{nudgeMeters === 0 ? 'off' : nudgeMeters >= 1000 ? `${nudgeMeters/1000}km` : `${nudgeMeters}m`}</span>
       </div>
 
-      <!-- Reads dual-range slider -->
+      <!-- Reads dual-range slider (log2 scale) -->
       <div class="flex items-center gap-1 text-slate-400">
         <span>Reads</span>
-        <span class="text-slate-500 w-10 text-right font-mono">{fmtVal(pctToVal(readMinPct, readLimits))}</span>
+        <span class="text-slate-500 w-10 text-right font-mono">{readFilterLabel(log2Min)}</span>
         <div class="dual-range relative w-28 h-5 flex items-center">
           <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
-          <div class="absolute h-1 bg-cyan-400/40 rounded" style="left: {readMinPct}%; right: {100 - readMaxPct}%"></div>
-          <input type="range" min="0" max="100" step="1" bind:value={readMinPct}
-            oninput={() => { if (readMinPct > readMaxPct - 2) readMinPct = readMaxPct - 2; }} />
-          <input type="range" min="0" max="100" step="1" bind:value={readMaxPct}
-            oninput={() => { if (readMaxPct < readMinPct + 2) readMaxPct = readMinPct + 2; }} />
+          <div class="absolute h-1 bg-cyan-400/40 rounded" style="left: {log2Min / log2Ceil * 100}%; right: {100 - log2Max / log2Ceil * 100}%"></div>
+          <input type="range" min="0" max={log2Ceil} step="0.5" bind:value={log2Min}
+            oninput={() => { if (log2Min > log2Max - 0.5) log2Min = log2Max - 0.5; }} />
+          <input type="range" min="0" max={log2Ceil} step="0.5" bind:value={log2Max}
+            oninput={() => { if (log2Max < log2Min + 0.5) log2Max = log2Min + 0.5; }} />
         </div>
-        <span class="text-slate-500 w-10 font-mono">{fmtVal(pctToVal(readMaxPct, readLimits))}</span>
+        <span class="text-slate-500 w-10 font-mono">{readFilterLabel(log2Max)}</span>
       </div>
 
       <!-- Depth dual-range slider -->
@@ -297,8 +313,16 @@
         {#if $cartActive && $cartItems.size > 0}
           <span class="text-cyan-400">(cart filtered)</span>
         {/if}
+        <span class="text-slate-600 ml-1">shift-drag to select</span>
       </span>
-      {#if markers.length > 0 && markers.length < allMarkers.length}
+      {#if lassoIds}
+        <button
+          class="px-3 py-1 rounded-md border border-cyan-400 bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20 transition-colors"
+          onclick={addLassoToCart}
+        >
+          Add {lassoIds.length} to Cart
+        </button>
+      {:else if markers.length > 0 && markers.length < allMarkers.length}
         <button
           class="px-3 py-1 rounded-md border border-cyan-400 bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20 transition-colors"
           onclick={() => { for (const m of markers) addToCart(m.id); }}
@@ -319,7 +343,9 @@
           {sizeScale}
           {nudgeMeters}
           onMarkerClick={handleMarkerClick}
+          onSelect={handleSelect}
           {highlightIds}
+          exportName={`danaseq_map_color-${colorBy}`}
         />
       </div>
 

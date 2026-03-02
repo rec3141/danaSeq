@@ -45,7 +45,7 @@ def discover_samples(input_dir):
                 samples.append({
                     'flowcell': flowcell,
                     'barcode': barcode_dir.name,
-                    'id': f"{flowcell}/{barcode_dir.name}",
+                    'id': f"{flowcell}_{barcode_dir.name}",
                     'db_path': str(db_path),
                     'dir': str(barcode_dir),
                 })
@@ -243,7 +243,7 @@ def query_function(db_path):
 
 
 def compute_grid_layout(samples_list):
-    """Arrange samples in a rectangular grid sorted by start_time/flowcell/barcode."""
+    """Arrange samples in a rectangular grid sorted by start_time, flowcell, barcode."""
     sorted_samples = sorted(samples_list, key=lambda s: (
         s.get('start_time', '9999'),  # samples without timestamp sort last
         s.get('flowcell', ''),
@@ -466,32 +466,66 @@ def compute_sample_tsne(sketch_distances_file, sample_ids):
     return {id_list[i]: [float(coords[i, 0]), float(coords[i, 1])] for i in range(n)}
 
 
+def normalize_barcode(raw):
+    """Normalize barcode to 'barcodeNN' format.
+
+    Accepts: '1', '01', 'barcode1', 'barcode01' -> 'barcode01'."""
+    if not raw:
+        return ''
+    s = str(raw).strip().lower()
+    m = re.match(r'^(?:barcode)?(\d+)$', s)
+    if not m:
+        return ''
+    return f"barcode{int(m.group(1)):02d}"
+
+
+COLUMN_ALIASES = {
+    'latitude': 'lat', 'longitude': 'lon', 'long': 'lon', 'lng': 'lon',
+    'sample_id': 'flowcell',
+}
+
+
+def normalize_column(name):
+    """Normalize a column header to its canonical name (case-insensitive)."""
+    lower = name.strip().lower()
+    return COLUMN_ALIASES.get(lower, lower)
+
+
 def load_metadata(metadata_file):
-    """Load user-provided metadata TSV."""
+    """Load user-provided metadata TSV.
+
+    Requires flowcell and barcode columns.
+    Canonical sample key: FLOWCELL_barcodeNN.
+    Column aliases (case-insensitive): latitude->lat, longitude/long/lng->lon,
+    sample_id->flowcell."""
     if not metadata_file or not os.path.exists(metadata_file):
         return {}
 
     metadata = {}
     with open(metadata_file) as f:
-        header = f.readline().strip().split('\t')
+        raw_header = f.readline().strip().split('\t')
+        header = [normalize_column(h) for h in raw_header]
+        has_flowcell = 'flowcell' in header
+        has_barcode = 'barcode' in header
+        if not has_flowcell or not has_barcode:
+            print("[ERROR] Metadata TSV requires both flowcell (or sample_id) and barcode columns",
+                  file=sys.stderr)
+            return {}
+
         for line in f:
             fields = line.strip().split('\t')
             row = dict(zip(header, fields))
 
-            # Build sample key
-            sample_id = row.get('sample_id', row.get('flowcell', ''))
-            barcode = row.get('barcode', '')
-            if sample_id and barcode:
-                key = f"{sample_id}/{barcode}"
-            elif sample_id:
-                key = sample_id
-            else:
+            flowcell = (row.get('flowcell', '')).strip()
+            barcode = normalize_barcode(row.get('barcode', ''))
+            if not flowcell or not barcode:
                 continue
+            key = f"{flowcell}_{barcode}"
 
             # Parse numeric fields
             parsed = {}
             for k, v in row.items():
-                if k in ('sample_id', 'barcode'):
+                if k in ('flowcell', 'barcode'):
                     continue
                 try:
                     parsed[k] = float(v)
@@ -545,7 +579,7 @@ def main():
     all_phylum_tax = {}
     all_class_tax = {}
     all_function = {}
-    all_sunburst_paths = {}   # (taxonomy, leaf_name) -> total direct count
+    all_sunburst_paths = {}   # (taxonomy, leaf_name) -> total proportional count
     all_sunburst_names = {}   # name -> rank
     all_sample_sunburst = {}  # sample_id -> {taxon: direct_count} (filtered >0.1%)
 
@@ -560,8 +594,10 @@ def main():
         # Collect full taxonomy lineage for sunburst
         sb_paths, sb_names = query_sunburst_data(s['db_path'])
         all_sunburst_names.update(sb_names)
+        # Normalize per-sample counts to proportions (equal weight per sample)
+        sb_total = sum(sb_paths.values()) or 1
         for key, cnt in sb_paths.items():
-            all_sunburst_paths[key] = all_sunburst_paths.get(key, 0) + cnt
+            all_sunburst_paths[key] = all_sunburst_paths.get(key, 0) + cnt / sb_total
 
         # Per-sample filtered sunburst counts for cart filtering
         all_sample_sunburst[sid] = filter_sample_sunburst(sb_paths)

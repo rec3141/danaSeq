@@ -66,6 +66,23 @@
     return { ...s, ...(m || {}) };
   });
 
+  // Precompute size normalization from data range
+  let sizeNorm = $derived.by(() => {
+    if (sizeBy === 'fixed' || !mergedData.length) return null;
+    const vals = mergedData.map(d => d[sizeBy]).filter(v => typeof v === 'number' && v > 0);
+    if (vals.length < 2) return null;
+    const logMin = Math.log1p(Math.min(...vals));
+    const logMax = Math.log1p(Math.max(...vals));
+    return { logMin, logMax, range: logMax - logMin || 1 };
+  });
+
+  function normSize(val, minR, maxR) {
+    if (sizeBy === 'fixed') return (minR * 2) * sizeScale;
+    if (typeof val !== 'number' || val <= 0 || !sizeNorm) return minR * sizeScale;
+    const t = (Math.log1p(val) - sizeNorm.logMin) / sizeNorm.range;
+    return (minR + t * (maxR - minR)) * sizeScale;
+  }
+
   // Color map for categorical coloring
   let colorMap = $derived.by(() => {
     const map = {};
@@ -90,9 +107,7 @@
       g.y.push(d[yVar]);
       g.text.push(`${d.id}<br>${xVar}: ${d[xVar]}<br>${yVar}: ${d[yVar]}<br>${colorBy}: ${key}`);
       g.ids.push(d.id);
-      const sVal = typeof d[sizeBy] === 'number' ? d[sizeBy] : 0;
-      const sz = (sizeBy === 'fixed' ? 8 : (sVal === 0 ? 4 : Math.max(4, Math.min(24, 4 + Math.log1p(sVal) * 1.2)))) * sizeScale;
-      g.sizes.push(sz);
+      g.sizes.push(normSize(d[sizeBy], 4, 24));
     }
 
     return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0])).map(([name, g]) => ({
@@ -163,11 +178,7 @@
         text: pts.map(d => `${d.id}<br>${colorBy}: ${d[colorBy] ?? '-'}<br>${yVar}: ${d[yVar]}`),
         customdata: pts.map(d => d.id),
         marker: {
-          size: pts.map(d => {
-            const sVal = typeof d[sizeBy] === 'number' ? d[sizeBy] : 0;
-            const sz = sizeBy === 'fixed' ? 5 : (sVal === 0 ? 3 : Math.max(3, Math.min(18, 3 + Math.log1p(sVal) * 0.9)));
-            return sz * sizeScale;
-          }),
+          size: pts.map(d => normSize(d[sizeBy], 3, 18)),
           color: pts.map(d => {
             const cv = d[colorBy] != null ? String(d[colorBy]) : 'Unknown';
             return colorMap[cv] || '#94a3b8';

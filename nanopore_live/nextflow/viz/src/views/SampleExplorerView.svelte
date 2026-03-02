@@ -56,6 +56,26 @@
     return true;
   }
 
+  // Stats for the currently filtered (and optionally cart-filtered) dataset
+  let filteredStats = $derived.by(() => {
+    if (!$samples) return null;
+    const passedFilter = $samples.filter(passesFilters);
+    const visible = $cartActive && $cartItems.size > 0
+      ? passedFilter.filter(s => $cartItems.has(s.id))
+      : passedFilter;
+    const flowcells = new Set(visible.map(s => s.flowcell).filter(Boolean));
+    const totalReads = visible.reduce((sum, s) => sum + (s.read_count || 0), 0);
+    const totalBases = visible.reduce((sum, s) => sum + (s.total_bases || 0), 0);
+    return {
+      nFlowcells: flowcells.size,
+      nSamples: visible.length,
+      totalReads,
+      totalBases,
+      isFiltered: visible.length < $samples.length,
+      totalAll: $samples.length,
+    };
+  });
+
   // Embedding mode: cycle between available embeddings (derived from data)
   const EMBED_LABELS = { grid: 'Grid', tsne: 't-SNE' };
   let embedIdx = $state(0);
@@ -217,12 +237,12 @@
 
 <div class="space-y-6">
   <!-- Header stats -->
-  {#if $overview}
+  {#if filteredStats}
     <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-      <StatCard label="Flowcells" value={$overview.n_flowcells ?? 0} color="purple" />
-      <StatCard label="Barcodes" value={$overview.n_samples ?? 0} color="cyan" />
-      <StatCard label="Total Reads" value={($overview.total_reads ?? 0).toLocaleString()} color="emerald" />
-      <StatCard label="Total Bases" value={$overview.total_bases ? `${($overview.total_bases / 1e9).toFixed(1)} Gbp` : '-'} color="amber" />
+      <StatCard label="Flowcells" value={filteredStats.nFlowcells} color="purple" />
+      <StatCard label={filteredStats.isFiltered ? `Barcodes (of ${filteredStats.totalAll})` : 'Barcodes'} value={filteredStats.nSamples} color="cyan" />
+      <StatCard label="Total Reads" value={filteredStats.totalReads.toLocaleString()} color="emerald" />
+      <StatCard label="Total Bases" value={filteredStats.totalBases ? `${(filteredStats.totalBases / 1e9).toFixed(1)} Gbp` : '-'} color="amber" />
       <StatCard label="In Cart" value={$cartItems.size} color="slate" />
     </div>
   {/if}

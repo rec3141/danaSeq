@@ -72,16 +72,42 @@ export async function loadAllData() {
   }
 }
 
+/** Normalize a barcode value to "barcodeNN" format.
+ *  Accepts: "1", "01", "barcode1", "barcode01" → "barcode01". */
+function normalizeBarcode(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim().toLowerCase();
+  const m = s.match(/^(?:barcode)?(\d+)$/);
+  if (!m) return '';
+  return 'barcode' + m[1].padStart(2, '0');
+}
+
+/** Normalize a column header to its canonical name.
+ *  Case-insensitive aliases: latitude→lat, longitude/long/lng→lon,
+ *  sample_id→flowcell. */
+function normalizeColumn(name) {
+  const lower = name.trim().toLowerCase();
+  const aliases = {
+    'latitude': 'lat', 'longitude': 'lon', 'long': 'lon', 'lng': 'lon',
+    'sample_id': 'flowcell',
+  };
+  return aliases[lower] || lower;
+}
+
 /** Parse a metadata TSV string and update the metadata store.
+ *  Requires flowcell and barcode columns. Canonical sample key: FLOWCELL_barcodeNN.
  *  Validates against known sample IDs before replacing existing data.
  *  Returns { matched, total, error? }. */
 export function loadMetadataTsv(text) {
   const lines = text.split('\n').filter(l => l.trim());
   if (lines.length < 2) return { matched: 0, total: 0, error: 'File has no data rows' };
 
-  const header = lines[0].split('\t');
-  if (!header.includes('sample_id') && !header.includes('flowcell')) {
-    return { matched: 0, total: 0, error: 'Missing sample_id or flowcell column' };
+  const rawHeader = lines[0].split('\t');
+  const header = rawHeader.map(normalizeColumn);
+  const hasFlowcell = header.includes('flowcell');
+  const hasBarcode = header.includes('barcode');
+  if (!hasFlowcell || !hasBarcode) {
+    return { matched: 0, total: 0, error: 'Requires both flowcell (or sample_id) and barcode columns' };
   }
 
   const result = {};
@@ -90,14 +116,14 @@ export function loadMetadataTsv(text) {
     const row = {};
     header.forEach((h, j) => { row[h] = fields[j] ?? ''; });
 
-    const sampleId = row.sample_id || row.flowcell || '';
-    const barcode = row.barcode || '';
-    const key = sampleId && barcode ? `${sampleId}/${barcode}` : sampleId;
-    if (!key) continue;
+    const flowcell = (row.flowcell || '').trim();
+    const barcode = normalizeBarcode(row.barcode);
+    if (!flowcell || !barcode) continue;
+    const key = `${flowcell}_${barcode}`;
 
     const parsed = {};
     for (const [k, v] of Object.entries(row)) {
-      if (k === 'sample_id' || k === 'barcode') continue;
+      if (k === 'flowcell' || k === 'barcode') continue;
       const num = Number(v);
       if (v !== '' && !isNaN(num)) parsed[k] = num;
       else if (v) parsed[k] = v;

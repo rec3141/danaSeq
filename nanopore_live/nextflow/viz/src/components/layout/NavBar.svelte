@@ -29,7 +29,7 @@
       for (const k of Object.keys(v)) allCols.add(k);
     }
     const cols = [...allCols].sort();
-    const header = ['sample_id', ...cols];
+    const header = ['flowcell', 'barcode', ...cols];
 
     const rows = [header.join('\t')];
     // Use samples order if available, otherwise metadata keys
@@ -37,7 +37,11 @@
     for (const id of ids) {
       const m = meta[id];
       if (!m) continue;
-      const vals = [id, ...cols.map(c => m[c] != null ? String(m[c]) : '')];
+      // Split canonical FLOWCELL_barcodeNN key into separate columns
+      const sepIdx = id.lastIndexOf('_barcode');
+      const flowcell = sepIdx >= 0 ? id.slice(0, sepIdx) : id;
+      const barcode = sepIdx >= 0 ? id.slice(sepIdx + 1) : '';
+      const vals = [flowcell, barcode, ...cols.map(c => m[c] != null ? String(m[c]) : '')];
       rows.push(vals.join('\t'));
     }
 
@@ -111,7 +115,7 @@
         <button
           class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
           onclick={() => metaInput.click()}
-          title="Upload metadata TSV (sample_id, barcode, lat, lon, ...)"
+          title="Upload metadata TSV (requires flowcell + barcode columns)"
         >
           <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>

@@ -23,13 +23,15 @@
                    '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8',
                    '#94a3b8','#d4d4d8','#78716c'];
 
+  // Precomputed sizing normalization (set in getTraces)
+  let sizeNorm = null;
+
   function markerSize(c, sizeBy, scale) {
     if (sizeBy === 'fixed') return 8 * scale;
     const val = typeof c[sizeBy] === 'number' ? c[sizeBy] : 0;
-    if (val === 0) return 4 * scale;
-    // Normalize via log: handles both small (0-10) and large (1e6+) ranges
-    const s = Math.max(4, Math.min(24, 4 + Math.log1p(val) * 1.2));
-    return s * scale;
+    if (val <= 0 || !sizeNorm) return 4 * scale;
+    const t = (Math.log1p(val) - sizeNorm.logMin) / sizeNorm.range;
+    return (4 + t * 20) * scale; // 4px to 24px full range
   }
 
   function hoverText(c) {
@@ -60,6 +62,17 @@
     if (!data?.points?.length) return [];
     const points = data.points;
     const xKey = `${mode}_x`, yKey = `${mode}_y`;
+
+    // Precompute size normalization from data range
+    sizeNorm = null;
+    if (sizeBy !== 'fixed') {
+      const vals = points.map(c => c[sizeBy]).filter(v => typeof v === 'number' && v > 0);
+      if (vals.length > 1) {
+        const logMin = Math.log1p(Math.min(...vals));
+        const logMax = Math.log1p(Math.max(...vals));
+        sizeNorm = { logMin, logMax, range: logMax - logMin || 1 };
+      }
+    }
 
     if (isContinuousField(points, colorBy)) {
       const fn = c => typeof c[colorBy] === 'number' ? c[colorBy] : 0;
@@ -149,7 +162,7 @@
     Plotly.react(container, traces, layout, {
       responsive: true, displaylogo: false, scrollZoom: true,
       doubleClick: false, displayModeBar: 'hover',
-      toImageButtonOptions: { format: 'png', filename: exportName, scale: 4 },
+      toImageButtonOptions: { format: 'svg', filename: exportName },
       modeBarButtonsToRemove: ['autoScale2d','toggleSpikelines','hoverCompareCartesian','hoverClosestCartesian','zoomIn2d','zoomOut2d'],
     });
 

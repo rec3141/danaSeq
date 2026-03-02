@@ -105,21 +105,22 @@
     return Object.values(tax).reduce((s, v) => s + v, 0) || 1;
   }
 
-  // Build cart-filtered sunburst from per-sample direct counts + parent map
+  // Build sunburst from per-sample proportional counts (equal weight per sample)
   let sunburstData = $derived.by(() => {
-    if (!$sampleTaxonomy) return $taxonomySunburst;
-    if (!cartIsFiltering) return $taxonomySunburst;
+    const parents = $sampleTaxonomy?.parents || {};
+    const sampleData = $sampleTaxonomy?.samples || {};
+    const samps = cartIsFiltering ? activeSamples : ($samples || []);
 
-    const parents = $sampleTaxonomy.parents || {};
-    const sampleData = $sampleTaxonomy.samples || {};
+    if (!samps.length || !$sampleTaxonomy) return $taxonomySunburst;
 
-    // Aggregate direct counts across carted samples
+    // Aggregate proportional counts: each sample contributes fractions summing to 1
     const merged = {};
-    for (const s of activeSamples) {
+    for (const s of samps) {
       const direct = sampleData[s.id]?.direct;
       if (!direct) continue;
+      const total = Object.values(direct).reduce((a, b) => a + b, 0) || 1;
       for (const [taxon, count] of Object.entries(direct)) {
-        merged[taxon] = (merged[taxon] || 0) + count;
+        merged[taxon] = (merged[taxon] || 0) + count / total;
       }
     }
 
@@ -169,18 +170,28 @@
     return { name: 'Community', children };
   });
 
-  // Stacked bar chart: per-sample composition at current rank
+  const MAX_STACKED_TAXA = 20;
+
+  // Stacked bar chart: per-sample composition at current rank (top N + Other)
   let stackedTraces = $derived.by(() => {
     if (!$sampleTaxonomy?.samples || !activeSamples.length) return [];
-    const allTaxa = new Set();
+    // Aggregate counts across samples to rank taxa
+    const totalCounts = {};
     for (const s of activeSamples) {
       const tax = getRankTax(s.id);
-      Object.keys(tax).forEach(k => allTaxa.add(k));
+      for (const [taxon, count] of Object.entries(tax)) {
+        totalCounts[taxon] = (totalCounts[taxon] || 0) + count;
+      }
     }
-    const taxaList = [...allTaxa].sort();
+    // Keep top N, merge rest into "Other"
+    const sorted = Object.entries(totalCounts).sort((a, b) => b[1] - a[1]);
+    const topTaxaNames = sorted.slice(0, MAX_STACKED_TAXA).map(e => e[0]);
+    const topSet = new Set(topTaxaNames);
+    const hasOther = sorted.length > MAX_STACKED_TAXA;
+
     const sampleIds = activeSamples.map(s => s.id);
 
-    return taxaList.map((taxon, i) => ({
+    const traces = topTaxaNames.map((taxon, i) => ({
       type: 'bar',
       name: taxon.length > 20 ? taxon.slice(0, 18) + '..' : taxon,
       x: sampleIds,
@@ -190,6 +201,25 @@
       }),
       marker: { color: PALETTE[i % PALETTE.length] },
     }));
+
+    if (hasOther) {
+      traces.push({
+        type: 'bar',
+        name: `Other (${sorted.length - MAX_STACKED_TAXA})`,
+        x: sampleIds,
+        y: sampleIds.map(id => {
+          const tax = getRankTax(id);
+          let sum = 0;
+          for (const [taxon, count] of Object.entries(tax)) {
+            if (!topSet.has(taxon)) sum += count;
+          }
+          return showPct ? (sum / sampleTotal(id)) * 100 : sum;
+        }),
+        marker: { color: '#475569' },
+      });
+    }
+
+    return traces;
   });
 
   let stackedLayout = $derived({
@@ -227,6 +257,68 @@
     { key: 'count', label: 'Reads', render: v => v?.toLocaleString() ?? '-' },
     { key: 'pct', label: '%', render: v => `${v.toFixed(1)}%` },
   ]);
+
+  // Walk parent chain to find ancestor at a given rank
+  function getAncestorAtRank(taxon, rankCode) {
+    const ranks = $sampleTaxonomy?.ranks;
+    const parents = $sampleTaxonomy?.parents;
+    if (!ranks || !parents) return '';
+    if (ranks[taxon] === rankCode) return taxon;
+    let cur = taxon;
+    while (parents[cur]) {
+      cur = parents[cur];
+      if (ranks[cur] === rankCode) return cur;
+    }
+    return '';
+  }
+
+  // Build samples × taxa abundance matrix for TSV export
+  // Includes lineage rows for all higher taxonomic ranks
+  function exportAbundanceTsv() {
+    if (!activeSamples.length) return;
+    // Collect all taxa across active samples at current rank
+    const allTaxa = new Set();
+    for (const s of activeSamples) {
+      Object.keys(getRankTax(s.id)).forEach(k => allTaxa.add(k));
+    }
+    const taxaList = [...allTaxa].sort();
+    if (!taxaList.length) return;
+
+    // Determine higher ranks above current rank
+    const currentIdx = RANK_LEVELS.findIndex(r => r.code === currentRank.code);
+    const higherRanks = RANK_LEVELS.slice(0, currentIdx); // e.g., for Genus: [P, C, O, F]
+
+    const lines = [];
+
+    // Header row: taxon names
+    lines.push(['', ...taxaList].join('\t'));
+
+    // Lineage rows: one per higher rank
+    for (const rank of higherRanks) {
+      lines.push([rank.label, ...taxaList.map(t => getAncestorAtRank(t, rank.code))].join('\t'));
+    }
+
+    // Abundance rows: one per sample
+    for (const s of activeSamples) {
+      const tax = getRankTax(s.id);
+      const total = Object.values(tax).reduce((a, v) => a + v, 0) || 1;
+      const vals = taxaList.map(t => {
+        const count = tax[t] ?? 0;
+        return showPct ? ((count / total) * 100).toFixed(4) : count;
+      });
+      lines.push([s.id, ...vals].join('\t'));
+    }
+
+    const tsv = lines.join('\n');
+    const blob = new Blob([tsv], { type: 'text/tab-separated-values' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const mode = showPct ? 'pct' : 'counts';
+    a.download = `danaseq_${currentRank.label.toLowerCase()}_abundance_${mode}.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 </script>
 
 <div class="space-y-6">
@@ -256,7 +348,7 @@
         <span class="text-xs text-slate-500 font-normal ml-2">click to zoom, click center to zoom out</span>
       </h3>
       {#if sunburstData}
-        <D3Sunburst data={sunburstData} colorDepth={3} />
+        <D3Sunburst data={sunburstData} colorDepth={3} exportName="danaseq_taxonomy_sunburst" />
       {:else}
         <div class="h-[400px] flex items-center justify-center text-slate-500 text-sm">No taxonomy data</div>
       {/if}
@@ -283,15 +375,24 @@
           <span class="text-xs text-cyan-400 ml-2">(cart filtered)</span>
         {/if}
       </h3>
-      <button
-        class="text-[10px] px-1.5 py-0.5 rounded border transition-colors
-          {showPct
-            ? 'border-cyan-400 text-cyan-400'
-            : 'border-slate-600 text-slate-500 hover:text-slate-300'}"
-        onclick={() => showPct = !showPct}
-      >
-        {showPct ? '%' : '#'}
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          class="text-[10px] px-1.5 py-0.5 rounded border transition-colors
+            {showPct
+              ? 'border-cyan-400 text-cyan-400'
+              : 'border-slate-600 text-slate-500 hover:text-slate-300'}"
+          onclick={() => showPct = !showPct}
+        >
+          {showPct ? '%' : '#'}
+        </button>
+        <button
+          class="text-[10px] px-1.5 py-0.5 rounded border border-slate-600 text-slate-500 hover:text-slate-300 hover:border-slate-500 transition-colors"
+          onclick={exportAbundanceTsv}
+          title="Export samples × {currentRank.label.toLowerCase()} abundance matrix as TSV ({showPct ? 'proportional' : 'absolute counts'})"
+        >
+          TSV
+        </button>
+      </div>
     </div>
     {#if stackedTraces.length}
       <PlotlyChart traces={stackedTraces} layout={stackedLayout} exportName={`danaseq_taxonomy_stacked_${currentRank}`} />

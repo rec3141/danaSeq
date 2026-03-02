@@ -106,6 +106,7 @@
             sizeScale={0.6}
             mode="tsne"
             {searchMatchIds}
+            exportName={`danaseq_read_tsne_color-${colorBy}`}
           />
         {:else}
           <div class="flex items-center justify-center h-full text-slate-500">

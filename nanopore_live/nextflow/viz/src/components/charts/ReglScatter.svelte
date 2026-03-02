@@ -3,7 +3,7 @@
   import createScatterplot from 'regl-scatterplot';
   import * as d3 from 'd3';
 
-  let { data = null, colorBy = 'sample', sizeBy = 'fixed', sizeScale = 1.0, mode = 'tsne', colorMap = {}, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, idField = 'id' } = $props();
+  let { data = null, colorBy = 'sample', sizeBy = 'fixed', sizeScale = 1.0, mode = 'tsne', colorMap = {}, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, idField = 'id', exportName = 'danaseq_scatter' } = $props();
 
   let canvasEl;
   let scatterplot;
@@ -32,6 +32,14 @@
     total_bases: c => Math.log10((c.total_bases || 1) + 1),
     diversity: c => c.diversity ?? 0,
   };
+
+  function exportPng() {
+    if (!canvasEl) return;
+    // regl-scatterplot preserves drawing buffer, capture directly
+    const url = canvasEl.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url; a.download = `${exportName}.png`; a.click();
+  }
 
   function init() {
     if (!canvasEl || scatterplot) return;
@@ -230,6 +238,15 @@
 
 <div class="w-full relative flex-1 min-h-0">
   <canvas bind:this={canvasEl} class="absolute inset-0 w-full h-full rounded" style="background: #0f172a;"></canvas>
+  <button
+    class="absolute top-2 left-2 z-10 p-1 rounded text-slate-500 hover:text-cyan-400 hover:bg-slate-800/80 transition-colors"
+    onclick={exportPng}
+    title="Download PNG"
+  >
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4 0l-4 4m0 0l-4-4m4 4V4"/>
+    </svg>
+  </button>
   {#if tipShow}
     <div
       class="absolute pointer-events-none bg-slate-900/95 text-slate-200 text-xs px-2 py-1 rounded shadow-lg border border-slate-600 whitespace-nowrap z-10"
