@@ -81,15 +81,13 @@
     {/if}
 
     <!-- Controls -->
-    <div class="flex items-center gap-4">
-      <label class="text-xs text-slate-400">
-        Color by:
-        <select bind:value={colorBy} class="ml-1 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200">
-          {#each colorOptions as opt}
-            <option value={opt.value}>{opt.label}</option>
-          {/each}
-        </select>
-      </label>
+    <div class="flex items-center gap-3 text-xs">
+      <select bind:value={colorBy}
+        class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
+        {#each colorOptions as opt}
+          <option value={opt.value}>{opt.label}</option>
+        {/each}
+      </select>
       {#if scatterData?.points}
         <span class="text-xs text-slate-500">
           {scatterData.points.length.toLocaleString()} reads displayed

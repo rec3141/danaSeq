@@ -113,7 +113,7 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <h3 class="text-sm font-semibold text-slate-300 mb-2">Gene Features per Sample</h3>
       {#if geneBarTraces.length}
-        <PlotlyChart traces={geneBarTraces} layout={geneBarLayout} />
+        <PlotlyChart traces={geneBarTraces} layout={geneBarLayout} exportName="danaseq_gene_features_per_sample" />
       {:else}
         <div class="h-[400px] flex items-center justify-center text-slate-500 text-sm">No functional data</div>
       {/if}
@@ -123,7 +123,7 @@
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
       <h3 class="text-sm font-semibold text-slate-300 mb-2">Hypothetical Protein %</h3>
       {#if hypotheticalTraces.length}
-        <PlotlyChart traces={hypotheticalTraces} layout={hypotheticalLayout} />
+        <PlotlyChart traces={hypotheticalTraces} layout={hypotheticalLayout} exportName="danaseq_hypothetical_protein_pct" />
       {:else}
         <div class="h-[300px] flex items-center justify-center text-slate-500 text-sm">No data</div>
       {/if}

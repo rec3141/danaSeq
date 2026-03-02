@@ -72,6 +72,55 @@ export async function loadAllData() {
   }
 }
 
+/** Parse a metadata TSV string and update the metadata store.
+ *  Validates against known sample IDs before replacing existing data.
+ *  Returns { matched, total, error? }. */
+export function loadMetadataTsv(text) {
+  const lines = text.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return { matched: 0, total: 0, error: 'File has no data rows' };
+
+  const header = lines[0].split('\t');
+  if (!header.includes('sample_id') && !header.includes('flowcell')) {
+    return { matched: 0, total: 0, error: 'Missing sample_id or flowcell column' };
+  }
+
+  const result = {};
+  for (let i = 1; i < lines.length; i++) {
+    const fields = lines[i].split('\t');
+    const row = {};
+    header.forEach((h, j) => { row[h] = fields[j] ?? ''; });
+
+    const sampleId = row.sample_id || row.flowcell || '';
+    const barcode = row.barcode || '';
+    const key = sampleId && barcode ? `${sampleId}/${barcode}` : sampleId;
+    if (!key) continue;
+
+    const parsed = {};
+    for (const [k, v] of Object.entries(row)) {
+      if (k === 'sample_id' || k === 'barcode') continue;
+      const num = Number(v);
+      if (v !== '' && !isNaN(num)) parsed[k] = num;
+      else if (v) parsed[k] = v;
+    }
+    result[key] = parsed;
+  }
+
+  const total = Object.keys(result).length;
+  if (total === 0) return { matched: 0, total: 0, error: 'No rows parsed' };
+
+  // Validate: check how many keys match known samples
+  const knownSamples = get(samples);
+  const knownIds = knownSamples ? new Set(knownSamples.map(s => s.id)) : null;
+  const matched = knownIds ? Object.keys(result).filter(k => knownIds.has(k)).length : total;
+
+  if (matched === 0) {
+    return { matched: 0, total, error: `0/${total} rows matched known samples` };
+  }
+
+  metadata.set(result);
+  return { matched, total };
+}
+
 // Lazy-load read explorer data (potentially huge)
 let readLoading = false;
 export async function loadReadExplorer() {

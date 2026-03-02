@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
 
-  let { data = null, colorBy = 'sample', sizeBy = 'fixed', sizeScale = 1.0, mode = 'tsne', colorMap = {}, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, idField = 'id' } = $props();
+  let { data = null, colorBy = 'sample', sizeBy = 'fixed', sizeScale = 1.0, mode = 'tsne', colorMap = {}, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, idField = 'id', exportName = 'danaseq_scatter' } = $props();
   let container;
   let listenersAttached = false;
 
@@ -24,12 +24,12 @@
                    '#94a3b8','#d4d4d8','#78716c'];
 
   function markerSize(c, sizeBy, scale) {
-    let s;
-    if (sizeBy === 'fixed') s = 8;
-    else if (sizeBy === 'read_count') s = Math.max(3, Math.min(20, Math.pow(c.read_count || 1, 0.25) * 0.7));
-    else if (sizeBy === 'total_bases') s = Math.max(3, Math.min(20, Math.pow(c.total_bases || 1, 0.25) * 0.1));
-    else s = 6;
-    return Math.min(40, s * scale);
+    if (sizeBy === 'fixed') return 8 * scale;
+    const val = typeof c[sizeBy] === 'number' ? c[sizeBy] : 0;
+    if (val === 0) return 4 * scale;
+    // Normalize via log: handles both small (0-10) and large (1e6+) ranges
+    const s = Math.max(4, Math.min(24, 4 + Math.log1p(val) * 1.2));
+    return s * scale;
   }
 
   function hoverText(c) {
@@ -48,20 +48,23 @@
     return parts.join('<br>');
   }
 
-  const continuousModes = {
-    read_count:  { fn: c => c.read_count || 0,                      title: 'Reads',             scale: 'Viridis' },
-    total_bases: { fn: c => c.total_bases || 0,                      title: 'Bases',             scale: 'Viridis' },
-    diversity:   { fn: c => c.diversity ?? 0,                       title: 'Shannon diversity',  scale: 'Viridis' },
-  };
+  function isContinuousField(points, field) {
+    let numCount = 0, total = 0;
+    for (const c of points) {
+      if (c[field] != null) { total++; if (typeof c[field] === 'number') numCount++; }
+    }
+    return total > 0 && numCount > total * 0.8;
+  }
 
   function getTraces() {
     if (!data?.points?.length) return [];
     const points = data.points;
     const xKey = `${mode}_x`, yKey = `${mode}_y`;
 
-    if (continuousModes[colorBy]) {
-      const cm = continuousModes[colorBy];
-      const sorted = [...points].sort((a, b) => cm.fn(a) - cm.fn(b));
+    if (isContinuousField(points, colorBy)) {
+      const fn = c => typeof c[colorBy] === 'number' ? c[colorBy] : 0;
+      const sorted = [...points].sort((a, b) => fn(a) - fn(b));
+      const label = colorBy.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
       return [{
         type: 'scattergl', mode: 'markers',
         x: sorted.map(c => c[xKey]), y: sorted.map(c => c[yKey]),
@@ -69,10 +72,10 @@
         customdata: sorted.map(c => c[idField] || c.id),
         marker: {
           size: sorted.map(c => markerSize(c, sizeBy, sizeScale)),
-          color: sorted.map(cm.fn), opacity: 0.75,
-          colorscale: cm.scale, showscale: true,
+          color: sorted.map(fn), opacity: 0.75,
+          colorscale: 'Viridis', showscale: true,
           colorbar: {
-            title: { text: cm.title, font: { color: '#94a3b8' } },
+            title: { text: label, font: { color: '#94a3b8' } },
             tickfont: { color: '#94a3b8' },
             x: 0.99, xanchor: 'right', y: 0.98, yanchor: 'top',
             len: 0.4, thickness: 12, bgcolor: 'rgba(15,23,42,0.7)', borderwidth: 0,
@@ -146,10 +149,23 @@
     Plotly.react(container, traces, layout, {
       responsive: true, displaylogo: false, scrollZoom: true,
       doubleClick: false, displayModeBar: 'hover',
+      toImageButtonOptions: { format: 'png', filename: exportName, scale: 4 },
       modeBarButtonsToRemove: ['autoScale2d','toggleSpikelines','hoverCompareCartesian','hoverClosestCartesian','zoomIn2d','zoomOut2d'],
     });
 
     if (!listenersAttached) {
+      // Shift held = lasso mode, shift released = back to pan
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Shift' && container.layout?.dragmode !== 'lasso') {
+          Plotly.relayout(container, { dragmode: 'lasso' });
+        }
+      });
+      document.addEventListener('keyup', (e) => {
+        if (e.key === 'Shift' && container.layout?.dragmode === 'lasso') {
+          Plotly.relayout(container, { dragmode: 'pan' });
+        }
+      });
+
       container.on('plotly_doubleclick', () => {
         const lr = container.layout;
         const xr = lr.xaxis.range, yr = lr.yaxis.range;

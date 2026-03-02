@@ -1,5 +1,7 @@
 <script>
   import { cartCount, cartActive } from '../../stores/cart.js';
+  import { loadMetadataTsv, metadata, samples } from '../../stores/data.js';
+  import { get } from 'svelte/store';
 
   const tabs = [
     { id: 'samples', label: 'Samples' },
@@ -11,6 +13,63 @@
   ];
 
   let { activeTab = 'samples', onCartToggle = null } = $props();
+  let metaInput;
+  let metaStatus = $state('');
+
+  let metaError = $state(false);
+
+  function downloadMetadata() {
+    const meta = get(metadata);
+    const samps = get(samples);
+    if (!meta || !Object.keys(meta).length) return;
+
+    // Collect all column names across all entries
+    const allCols = new Set();
+    for (const v of Object.values(meta)) {
+      for (const k of Object.keys(v)) allCols.add(k);
+    }
+    const cols = [...allCols].sort();
+    const header = ['sample_id', ...cols];
+
+    const rows = [header.join('\t')];
+    // Use samples order if available, otherwise metadata keys
+    const ids = samps ? samps.map(s => s.id) : Object.keys(meta);
+    for (const id of ids) {
+      const m = meta[id];
+      if (!m) continue;
+      const vals = [id, ...cols.map(c => m[c] != null ? String(m[c]) : '')];
+      rows.push(vals.join('\t'));
+    }
+
+    const blob = new Blob([rows.join('\n')], { type: 'text/tab-separated-values' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `metadata_${date}.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleMetaUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = loadMetadataTsv(reader.result);
+      if (result.error) {
+        metaStatus = result.error;
+        metaError = true;
+        // Errors stay visible until dismissed
+      } else {
+        metaStatus = `${result.matched}/${result.total} matched`;
+        metaError = false;
+        setTimeout(() => { metaStatus = ''; }, 5000);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }
 </script>
 
 <nav class="bg-slate-900 border-b border-slate-700 sticky top-0 z-50">
@@ -46,6 +105,38 @@
           </a>
         {/each}
       </div>
+      <!-- Metadata upload -->
+      <div class="ml-4 flex items-center gap-2 shrink-0">
+        <input type="file" accept=".tsv,.txt,.csv" class="hidden" bind:this={metaInput} onchange={handleMetaUpload} />
+        <button
+          class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+          onclick={() => metaInput.click()}
+          title="Upload metadata TSV (sample_id, barcode, lat, lon, ...)"
+        >
+          <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+          </svg>
+          Metadata
+        </button>
+        {#if $metadata && Object.keys($metadata).length > 0}
+          <button
+            class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+            onclick={downloadMetadata}
+            title="Download current metadata as TSV"
+          >
+            <svg class="w-3.5 h-3.5 inline -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4 0l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+          </button>
+        {/if}
+        {#if metaStatus}
+          <span
+            class="text-[10px] {metaError ? 'text-rose-400 cursor-pointer' : 'text-cyan-400'}"
+            onclick={() => { metaStatus = ''; metaError = false; }}
+          >{metaStatus}{#if metaError} ✕{/if}</span>
+        {/if}
+      </div>
+
       <!-- Cart controls -->
       <div class="ml-4 flex items-center gap-1">
         {#if $cartCount > 0}

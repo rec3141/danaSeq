@@ -231,14 +231,14 @@
 
 <div class="space-y-6">
   <!-- Rank toggle (shared across table + bar) -->
-  <div class="flex items-center gap-3">
-    <span class="text-xs text-slate-500">Taxonomic Level:</span>
+  <div class="flex items-center gap-3 text-xs">
     <button
-      class="text-xs px-2.5 py-1 rounded border font-medium transition-colors
-        bg-cyan-400/20 text-cyan-400 border-cyan-400/40 hover:bg-cyan-400/30"
+      class="px-3 py-1 rounded-md border transition-colors text-center
+        border-cyan-400 bg-cyan-400/10 text-cyan-400"
       onclick={cycleRank}
+      title={`Cycle: ${RANK_LEVELS.map(r => r.label).join(' → ')}`}
     >
-      {currentRank.label}
+      {currentRank.label} &#x25BE;
     </button>
     <span class="text-[10px] text-slate-600">
       {RANK_LEVELS.map(r => r.label === currentRank.label ? `[${r.label}]` : r.label).join(' > ')}
@@ -284,17 +284,17 @@
         {/if}
       </h3>
       <button
-        class="text-xs px-2 py-1 rounded border transition-colors
+        class="text-[10px] px-1.5 py-0.5 rounded border transition-colors
           {showPct
-            ? 'bg-cyan-400/20 text-cyan-400 border-cyan-400/40'
-            : 'text-slate-400 border-slate-600 hover:text-slate-200 hover:border-slate-500'}"
+            ? 'border-cyan-400 text-cyan-400'
+            : 'border-slate-600 text-slate-500 hover:text-slate-300'}"
         onclick={() => showPct = !showPct}
       >
         {showPct ? '%' : '#'}
       </button>
     </div>
     {#if stackedTraces.length}
-      <PlotlyChart traces={stackedTraces} layout={stackedLayout} />
+      <PlotlyChart traces={stackedTraces} layout={stackedLayout} exportName={`danaseq_taxonomy_stacked_${currentRank}`} />
     {:else}
       <div class="h-[400px] flex items-center justify-center text-slate-500 text-sm">No per-sample taxonomy data</div>
     {/if}

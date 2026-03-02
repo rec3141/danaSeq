@@ -2,8 +2,9 @@
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
 
-  let { traces = [], layout = {}, config = {} } = $props();
+  let { traces = [], layout = {}, config = {}, onclick = null, onselect = null, exportName = 'danaseq_plot' } = $props();
   let container;
+  let listenersAttached = false;
 
   const darkDefaults = {
     paper_bgcolor: '#1e293b', plot_bgcolor: '#0f172a',
@@ -12,6 +13,7 @@
     modebar: { orientation: 'v', bgcolor: 'transparent', color: '#64748b', activecolor: '#22d3ee' },
     xaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155' },
     yaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155' },
+    hovermode: 'closest',
   };
 
   function plot() {
@@ -20,13 +22,52 @@
       xaxis: { ...darkDefaults.xaxis, ...(layout.xaxis || {}) },
       yaxis: { ...darkDefaults.yaxis, ...(layout.yaxis || {}) },
     };
-    const mergedConfig = { responsive: true, displaylogo: false, displayModeBar: 'hover', ...config };
+    const mergedConfig = {
+      responsive: true, displaylogo: false, displayModeBar: 'hover',
+      toImageButtonOptions: { format: 'png', filename: exportName, scale: 4 },
+      ...config,
+    };
     Plotly.react(container, traces, mergedLayout, mergedConfig);
+    // Force resize after react to prevent overflow in grid/flex containers
+    requestAnimationFrame(() => { if (container) Plotly.Plots.resize(container); });
+
+    if (!listenersAttached) {
+      if (onclick) {
+        container.on('plotly_click', (eventData) => {
+          if (eventData?.points?.length) {
+            const id = eventData.points[0].customdata;
+            if (id) onclick(id);
+          }
+        });
+      }
+      if (onselect) {
+        // Shift-drag for lasso select
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Shift' && container._fullLayout?.dragmode !== 'lasso') {
+            Plotly.relayout(container, { dragmode: 'lasso' });
+          }
+        });
+        document.addEventListener('keyup', (e) => {
+          if (e.key === 'Shift' && container._fullLayout?.dragmode === 'lasso') {
+            Plotly.relayout(container, { dragmode: 'zoom' });
+          }
+        });
+        container.on('plotly_selected', (eventData) => {
+          if (eventData?.points?.length) onselect(eventData.points.map(p => p.customdata).filter(Boolean));
+        });
+        container.on('plotly_deselect', () => onselect(null));
+      }
+      listenersAttached = true;
+    }
   }
 
   onMount(() => {
     plot();
-    requestAnimationFrame(() => { if (container) Plotly.Plots.resize(container); });
+    const ro = new ResizeObserver(() => {
+      if (container) Plotly.Plots.resize(container);
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
   });
 
   $effect(() => {

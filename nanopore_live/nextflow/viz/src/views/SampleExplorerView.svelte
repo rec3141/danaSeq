@@ -69,14 +69,53 @@
     embedIdx++;
   }
 
-  const colorOptions = [
-    { value: 'dominant_phylum', label: 'Dominant Phylum' },
-    { value: 'dominant_class', label: 'Dominant Class' },
-    { value: 'flowcell', label: 'Flowcell' },
-    { value: 'read_count', label: 'Read Count' },
-    { value: 'total_bases', label: 'Total Bases' },
-    { value: 'diversity', label: 'Shannon Diversity' },
-  ];
+  // Detect metadata columns: classify as continuous (>80% numeric) or categorical
+  let metaColumns = $derived.by(() => {
+    if (!$metadata) return [];
+    const stats = new Map();
+    for (const m of Object.values($metadata)) {
+      for (const [k, v] of Object.entries(m)) {
+        if (k === 'lat' || k === 'lon') continue;
+        if (!stats.has(k)) stats.set(k, { num: 0, total: 0 });
+        const s = stats.get(k);
+        s.total++;
+        if (typeof v === 'number') s.num++;
+      }
+    }
+    return [...stats.entries()].map(([k, s]) => ({ key: k, continuous: s.num > s.total * 0.8 })).sort((a, b) => a.key.localeCompare(b.key));
+  });
+
+  let colorOptions = $derived.by(() => {
+    const opts = [
+      { value: 'dominant_phylum', label: 'Phylum' },
+      { value: 'dominant_class', label: 'Class' },
+      { value: 'flowcell', label: 'Flowcell' },
+      { value: 'read_count', label: 'Read Count' },
+      { value: 'total_bases', label: 'Total Bases' },
+      { value: 'diversity', label: 'Diversity' },
+    ];
+    const existing = new Set(opts.map(o => o.value));
+    for (const col of metaColumns) {
+      if (existing.has(col.key)) continue;
+      opts.push({ value: col.key, label: col.key });
+    }
+    return opts;
+  });
+
+  let sizeOptions = $derived.by(() => {
+    const opts = [
+      { value: 'fixed', label: 'Fixed' },
+      { value: 'read_count', label: 'Reads' },
+      { value: 'total_bases', label: 'Bases' },
+      { value: 'diversity', label: 'Diversity' },
+    ];
+    const existing = new Set(opts.map(o => o.value));
+    for (const col of metaColumns) {
+      if (!col.continuous || existing.has(col.key)) continue;
+      opts.push({ value: col.key, label: col.key });
+    }
+    return opts;
+  });
 
   // Get coordinates for current embedding mode
   function getCoords(sampleId) {
@@ -152,12 +191,12 @@
   const tableColumns = [
     { key: 'flowcell', label: 'Flowcell' },
     { key: 'barcode', label: 'Barcode' },
-    { key: 'read_count', label: 'Reads', render: v => v?.toLocaleString() ?? '-' },
-    { key: 'total_bases', label: 'Bases', render: v => v ? `${(v/1e6).toFixed(1)}M` : '-' },
-    { key: 'avg_length', label: 'Avg Len', render: v => v ? Math.round(v).toLocaleString() : '-' },
-    { key: 'n_classified', label: 'Classified', render: v => v?.toLocaleString() ?? '-' },
+    { key: 'read_count', label: 'Reads', render: v => typeof v === 'number' ? v.toLocaleString() : '-' },
+    { key: 'total_bases', label: 'Bases', render: v => typeof v === 'number' ? `${(v/1e6).toFixed(1)}M` : '-' },
+    { key: 'avg_length', label: 'Avg Len', render: v => typeof v === 'number' ? Math.round(v).toLocaleString() : '-' },
+    { key: 'n_classified', label: 'Classified', render: v => typeof v === 'number' ? v.toLocaleString() : '-' },
     { key: 'dominant_class', label: 'Dominant Class' },
-    { key: 'diversity', label: 'Shannon H', render: v => v != null ? v.toFixed(2) : '-' },
+    { key: 'diversity', label: 'Shannon H', render: v => typeof v === 'number' ? v.toFixed(2) : '-' },
   ];
 
   function handleSelect(ids) {
@@ -189,67 +228,65 @@
   {/if}
 
   <!-- Controls -->
-  <div class="flex items-center gap-4 flex-wrap">
+  <div class="flex items-center gap-3 flex-wrap text-xs">
     <button
-      class="text-xs px-3 py-1.5 rounded border border-slate-600 text-slate-300 transition-colors font-medium
-        {availableModes.length > 1 ? 'hover:text-cyan-400 hover:border-cyan-400/40 cursor-pointer' : 'opacity-60 cursor-default'}"
+      class="px-3 py-1 rounded-md border transition-colors text-center
+        {availableModes.length > 1 ? 'border-slate-600 text-slate-400 hover:border-slate-500 cursor-pointer' : 'border-slate-700 text-slate-500 opacity-60 cursor-default'}"
       onclick={availableModes.length > 1 ? cycleEmbed : undefined}
       title={availableModes.length > 1 ? `Cycle layout (${availableModes.map(m => EMBED_LABELS[m] || m).join(' / ')})` : 'Only grid layout available (run sketching for t-SNE)'}
     >
-      {EMBED_LABELS[embedMode] || embedMode}
+      {EMBED_LABELS[embedMode] || embedMode} &#x25BE;
     </button>
-    <label class="text-xs text-slate-400">
-      Color by:
-      <select bind:value={colorBy} class="ml-1 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200">
-        {#each colorOptions as opt}
-          <option value={opt.value}>{opt.label}</option>
-        {/each}
-      </select>
-    </label>
-    <label class="text-xs text-slate-400">
-      Size by:
-      <select bind:value={sizeBy} class="ml-1 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200">
-        <option value="fixed">Fixed</option>
-        <option value="read_count">Read Count</option>
-        <option value="total_bases">Total Bases</option>
-      </select>
-    </label>
-    <label class="text-xs text-slate-400 flex items-center gap-2">
-      Size:
-      <input type="range" min="0.2" max="3" step="0.1" bind:value={sizeScale}
-        class="w-20 h-1 accent-cyan-400" />
-      <span class="text-slate-500 w-8">{sizeScale.toFixed(1)}x</span>
-    </label>
-    <!-- log2 read count filter -->
-    <label class="text-xs text-slate-400 flex items-center gap-2">
-      Reads:
+    <select bind:value={colorBy}
+      class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
+      {#each colorOptions as opt}
+        <option value={opt.value}>{opt.label}</option>
+      {/each}
+    </select>
+    <select bind:value={sizeBy}
+      class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
+      {#each sizeOptions as opt}
+        <option value={opt.value}>Size: {opt.label}</option>
+      {/each}
+    </select>
+    <div class="text-slate-400 flex items-center gap-1">
+      Size
+      <div class="single-range relative w-20 h-5 flex items-center">
+        <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
+        <input type="range" min="0.2" max="3" step="0.1" bind:value={sizeScale} />
+      </div>
+      <span class="text-slate-500 w-8 font-mono">{sizeScale.toFixed(1)}x</span>
+    </div>
+    <!-- log2 read count filter (MAG-style dual-range) -->
+    <div class="text-slate-400 flex items-center gap-1">
+      Reads
       <span class="text-slate-500 w-10 text-right font-mono">{readFilterLabel(log2Min)}</span>
-      <div class="relative w-28 h-4 flex items-center">
+      <div class="dual-range relative w-28 h-5 flex items-center">
+        <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
+        <div class="absolute h-1 bg-cyan-400/40 rounded" style="left: {log2Min / log2Ceil * 100}%; right: {100 - log2Max / log2Ceil * 100}%"></div>
         <input type="range" min="0" max={log2Ceil} step="0.5" bind:value={log2Min}
-          oninput={(e) => { if (log2Min > log2Max - 0.5) log2Min = log2Max - 0.5; }}
-          class="absolute w-full h-1 accent-cyan-400 pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto appearance-none bg-slate-700 rounded" />
+          oninput={() => { if (log2Min > log2Max - 0.5) log2Min = log2Max - 0.5; }} />
         <input type="range" min="0" max={log2Ceil} step="0.5" bind:value={log2Max}
-          oninput={(e) => { if (log2Max < log2Min + 0.5) log2Max = log2Min + 0.5; }}
-          class="absolute w-full h-1 accent-cyan-400 pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto appearance-none bg-transparent rounded" />
+          oninput={() => { if (log2Max < log2Min + 0.5) log2Max = log2Min + 0.5; }} />
       </div>
       <span class="text-slate-500 w-10 font-mono">{readFilterLabel(log2Max)}</span>
-    </label>
+    </div>
     <!-- Date filter -->
     {#if dateRange.min}
-      <label class="text-xs text-slate-400 flex items-center gap-2">
-        Run Date:
+      <div class="text-slate-400 flex items-center gap-1">
+        Date
         <input type="date" bind:value={dateMin}
           min={dateRange.min} max={dateRange.max}
-          class="bg-slate-800 border border-slate-600 rounded px-1.5 py-1 text-xs text-slate-200 w-[130px]" />
+          class="bg-slate-800 border border-slate-600 rounded-md px-1.5 py-1 text-xs text-slate-200 w-[130px] focus:border-cyan-400 focus:outline-none" />
         <span class="text-slate-500">–</span>
         <input type="date" bind:value={dateMax}
           min={dateRange.min} max={dateRange.max}
-          class="bg-slate-800 border border-slate-600 rounded px-1.5 py-1 text-xs text-slate-200 w-[130px]" />
-      </label>
+          class="bg-slate-800 border border-slate-600 rounded-md px-1.5 py-1 text-xs text-slate-200 w-[130px] focus:border-cyan-400 focus:outline-none" />
+      </div>
     {/if}
     {#if lassoIds}
       <button
-        class="text-xs px-3 py-1.5 rounded bg-cyan-400/20 text-cyan-400 border border-cyan-400/40 hover:bg-cyan-400/30 transition-colors"
+        class="px-3 py-1 rounded-md border border-cyan-400 bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20 transition-colors"
         onclick={addLassoToCart}
       >
         Add {lassoIds.length} to Cart
@@ -271,6 +308,7 @@
           {coordExtents}
           onselect={handleSelect}
           onclick={handleClick}
+          exportName={`danaseq_sample_tsne_color-${colorBy}`}
         />
       {:else}
         <div class="flex items-center justify-center h-full text-slate-500">No sample data available</div>
@@ -351,3 +389,73 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .dual-range input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    pointer-events: none;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  .dual-range input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    pointer-events: all;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: #22d3ee;
+    cursor: pointer;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 3px rgba(0,0,0,0.4);
+  }
+  .dual-range input[type="range"]::-moz-range-thumb {
+    pointer-events: all;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: #22d3ee;
+    cursor: pointer;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 3px rgba(0,0,0,0.4);
+  }
+  .dual-range input[type="range"]::-webkit-slider-runnable-track { height: 0; }
+  .dual-range input[type="range"]::-moz-range-track { height: 0; background: transparent; }
+
+  .single-range input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+  .single-range input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: #22d3ee;
+    cursor: pointer;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 3px rgba(0,0,0,0.4);
+  }
+  .single-range input[type="range"]::-moz-range-thumb {
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: #22d3ee;
+    cursor: pointer;
+    border: 2px solid #0f172a;
+    box-shadow: 0 0 3px rgba(0,0,0,0.4);
+  }
+  .single-range input[type="range"]::-webkit-slider-runnable-track { height: 0; }
+  .single-range input[type="range"]::-moz-range-track { height: 0; background: transparent; }
+</style>
