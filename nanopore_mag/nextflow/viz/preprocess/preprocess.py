@@ -27,11 +27,15 @@ from scipy.spatial.distance import pdist
 
 
 def load_tsv(path, **kwargs):
-    """Load a TSV file, returning None if it doesn't exist."""
+    """Load a TSV file, returning None if it doesn't exist or is empty."""
     if not os.path.exists(path):
         print(f"  [WARNING] Missing: {path}", file=sys.stderr)
         return None
-    return pd.read_csv(path, sep='\t', **kwargs)
+    try:
+        return pd.read_csv(path, sep='\t', **kwargs)
+    except pd.errors.EmptyDataError:
+        print(f"  [WARNING] Empty: {path}", file=sys.stderr)
+        return None
 
 
 def write_json_gz(path, data, **dump_kwargs):

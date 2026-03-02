@@ -19,7 +19,7 @@ process ASSEMBLY_FLYE {
     def filtlong_cmd = ""
     if (params.filtlong_size) {
         filtlong_cmd = """
-        filtlong -t ${params.filtlong_size} all_reads.fastq.gz | gzip > all_reads_filt.fastq.gz
+        filtlong -t ${params.filtlong_size} all_reads.fastq.gz | pigz > all_reads_filt.fastq.gz
         mv all_reads_filt.fastq.gz all_reads.fastq.gz
         """
     }
@@ -98,7 +98,7 @@ process ASSEMBLY_METAMDBG {
     def filtlong_cmd = ""
     if (params.filtlong_size) {
         filtlong_cmd = """
-        filtlong -t ${params.filtlong_size} all_reads.fastq.gz | gzip > all_reads_filt.fastq.gz
+        filtlong -t ${params.filtlong_size} all_reads.fastq.gz | pigz > all_reads_filt.fastq.gz
         mv all_reads_filt.fastq.gz all_reads.fastq.gz
         """
     }
@@ -203,7 +203,7 @@ process ASSEMBLY_MYLOASM {
     def filtlong_cmd = ""
     if (params.filtlong_size) {
         filtlong_cmd = """
-        filtlong -t ${params.filtlong_size} all_reads.fastq.gz | gzip > all_reads_filt.fastq.gz
+        filtlong -t ${params.filtlong_size} all_reads.fastq.gz | pigz > all_reads_filt.fastq.gz
         mv all_reads_filt.fastq.gz all_reads.fastq.gz
         """
     }
