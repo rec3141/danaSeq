@@ -606,6 +606,7 @@ def main():
     print(f"[watch_status] Output:     {output_path}", file=sys.stderr)
     print(f"[watch_status] Interval:   {args.interval}s", file=sys.stderr)
 
+    ever_active = False
     while True:
         try:
             status = build_enhanced_status(args.results, args.work_dir)
@@ -618,10 +619,14 @@ def main():
             print(f"[watch_status] {ts}  {n_completed}/{n_total} completed, "
                   f"{n_running} running", file=sys.stderr)
 
-            if args.once or not status.get('pipeline_active'):
-                if not status.get('pipeline_active'):
-                    print("[watch_status] Pipeline no longer active — exiting.",
-                          file=sys.stderr)
+            if status.get('pipeline_active') or n_completed > 0:
+                ever_active = True
+
+            if args.once:
+                break
+            if ever_active and not status.get('pipeline_active'):
+                print("[watch_status] Pipeline no longer active — exiting.",
+                      file=sys.stderr)
                 break
 
         except Exception as e:
