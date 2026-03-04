@@ -45,6 +45,7 @@ CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag:latest"
 USE_CONTAINER=false
 CONTAINER_RUNTIME=""   # docker, apptainer, or singularity
 SIF_PATH=""            # resolved path to .sif file (apptainer/singularity only)
+PULL_SIF=false         # if true, pull/build SIF when missing
 NF_ARGS=()
 DB_ARGS=()
 MOUNTS=()
@@ -111,11 +112,21 @@ save_run_command() {
     local skip_next=false has_session=false
     for arg in "${ORIGINAL_ARGS[@]}"; do
         if $skip_next; then skip_next=false; continue; fi
-        if [[ "$arg" == "--session" ]]; then skip_next=true; has_session=true; continue; fi
+        if [[ "$arg" == "--resume" ]]; then
+            # Skip --resume and its optional session ID arg
+            has_session=true
+            continue
+        fi
+        # Skip bare session ID that followed --resume
+        if $has_session && [[ "$arg" =~ ^[0-9a-f-]{36}$ ]]; then
+            has_session=false
+            continue
+        fi
+        has_session=false
         save_args+=("$arg")
     done
     if [[ -n "$session" ]]; then
-        save_args+=("--session" "$session")
+        save_args+=("--resume" "$session")
     fi
     printf '%s\n' "$(realpath "$0") ${save_args[*]}" >> "${outdir}/pipeline_info/run_command.txt"
 }
@@ -134,6 +145,7 @@ usage() {
     echo "  --container      Auto-detect container runtime (apptainer > singularity > docker)"
     echo "  --image IMAGE    Override container image [default: ghcr.io/rec3141/danaseq-mag:latest]"
     echo "  --sif PATH       Use a specific .sif file (apptainer/singularity only)"
+    echo "  --pull           Pull/build SIF image if not found (apptainer/singularity)"
     echo ""
     echo "Shortcuts:"
     echo "  --all            Enable all optional modules (dedupe, bakta_extra, kraken2,"
@@ -145,10 +157,12 @@ usage() {
     echo "                   macsyfinder, defensefinder, metaeuk, marferret). Explicit"
     echo "                   --flag PATH overrides any auto-detected path."
     echo ""
-    echo "Caching:"
+    echo "Caching & Resume:"
     echo "  --workdir DIR        Nextflow work directory [-w] (default: /tmp/nanopore_mag_work)"
     echo "  --store_dir DIR      Persistent cache directory (storeDir); skips completed processes"
     echo "                       across runs even after work/ cleanup. Off by default."
+    echo "  --resume [ID]        Resume a previous run. Without ID, auto-detects from outdir"
+    echo "                       or resumes the last Nextflow session."
     echo ""
     echo "Pipeline flags (passed to Nextflow):"
     echo "  --dedupe             BBDuk deduplication before assembly"
@@ -223,7 +237,7 @@ INPUT_HOST=""
 OUTDIR_HOST=""
 WORKDIR_HOST="/tmp/nanopore_mag_work"
 RESUME_SESSION=""
-AUTO_SESSION=true
+DO_RESUME=false
 DB_DIR_HOST=""
 STORE_DIR_HOST=""
 
@@ -258,6 +272,9 @@ while (( $# )); do
             [[ -z "${2:-}" ]] && die "--sif requires a path to a .sif file"
             SIF_PATH="$2"
             shift 2 ;;
+        --pull)
+            PULL_SIF=true
+            shift ;;
         --input)
             [[ -z "${2:-}" ]] && die "--input requires a directory path"
             INPUT_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
@@ -294,11 +311,14 @@ while (( $# )); do
                 --run_marferret true
             )
             shift ;;
-        --session)
-            [[ -z "${2:-}" ]] && die "--session requires a session ID"
-            RESUME_SESSION="$2"
-            AUTO_SESSION=false
-            shift 2 ;;
+        --resume)
+            DO_RESUME=true
+            # Optional session ID argument (next arg that doesn't start with --)
+            if [[ -n "${2:-}" && "${2}" != --* ]]; then
+                RESUME_SESSION="$2"
+                shift
+            fi
+            shift ;;
         *)
             NF_ARGS+=("$1")
             shift ;;
@@ -340,15 +360,16 @@ fi
 # Auto-detect session ID from previous runs in this outdir
 # ============================================================================
 
-if [[ "$AUTO_SESSION" == true && -z "$RESUME_SESSION" ]]; then
-    # Extract session ID from last run_command.sh entry (UUID after -resume)
+if [[ "$DO_RESUME" == true && -z "$RESUME_SESSION" ]]; then
+    # Try to auto-detect session ID from previous run in this outdir
     if [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.txt" ]]; then
-        RESUME_SESSION=$(grep -oP '(?<=--session )[0-9a-f-]{36}' \
+        RESUME_SESSION=$(grep -oP '(?<=--resume )[0-9a-f-]{36}' \
             "${OUTDIR_HOST}/pipeline_info/run_command.txt" | tail -1 || true)
         if [[ -n "$RESUME_SESSION" ]]; then
             echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"
         fi
     fi
+    # If no session found, -resume without ID will resume the last run
 fi
 
 # ============================================================================
@@ -377,11 +398,15 @@ if [[ "$USE_CONTAINER" == true ]]; then
     if [[ "$CONTAINER_RUNTIME" == "apptainer" || "$CONTAINER_RUNTIME" == "singularity" ]]; then
         if [[ -z "$SIF_PATH" ]]; then
             SIF_PATH="${SCRIPT_DIR}/.danaseq-mag.sif"
-            if [[ ! -f "$SIF_PATH" ]]; then
-                echo "[INFO] Pulling container image (one-time download)..."
+        fi
+        if [[ ! -f "$SIF_PATH" ]]; then
+            if [[ "$PULL_SIF" == true ]]; then
+                echo "[INFO] Pulling container image..."
                 echo "  Source: docker://${CONTAINER_IMAGE}"
                 echo "  Destination: ${SIF_PATH}"
                 "$CONTAINER_RUNTIME" pull "$SIF_PATH" "docker://${CONTAINER_IMAGE}"
+            else
+                die "SIF file not found: $SIF_PATH\n  Use --pull to download it, or --sif PATH to specify an existing file."
             fi
         fi
         [[ -f "$SIF_PATH" ]] || die "SIF file not found: $SIF_PATH"
@@ -448,7 +473,10 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=("$SIF_PATH" run /pipeline/main.nf)
             ;;
     esac
-    CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}" -resume ${RESUME_SESSION})
+    CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}")
+    if [[ "$DO_RESUME" == true ]]; then
+        CONTAINER_CMD+=(-resume ${RESUME_SESSION})
+    fi
 
     echo "[INFO] Mode:   Container (${CONTAINER_RUNTIME})"
     echo "[INFO] Input:  $INPUT_HOST"
@@ -482,6 +510,11 @@ if [[ -n "$WORKDIR_HOST" ]]; then
     WORKDIR_FLAG=(-w "$WORKDIR_HOST")
 fi
 
+RESUME_FLAG=()
+if [[ "$DO_RESUME" == true ]]; then
+    RESUME_FLAG=(-resume ${RESUME_SESSION})
+fi
+
 LOCAL_CMD=(
     mamba run -p "${SCRIPT_DIR}/conda-envs/dana-mag-flye"
     nextflow run "${SCRIPT_DIR}/main.nf"
@@ -489,7 +522,7 @@ LOCAL_CMD=(
     --outdir "$OUTDIR_HOST"
     "${WORKDIR_FLAG[@]}"
     "${NF_ARGS[@]}"
-    -resume ${RESUME_SESSION}
+    "${RESUME_FLAG[@]}"
 )
 
 echo "[INFO] Mode:   Local (conda)"
