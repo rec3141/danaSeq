@@ -107,13 +107,6 @@ def helpMessage() {
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
 
-    Bin Refinement (NCLB):
-      --run_nclb          Run NCLB bin refinement after DAS_Tool [default: false]
-      --nclb_dir PATH     Path to NCLB repository (contains bin/, lib/, envs/)
-      --nclb_base_url URL LLM server URL for conversations [default: http://localhost:1234/v1]
-      --nclb_model NAME   LLM model name [default: auto-detect from server]
-      --nclb_with_ani     Run minimap2 ANI during Elder investigations [default: false]
-
     Visualization:
       --run_viz            Build viz dashboard at end of pipeline [default: true]
 
@@ -167,11 +160,11 @@ def helpMessage() {
       │   ├── *.sorted.bam
       │   └── depths.txt
       ├── binning/
-      │   ├── semibin/contig_bins.tsv
-      │   ├── metabat/contig_bins.tsv
-      │   ├── maxbin/contig_bins.tsv
-      │   ├── lorbin/contig_bins.tsv
-      │   ├── comebin/contig_bins.tsv
+      │   ├── semibin/semibin_bins.tsv
+      │   ├── metabat/metabat_bins.tsv
+      │   ├── maxbin/maxbin_bins.tsv
+      │   ├── lorbin/lorbin_bins.tsv
+      │   ├── comebin/comebin_bins.tsv
       │   ├── dastool/
       │   │   ├── bins/*.fa
       │   │   ├── contig2bin.tsv
@@ -258,16 +251,6 @@ def helpMessage() {
       │       ├── rrna_genes.tsv     Per-gene rRNA classifications (barrnap + vsearch)
       │       ├── rrna_contigs.tsv   Per-contig rRNA summary (best SSU/LSU taxonomy)
       │       └── rrna_sequences.fasta  Extracted rRNA gene sequences
-      ├── binning/nclb/               (if --run_nclb + --nclb_dir set)
-      │   ├── communities/*.fa         Refined community FASTAs
-      │   ├── gathering.json           Identity cards + resonance data
-      │   ├── proposals.json           LLM conversation proposals
-      │   ├── elder_reports.json       SCG redundancy investigations
-      │   ├── chronicle.json           Machine-readable decision log
-      │   ├── chronicle.md            Human-readable narrative
-      │   ├── contig2community.tsv     Contig membership assignments
-      │   ├── quality_report.tsv       Community quality metrics
-      │   └── valence_report.tsv       Per-contig valence scores
       ├── viz/                          (if --run_viz)
       │   ├── data/                     11 JSON files for dashboard
       │   │   ├── overview.json
@@ -347,10 +330,6 @@ include { INTEGRONFINDER }      from './modules/mge'
 include { ISLANDPATH_DIMOB }    from './modules/mge'
 include { MACSYFINDER }         from './modules/mge'
 include { DEFENSEFINDER }       from './modules/mge'
-include { NCLB_GATHER }         from './modules/refinement'
-include { NCLB_CONVERSE }       from './modules/refinement'
-include { NCLB_ELDERS }         from './modules/refinement'
-include { NCLB_INTEGRATE }      from './modules/refinement'
 include { TIARA_CLASSIFY }      from './modules/eukaryotic'
 include { WHOKARYOTE_CLASSIFY } from './modules/eukaryotic'
 include { METAEUK_PREDICT }     from './modules/eukaryotic'
@@ -483,6 +462,8 @@ workflow {
     }
 
     // 2c2a. Kaiju taxonomy — secondary: protein-level via annotation .faa + .gff (per-gene detail)
+    //       Output (kaiju_genes.tsv) is a terminal sink: published to disk but not consumed
+    //       by any downstream process. The contig-level classifier above feeds the viz.
     if (params.run_kaiju && params.kaiju_db && effective_annotator != 'none') {
         KAIJU_CLASSIFY(ch_proteins, ch_gff)
     }
@@ -702,22 +683,7 @@ workflow {
         CHECKM2(ch_all_bins)
     }
 
-    // 8. NCLB bin refinement (optional — requires --nclb_dir + LLM server)
-    if (params.run_nclb && params.nclb_dir) {
-        // Build a "ready" signal: collect DAS Tool output (+ CheckM2 if available)
-        // This ensures all upstream results are published before NCLB reads them
-        ch_nclb_ready = DASTOOL_CONSENSUS.out.contig2bin
-            .mix(CALCULATE_TNF.out.tnf)
-            .mix(CALCULATE_DEPTHS.out.jgi_depth)
-            .collect()
-
-        NCLB_GATHER(ch_nclb_ready)
-        NCLB_CONVERSE(NCLB_GATHER.out.gathering)
-        NCLB_ELDERS(NCLB_GATHER.out.gathering)
-        NCLB_INTEGRATE(NCLB_CONVERSE.out.proposals)
-    }
-
-    // 9. Viz dashboard: preprocess results into JSON + build static site
+    // 8. Viz dashboard: preprocess results into JSON + build static site
     //    Fires incrementally at 3-4 checkpoints; only stage 1 computes t-SNE.
     //    preprocess.py handles missing files gracefully (WARNING, not error).
     //    --skip-tsne preserves existing contig_embeddings.json on subsequent runs.

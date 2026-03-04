@@ -18,19 +18,22 @@ nanopore_mag/
 │   ├── main.nf                 Pipeline entry point
 │   ├── nextflow.config         Params, profiles, resources
 │   ├── modules/
+│   │   ├── preprocess.nf      CONCAT_READS (per-barcode concat + optional dedupe)
 │   │   ├── assembly.nf         ASSEMBLY_FLYE, ASSEMBLY_METAMDBG, ASSEMBLY_MYLOASM, CALCULATE_TNF
-│   │   ├── mapping.nf          MAP_READS, CALCULATE_DEPTHS
+│   │   ├── mapping.nf          MAP_READS, CALCULATE_DEPTHS, CALCULATE_GENE_DEPTHS
 │   │   ├── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
 │   │   │                       BIN_LORBIN, BIN_COMEBIN,
 │   │   │                       DASTOOL_CONSENSUS, CHECKM2
-│   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_CDS, BAKTA_FULL
+│   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_BASIC, BAKTA_EXTRA
+│   │   ├── taxonomy.nf         KAIJU_CONTIG_CLASSIFY, KAIJU_CLASSIFY,
+│   │   │                       KRAKEN2_CLASSIFY, SENDSKETCH_CLASSIFY
 │   │   ├── eukaryotic.nf      TIARA_CLASSIFY, WHOKARYOTE_CLASSIFY, METAEUK_PREDICT,
 │   │   │                       MARFERRET_CLASSIFY
-│   │   ├── rrna.nf             RRNA_CLASSIFY (barrnap + vsearch SILVA classification)
+│   │   ├── rrna.nf             RNA_CLASSIFY (barrnap + vsearch + Aragorn)
 │   │   ├── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
 │   │   │                       ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
 │   │   ├── metabolism.nf       KOFAMSCAN, EMAPPER, DBCAN, MERGE_ANNOTATIONS,
-│   │   │                       MAP_TO_BINS, KEGG_MODULES
+│   │   │                       MAP_TO_BINS, KEGG_MODULES, MINPATH, KEGG_DECODER
 │   │   └── viz.nf              VIZ_PREPROCESS (dashboard JSON + static site build)
 │   ├── envs/                   Conda YAML specs
 │   │   ├── flye.yml            Flye, Filtlong, Nextflow, OpenJDK
@@ -50,7 +53,9 @@ nanopore_mag/
 │   │   ├── kofamscan.yml      KofamScan (KEGG Orthology)
 │   │   ├── emapper.yml        eggNOG-mapper (COG/GO/EC/KEGG/Pfam)
 │   │   ├── dbcan.yml          dbCAN3 (CAZyme annotation)
+│   │   ├── kaiju.yml            Kaiju (protein-level taxonomy)
 │   │   ├── kraken2.yml         Kraken2 (k-mer contig-level taxonomy)
+│   │   ├── prokka.yml          Prokka (gene annotation)
 │   │   ├── checkm2.yml         CheckM2
 │   │   ├── tiara.yml           Tiara (eukaryotic contig classification, deep learning)
 │   │   ├── whokaryote.yml     Whokaryote (eukaryotic classification, gene structure RF)
@@ -61,7 +66,10 @@ nanopore_mag/
 │   │   └── viz.yml             Node.js + Python/pandas/scipy (viz dashboard)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py,
 │   │                           merge_annotations.py, map_annotations_to_bins.py,
-│   │                           kegg_module_completeness.py, parse_marferret_results.py)
+│   │                           kegg_module_completeness.py, parse_marferret_results.py,
+│   │                           parallel_defensefinder.py, parse_aragorn_results.py,
+│   │                           parse_rrna_results.py, prepare_keggdecoder_input.py,
+│   │                           run_minpath_per_mag.py)
 │   ├── conda-envs/             Pre-built envs (created by install.sh)
 │   ├── install.sh              Conda environment builder
 │   ├── Dockerfile              Pipeline image (thin layer on base, rebuilt on push)
@@ -268,30 +276,35 @@ directive or in the output file copy logic (e.g. wrong filename pattern in the s
 
 ```
 Sample FASTQs (N files)
+         │ CONCAT_READS (per barcode)
          │ collect()
    ASSEMBLY_{FLYE|METAMDBG|MYLOASM}   Fan-in: all reads → 1 co-assembly (--assembler)
-         ├──────────────────────┬──────────────────────┬──────────────────┬───────────────────┐
-   MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY   INTEGRONFINDER   KRAKEN2_CLASSIFY   SENDSKETCH_CLASSIFY   RRNA_CLASSIFY
-         │ collect()        │                │
-   CALCULATE_DEPTHS   PROKKA|BAKTA    CHECKV_QUALITY
-                            │
-                  ┌─────────┼──────────┬────────────────────┐
-            ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   TIARA + WHOKARYOTE   METAEUK → MARFERRET
-                            └─────┬────┘
-                          MERGE_ANNOTATIONS
-                                  │
-                           MAP_TO_BINS
-                                  │
-                          KEGG_MODULES
-         │
-    ┌────┼────┬────┬────┐
- SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (serial)
-    └────┼────┴────┴────┘
-   DASTOOL_CONSENSUS      Consensus integration
-         │ collect()
-   CHECKM2                Quality assessment (optional, needs --checkm2_db)
-         │
-   VIZ_PREPROCESS         Dashboard JSON + static site (barrier: DAS_Tool + CheckM2 + KEGG)
+         ├──────────────────────┬──────────────────────────┬──────────────────────────────────┐
+   MAP_READS (×N)     CALCULATE_TNF   GENOMAD_CLASSIFY     INTEGRONFINDER                    │
+         │ collect()        │                │              KAIJU_CONTIG_CLASSIFY              │
+   CALCULATE_DEPTHS        │         CHECKV_QUALITY        KRAKEN2_CLASSIFY                   │
+   CALCULATE_GENE_DEPTHS   │                               SENDSKETCH_CLASSIFY                │
+                            │                               RNA_CLASSIFY                      │
+                      PROKKA|BAKTA ─────────────────────────────────────────────────────┐     │
+                            │                                                           │     │
+                  ┌─────────┼──────────┬─────────────────────┐                          │     │
+            ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   TIARA + WHOKARYOTE   METAEUK → MARFERRET │
+            MACSYFINDER  DEFENSEFINDER │                                                      │
+            KAIJU_CLASSIFY   └─────┬───┘                                                      │
+                          MERGE_ANNOTATIONS                                                   │
+                                  │                                                           │
+                           MAP_TO_BINS ──────────── (needs DAS_Tool contig2bin)                │
+                           ┌──────┼──────┐                                                    │
+                     KEGG_MODULES MINPATH KEGG_DECODER                                        │
+         │                                                                                    │
+    ┌────┼────┬────┬────┐                                                                     │
+ SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (parallel)                               │
+    └────┼────┴────┴────┘                                                                     │
+   DASTOOL_CONSENSUS      Consensus integration                                               │
+         │ collect()                                                                          │
+   CHECKM2                Quality assessment (optional, needs --checkm2_db)                   │
+         │                                                                                    │
+   VIZ_PREPROCESS (×4)    Incremental dashboard (barrier: TNF → annotation → binning → all)   │
 ```
 
 ### Key Design Decisions
@@ -310,11 +323,11 @@ Sample FASTQs (N files)
 
 **Resume:** Nextflow's built-in `-resume` uses task hashing. No manual checkpoint logic needed.
 
-**Persistent caching:** All 41 processes support `storeDir` for caching that survives work directory cleanup. Opt-in via `--store_dir`. When active, publishDir is ignored and outputs go directly to the store path.
+**Persistent caching:** All processes support `storeDir` for caching that survives work directory cleanup. Opt-in via `--store_dir`. When active, publishDir is ignored and outputs go directly to the store path.
 
 ### Conda Environments
 
-Twenty-one isolated environments avoid dependency conflicts:
+Isolated conda environments avoid dependency conflicts:
 
 | Environment | Tools | Rationale |
 |-------------|-------|-----------|
@@ -332,7 +345,9 @@ Twenty-one isolated environments avoid dependency conflicts:
 | `dana-mag-kofamscan` | KofamScan, HMMER | KEGG Orthology assignment via adaptive HMM thresholds |
 | `dana-mag-emapper` | eggNOG-mapper, DIAMOND | COG/GO/EC/KEGG/Pfam functional annotation |
 | `dana-mag-dbcan` | run_dbcan, HMMER, DIAMOND | CAZyme annotation (3-method consensus) |
+| `dana-mag-kaiju` | Kaiju | Protein-level taxonomy (six-frame translation or pre-annotated .faa) |
 | `dana-mag-kraken2` | Kraken2 | k-mer contig-level taxonomy (no annotation needed; maxForks 1) |
+| `dana-mag-prokka` | Prokka | Gene annotation (alternative to Bakta) |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
 | `dana-mag-tiara` | Tiara | Deep learning k-mer eukaryotic classification (98%+ accuracy) |
 | `dana-mag-whokaryote` | Whokaryote, Prodigal | Gene structure-based eukaryotic classification (random forest) |
@@ -378,11 +393,13 @@ input_dir/
 results/
 ├── assembly/
 │   ├── assembly.fasta         Co-assembly
-│   └── tnf.tsv                Tetranucleotide frequencies (136 features)
+│   ├── tnf.tsv                Tetranucleotide frequencies (136 features)
+│   └── gc.tsv                 Per-contig GC content
 ├── mapping/
 │   ├── *.sorted.bam           Per-sample alignments
 │   ├── *.sorted.bam.bai       BAM indices
-│   └── depths.txt             CoverM depth table
+│   ├── depths.txt             CoverM depth table
+│   └── gene_depths.tsv        Per-gene mean depths (from annotation BED + BAMs)
 ├── binning/
 │   ├── semibin/semibin_bins.tsv
 │   ├── metabat/metabat_bins.tsv
@@ -443,6 +460,12 @@ results/
 │   ├── modules/
 │   │   ├── module_completeness.tsv  MAG × module completeness matrix
 │   │   └── module_heatmap.svg       Clustered heatmap
+│   ├── minpath/
+│   │   ├── minpath_pathways.tsv     MAG × pathway (naive vs parsimony)
+│   │   └── details/                 Per-MAG MinPath reports
+│   ├── kegg_decoder/
+│   │   ├── kegg_decoder_output.tsv  MAG × function completeness (~80 functions)
+│   │   └── function_heatmap.svg     Publication-quality heatmap
 │   └── community/
 │       └── community_annotations.tsv  All proteins with bin_id column
 ├── taxonomy/                      Taxonomy classification
@@ -454,10 +477,11 @@ results/
 │   │   └── kraken2_report.txt     Standard Kraken2 report (for Krona/Pavian)
 │   ├── sendsketch/                GTDB MinHash taxonomy (if --sendsketch_address set)
 │   │   └── sendsketch_contigs.tsv Per-contig GTDB taxonomy + ANI
-│   └── rrna/                      rRNA gene classification (if --silva_ssu_db set)
+│   └── rrna/                      RNA gene classification (if --silva_ssu_db set)
 │       ├── rrna_genes.tsv         Per-gene rRNA classifications (barrnap + vsearch)
 │       ├── rrna_contigs.tsv       Per-contig rRNA summary (best SSU/LSU taxonomy)
-│       └── rrna_sequences.fasta   Extracted rRNA gene sequences
+│       ├── rrna_sequences.fasta   Extracted rRNA gene sequences
+│       └── trna_genes.tsv         tRNA/tmRNA genes (Aragorn)
 ├── eukaryotic/                    Eukaryotic analysis (if --run_eukaryotic or --run_metaeuk)
 │   ├── tiara/
 │   │   └── tiara_output.tsv       Per-contig Tiara classification + probabilities

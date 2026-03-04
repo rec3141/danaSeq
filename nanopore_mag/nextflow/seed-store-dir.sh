@@ -117,9 +117,6 @@ link_dir "$RESULTS/binning/dastool" "$STORE/binning/dastool"
 # CheckM2
 link_dir "$RESULTS/binning/checkm2" "$STORE/binning/checkm2"
 
-# NCLB
-link_dir "$RESULTS/binning/nclb" "$STORE/binning/nclb"
-
 # Annotation (Bakta already uses annotation.* names)
 link_dir "$RESULTS/annotation/bakta/basic" "$STORE/annotation/bakta/basic"
 link_dir "$RESULTS/annotation/bakta/extra" "$STORE/annotation/bakta/extra"

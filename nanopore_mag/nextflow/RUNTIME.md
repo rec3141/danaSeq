@@ -69,7 +69,7 @@ If running on CPU-only nodes, use the `semibin-cpu.yml` and `comebin-cpu.yml` co
 | KAIJU_CONTIG_CLASSIFY | 16 | 60 GB | ~5h | b2 (12h) | 6-frame translation, greedy mode; ~40 GB DB |
 | KRAKEN2_CLASSIFY | 8 | 60 GB | ~9h | b2 (12h) | Loads ~50 GB DB into RAM; maxForks 1 |
 | SENDSKETCH_CLASSIFY | 8 | 24 GB | ~70 min | b1 (3h) | Remote GTDB TaxServer |
-| RRNA_CLASSIFY | 8 | 24 GB | ~5h | b2 (12h) | barrnap 3x + vsearch 6x + aragorn |
+| RNA_CLASSIFY | 8 | 24 GB | ~5h | b2 (12h) | barrnap 3x + vsearch 6x + aragorn |
 
 ### Annotation
 
@@ -141,7 +141,7 @@ withLabel: process_kraken {
 
 ```groovy
 // BAKTA_EXTRA is the critical bottleneck (17h+ on full DB)
-withName: 'BAKTA_EXTRA|BAKTA_FULL' {
+withName: 'BAKTA_EXTRA' {
     time   = 3.d        // b4 partition
 }
 

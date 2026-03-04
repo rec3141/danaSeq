@@ -1,4 +1,12 @@
-// Binning: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, DAS_Tool consensus
+// Binning: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, DAS_Tool consensus.
+//
+// Five binners run in parallel, each emitting a DAS_Tool-format TSV (contig\tbin).
+// All outputs are mixed into ch_binner_results in main.nf and collected by
+// DASTOOL_CONSENSUS for score-based consensus integration.
+//
+// Each binner catches failures and emits an empty TSV so the pipeline continues.
+// DAS_Tool filters out empty inputs and handles the "no bins above threshold" case.
+// CHECKM2 runs on all binner + consensus FASTAs for quality assessment.
 
 process BIN_SEMIBIN2 {
     tag "semibin2"

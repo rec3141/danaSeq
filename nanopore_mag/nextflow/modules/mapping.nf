@@ -1,4 +1,13 @@
-// Read mapping: align each sample to the co-assembly, calculate coverage depths
+// Read mapping: align each sample to the co-assembly, calculate coverage depths.
+//
+// Processes:
+//   MAP_READS            — minimap2 map-ont per sample, samtools sort + index.
+//                          Drops unmapped + secondary (-F 0x104), keeps supplementary
+//                          for read-bridged adjacency. CoverM ignores supplementary
+//                          when computing depths so they don't inflate coverage.
+//   CALCULATE_DEPTHS     — CoverM metabat-mode depth table across all BAMs.
+//                          Replaces jgi_summarize_bam_contig_depths (overflow bug).
+//   CALCULATE_GENE_DEPTHS — samtools bedcov per-gene depths from annotation BED.
 
 process MAP_READS {
     tag "${meta.id}"

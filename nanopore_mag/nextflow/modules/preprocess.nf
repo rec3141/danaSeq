@@ -1,4 +1,10 @@
-// Per-barcode read concatenation with optional deduplication
+// Per-barcode read concatenation with optional deduplication.
+//
+// When --input points to a nanopore run directory (fastq_pass/barcode*/),
+// main.nf groups FASTQ files by flowcell+barcode and feeds each group here.
+// CONCAT_READS concatenates the chunks into one file per barcode, optionally
+// deduplicating by read UUID (--dedupe) to remove basecall duplicates.
+// Tiny barcodes (< 1 KB) are skipped; downstream filters then drop empty outputs.
 
 process CONCAT_READS {
     tag "${meta.id}"

@@ -1,6 +1,6 @@
 # MAG Assembly Pipeline
 
-Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes gene annotation (Prokka/Bakta), four taxonomy classifiers (Kaiju, Kraken2, sendsketch, rRNA/SILVA), mobile genetic element detection (geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder), metabolic profiling with pathway analysis (KofamScan, eggNOG-mapper, dbCAN3, MinPath, KEGG-Decoder), eukaryotic analysis (Tiara, Whokaryote, MetaEuk, MarFERReT), and optional LLM-guided bin refinement (NCLB).
+Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes gene annotation (Prokka/Bakta), four taxonomy classifiers (Kaiju, Kraken2, sendsketch, rRNA/SILVA), mobile genetic element detection (geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder), metabolic profiling with pathway analysis (KofamScan, eggNOG-mapper, dbCAN3, MinPath, KEGG-Decoder), eukaryotic analysis (Tiara, Whokaryote, MetaEuk, MarFERReT).
 
 ## Quick Start
 
@@ -106,9 +106,10 @@ Sample FASTQs (N files)
       +-- MINPATH            Parsimony pathway reconstruction (Ye & Doak 2009)
       +-- KEGG_DECODER       Biogeochemical function scoring + heatmap (Graham et al. 2018)
 
+   KAIJU_CONTIG_CLASSIFY     Six-frame translation taxonomy on contigs (primary Kaiju mode)
    KRAKEN2_CLASSIFY          k-mer contig-level taxonomy (no annotation needed)
    SENDSKETCH_CLASSIFY       GTDB MinHash taxonomy (BBSketch TaxServer)
-   RRNA_CLASSIFY             rRNA gene detection (barrnap) + SILVA classification (vsearch)
+   RNA_CLASSIFY              rRNA (barrnap + vsearch SILVA) + tRNA/tmRNA (Aragorn)
 
    TIARA_CLASSIFY            Deep learning eukaryotic classification
    WHOKARYOTE_CLASSIFY       Gene structure-based eukaryotic classification
@@ -122,12 +123,6 @@ Sample FASTQs (N files)
    INTEGRONFINDER           Integron + gene cassette detection
    CALCULATE_TNF            Tetranucleotide frequency profiles
 
-  --- optional bin refinement (after DAS Tool) ---
-
-   NCLB_GATHER              Build contig identity cards
-   NCLB_CONVERSE            LLM-guided bin placement conversations
-   NCLB_ELDERS              SCG redundancy investigation (ecotype vs contamination)
-   NCLB_INTEGRATE           Apply proposals, extract refined community FASTAs
 ```
 
 ## Output
@@ -142,11 +137,11 @@ results/
 │   ├── *.sorted.bam.bai          BAM indices
 │   └── depths.txt                CoverM depth table
 ├── binning/
-│   ├── semibin/contig_bins.tsv   SemiBin2 assignments
-│   ├── metabat/contig_bins.tsv   MetaBAT2 assignments
-│   ├── maxbin/contig_bins.tsv    MaxBin2 assignments
-│   ├── lorbin/contig_bins.tsv    LorBin assignments
-│   ├── comebin/contig_bins.tsv   COMEBin assignments
+│   ├── semibin/semibin_bins.tsv   SemiBin2 assignments
+│   ├── metabat/metabat_bins.tsv   MetaBAT2 assignments
+│   ├── maxbin/maxbin_bins.tsv    MaxBin2 assignments
+│   ├── lorbin/lorbin_bins.tsv    LorBin assignments
+│   ├── comebin/comebin_bins.tsv   COMEBin assignments
 │   ├── dastool/
 │   │   ├── bins/*.fa             Final consensus MAG FASTAs
 │   │   ├── contig2bin.tsv        Contig-to-bin assignments
@@ -233,16 +228,6 @@ results/
 │   │   └── function_heatmap.svg     Publication-quality biogeochemical heatmap
 │   └── community/
 │       └── community_annotations.tsv  All proteins with bin_id column
-├── binning/nclb/                 NCLB bin refinement (if --run_nclb + --nclb_dir)
-│   ├── communities/*.fa          Refined community FASTAs
-│   ├── gathering.json            Identity cards + resonance data
-│   ├── proposals.json            LLM conversation proposals
-│   ├── elder_reports.json        SCG redundancy investigations
-│   ├── chronicle.json            Machine-readable decision log
-│   ├── chronicle.md              Human-readable narrative
-│   ├── contig2community.tsv      Contig membership assignments
-│   ├── quality_report.tsv        Community quality metrics
-│   └── valence_report.tsv        Per-contig valence scores
 ├── viz/                          Interactive dashboard (if --run_viz)
 │   ├── data/                     11 JSON files for dashboard
 │   │   ├── overview.json         Assembly + binning summary stats
@@ -350,6 +335,7 @@ load times with no server configuration needed.
 |-----------|---------|-------------|
 | `--input` | (required) | Directory containing `*.fastq.gz` files |
 | `--outdir` | `results` | Output directory |
+| `--assembler` | `flye` | Assembler: `flye`, `metamdbg`, or `myloasm` |
 | `--min_overlap` | `1000` | Flye `--min-overlap` |
 | `--polish` | `true` | Flye polishing iterations |
 | `--dedupe` | `false` | BBDuk deduplication before assembly |
@@ -359,6 +345,7 @@ load times with no server configuration needed.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `--run_semibin` | `true` | Include SemiBin2 in consensus |
 | `--run_maxbin` | `true` | Include MaxBin2 in consensus |
 | `--run_lorbin` | `true` | Include LorBin in consensus (deep learning, long-read) |
 | `--run_comebin` | `true` | Include COMEBin in consensus (contrastive learning) |
@@ -369,11 +356,12 @@ load times with no server configuration needed.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--annotator` | (auto) | Annotator: `prokka`, `bakta`, or `none`. Overrides legacy flags |
-| `--run_prokka` | `true` | (deprecated) Run Prokka — use `--annotator` instead |
-| `--run_bakta` | `false` | (deprecated) Run Bakta — use `--annotator` instead |
-| `--bakta_db` | (skip) | Path to Bakta database (required when using Bakta) |
-| `--bakta_full` | `false` | Also run full Bakta annotation (ncRNA/tRNA/CRISPR — slow) |
+| `--annotator` | `bakta` | Annotator: `prokka`, `bakta`, or `none`. Overrides legacy flags |
+| `--run_prokka` | `false` | (deprecated) Run Prokka — use `--annotator` instead |
+| `--run_bakta` | `true` | (deprecated) Run Bakta — use `--annotator` instead |
+| `--bakta_db` | (skip) | Path to Bakta full database (used by `BAKTA_EXTRA`) |
+| `--bakta_light_db` | (skip) | Path to Bakta light database (used by `BAKTA_BASIC`) |
+| `--bakta_extra` | `false` | Also run BAKTA_EXTRA annotation (ncRNA/tRNA/CRISPR — slow) |
 
 ### Taxonomy
 
@@ -428,16 +416,6 @@ load times with no server configuration needed.
 | `--metaeuk_max_intron` | `10000` | Maximum intron length in bp |
 | `--run_marferret` | `false` | Run DIAMOND blastp against MarFERReT marine eukaryotic database |
 | `--marferret_db` | (skip) | Path to MarFERReT database dir (`.dmnd` + taxonomy + Pfam) |
-
-### Bin Refinement (NCLB)
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--run_nclb` | `false` | Run NCLB LLM-guided bin refinement after DAS Tool |
-| `--nclb_dir` | (skip) | Path to NCLB repository (contains `bin/`, `lib/`, `envs/`) |
-| `--nclb_base_url` | (auto) | LLM server URL (default: `http://localhost:1234/v1`) |
-| `--nclb_model` | (auto) | LLM model name (default: auto-detect from server) |
-| `--nclb_with_ani` | `false` | Run minimap2 ANI during Elder investigations |
 
 ### Visualization
 
@@ -510,11 +488,9 @@ cd nextflow
 
 **Eukaryotic contig filtering.** Tiara (deep learning k-mer NN) and Whokaryote (gene structure random forest) independently classify contigs. MetaEuk runs only on the union of non-prokaryotic contigs, avoiding wasted computation on bacterial sequences.
 
-**NCLB bin refinement.** Optional LLM-guided iterative refinement of DAS Tool bins. Four-step process: gather contig identity cards, LLM conversations for placement proposals, Elder investigations for SCG redundancy, and integration to produce refined community FASTAs.
-
 **Integrated viz dashboard.** The pipeline automatically preprocesses all results into JSON and builds a static Svelte dashboard (`--run_viz`, on by default). Node.js and Python dependencies are bundled in a dedicated conda env (`dana-mag-viz`) for portability.
 
-**Twenty-seven isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
+**Isolated conda environments.** Each tool or group of compatible tools gets its own environment to avoid dependency conflicts. See `install.sh --check` for status.
 
 ## Docker / Container Image
 
@@ -566,7 +542,7 @@ The CI workflows are in `.github/workflows/`:
 
 ## Conda Environments
 
-Twenty-seven isolated environments avoid dependency conflicts (29 YAML specs including CPU variants):
+Isolated environments avoid dependency conflicts:
 
 | Environment | Tools |
 |-------------|-------|

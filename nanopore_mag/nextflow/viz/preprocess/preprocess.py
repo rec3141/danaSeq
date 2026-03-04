@@ -257,8 +257,7 @@ def build_pipeline_status(results_dir):
 
     # 3. Merge: build final status for each process
     # Exclude internal VIZ_STAGE processes (they're aliases for VIZ_PREPROCESS)
-    skip_procs = {'VIZ_STAGE1', 'VIZ_STAGE2', 'VIZ_STAGE3', 'VIZ_STAGE4', 'VIZ_PREPROCESS',
-                  'NCLB_CONVERSE', 'NCLB_GATHER', 'NCLB_INTEGRATE', 'NCLB_ELDERS'}
+    skip_procs = {'VIZ_STAGE1', 'VIZ_STAGE2', 'VIZ_STAGE3', 'VIZ_STAGE4', 'VIZ_PREPROCESS'}
     processes = {}
     has_running = False
     for proc in sorted(all_processes - skip_procs):

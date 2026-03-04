@@ -1,8 +1,18 @@
-// Mobile genetic element detection: geNomad (virus + plasmid), CheckV (viral QA),
-// IntegronFinder (integron + gene cassette detection),
-// IslandPath-DIMOB (genomic island detection via dinucleotide bias),
-// MacSyFinder (secretion systems + conjugation detection),
-// DefenseFinder (anti-phage defense system detection)
+// Mobile genetic element detection.
+//
+// Processes (all optional, gated by params.run_* + database paths):
+//   GENOMAD_CLASSIFY   — geNomad end-to-end: marker genes + neural network → viruses,
+//                         plasmids, proviruses. Runs directly on the assembly FASTA.
+//   CHECKV_QUALITY     — CheckV viral QA: AAI + HMM completeness, host trimming.
+//                         Requires geNomad virus FASTA as input.
+//   INTEGRONFINDER     — Integron detection: integrase + attC/attI + gene cassettes.
+//                         Runs on assembly; no annotation dependency.
+//   ISLANDPATH_DIMOB   — Genomic island detection via dinucleotide bias + mobility
+//                         gene HMMs. Requires annotation GFF + FAA.
+//   MACSYFINDER        — Secretion systems (TXSScan) + conjugation (CONJScan).
+//                         Requires protein FAA.
+//   DEFENSEFINDER      — Anti-phage defense systems (CRISPR, R-M, BREX, Abi, etc.).
+//                         Requires protein FAA + GFF. Parallelized per-contig.
 
 process GENOMAD_CLASSIFY {
     tag "genomad"
