@@ -314,11 +314,15 @@ NF_ARGS=("${DB_ARGS[@]}" "${NF_ARGS[@]}")
 
 [[ -z "$INPUT_HOST" ]] && die "--input is required. Run with --help for usage."
 
+# --outdir and --store_dir are mutually exclusive; use --store_dir for persistent output
+if [[ -n "$OUTDIR_HOST" && -n "$STORE_DIR_HOST" ]]; then
+    die "--outdir and --store_dir are mutually exclusive. Use --store_dir for persistent output."
+fi
+
 # Default --outdir to --store_dir when only store_dir is set
 if [[ -z "$OUTDIR_HOST" && -n "$STORE_DIR_HOST" ]]; then
     OUTDIR_HOST="$STORE_DIR_HOST"
     NF_ARGS+=("--outdir" "$OUTDIR_HOST")
-    echo "[INFO] No --outdir specified, using --store_dir: $OUTDIR_HOST"
 fi
 [[ -z "$OUTDIR_HOST" ]] && die "--outdir (or --store_dir) is required. Run with --help for usage."
 
