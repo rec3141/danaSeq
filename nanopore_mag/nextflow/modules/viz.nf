@@ -75,7 +75,11 @@ process VIZ_PREPROCESS {
     fi
 
     # Build static site (node/npm provided by conda env)
-    cd ${projectDir}/viz
+    # Copy viz source to a writable location (container filesystem may be read-only)
+    VIZ_BUILD="\${VIZ_DIR}/.build"
+    rm -rf "\${VIZ_BUILD}"
+    cp -r ${projectDir}/viz "\${VIZ_BUILD}"
+    cd "\${VIZ_BUILD}"
     npm ci --prefer-offline 2>/dev/null || npm install --no-audit --no-fund
     # Copy preprocessed JSON into public/data for build
     cp "\${VIZ_DIR}"/data/* public/data/
@@ -91,6 +95,7 @@ process VIZ_PREPROCESS {
     VIZ_PORT=${vizPort}
     pkill -f "vite preview.*--port \${VIZ_PORT}" 2>/dev/null || true
     sleep 1
+    cd "\${VIZ_BUILD}"
     setsid nohup npm run serve -- --host 0.0.0.0 --port \${VIZ_PORT} </dev/null > /tmp/vite_preview_\${VIZ_PORT}.log 2>&1 &
     _server_ip=\$(hostname -I | awk '{print \$1}')
     echo "Viz dashboard: http://\${_server_ip}:\${VIZ_PORT}/"
