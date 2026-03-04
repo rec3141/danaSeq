@@ -61,8 +61,8 @@ resolve_db_dir() {
 
     # Simple fixed-layout databases
     local -A fixed_dbs=(
-        [--bakta_db]="bakta/full"
-        [--bakta_light_db]="bakta/light"
+        [--bakta_db]="bakta/db"
+        [--bakta_light_db]="bakta/db-light"
         [--genomad_db]="genomad_db"
         [--checkv_db]="checkv_db"
         [--checkm2_db]="checkm2"
