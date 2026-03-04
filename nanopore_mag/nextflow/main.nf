@@ -390,17 +390,26 @@ workflow {
     if (barcode_dirs) {
         // Nanopore barcode structure detected — concat per barcode
         log.info "Detected nanopore barcode structure: ${barcode_dirs.size()} barcode directories"
-        ch_barcode_raw = Channel.from(barcode_dirs)
-            .flatMap { dir ->
-                def barcode = dir.name
-                // Extract flowcell ID from MinKNOW run dir name
-                // e.g. 20251021_1541_X1_FAZ84459_9acd0eaa -> FAZ84459
-                def run_name = dir.parent.parent.name
-                def parts = run_name.tokenize('_')
-                def flowcell = parts.size() >= 4 ? parts[3] : run_name
-                def sample_id = "${flowcell}_${barcode}"
-                file("${dir}/*.fastq.gz").collect { fq -> [sample_id, fq] }
+        // Resolve all [sample_id, fastq] pairs upfront in plain Groovy
+        // (avoids closure/List cast issues inside Nextflow channel operators)
+        def all_pairs = []
+        for (dir in barcode_dirs) {
+            def barcode = dir.name
+            // Extract flowcell ID from MinKNOW run dir name
+            // e.g. 20251021_1541_X1_FAZ84459_9acd0eaa -> FAZ84459
+            def run_name = dir.parent.parent.name
+            def parts = run_name.tokenize('_')
+            def flowcell = parts.size() >= 4 ? parts[3] : run_name
+            def sample_id = "${flowcell}_${barcode}"
+            def fqs = file("${dir}/*.fastq.gz")
+            if (fqs instanceof List) {
+                for (fq in fqs) { all_pairs.add([sample_id, fq]) }
+            } else if (fqs) {
+                all_pairs.add([sample_id, fqs])
             }
+        }
+        log.info "Found ${all_pairs.size()} FASTQ files across ${barcode_dirs.size()} barcodes"
+        ch_barcode_raw = Channel.from(all_pairs)
             .groupTuple()
             .map { sample_id, fastqs -> [[id: sample_id], fastqs] }
             .filter { meta, fastqs -> fastqs.size() > 0 }

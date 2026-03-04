@@ -2,8 +2,8 @@
 
 process CONCAT_READS {
     tag "${meta.id}"
-    label { params.dedupe ? 'process_medium' : 'process_low' }
-    time  = { params.dedupe ? 4.h : 1.h }
+    label 'process_medium'
+    time { params.dedupe ? 4.h : 1.h }
     conda "${projectDir}/conda-envs/dana-bbmap"
     publishDir "${params.outdir}/concat", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/concat" : null
