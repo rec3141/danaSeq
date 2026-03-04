@@ -20,7 +20,7 @@ process VIZ_PREPROCESS {
     def storeFlag = storeRoot ? "--store-dir ${storeRoot}" : ""
     def tsne_flag = skip_tsne ? '--skip-tsne' : ''
     def umap_flag = skip_umap ? '--skip-umap' : ''
-    def vizDir = "${params.outdir}/viz"
+    def vizDir = params.store_dir ? "${params.store_dir}/viz" : "${params.outdir}/viz"
     def vizPort = params.viz_port ?: 5174
     """
     # Ensure the viz conda env's Python is used (has numpy, pandas, scipy, etc.)
