@@ -372,7 +372,6 @@ Isolated conda environments avoid dependency conflicts:
 |---------|----------|
 | `standard` | Local execution |
 | `test` | Small test data, reduced resources (4 CPUs, 8GB) |
-| `shipboard` | Production: 32 CPUs, 256GB RAM |
 
 ## Expected Input/Output
 

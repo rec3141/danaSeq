@@ -239,7 +239,7 @@ results/
 │   │   └── ...                   mge_summary, mge_per_bin, eukaryotic, contig_explorer, contig_lengths
 │   └── site/                     Static site (index.html + assets/)
 └── pipeline_info/
-    ├── run_command.sh            Exact re-runnable command (for -resume)
+    ├── run_command.txt            Exact re-runnable command (for -resume)
     ├── timeline.html
     ├── report.html
     └── trace.txt
@@ -437,7 +437,6 @@ load times with no server configuration needed.
 |---------|----------|
 | `standard` | Local execution (default) |
 | `test` | Small test data, reduced resources |
-| `shipboard` | Production: 32 CPUs, 256 GB RAM |
 
 ## Databases
 
