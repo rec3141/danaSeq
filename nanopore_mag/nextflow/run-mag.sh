@@ -452,13 +452,13 @@ if [[ "$USE_CONTAINER" == true ]]; then
     echo "[INFO] Running: ${CONTAINER_CMD[*]}"
     echo ""
 
-    mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
+    mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
     # Capture session ID from Nextflow log and save self-invocation for reliable resume
     NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
-    save_run_command "$OUTDIR_HOST" "$NF_SESSION"
+    save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
 
     exit $NF_EXIT
 fi
@@ -494,7 +494,7 @@ echo "[INFO] Output: $OUTDIR_HOST"
 echo "[INFO] Running: ${LOCAL_CMD[*]}"
 echo ""
 
-mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
+mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
 # Resolve Python for the watcher (use viz conda env if available)
 WATCHER_PYTHON="${SCRIPT_DIR}/conda-envs/dana-mag-viz/bin/python3"
@@ -503,7 +503,7 @@ if [[ ! -x "$WATCHER_PYTHON" ]]; then
 fi
 
 # Start pipeline status watcher (writes pipeline_status.json for live dashboard)
-VIZ_DATA_DIR="${OUTDIR_HOST}/viz/data"
+VIZ_DATA_DIR="${STORE_DIR_HOST:-$OUTDIR_HOST}/viz/data"
 mkdir -p "$VIZ_DATA_DIR"
 WATCHER_PID=""
 if [[ -x "$(command -v "$WATCHER_PYTHON" 2>/dev/null)" ]]; then
@@ -533,6 +533,6 @@ fi
 
 # Capture session ID from Nextflow log and save self-invocation for reliable resume
 NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
-save_run_command "$OUTDIR_HOST" "$NF_SESSION"
+save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
 
 exit $NF_EXIT

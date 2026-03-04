@@ -30,7 +30,7 @@ process VIZ_PREPROCESS {
     fi
 
     # Copy Nextflow log for pipeline status parsing
-    cp "${projectDir}/.nextflow.log" "${params.outdir}/pipeline_info/nextflow.log" 2>/dev/null || true
+    cp "${projectDir}/.nextflow.log" "${vizDir}/../pipeline_info/nextflow.log" 2>/dev/null || true
 
     # Write JSON data directly to outdir
     VIZ_DIR="${vizDir}"
