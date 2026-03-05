@@ -89,16 +89,36 @@ process VIZ_PREPROCESS {
     # Copy pipeline_info (report, timeline, trace) into site for dashboard linking
     cp -r "${params.outdir}/pipeline_info" "\${VIZ_DIR}/site/pipeline_info" 2>/dev/null || true
 
-    # Start/restart the preview server (all interfaces, configurable port)
+    # Start/restart the preview server (all interfaces, configurable port).
     # setsid creates a new session so the child is not in the Nextflow process group.
-    # All three fds must be redirected so the inherited tee pipe is fully closed;
-    # otherwise npm holds the pipe open and tee (hence the Nextflow task) blocks forever.
+    # Fds 0-2 are redirected to /dev/null and a log file.  Fds 3-9 are explicitly
+    # closed because Nextflow's .command.run wraps every task in a tee pipeline:
+    #   (nxf_launch | tee .command.out) 3>&1 1>&2 2>&3 | tee .command.err
+    # That creates fd 3 holding the outer tee pipe's write end.  Without closing
+    # it, tee never gets EOF → the subshell never exits → .exitcode is never
+    # written → the Nextflow task hangs indefinitely.
     VIZ_PORT=${vizPort}
     pkill -f "vite preview.*--port \${VIZ_PORT}" 2>/dev/null || true
     sleep 1
     cd "\${VIZ_BUILD}"
-    setsid nohup npm run serve -- --host 0.0.0.0 --port \${VIZ_PORT} </dev/null > /tmp/vite_preview_\${VIZ_PORT}.log 2>&1 &
+    setsid nohup npm run serve -- --host 0.0.0.0 --port \${VIZ_PORT} \
+        </dev/null >/tmp/vite_preview_\${VIZ_PORT}.log 2>&1 \
+        3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
     _server_ip=\$(hostname -I | awk '{print \$1}')
     echo "Viz dashboard: http://\${_server_ip}:\${VIZ_PORT}/"
+
+    # Write a convenience script to restart the server without re-running the pipeline
+    cat > "\${VIZ_DIR}/start-server.sh" << 'LAUNCHER'
+#!/bin/bash
+PORT="\${1:-${vizPort}}"
+DIR="\$(cd "\$(dirname "\$0")/.build" && pwd)"
+cd "\$DIR" || { echo "Build dir not found: \$DIR"; exit 1; }
+pkill -f "vite preview.*--port \${PORT}" 2>/dev/null || true
+sleep 1
+echo "Starting viz server on port \${PORT}..."
+npm run serve -- --host 0.0.0.0 --port "\${PORT}"
+LAUNCHER
+    chmod +x "\${VIZ_DIR}/start-server.sh"
+    echo "Restart server later: \${VIZ_DIR}/start-server.sh [\${VIZ_PORT}]"
     """
 }
