@@ -36,7 +36,7 @@ process VIZ_PREPROCESS {
     VIZ_DIR="${vizDir}"
     mkdir -p "\${VIZ_DIR}/data"
     python3 ${projectDir}/viz/preprocess/preprocess.py \
-        --results "${params.outdir}" \
+        --results "${params.store_dir ?: params.outdir}" \
         --output "\${VIZ_DIR}/data/" \
         ${storeFlag} \
         ${tsne_flag} \

@@ -84,7 +84,11 @@ process EMAPPER {
         -m diamond \\
         --cpu ${task.cpus} \\
         --output emapper_results \\
-        --override
+        --override \\
+        --dmnd_iterate no \\
+        --dmnd_algo ctg \\
+        --dbmem \\
+        --temp_dir .
     emapper_exit=\$?
     set -e
 
