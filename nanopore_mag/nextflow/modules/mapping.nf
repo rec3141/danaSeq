@@ -126,13 +126,14 @@ process CALCULATE_GENE_DEPTHS {
     fi
 
     # samtools bedcov: sum of per-base depths per region per BAM
-    # bedcov is single-threaded (no -@ support), so split BED and run in parallel
+    # bedcov is single-threaded (no -@ support), so split BED and run in parallel.
+    # Round-robin distribution ensures heavy contigs (high depth) spread evenly.
     CPUS=${task.cpus}
-    N_LINES=\$(wc -l < genes.bed)
-    CHUNK_SIZE=\$(( (N_LINES + CPUS - 1) / CPUS ))
 
     mkdir -p bed_chunks
-    split -l "\$CHUNK_SIZE" -d -a 3 genes.bed bed_chunks/chunk_
+    awk -v n="\$CPUS" -v dir="bed_chunks" '
+        { print > (dir "/chunk_" (NR-1)%n) }
+    ' genes.bed
 
     ls bed_chunks/chunk_* | xargs -P "\$CPUS" -I{} sh -c '
         samtools bedcov "{}" *.sorted.bam > "{}.cov"
