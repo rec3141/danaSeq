@@ -2,7 +2,7 @@
 
 process VIZ_PREPROCESS {
     tag "viz_preprocess"
-    label 'process_medium'
+    label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-viz"
     // No publishDir or storeDir — writes directly to outdir/viz/
 

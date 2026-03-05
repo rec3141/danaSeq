@@ -65,36 +65,110 @@ process EMAPPER {
     path("emapper_results.emapper.annotations"), emit: annotations
 
     script:
+    def cpus = task.cpus
+    def batch_size = params.emapper_batch_size
     """
     # eggNOG-mapper: functional annotation via DIAMOND search against eggNOG database
     # Assigns COG categories, GO terms, EC numbers, KEGG KOs, Pfam domains, descriptions
-    # -m diamond: fast search mode (default for large datasets)
-    # --override: overwrite existing output files
+    #
+    # Two-stage batched mode to prevent /tmp overflow from DIAMOND temp files:
+    #   Stage 1: DIAMOND search per chunk (--no_annot), no --dbmem needed
+    #   Stage 2: Annotate all hits at once (-m no_search --dbmem)
+    #
+    # DIAMOND writes unlinked temp files (~5 MB/s). Batching bounds temp size per chunk.
+    # Chunk size controlled by params.emapper_batch_size (default 50000 proteins).
+
+    HEADER='## eggNOG-mapper\\n#query\\tseed_ortholog\\tevalue\\tscore\\teggNOG_OGs\\tmax_annot_lvl\\tCOG_category\\tDescription\\tPreferred_name\\tGOs\\tEC\\tKEGG_ko\\tKEGG_Pathway\\tKEGG_Module\\tKEGG_Reaction\\tKEGG_rclass\\tBRITE\\tKEGG_TC\\tCAZy\\tBiGG_Reaction\\tPFAMs'
 
     if [ ! -s "${proteins}" ]; then
         echo "[WARNING] No protein sequences — skipping eggNOG-mapper" >&2
-        printf '## eggNOG-mapper\\n#query\\tseed_ortholog\\tevalue\\tscore\\teggNOG_OGs\\tmax_annot_lvl\\tCOG_category\\tDescription\\tPreferred_name\\tGOs\\tEC\\tKEGG_ko\\tKEGG_Pathway\\tKEGG_Module\\tKEGG_Reaction\\tKEGG_rclass\\tBRITE\\tKEGG_TC\\tCAZy\\tBiGG_Reaction\\tPFAMs\\n' > emapper_results.emapper.annotations
+        printf "\$HEADER\\n" > emapper_results.emapper.annotations
         exit 0
     fi
 
+    # Count proteins and split into chunks (same pattern as SENDSKETCH_CLASSIFY)
+    N_SEQS=\$(grep -c '^>' "${proteins}")
+    BATCH_SIZE=${batch_size}
+    echo "[INFO] EMAPPER: \$N_SEQS proteins, batch size \$BATCH_SIZE" >&2
+
+    mkdir -p chunks
+    if [ "\$N_SEQS" -le "\$BATCH_SIZE" ]; then
+        ln -s "\$(readlink -f ${proteins})" chunks/chunk_000.faa
+    else
+        awk -v bs="\$BATCH_SIZE" -v dir="chunks" '
+            BEGIN { n=0; chunk=0; fn=sprintf("%s/chunk_%03d.faa", dir, chunk) }
+            /^>/ { if (n >= bs) { close(fn); chunk++; fn=sprintf("%s/chunk_%03d.faa", dir, chunk); n=0 } n++ }
+            { print > fn }
+        ' "${proteins}"
+    fi
+
+    N_CHUNKS=\$(ls chunks/chunk_*.faa | wc -l)
+    echo "[INFO] Split into \$N_CHUNKS chunk(s)" >&2
+
+    # Stage 1: DIAMOND search per chunk (no --dbmem — search needs ~16 GB, not 48 GB)
+    # Each chunk's temp files are cleaned before the next starts.
+    > merged.seed_orthologs
+    search_ok=true
+    chunk_i=0
+    for chunk in chunks/chunk_*.faa; do
+        chunk_i=\$((chunk_i + 1))
+        name=\$(basename "\$chunk" .faa)
+        echo "[INFO] Stage 1: DIAMOND search chunk \$chunk_i/\$N_CHUNKS (\$name)" >&2
+
+        set +e
+        emapper.py \\
+            -i "\$chunk" \\
+            --data_dir "${eggnog_db}" \\
+            -m diamond \\
+            --no_annot \\
+            --cpu ${cpus} \\
+            --output "\$name" \\
+            --override \\
+            --dmnd_iterate no \\
+            --dmnd_algo ctg \\
+            --temp_dir .
+        chunk_exit=\$?
+        set -e
+
+        if [ \$chunk_exit -ne 0 ]; then
+            echo "[WARNING] DIAMOND search failed for \$name (exit \$chunk_exit)" >&2
+            search_ok=false
+            break
+        fi
+
+        if [ -f "\${name}.emapper.seed_orthologs" ]; then
+            cat "\${name}.emapper.seed_orthologs" >> merged.seed_orthologs
+        fi
+
+        # Clean up chunk temp files to free disk space
+        rm -f "\${name}".emapper.* 2>/dev/null || true
+    done
+
+    if [ "\$search_ok" != "true" ] || [ ! -s merged.seed_orthologs ]; then
+        echo "[WARNING] eggNOG-mapper search stage failed or produced no hits" >&2
+        printf "\$HEADER\\n" > emapper_results.emapper.annotations
+        exit 0
+    fi
+
+    echo "[INFO] Stage 1 complete: \$(wc -l < merged.seed_orthologs) seed orthologs" >&2
+
+    # Stage 2: Annotate all hits at once (--dbmem loads 44 GB sqlite into RAM)
+    echo "[INFO] Stage 2: Annotating merged seed orthologs" >&2
     set +e
     emapper.py \\
-        -i "${proteins}" \\
+        -m no_search \\
+        --annotate_hits_table merged.seed_orthologs \\
         --data_dir "${eggnog_db}" \\
-        -m diamond \\
-        --cpu ${task.cpus} \\
-        --output emapper_results \\
-        --override \\
-        --dmnd_iterate no \\
-        --dmnd_algo ctg \\
         --dbmem \\
-        --temp_dir .
-    emapper_exit=\$?
+        --cpu ${cpus} \\
+        --output emapper_results \\
+        --override
+    annot_exit=\$?
     set -e
 
-    if [ \$emapper_exit -ne 0 ] || [ ! -f emapper_results.emapper.annotations ]; then
-        echo "[WARNING] eggNOG-mapper exited with code \$emapper_exit" >&2
-        printf '## eggNOG-mapper\\n#query\\tseed_ortholog\\tevalue\\tscore\\teggNOG_OGs\\tmax_annot_lvl\\tCOG_category\\tDescription\\tPreferred_name\\tGOs\\tEC\\tKEGG_ko\\tKEGG_Pathway\\tKEGG_Module\\tKEGG_Reaction\\tKEGG_rclass\\tBRITE\\tKEGG_TC\\tCAZy\\tBiGG_Reaction\\tPFAMs\\n' > emapper_results.emapper.annotations
+    if [ \$annot_exit -ne 0 ] || [ ! -f emapper_results.emapper.annotations ]; then
+        echo "[WARNING] eggNOG-mapper annotation stage exited with code \$annot_exit" >&2
+        printf "\$HEADER\\n" > emapper_results.emapper.annotations
         exit 0
     fi
     """

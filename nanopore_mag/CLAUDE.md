@@ -575,6 +575,38 @@ Run `./install.sh --check` to diagnose. Ensure mamba is on PATH. Build requires 
 ### Depth values are wrong (overflow/negative)
 This pipeline uses CoverM instead of `jgi_summarize_bam_contig_depths` to avoid the MetaBAT2 integer overflow bug. If you see overflow values, ensure the CALCULATE_DEPTHS process is using CoverM (check `modules/mapping.nf`).
 
+### eggNOG-mapper / DIAMOND temp file management
+DIAMOND writes intermediate alignments to unlinked temp files in the work directory
+(visible via `/proc/<pid>/fd/` as `(deleted)` symlinks, invisible to `du`/`ls`). These
+temp files grow at ~5 MB/s during search and can reach **20-30+ GB** for 133K proteins
+against the 8.7 GB eggnog database.
+
+**Fix (built-in batching):** The EMAPPER process uses two-stage batched mode:
+- **Stage 1:** Splits proteins into chunks of `params.emapper_batch_size` (default 50K),
+  runs DIAMOND search per chunk (`--no_annot`), bounds temp files to ~3-4 GB per chunk
+- **Stage 2:** Annotates all merged seed orthologs at once (`-m no_search --dbmem`)
+
+Performance flags:
+- `--dmnd_iterate no` — single sensitivity pass instead of 4 rounds (eliminates temp bloat)
+- `--dmnd_algo ctg` — contiguous seed algorithm, faster for protein search
+- `--dbmem` — loads eggnog.db SQLite (~44 GB) into RAM for fast annotation (needs 48 GB)
+- `--temp_dir .` — keeps temp files in the Nextflow work dir (explicit, not /tmp default)
+
+**Result:** 61x speedup (7,950s → 129s for 100 proteins). EMAPPER memory is set to 48 GB
+to accommodate `--dbmem`.
+
+**Tuning batch size:** Adjust `--emapper_batch_size` to trade temp disk usage vs overhead.
+Rule of thumb: 50K proteins → ~3-4 GB temp per chunk. Default 50K works for most systems.
+For very constrained `/tmp`, lower to 25K. For systems with ample disk, raise to 100K+.
+
+**Monitoring:** Check DIAMOND's hidden temp usage with:
+```bash
+# Total bytes in unlinked temp files held open by DIAMOND
+for fd in $(ls /proc/<diamond_pid>/fd/); do
+    grep pos /proc/<diamond_pid>/fdinfo/$fd 2>/dev/null
+done | awk '{s+=$2} END {printf "%.1f GB\n", s/1024/1024/1024}'
+```
+
 ## Database Locations (this system)
 
 Reference databases live in `/data/scratch/refdbs/`, NOT in the pipeline's `databases/` directory. When downloading new databases, use:
