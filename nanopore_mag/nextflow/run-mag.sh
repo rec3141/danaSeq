@@ -73,6 +73,7 @@ resolve_db_dir() {
         [--macsyfinder_models]="macsyfinder_models"
         [--defensefinder_models]="defensefinder_models"
         [--marferret_db]="marferret_db"
+        [--gtdbtk_db]="gtdbtk_db"
         [--metaeuk_db]="metaeuk_db/metaeuk_db"
     )
     for flag in "${!fixed_dbs[@]}"; do

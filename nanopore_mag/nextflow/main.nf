@@ -107,6 +107,9 @@ def helpMessage() {
     Quality:
       --checkm2_db PATH  Path to CheckM2 DIAMOND database; null = skip CheckM2
 
+    Phylogenetics:
+      --gtdbtk_db PATH   Path to GTDB-Tk reference data (release226/); null = skip GTDB-Tk
+
     Visualization:
       --run_viz            Build viz dashboard at end of pipeline [default: true]
 
@@ -316,6 +319,7 @@ include { BIN_LORBIN }          from './modules/binning'
 include { BIN_COMEBIN }         from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
+include { GTDBTK_CLASSIFY }     from './modules/phylogeny'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
 include { BAKTA_BASIC }          from './modules/annotation'
 include { BAKTA_EXTRA }          from './modules/annotation'
@@ -683,6 +687,28 @@ workflow {
         CHECKM2(ch_all_bins)
     }
 
+    // 7b. Phylogenetic classification with GTDB-Tk (optional — requires database path)
+    if (params.gtdbtk_db) {
+        ch_gtdbtk_bins = BIN_METABAT2.out.fastas
+        if (params.run_semibin) {
+            ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_SEMIBIN2.out.fastas)
+        }
+        if (params.run_maxbin) {
+            ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_MAXBIN2.out.fastas)
+        }
+        if (params.run_lorbin) {
+            ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_LORBIN.out.fastas)
+        }
+        if (params.run_comebin) {
+            ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_COMEBIN.out.fastas)
+        }
+        ch_gtdbtk_bins = ch_gtdbtk_bins
+            .mix(DASTOOL_CONSENSUS.out.bins)
+            .collect()
+
+        GTDBTK_CLASSIFY(ch_gtdbtk_bins)
+    }
+
     // 8. Viz dashboard: preprocess results into JSON + build static site
     //    Fires incrementally at 3-4 checkpoints; only stage 1 computes t-SNE.
     //    preprocess.py handles missing files gracefully (WARNING, not error).
@@ -748,6 +774,9 @@ workflow {
             ch_viz_stage4 = ch_viz_stage4.mix(KEGG_MODULES.out.modules.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(MINPATH.out.pathways.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(KEGG_DECODER.out.output.collect())
+        }
+        if (params.gtdbtk_db) {
+            ch_viz_stage4 = ch_viz_stage4.mix(GTDBTK_CLASSIFY.out.taxonomy.collect())
         }
         VIZ_STAGE4(ch_viz_stage4.collect(), true, true)
     }

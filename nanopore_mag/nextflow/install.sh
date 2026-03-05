@@ -111,6 +111,7 @@ ENV_YAMLS=(
     kaiju.yml
     kraken2.yml
     checkm2.yml
+    gtdbtk.yml
     tiara.yml
     whokaryote.yml
     metaeuk.yml
@@ -151,6 +152,7 @@ declare -A ENV_CHECK=(
     [dana-mag-kaiju]="kaiju"
     [dana-mag-kraken2]="kraken2"
     [dana-mag-checkm2]="checkm2"
+    [dana-mag-gtdbtk]="gtdbtk"
     [dana-mag-tiara]="tiara"
     [dana-mag-whokaryote]="whokaryote.py"
     [dana-mag-metaeuk]="metaeuk"

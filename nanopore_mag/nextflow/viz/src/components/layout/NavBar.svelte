@@ -4,6 +4,7 @@
     { id: 'contigs', label: 'Explorer' },
     { id: 'quality', label: 'Quality' },
     { id: 'taxonomy', label: 'Taxonomy' },
+    { id: 'phylogeny', label: 'Phylogeny' },
     { id: 'coverage', label: 'Abundance' },
     { id: 'kegg', label: 'Function' },
     { id: 'eukaryotic', label: 'Eukaryotic' },

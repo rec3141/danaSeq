@@ -34,6 +34,7 @@ nanopore_mag/
 │   │   │                       ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
 │   │   ├── metabolism.nf       KOFAMSCAN, EMAPPER, DBCAN, MERGE_ANNOTATIONS,
 │   │   │                       MAP_TO_BINS, KEGG_MODULES, MINPATH, KEGG_DECODER
+│   │   ├── phylogeny.nf       GTDBTK_CLASSIFY (GTDB-Tk phylogenetic classification)
 │   │   └── viz.nf              VIZ_PREPROCESS (dashboard JSON + static site build)
 │   ├── envs/                   Conda YAML specs
 │   │   ├── flye.yml            Flye, Filtlong, Nextflow, OpenJDK
@@ -57,6 +58,7 @@ nanopore_mag/
 │   │   ├── kraken2.yml         Kraken2 (k-mer contig-level taxonomy)
 │   │   ├── prokka.yml          Prokka (gene annotation)
 │   │   ├── checkm2.yml         CheckM2
+│   │   ├── gtdbtk.yml          GTDB-Tk (phylogenetic MAG classification)
 │   │   ├── tiara.yml           Tiara (eukaryotic contig classification, deep learning)
 │   │   ├── whokaryote.yml     Whokaryote (eukaryotic classification, gene structure RF)
 │   │   ├── metaeuk.yml        MetaEuk (eukaryotic gene prediction, multi-exon)
@@ -303,6 +305,7 @@ Sample FASTQs (N files)
    DASTOOL_CONSENSUS      Consensus integration                                               │
          │ collect()                                                                          │
    CHECKM2                Quality assessment (optional, needs --checkm2_db)                   │
+   GTDBTK_CLASSIFY        GTDB-Tk phylogenetic classification (optional, needs --gtdbtk_db)   │
          │                                                                                    │
    VIZ_PREPROCESS (×4)    Incremental dashboard (barrier: TNF → annotation → binning → all)   │
 ```
@@ -349,6 +352,7 @@ Isolated conda environments avoid dependency conflicts:
 | `dana-mag-kraken2` | Kraken2 | k-mer contig-level taxonomy (no annotation needed; maxForks 1) |
 | `dana-mag-prokka` | Prokka | Gene annotation (alternative to Bakta) |
 | `dana-mag-checkm2` | CheckM2 | Quality assessment (optional, needs `--checkm2_db`) |
+| `dana-mag-gtdbtk` | GTDB-Tk 2.4.0 | Phylogenetic MAG classification (optional, needs `--gtdbtk_db`) |
 | `dana-mag-tiara` | Tiara | Deep learning k-mer eukaryotic classification (98%+ accuracy) |
 | `dana-mag-whokaryote` | Whokaryote, Prodigal | Gene structure-based eukaryotic classification (random forest) |
 | `dana-mag-metaeuk` | MetaEuk | Eukaryotic gene prediction (multi-exon, intron-aware, homology-based) |
@@ -476,11 +480,14 @@ results/
 │   │   └── kraken2_report.txt     Standard Kraken2 report (for Krona/Pavian)
 │   ├── sendsketch/                GTDB MinHash taxonomy (if --sendsketch_address set)
 │   │   └── sendsketch_contigs.tsv Per-contig GTDB taxonomy + ANI
-│   └── rrna/                      RNA gene classification (if --silva_ssu_db set)
-│       ├── rrna_genes.tsv         Per-gene rRNA classifications (barrnap + vsearch)
-│       ├── rrna_contigs.tsv       Per-contig rRNA summary (best SSU/LSU taxonomy)
-│       ├── rrna_sequences.fasta   Extracted rRNA gene sequences
-│       └── trna_genes.tsv         tRNA/tmRNA genes (Aragorn)
+│   ├── rrna/                      RNA gene classification (if --silva_ssu_db set)
+│   │   ├── rrna_genes.tsv         Per-gene rRNA classifications (barrnap + vsearch)
+│   │   ├── rrna_contigs.tsv       Per-contig rRNA summary (best SSU/LSU taxonomy)
+│   │   ├── rrna_sequences.fasta   Extracted rRNA gene sequences
+│   │   └── trna_genes.tsv         tRNA/tmRNA genes (Aragorn)
+│   └── gtdbtk/                    GTDB-Tk classification (if --gtdbtk_db set)
+│       ├── gtdbtk_taxonomy.tsv    Per-bin GTDB classification + placement info
+│       └── gtdbtk_trees/          Newick placement trees (bac120/ar53)
 ├── eukaryotic/                    Eukaryotic analysis (if --run_eukaryotic or --run_metaeuk)
 │   ├── tiara/
 │   │   └── tiara_output.tsv       Per-contig Tiara classification + probabilities
@@ -593,6 +600,7 @@ Current database paths for pipeline flags:
 - `--silva_ssu_db /data/scratch/refdbs/silva_db/SILVA_138.2_SSURef_NR99.fasta`
 - `--silva_lsu_db /data/scratch/refdbs/silva_db/SILVA_138.2_LSURef_NR99.fasta`
 - `--marferret_db /data/scratch/refdbs/marferret_db`
+- `--gtdbtk_db /data/scratch/refdbs/gtdbtk_db`
 - `--sendsketch_address http://10.151.50.41:3068/sketch`  (Ratnakara GTDB TaxServer)
 
 ---

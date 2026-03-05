@@ -28,6 +28,7 @@ set -euo pipefail
 #   ./download-databases.sh --kraken2         # Download Kraken2 PlusPFP-8 (~8 GB)
 #   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
+#   ./download-databases.sh --gtdbtk          # Download GTDB-Tk r226 reference data (~132 GB)
 #   ./download-databases.sh --docker            # Use Docker to run tool CLIs
 #   ./download-databases.sh --apptainer         # Use Apptainer/Singularity (auto-pulls SIF)
 #   ./download-databases.sh --container         # Auto-detect: apptainer > singularity > docker
@@ -108,6 +109,7 @@ DOWNLOAD_METAEUK=false
 DOWNLOAD_KRAKEN2=false
 DOWNLOAD_SILVA=false
 DOWNLOAD_MARFERRET=false
+DOWNLOAD_GTDBTK=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -138,6 +140,7 @@ while (( $# )); do
         --kraken2)   DOWNLOAD_KRAKEN2=true; INTERACTIVE=false; shift ;;
         --silva)     DOWNLOAD_SILVA=true; INTERACTIVE=false; shift ;;
         --marferret) DOWNLOAD_MARFERRET=true; INTERACTIVE=false; shift ;;
+        --gtdbtk)    DOWNLOAD_GTDBTK=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -163,6 +166,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_KRAKEN2=true
     DOWNLOAD_SILVA=true
     DOWNLOAD_MARFERRET=true
+    DOWNLOAD_GTDBTK=true
 fi
 
 # Auto-detect container runtime if --container was used
@@ -219,6 +223,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "kraken2"  "~8 GB"   "Kraken2 PlusPFP-8 (k-mer contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "silva"    "~900 MB" "SILVA 138.2 SSU + LSU NR99 (rRNA gene classification)"
     printf "  %-12s %-8s  %s\n" "marferret" "~9 GB"  "MarFERReT v1.1.1 marine eukaryotic proteins (DIAMOND + taxonomy + Pfam)"
+    printf "  %-12s %-8s  %s\n" "gtdbtk"   "~132 GB" "GTDB-Tk r226 reference data (phylogenetic MAG classification)"
     echo ""
     echo "  Note: Tiara, Whokaryote, and IslandPath HMM profiles are bundled with"
     echo "  their conda packages (no separate database download needed)."
@@ -243,6 +248,7 @@ show_databases() {
     echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
     echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
     echo "  --marferret_db ${DB_DIR}/marferret_db"
+    echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
     echo ""
 }
 
@@ -919,6 +925,73 @@ download_marferret() {
     echo "  Use with: --marferret_db ${db_path}"
 }
 
+download_gtdbtk() {
+    local db_path="${DB_DIR}/gtdbtk_db"
+    if [ -d "${db_path}/taxonomy" ] && [ -d "${db_path}/markers" ]; then
+        echo "[INFO] GTDB-Tk database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading GTDB-Tk r226 reference data..."
+    echo "  Destination: ${db_path}"
+    echo ""
+    echo "  The full package is ~132 GB (~85 GB extracted)."
+    echo "  The skani/ directory (~100 GB compressed) is required for species-level"
+    echo "  ANI classification even when using --skip_ani_screen."
+    echo ""
+    echo "  Mirrors (Denmark is fastest worldwide):"
+    echo "    EU:  https://data.gtdb.aau.ecogenomic.org/releases/"
+    echo "    AU1: https://data.ace.uq.edu.au/public/gtdb/data/releases/"
+    echo "    AU2: https://data.gtdb.ecogenomic.org/releases/"
+
+    mkdir -p "${db_path}"
+
+    local tarball="gtdbtk_r226_data.tar.gz"
+    local rel_path="release226/226.0/auxillary_files/gtdbtk_package/full_package/${tarball}"
+    # Australian mirrors are fastest from most locations; Denmark as fallback
+    local urls=(
+        "https://data.gtdb.ecogenomic.org/releases/${rel_path}"
+        "https://data.ace.uq.edu.au/public/gtdb/data/releases/${rel_path}"
+        "https://data.gtdb.aau.ecogenomic.org/releases/${rel_path}"
+    )
+
+    if [ ! -f "${db_path}/${tarball}" ]; then
+        echo "[INFO] Downloading ${tarball} (~132 GB)..."
+        local downloaded=false
+        if command -v aria2c &>/dev/null; then
+            # aria2 supports multi-source parallel download + auto-resume
+            echo "  Using aria2c (multi-source parallel download)"
+            aria2c -x 4 -s 4 -c -d "${db_path}" -o "${tarball}" \
+                "${urls[@]}" && downloaded=true
+        fi
+        if ! $downloaded; then
+            # wget fallback — try mirrors in order, -c for resume
+            for url in "${urls[@]}"; do
+                echo "  Trying: ${url}"
+                if wget -c -q --show-progress -O "${db_path}/${tarball}" "${url}"; then
+                    downloaded=true
+                    break
+                fi
+                echo "  Mirror failed, trying next..."
+            done
+        fi
+        $downloaded || { echo "[ERROR] All download mirrors failed" >&2; return 1; }
+    else
+        echo "[INFO] Tarball already present, skipping download"
+    fi
+
+    echo "[INFO] Extracting ${tarball}..."
+    tar xzf "${db_path}/${tarball}" -C "${db_path}" --strip-components=1 || return 1
+
+    echo "[INFO] Removing tarball to free disk space..."
+    rm -f "${db_path}/${tarball}"
+
+    echo "[SUCCESS] GTDB-Tk database downloaded to ${db_path}"
+    echo "  Use with: --gtdbtk_db ${db_path}"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -992,6 +1065,10 @@ if $DOWNLOAD_MARFERRET; then
     ( download_marferret ) || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_GTDBTK; then
+    ( download_gtdbtk ) || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -1017,4 +1094,5 @@ else
     ! $DOWNLOAD_SILVA   || echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
     ! $DOWNLOAD_SILVA   || echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
     ! $DOWNLOAD_MARFERRET || echo "  --marferret_db ${DB_DIR}/marferret_db"
+    ! $DOWNLOAD_GTDBTK   || echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
 fi

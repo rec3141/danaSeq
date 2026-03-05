@@ -14,6 +14,7 @@ export const eukaryotic = writable(null);
 export const contigLengths = writable(null);
 // Lazy-loaded (large files)
 export const contigExplorer = writable(null);
+export const phyloTree = writable(null);
 
 export const loading = writable(true);
 export const error = writable(null);
@@ -222,6 +223,22 @@ export async function loadSampleDepths() {
     sampleDepths.set({ samples: [], depths: {} });
   } finally {
     sampleDepthsLoading = false;
+  }
+}
+
+// Lazy load phylotree (GTDB-Tk phylogenetic classification)
+let phyloLoading = false;
+export async function loadPhyloTree() {
+  if (phyloLoading || get(phyloTree) !== null) return;
+  phyloLoading = true;
+  try {
+    const data = await fetchJSON('/data/phylotree.json');
+    phyloTree.set(data);
+  } catch (e) {
+    console.warn('Phylotree data not available:', e.message);
+    phyloTree.set({ hierarchy: null, bins: [], newick: {} });
+  } finally {
+    phyloLoading = false;
   }
 }
 

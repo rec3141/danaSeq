@@ -1554,6 +1554,125 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     return explorer, tsne_emb, umap_emb, sample_depths
 
 
+# ---------------------------------------------------------------------------
+# 12. phylotree.json — GTDB-Tk phylogenetic classification + placement trees
+# ---------------------------------------------------------------------------
+
+def build_phylotree(results_dir, checkm2_df):
+    """Build a d3-hierarchy tree from GTDB-Tk taxonomy and include raw Newick trees."""
+    gtdbtk_path = resolve_path(results_dir, 'taxonomy', 'gtdbtk', 'gtdbtk_taxonomy.tsv')
+    gtdbtk_df = load_tsv(gtdbtk_path)
+
+    if gtdbtk_df is None or gtdbtk_df.empty or len(gtdbtk_df) == 0:
+        print("  [WARNING] No GTDB-Tk taxonomy data found", file=sys.stderr)
+        return {'hierarchy': None, 'bins': [], 'newick': {}}
+
+    # Parse classification column (GTDB lineage strings like "d__Bacteria;p__Actinomycetota;...")
+    RANKS = ['domain', 'phylum', 'class', 'order', 'family', 'genus', 'species']
+
+    bins = []
+    for _, row in gtdbtk_df.iterrows():
+        genome = str(row.get('user_genome', ''))
+        classification = str(row.get('classification', ''))
+
+        # Parse lineage
+        lineage = {}
+        if classification and classification != 'nan':
+            for part in classification.split(';'):
+                part = part.strip()
+                if '__' in part:
+                    prefix, name = part.split('__', 1)
+                    rank_map = {'d': 'domain', 'p': 'phylum', 'c': 'class',
+                                'o': 'order', 'f': 'family', 'g': 'genus', 's': 'species'}
+                    rank = rank_map.get(prefix)
+                    if rank and name:
+                        lineage[rank] = name
+
+        # Determine binner source from bin name prefix
+        binner = 'unknown'
+        for prefix in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']:
+            if genome.startswith(prefix + '_'):
+                binner = prefix
+                break
+        if genome.startswith('DASToolConsensus') or genome.startswith('dastool'):
+            binner = 'dastool'
+
+        entry = {
+            'name': genome,
+            'binner': binner,
+            'classification': classification if classification != 'nan' else '',
+            'lineage': lineage,
+            'method': str(row.get('classification_method', '')),
+            'ani': row.get('fastani_ani') if pd.notna(row.get('fastani_ani')) else None,
+            'msa_percent': row.get('msa_percent') if pd.notna(row.get('msa_percent')) else None,
+            'red_value': row.get('red_value') if pd.notna(row.get('red_value')) else None,
+        }
+
+        # Join CheckM2 quality if available
+        if checkm2_df is not None and not checkm2_df.empty:
+            match = checkm2_df[checkm2_df['Name'] == genome]
+            if not match.empty:
+                r = match.iloc[0]
+                entry['completeness'] = round(float(r.get('Completeness', 0)), 1)
+                entry['contamination'] = round(float(r.get('Contamination', 0)), 1)
+
+        bins.append(entry)
+
+    # Build d3-hierarchy tree from taxonomy
+    # root → domain → phylum → ... → species → leaf (bin)
+    def build_tree(bins_list):
+        root = {'name': 'GTDB', 'children': {}}
+        for b in bins_list:
+            node = root
+            for rank in RANKS:
+                taxon = b['lineage'].get(rank)
+                if not taxon:
+                    break
+                if taxon not in node['children']:
+                    node['children'][taxon] = {'name': taxon, 'rank': rank, 'children': {}}
+                node = node['children'][taxon]
+            # Add leaf
+            leaf = {
+                'name': b['name'],
+                'rank': 'bin',
+                'binner': b['binner'],
+            }
+            if 'completeness' in b:
+                leaf['completeness'] = b['completeness']
+            if 'contamination' in b:
+                leaf['contamination'] = b['contamination']
+            node['children'][b['name']] = leaf
+
+        def convert(node):
+            """Convert children dict to list recursively."""
+            if 'children' in node and isinstance(node['children'], dict):
+                children = list(node['children'].values())
+                if children:
+                    node['children'] = [convert(c) for c in children]
+                else:
+                    del node['children']
+            return node
+
+        return convert(root)
+
+    hierarchy = build_tree(bins)
+
+    # Load raw Newick tree strings
+    newick = {}
+    tree_dir = resolve_path(results_dir, 'taxonomy', 'gtdbtk', 'gtdbtk_trees')
+    if os.path.isdir(tree_dir):
+        for fname in os.listdir(tree_dir):
+            if fname.endswith('.tree') or fname.endswith('.nwk'):
+                fpath = os.path.join(tree_dir, fname)
+                try:
+                    with open(fpath) as f:
+                        newick[fname] = f.read().strip()
+                except Exception:
+                    pass
+
+    return {'hierarchy': hierarchy, 'bins': bins, 'newick': newick}
+
+
 def main():
     args = parse_args()
     results_dir = args.results
@@ -1708,6 +1827,13 @@ def main():
     eukaryotic = build_eukaryotic(results_dir, assembly_info)
     write_json_gz(os.path.join(output_dir, 'eukaryotic.json'), eukaryotic)
     print(f"  Wrote eukaryotic.json")
+
+    # 10b. phylotree.json (GTDB-Tk phylogenetic classification)
+    phylotree = build_phylotree(results_dir, checkm2_df)
+    write_json_gz(os.path.join(output_dir, 'phylotree.json'), phylotree)
+    n_bins = len(phylotree.get('bins', []))
+    n_trees = len(phylotree.get('newick', {}))
+    print(f"  Wrote phylotree.json ({n_bins} bins, {n_trees} placement trees)")
 
     # 11. contig_explorer.json (largest, do last)
     contig_explorer, tsne_emb, umap_emb, sample_depths = build_contig_explorer(
