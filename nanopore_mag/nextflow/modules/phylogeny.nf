@@ -70,7 +70,7 @@ process GTDBTK_CLASSIFY {
     fi
 
     # Copy placement tree files
-    find gtdbtk_out -name '*.classify.tree' -exec cp {} gtdbtk_trees/ \\; 2>/dev/null || true
+    find gtdbtk_out -name '*.classify.tree*' -exec cp {} gtdbtk_trees/ \\; 2>/dev/null || true
     # Ensure directory is not empty (Nextflow needs at least one file)
     if [ -z "\$(ls gtdbtk_trees/ 2>/dev/null)" ]; then
         touch gtdbtk_trees/.empty
