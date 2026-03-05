@@ -82,6 +82,7 @@ process VIZ_PREPROCESS {
     cd "\${VIZ_BUILD}"
     npm ci --prefer-offline 2>/dev/null || npm install --no-audit --no-fund
     # Copy preprocessed JSON into public/data for build
+    mkdir -p public/data
     cp "\${VIZ_DIR}"/data/* public/data/
     npm run build
     cp -r dist "\${VIZ_DIR}/site"
