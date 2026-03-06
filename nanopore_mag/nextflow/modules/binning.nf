@@ -193,7 +193,7 @@ process BIN_LORBIN {
         -fa "${assembly}" \\
         -b *.sorted.bam \\
         --num_process ${task.cpus} \\
-        --bin_length ${params.lorbin_min_length}
+        --bin_length $((${params.lorbin_min_length}))  # cast to int: LorBin argparse bug (github.com/LorMeBioAI/LorBin/issues/2)
     lorbin_exit=\$?
     set -e
 
