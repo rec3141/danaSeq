@@ -191,6 +191,8 @@ def parse_args():
                    help='Persistent storeDir overlay (checked first for each file)')
     p.add_argument('--skip-tsne', action='store_true', help='Skip t-SNE (saves ~5 min)')
     p.add_argument('--skip-umap', action='store_true', help='Skip UMAP (saves ~5-15 min)')
+    p.add_argument('--gtdbtk-db', default=None,
+                   help='GTDB-Tk database dir (for reference genome taxonomy labels)')
     return p.parse_args()
 
 
@@ -1558,7 +1560,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
 # 12. phylotree.json — GTDB-Tk phylogenetic classification + placement trees
 # ---------------------------------------------------------------------------
 
-def build_phylotree(results_dir, checkm2_df):
+def build_phylotree(results_dir, checkm2_df, gtdbtk_db=None):
     """Build a d3-hierarchy tree from GTDB-Tk taxonomy and include raw Newick trees."""
     gtdbtk_path = resolve_path(results_dir, 'taxonomy', 'gtdbtk', 'gtdbtk_taxonomy.tsv')
     gtdbtk_df = load_tsv(gtdbtk_path)
@@ -1606,6 +1608,10 @@ def build_phylotree(results_dir, checkm2_df):
             'ani': row.get('fastani_ani') if pd.notna(row.get('fastani_ani')) else None,
             'msa_percent': row.get('msa_percent') if pd.notna(row.get('msa_percent')) else None,
             'red_value': row.get('red_value') if pd.notna(row.get('red_value')) else None,
+            'closest_ref': str(row.get('closest_genome_reference', '')) if pd.notna(row.get('closest_genome_reference')) else None,
+            'closest_ani': float(row['closest_genome_ani']) if pd.notna(row.get('closest_genome_ani')) else None,
+            'closest_af': float(row['closest_genome_af']) if pd.notna(row.get('closest_genome_af')) else None,
+            'closest_taxonomy': str(row.get('closest_genome_taxonomy', '')) if pd.notna(row.get('closest_genome_taxonomy')) else None,
         }
 
         # Join CheckM2 quality if available
@@ -1657,6 +1663,31 @@ def build_phylotree(results_dir, checkm2_df):
 
     hierarchy = build_tree(bins)
 
+    # Load GTDB reference taxonomy for leaf relabeling
+    ref_taxonomy = {}  # accession -> full lineage string
+    ref_species = {}   # accession -> species name
+    if gtdbtk_db:
+        tax_file = os.path.join(gtdbtk_db, 'taxonomy', 'gtdb_taxonomy.tsv')
+        if os.path.exists(tax_file):
+            print(f"  Loading GTDB reference taxonomy from {tax_file}")
+            with open(tax_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split('\t', 1)
+                    if len(parts) == 2:
+                        acc, lineage = parts
+                        ref_taxonomy[acc] = lineage
+                        # Extract species: last s__ field
+                        for seg in lineage.split(';'):
+                            seg = seg.strip()
+                            if seg.startswith('s__') and len(seg) > 3:
+                                ref_species[acc] = seg[3:]
+            print(f"  Loaded {len(ref_species)} reference species labels")
+
+    bin_name_set = {b['name'] for b in bins}
+
     # Load raw Newick tree strings
     newick = {}
     tree_dir = resolve_path(results_dir, 'taxonomy', 'gtdbtk', 'gtdbtk_trees')
@@ -1670,7 +1701,74 @@ def build_phylotree(results_dir, checkm2_df):
                 except Exception:
                     pass
 
-    return {'hierarchy': hierarchy, 'bins': bins, 'newick': newick}
+    # Relabel Newick leaves: replace reference accession IDs with species names
+    # User bins keep their original names (semibin_042 etc.)
+    # Keep original ID in leaf_info for click lookups
+    leaf_info = {}  # display_label -> {id, lineage, ...}
+    if ref_species:
+        # Collect all leaf names across all trees
+        all_leaf_names = set()
+        for nwk in newick.values():
+            all_leaf_names.update(re.findall(r'[\(,]([A-Za-z0-9_.\-]+)(?=[:,\)])', nwk))
+
+        # Only relabel reference genomes, not user bins
+        ref_leaf_names = all_leaf_names - bin_name_set
+
+        # Count species occurrences for dedup
+        species_count = Counter()
+        for leaf_id in ref_leaf_names:
+            sp = ref_species.get(leaf_id)
+            if sp:
+                species_count[sp] += 1
+
+        species_seen = Counter()
+        label_map = {}  # original_id -> display_label
+        for leaf_id in sorted(ref_leaf_names):
+            sp = ref_species.get(leaf_id)
+            if sp:
+                if species_count[sp] > 1:
+                    species_seen[sp] += 1
+                    display = f"{sp} [{species_seen[sp]}]"
+                else:
+                    display = sp
+                label_map[leaf_id] = display
+            else:
+                display = leaf_id
+            lineage = ref_taxonomy.get(leaf_id, '')
+            leaf_info[display] = {'id': leaf_id, 'user_bin': False,
+                                  'lineage': lineage}
+
+        # Also add user bins to leaf_info (keyed by original name)
+        for b in bins:
+            leaf_info[b['name']] = {'id': b['name'], 'user_bin': True}
+
+        # Apply replacements to Newick strings
+        if label_map:
+            # Sort by length descending to avoid partial replacements
+            sorted_ids = sorted(label_map.keys(), key=len, reverse=True)
+            for fname in newick:
+                nwk = newick[fname]
+                for old_id in sorted_ids:
+                    if old_id in nwk:
+                        # Replace only exact leaf occurrences (preceded by ( or ,)
+                        # Sanitize display label: replace chars illegal in Newick
+                        safe_label = label_map[old_id].replace('(', '_').replace(')', '_').replace(',', '_').replace(';', '_').replace(':', '_')
+                        nwk = re.sub(
+                            r'(?<=[\(,])' + re.escape(old_id) + r'(?=[:,\)])',
+                            safe_label,
+                            nwk
+                        )
+                newick[fname] = nwk
+
+    # Per-tree metadata: count user bins present in each Newick string
+    bin_names = {b['name'] for b in bins}
+    tree_metadata = {}
+    for fname, nwk in newick.items():
+        count = sum(1 for name in bin_names if name in nwk)
+        tree_metadata[fname] = {'user_bins': count}
+
+    return {'hierarchy': hierarchy, 'bins': bins, 'newick': newick,
+            'tree_metadata': tree_metadata, 'leaf_info': leaf_info}
 
 
 def main():
@@ -1829,7 +1927,7 @@ def main():
     print(f"  Wrote eukaryotic.json")
 
     # 10b. phylotree.json (GTDB-Tk phylogenetic classification)
-    phylotree = build_phylotree(results_dir, checkm2_df)
+    phylotree = build_phylotree(results_dir, checkm2_df, gtdbtk_db=args.gtdbtk_db)
     write_json_gz(os.path.join(output_dir, 'phylotree.json'), phylotree)
     n_bins = len(phylotree.get('bins', []))
     n_trees = len(phylotree.get('newick', {}))
