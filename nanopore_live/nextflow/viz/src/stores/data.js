@@ -32,6 +32,8 @@ async function fetchJSON(url) {
   } catch (_) { /* fall through to plain JSON */ }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
+  const ct = res.headers.get('Content-Type') || '';
+  if (ct.includes('html')) return null;  // Vite SPA fallback — file doesn't exist yet
   return res.json();
 }
 
@@ -48,21 +50,21 @@ export async function loadAllData() {
       funcData,
       metaData,
     ] = await Promise.all([
-      fetchJSON('/data/overview.json'),
-      fetchJSON('/data/samples.json'),
-      fetchJSON('/data/sample_tsne.json'),
-      fetchJSON('/data/sample_taxonomy.json'),
-      fetchJSON('/data/taxonomy_sunburst.json'),
-      fetchJSON('/data/sample_function.json'),
+      fetchJSON('/data/overview.json').catch(() => null),
+      fetchJSON('/data/samples.json').catch(() => null),
+      fetchJSON('/data/sample_tsne.json').catch(() => null),
+      fetchJSON('/data/sample_taxonomy.json').catch(() => null),
+      fetchJSON('/data/taxonomy_sunburst.json').catch(() => null),
+      fetchJSON('/data/sample_function.json').catch(() => null),
       fetchJSON('/data/metadata.json').catch(() => null),
     ]);
 
-    overview.set(overviewData);
-    samples.set(samplesData);
-    sampleTsne.set(tsneData);
-    sampleTaxonomy.set(taxData);
-    taxonomySunburst.set(sunburstData);
-    sampleFunction.set(funcData);
+    if (overviewData) overview.set(overviewData);
+    if (samplesData) samples.set(samplesData);
+    if (tsneData) sampleTsne.set(tsneData);
+    if (taxData) sampleTaxonomy.set(taxData);
+    if (sunburstData) taxonomySunburst.set(sunburstData);
+    if (funcData) sampleFunction.set(funcData);
     if (metaData) metadata.set(metaData);
   } catch (e) {
     error.set(e.message);
