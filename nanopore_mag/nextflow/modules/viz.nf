@@ -77,6 +77,10 @@ process VIZ_PREPROCESS {
     # Build static site (node/npm provided by conda env)
     # Copy viz source to a writable location (container filesystem may be read-only)
     VIZ_BUILD="\${VIZ_DIR}/.build"
+    # Kill any running vite server before cleaning .build — it holds node_modules open
+    VIZ_PORT=${vizPort}
+    pkill -f "vite preview.*--port \${VIZ_PORT}" 2>/dev/null || true
+    sleep 1
     rm -rf "\${VIZ_BUILD}"
     cp -r ${projectDir}/viz "\${VIZ_BUILD}"
     cd "\${VIZ_BUILD}"
@@ -97,9 +101,6 @@ process VIZ_PREPROCESS {
     # That creates fd 3 holding the outer tee pipe's write end.  Without closing
     # it, tee never gets EOF → the subshell never exits → .exitcode is never
     # written → the Nextflow task hangs indefinitely.
-    VIZ_PORT=${vizPort}
-    pkill -f "vite preview.*--port \${VIZ_PORT}" 2>/dev/null || true
-    sleep 1
     cd "\${VIZ_BUILD}"
     setsid nohup npm run serve -- --host 0.0.0.0 --port \${VIZ_PORT} \
         </dev/null >/tmp/vite_preview_\${VIZ_PORT}.log 2>&1 \
