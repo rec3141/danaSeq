@@ -30,6 +30,12 @@
     }
   });
 
+  // Clear tree selection when switching trees
+  $effect(() => {
+    const _tree = selectedTree;
+    treeSelectedBins = new Set();
+  });
+
   let currentNewick = $derived(treeData?.newick?.[selectedTree] || '');
 
   function treeLabel(name) {
@@ -57,7 +63,7 @@
   }
 
   // ---- Color-by cycle ----
-  let colorBy = $state('binner');
+  let colorBy = $state('quality');
   const colorDefs = [
     { key: 'binner', label: 'Binner' },
     { key: 'domain', label: 'Domain' },
@@ -186,7 +192,7 @@
     return true;
   }
 
-  const GOLD = [251, 191, 36, 255]; // amber-400
+  const REF_COLOR = [220, 225, 235, 255]; // soft white for named reference taxa
 
   // ---- Node styles for Phylocanvas (keyed by display_label) ----
   let nodeStyles = $derived.by(() => {
@@ -214,7 +220,7 @@
       for (const name in leafInfo) {
         if (leafInfo[name].user_bin) continue;
         if (isValidBinomial(name)) {
-          styles[name] = { fillColour: GOLD };
+          styles[name] = { fillColour: REF_COLOR };
         }
       }
     }
@@ -274,23 +280,21 @@
     return ids;
   }
 
-  // ---- Click info panel ----
+  // ---- Click info panel + tree selection ----
   let clickedNode = $state(null);
+  let treeSelectedBins = $state(new Set());
 
   function handleNodeClick(nodeId, node) {
-    // Look up bin by display_label or name
     const bin = binByName[nodeId];
     if (bin) {
       const quality = qualityByName[nodeId];
       clickedNode = { type: 'bin', nodeId, bin, quality };
       selectedMag.set(bin.name);
     } else {
-      // Reference genome — check leaf_info
       const info = treeData?.leaf_info?.[nodeId];
       if (info) {
         clickedNode = { type: 'ref', nodeId, info };
       } else if (node && !node.isLeaf) {
-        // Internal node
         clickedNode = { type: 'internal', nodeId, node };
       } else {
         clickedNode = { type: 'unknown', nodeId };
@@ -298,7 +302,15 @@
     }
   }
 
+  // Phylocanvas fires this after its built-in selectNode runs,
+  // giving us the full list of highlighted leaf IDs (including descendants).
+  function handleSelectionChange(selectedIds) {
+    const bins = selectedIds.filter(id => userBinSet.has(id));
+    treeSelectedBins = new Set(bins);
+  }
+
   function closeInfoPanel() { clickedNode = null; }
+  function clearTreeSelection() { treeSelectedBins = new Set(); }
 
   // Parse a GTDB lineage string like "d__Bacteria;p__Proteo;..." into readable rows
   function parseLineage(lineageStr) {
@@ -312,38 +324,99 @@
   }
 
   // ---- Table ----
+  function qualityTier(comp, cont) {
+    if (comp >= 90 && cont < 5) return 'HQ';
+    if (comp >= 50 && cont < 10) return 'MQ';
+    return 'LQ';
+  }
+
+  function briefMethod(m) {
+    if (!m || m === 'nan') return '-';
+    if (/^ani_screen$/i.test(m)) return 'ANI screen';
+    if (/topology.*ani/i.test(m)) return 'Topo+ANI';
+    if (/topology/i.test(m)) return 'Topology';
+    if (/red/i.test(m)) return 'RED';
+    if (/placement/i.test(m)) return 'Placement';
+    return m.length > 14 ? m.slice(0, 14) + '...' : m;
+  }
+
   const tableColumns = [
     { key: 'name', label: 'Bin' },
-    { key: 'binner', label: 'Binner' },
+    { key: 'method', label: 'Method' },
+    { key: 'species', label: 'Match' },
+    { key: 'ani', label: 'ANI %', render: (v) => v != null ? Number(v).toFixed(1) : '-' },
+    { key: 'quality', label: 'Quality', render: (v) => {
+      const cls = v === 'HQ' ? 'text-emerald-400' : v === 'MQ' ? 'text-amber-400' : 'text-slate-400';
+      return `<span class="${cls} font-semibold">${v}</span>`;
+    }},
+    { key: 'completeness', label: 'Comp %' },
+    { key: 'contamination', label: 'Cont %' },
+    { key: 'size', label: 'Size', render: (v) => v != null ? (v / 1e6).toFixed(2) + ' Mb' : '-' },
+    { key: 'n50', label: 'N50', render: (v) => v != null ? (v / 1e3).toFixed(1) + ' Kb' : '-' },
+    { key: 'contigs', label: 'Contigs' },
     { key: 'domain', label: 'Domain' },
     { key: 'phylum', label: 'Phylum' },
     { key: 'class', label: 'Class' },
     { key: 'order', label: 'Order' },
     { key: 'family', label: 'Family' },
     { key: 'genus', label: 'Genus' },
-    { key: 'species', label: 'Species' },
-    { key: 'completeness', label: 'Comp%' },
-    { key: 'contamination', label: 'Cont%' },
-    { key: 'method', label: 'Method' },
   ];
 
-  let tableRows = $derived.by(() => {
-    if (!filteredBins.length) return [];
-    return filteredBins.map(b => ({
-      name: b.name,
-      binner: b.binner,
-      domain: b.lineage?.domain || '-',
-      phylum: b.lineage?.phylum || '-',
-      class: b.lineage?.class || '-',
-      order: b.lineage?.order || '-',
-      family: b.lineage?.family || '-',
-      genus: b.lineage?.genus || '-',
-      species: b.lineage?.species || '-',
-      completeness: b.completeness != null ? b.completeness : '-',
-      contamination: b.contamination != null ? b.contamination : '-',
-      method: b.method || '-',
-    }));
+  // When bins are selected in the tree, filter table to just those
+  let tableBins = $derived.by(() => {
+    if (treeSelectedBins.size > 0) {
+      return filteredBins.filter(b => treeSelectedBins.has(b.name));
+    }
+    return filteredBins;
   });
+
+  let tableRows = $derived.by(() => {
+    if (!tableBins.length) return [];
+    return tableBins.map(b => {
+      const q = qualityByName[b.name];
+      const comp = q?.completeness ?? b.completeness;
+      const cont = q?.contamination ?? b.contamination;
+      return {
+        name: b.name,
+        quality: qualityTier(comp ?? 0, cont ?? 100),
+        completeness: comp != null ? comp : '-',
+        contamination: cont != null ? cont : '-',
+        size: q?.genome_size,
+        n50: q?.n50,
+        contigs: q?.n_contigs ?? '-',
+        domain: b.lineage?.domain || '-',
+        phylum: b.lineage?.phylum || '-',
+        class: b.lineage?.class || '-',
+        order: b.lineage?.order || '-',
+        family: b.lineage?.family || '-',
+        genus: b.lineage?.genus || '-',
+        species: b.lineage?.species || '-',
+        ani: b.closest_ani != null ? Number(b.closest_ani) : null,
+        method: briefMethod(b.method),
+      };
+    });
+  });
+
+  function exportTableTsv() {
+    if (!tableRows.length) return;
+    const header = tableColumns.map(c => c.label).join('\t');
+    const body = tableRows.map(r =>
+      tableColumns.map(c => {
+        const v = r[c.key];
+        if (c.key === 'size') return v != null ? (v / 1e6).toFixed(2) + ' Mb' : '';
+        if (c.key === 'n50') return v != null ? (v / 1e3).toFixed(1) + ' Kb' : '';
+        return v ?? '';
+      }).join('\t')
+    ).join('\n');
+    const blob = new Blob([header + '\n' + body], { type: 'text/tab-separated-values' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const treeName = selectedTree.replace(/\.tree$/, '').replace(/\.nwk$/, '').replace(/^gtdbtk\./, '');
+    a.download = `phylogeny_${treeName}_bins.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   let hasData = $derived(
     treeData?.bins?.length > 0 && treeData?.newick && Object.keys(treeData.newick).length > 0
@@ -445,6 +518,7 @@
         selectedIds={[]}
         {collapsedIds}
         onNodeClick={handleNodeClick}
+        onSelectionChange={handleSelectionChange}
       />
       <div class="text-[10px] text-slate-500 mt-1 flex gap-4">
         <span>Scroll: zoom</span>
@@ -452,6 +526,8 @@
         <span>Ctrl+scroll: x-axis zoom</span>
         <span>Click+drag: pan</span>
         <span>Click node: info</span>
+        <span>Ctrl+click: multi-select bins</span>
+        <span>Click internal node: select descendants</span>
       </div>
     </div>
 
@@ -590,6 +666,12 @@
                   <dd class="font-mono">{n.totalLeaves}</dd>
                 </div>
               {/if}
+              {#if treeSelectedBins.size > 0}
+                <div class="flex justify-between">
+                  <dt class="text-slate-400">User Bins Selected</dt>
+                  <dd class="font-mono text-cyan-400">{treeSelectedBins.size}</dd>
+                </div>
+              {/if}
               {#if n.totalNodes != null}
                 <div class="flex justify-between">
                   <dt class="text-slate-400">Total Nodes</dt>
@@ -613,11 +695,27 @@
   </div>
 
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-    <h3 class="text-sm font-medium text-slate-400 mb-2">Per-Bin Classification ({filteredBins.length} bins)</h3>
+    <h3 class="text-sm font-medium text-slate-400 mb-2 flex items-center gap-2">
+      GTDB Per-Bin Classification — {tableBins.length}{treeSelectedBins.size > 0 ? `/${filteredBins.length}` : ''} bins
+      {#if treeSelectedBins.size > 0}
+        <button
+          class="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-400"
+          onclick={clearTreeSelection}
+        >
+          Clear tree selection ({treeSelectedBins.size})
+        </button>
+      {/if}
+      <button
+        class="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:border-slate-500 ml-auto"
+        onclick={exportTableTsv}
+        title="Export table as TSV"
+      >Export TSV</button>
+    </h3>
     <DataTable
       columns={tableColumns}
       rows={tableRows}
       maxHeight="500px"
+      hideExport={true}
     />
   </div>
 {/if}

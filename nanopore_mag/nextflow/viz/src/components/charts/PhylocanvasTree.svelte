@@ -8,6 +8,7 @@
     selectedIds = [],
     collapsedIds = [],
     onNodeClick = null,
+    onSelectionChange = null,
   } = $props();
 
   let container;
@@ -25,7 +26,7 @@
     fillColour: [148, 163, 184, 255],    // slate-400
     strokeColour: [71, 85, 105, 255],     // slate-600
     fontColour: [100, 116, 139, 255],      // slate-500 (dim default for unnamed refs)
-    highlightColour: [34, 211, 238, 255], // cyan-400
+    highlightColour: [220, 225, 235, 180], // soft white, visible on edges
   };
 
   function createTree() {
@@ -59,26 +60,32 @@
       collapsedIds,
     });
 
-    // Override handleClick to call our callback after default behavior
-    const origHandleClick = tree.handleClick.bind(tree);
-    tree.handleClick = function(info, event) {
-      // Run default: pickNodeFromLayer + selectNode
-      origHandleClick(info, event);
-      // Then fire our callback with the picked node
-      if (onNodeClick) {
-        const node = tree.pickNodeFromLayer(info);
-        if (node) {
-          onNodeClick(node.id, node);
+    // Collect all descendant leaf IDs of an internal node.
+    // Phylocanvas nodes are pre-order indexed; descendants of a node span
+    // a contiguous slice of the array.
+    function getDescendantLeafIds(node) {
+      const leaves = [];
+      function walk(n) {
+        if (!n.children || n.children.length === 0 || n.isLeaf) {
+          leaves.push(n.id);
+          return;
         }
+        for (const c of n.children) walk(c);
       }
-    };
+      if (node.children) { for (const c of node.children) walk(c); }
+      return leaves;
+    }
 
-    // Override handleHover for tooltip
-    const origHandleHover = tree.handleHover.bind(tree);
+    // Cache hovered node — user always hovers before clicking, so this gives
+    // us the node object without calling pickNodeFromLayer before origHandleClick
+    // (which would consume the pick and prevent Phylocanvas edge highlighting).
+    let lastHoveredNode = null;
+
+    // Override handleHover for our tooltip only (skip Phylocanvas's built-in one)
     tree.handleHover = function(info, event) {
-      origHandleHover(info, event);
       const node = tree.pickNodeFromLayer(info);
       if (node) {
+        lastHoveredNode = node;
         const label = node.label ?? node.id;
         tipText = node.isLeaf ? label : `${label} (${node.totalLeaves} leaves)`;
         const rect = container.getBoundingClientRect();
@@ -87,6 +94,28 @@
         tipShow = true;
       } else {
         tipShow = false;
+      }
+    };
+
+    // Override handleClick — let origHandleClick run first so Phylocanvas
+    // highlights edges, then use cached hover node for our callbacks.
+    const origHandleClick = tree.handleClick.bind(tree);
+    tree.handleClick = function(info, event) {
+      origHandleClick(info, event);
+      // For leaves, pickNodeFromLayer still works after origHandleClick;
+      // for internal nodes it returns null, so fall back to last hovered node.
+      const node = tree.pickNodeFromLayer(info) || lastHoveredNode;
+      if (node && onNodeClick) {
+        onNodeClick(node.id, node);
+      }
+      if (onSelectionChange) {
+        if (node && !node.isLeaf) {
+          const leafIds = getDescendantLeafIds(node);
+          onSelectionChange(leafIds);
+        } else {
+          const sel = tree.props?.selectedIds || [];
+          onSelectionChange([...sel]);
+        }
       }
     };
 
@@ -109,23 +138,24 @@
   });
 
   $effect(() => {
-    const _deps = [newick, treeType, styles, selectedIds, collapsedIds];
+    const _deps = [newick, treeType, styles, collapsedIds];
     if (!container || !newick) return;
 
     if (!tree || newick !== prevNewick) {
       createTree();
     } else {
+      // Don't pass selectedIds here — Phylocanvas manages selection internally
+      // via clicks; pushing [] would clear the highlight on every re-render.
       tree.setProps({
         type: treeType,
         styles,
-        selectedIds,
         collapsedIds,
       });
     }
   });
 </script>
 
-<div class="w-full relative overflow-hidden" style="min-height: 600px; background: #0f172a;">
+<div class="w-full relative overflow-hidden" style="height: 75vh; background: #0f172a;">
   <div bind:this={container} class="absolute inset-0 w-full h-full"></div>
   {#if tipShow}
     <div
