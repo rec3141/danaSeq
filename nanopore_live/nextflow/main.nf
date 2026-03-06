@@ -179,10 +179,14 @@ def create_fastq_channel() {
     // '*/fastq_pass/barcode*/*.fastq.gz' — set --input to the parent of the run
     // directory, or override --watch_glob to match your directory depth.
 
-    def glob_pattern = "${params.input}/**/fastq_pass/barcode*/*.fastq.gz"
     def ch_raw
     if (params.watch) {
-        ch_raw = Channel.watchPath("${params.input}/${params.watch_glob}", 'create')
+        // Catch up on existing files, then watch for new ones
+        def existing = file("${params.input}/**/fastq_pass/barcode*/*.fastq.gz") +
+                       file("${params.input}/fastq_pass/barcode*/*.fastq.gz")
+        def ch_existing = existing ? Channel.from(existing) : Channel.empty()
+        def ch_watch = Channel.watchPath("${params.input}/${params.watch_glob}", 'create')
+        ch_raw = ch_existing.mix(ch_watch)
     } else {
         // Validate input before creating channel
         def input_dir = file(params.input)
@@ -190,11 +194,12 @@ def create_fastq_channel() {
             error "ERROR: --input directory does not exist: ${params.input}\nRun with --help for usage."
         }
 
-        // Try to find files and give targeted advice on failure
-        def found = file("${params.input}/fastq_pass/barcode*/*.fastq.gz")
-        if (!found) {
-            found = file("${params.input}/*/fastq_pass/barcode*/*.fastq.gz")
-        }
+        // Check for nanopore barcode structure at any depth
+        // Note: Nextflow's ** glob doesn't match fastq_pass as a direct child,
+        // so we check both the recursive and direct patterns
+        def found = file("${params.input}/**/fastq_pass/barcode*/*.fastq.gz") +
+                    file("${params.input}/fastq_pass/barcode*/*.fastq.gz")
+
         if (!found) {
             def has_fastq_pass = file("${params.input}/fastq_pass").isDirectory()
             def has_barcode_dirs = file("${params.input}/barcode*/*.fastq.gz")
@@ -208,10 +213,14 @@ def create_fastq_channel() {
                 hint = "    Expected structure:\n      <input>/fastq_pass/barcode01/*.fastq.gz\n    Point --input at the directory CONTAINING fastq_pass/."
             }
 
-            error "ERROR: No FASTQ files found.\n\n    Searched: ${glob_pattern}\n${hint}\n\n    Run with --help for full usage information."
+            error "ERROR: No FASTQ files found.\n\n" +
+                  "    Searched: ${params.input}/**/fastq_pass/barcode*/*.fastq.gz\n" +
+                  "              ${params.input}/fastq_pass/barcode*/*.fastq.gz\n" +
+                  "${hint}\n\n    Run with --help for full usage information."
         }
 
-        ch_raw = Channel.fromPath(glob_pattern)
+        log.info "Found ${found.size()} FASTQ files"
+        ch_raw = Channel.from(found)
     }
 
     ch_raw

@@ -136,6 +136,18 @@ do_install() {
         rm -f "${log_file}"
 
         echo "  Done"
+
+        # Post-install: ensure conda is on PATH for Nextflow env activation.
+        # Nextflow's .command.run calls `conda info --json` to activate prefix envs.
+        # dana-tools hosts Nextflow and its bin/ is on PATH for all spawned processes.
+        if [[ "${env_name}" == "dana-tools" ]]; then
+            local conda_bin
+            conda_bin=$(which conda 2>/dev/null || echo "")
+            if [[ -n "${conda_bin}" && ! -e "${env_path}/bin/conda" ]]; then
+                ln -sf "${conda_bin}" "${env_path}/bin/conda"
+                echo "  Symlinked conda into tools env for Nextflow activation"
+            fi
+        fi
     done
 
     # Download tetramer_freqs_esom.pl into the tools environment
