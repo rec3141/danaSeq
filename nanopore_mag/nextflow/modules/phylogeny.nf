@@ -43,7 +43,7 @@ process GTDBTK_CLASSIFY {
         --extension fa \\
         --cpus ${task.cpus} \\
         --pplacer_cpus 1 \\
-        --skip_ani_screen
+        --mash_db gtdbtk_mash_db
     gtdbtk_exit=\$?
     set -e
 
