@@ -41,6 +41,20 @@
   function treeLabel(name) {
     const meta = treeData?.tree_metadata?.[name];
     const binCount = meta?.user_bins ?? '?';
+    if (name.includes('backbone')) return `Backbone (${binCount} bins)`;
+    if (name.includes('ar53')) return `Archaea (${binCount} bins)`;
+    // Bespoke labels for bac120 class-level partitions
+    const partitionLabels = {
+      '1': 'Gammaproteobacteria',
+      '2': 'Bacteroidota+',
+      '3': 'Alphaproteobacteria',
+      '5': 'Actinomycota+',
+      '6': 'Patescibacteriota',
+      '7': 'PVC+',
+      '8': 'Cyanobacteriota+',
+    };
+    const m = name.match(/\.tree\.(\d+)\.tree$/);
+    if (m && partitionLabels[m[1]]) return `${partitionLabels[m[1]]} (${binCount} bins)`;
     const short = name.replace(/\.tree$/, '').replace(/\.nwk$/, '').replace(/^gtdbtk\./, '');
     return `${short} (${binCount} bins)`;
   }
@@ -91,6 +105,17 @@
 
   // ---- Derived: bin lookups ----
   let userBinSet = $derived(new Set(treeData?.bins?.map(b => b.name) || []));
+
+  // Bins present in the currently selected tree's Newick string
+  let binsInTree = $derived.by(() => {
+    const nwk = currentNewick;
+    if (!nwk || !userBinSet.size) return userBinSet;
+    const inTree = new Set();
+    for (const name of userBinSet) {
+      if (nwk.includes(name)) inTree.add(name);
+    }
+    return inTree;
+  });
 
   // Reverse lookup: name -> phylotree bin object
   let binByName = $derived.by(() => {
@@ -362,12 +387,13 @@
     { key: 'genus', label: 'Genus' },
   ];
 
-  // When bins are selected in the tree, filter table to just those
+  // Default: show bins in current tree; click-selection narrows further
   let tableBins = $derived.by(() => {
+    const inTree = filteredBins.filter(b => binsInTree.has(b.name));
     if (treeSelectedBins.size > 0) {
-      return filteredBins.filter(b => treeSelectedBins.has(b.name));
+      return inTree.filter(b => treeSelectedBins.has(b.name));
     }
-    return filteredBins;
+    return inTree;
   });
 
   let tableRows = $derived.by(() => {
@@ -696,7 +722,7 @@
 
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
     <h3 class="text-sm font-medium text-slate-400 mb-2 flex items-center gap-2">
-      GTDB Per-Bin Classification — {tableBins.length}{treeSelectedBins.size > 0 ? `/${filteredBins.length}` : ''} bins
+      GTDB Per-Bin Classification — {tableBins.length} bins{treeSelectedBins.size > 0 ? ` (selected)` : ''}
       {#if treeSelectedBins.size > 0}
         <button
           class="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-400"
