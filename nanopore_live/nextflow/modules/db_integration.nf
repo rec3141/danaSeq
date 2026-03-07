@@ -201,7 +201,7 @@ process DB_SYNC {
                 run_r_script ${danadir}/41_krakenreport_db.r "\${barcode_dir}"
             fi
 
-            if [ -d "\${barcode_dir}/prokka" ]; then
+            if [ -d "\${barcode_dir}/prokka" ] || [ -d "\${barcode_dir}/bakta" ]; then
                 run_r_script ${danadir}/42_prokka_db.r "\${barcode_dir}"
             fi
 
@@ -221,6 +221,15 @@ process DB_SYNC {
                 run_cleanup "\${barcode_dir}"
             fi
         done
+
+        # Regenerate viz JSON after each sync cycle
+        viz_preprocess="${projectDir}/viz/preprocess/preprocess.py"
+        viz_output="${outdir}/viz"
+        if [ -f "\${viz_preprocess}" ]; then
+            echo "[INFO] DB_SYNC tick=\${tick}: running viz preprocess"
+            mkdir -p "\${viz_output}"
+            python3 "\${viz_preprocess}" --input "${outdir}" --output "\${viz_output}" 2>&1 | sed 's/^/  [VIZ] /' || true
+        fi
 
         echo "[INFO] DB_SYNC tick=\${tick}: complete, sleeping ${sync_seconds}s"
         tick=\$((tick + 1))

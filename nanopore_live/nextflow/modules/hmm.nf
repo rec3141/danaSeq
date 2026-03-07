@@ -16,12 +16,15 @@ process HMM_SEARCH {
 
     script:
     """
+    # Merge multiple .faa files (e.g. Bakta emits .faa + .hypotheticals.faa)
+    cat ${faa} > combined_proteins.faa
+
     hmmsearch \
         --cut_tc \
         --cpu 1 \
         --tblout "${meta.id}.${dbname}.tbl" \
         "${hmm_db}" \
-        "${faa}" \
+        combined_proteins.faa \
         > /dev/null
 
     # Parse tblout to TSV

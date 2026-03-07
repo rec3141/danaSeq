@@ -11,6 +11,7 @@ dependencies:
   - gawk=5.3.1
   - perl=5.32.1
   - curl
+  - python-duckdb
   - r-base=4.5.2
   - r-dbi=1.2.3
   - r-duckdb=1.4.4

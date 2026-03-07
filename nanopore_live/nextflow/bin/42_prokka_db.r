@@ -153,7 +153,7 @@ if (nrow(allfiles) > 0) {
 
 files_gff = sub(".tsv", ".gff", files_tsv, fixed = T)
 
-for (i in 1:length(files_tsv)) {
+for (i in seq_along(files_tsv)) {
   #  print(files_tsv[i])
   df_tsv <- read_prokka_tsv(files_tsv[i])
   if (nrow(df_tsv) > 0) {
