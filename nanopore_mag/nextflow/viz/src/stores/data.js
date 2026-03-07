@@ -3,7 +3,7 @@ import { writable, get } from 'svelte/store';
 // Individual data stores
 export const overview = writable(null);
 export const mags = writable(null);
-export const checkm2All = writable(null);
+export const binQuality = writable(null);
 export const taxonomySunburst = writable(null);
 export const keggHeatmap = writable(null);
 export const scgHeatmap = writable(null);
@@ -130,18 +130,18 @@ export async function loadAllData() {
   }
 }
 
-// Lazy load checkm2_all (3MB+ with all binner bins)
-let checkm2Loading = false;
-export async function loadCheckm2All() {
-  if (checkm2Loading || get(checkm2All) !== null) return;
-  checkm2Loading = true;
+// Lazy load bin quality data (3MB+ with all binner bins)
+let binQualityLoading = false;
+export async function loadBinQuality() {
+  if (binQualityLoading || get(binQuality) !== null) return;
+  binQualityLoading = true;
   try {
     const data = await fetchJSON('/data/checkm2_all.json');
-    checkm2All.set(data);
+    binQuality.set(data);
   } catch (e) {
     console.error('Failed to load checkm2_all:', e);
   } finally {
-    checkm2Loading = false;
+    binQualityLoading = false;
   }
 }
 

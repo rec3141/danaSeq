@@ -2,14 +2,14 @@
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import D3Heatmap from '../components/charts/D3Heatmap.svelte';
   import { onMount } from 'svelte';
-  import { coverage, checkm2All, loadCheckm2All } from '../stores/data.js';
+  import { coverage, binQuality, loadBinQuality } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
 
   let covData = $derived($coverage);
-  let allBins = $derived($checkm2All);
+  let allBins = $derived($binQuality);
   let selected = $derived($selectedMag);
 
-  onMount(() => { loadCheckm2All(); });
+  onMount(() => { loadBinQuality(); });
 
   // Binner toggle state — DAS Tool on by default
   let activeBinners = $state(new Set(['dastool']));
@@ -71,7 +71,7 @@
     return 'LQ';
   }
 
-  // Lookup map: bin name -> checkm2All record
+  // Lookup map: bin name -> binQuality record
   let binMetaMap = $derived.by(() => {
     if (!allBins) return {};
     const map = {};
@@ -303,7 +303,7 @@
     showDetail = true;
   }
 
-  // Unified detail lookup — checkm2All has taxonomy + MGE for all bins
+  // Unified detail lookup — binQuality has taxonomy + MGE for all bins
   let selectedBinData = $derived.by(() => {
     if (!selected || !allBins) return null;
     return allBins.find(b => b.dastool_name === selected)

@@ -18,11 +18,12 @@ process GTDBTK_CLASSIFY {
     output:
     path("gtdbtk_taxonomy.tsv"), emit: taxonomy
     path("gtdbtk_trees/"),       emit: trees
+    path("gtdbtk_markers/"),     emit: markers
 
     script:
     """
     # Merge all bin directories into one flat directory
-    mkdir -p all_bins gtdbtk_trees
+    mkdir -p all_bins gtdbtk_trees gtdbtk_markers
     for d in bins_*; do
         [ -d "\$d" ] || continue
         cp "\$d"/*.fa all_bins/ 2>/dev/null || true
@@ -31,6 +32,7 @@ process GTDBTK_CLASSIFY {
     if [ -z "\$(ls all_bins/*.fa 2>/dev/null)" ]; then
         echo "[WARNING] No bin FASTAs found -- skipping GTDB-Tk" >&2
         printf 'user_genome\\tclassification\\tfastani_reference\\tfastani_reference_radius\\tfastani_taxonomy\\tfastani_ani\\tfastani_af\\tclosest_placement_reference\\tclosest_placement_radius\\tclosest_placement_taxonomy\\tclosest_placement_ani\\tclosest_placement_af\\tpplacer_taxonomy\\tclassification_method\\tnote\\tother_related_references\\tmsa_percent\\ttranslation_table\\tred_value\\twarnings\\n' > gtdbtk_taxonomy.tsv
+        touch gtdbtk_markers/.empty
         exit 0
     fi
 
@@ -50,6 +52,7 @@ process GTDBTK_CLASSIFY {
     if [ \$gtdbtk_exit -ne 0 ]; then
         echo "[WARNING] GTDB-Tk exited with code \$gtdbtk_exit" >&2
         printf 'user_genome\\tclassification\\tfastani_reference\\tfastani_reference_radius\\tfastani_taxonomy\\tfastani_ani\\tfastani_af\\tclosest_placement_reference\\tclosest_placement_radius\\tclosest_placement_taxonomy\\tclosest_placement_ani\\tclosest_placement_af\\tpplacer_taxonomy\\tclassification_method\\tnote\\tother_related_references\\tmsa_percent\\ttranslation_table\\tred_value\\twarnings\\n' > gtdbtk_taxonomy.tsv
+        touch gtdbtk_markers/.empty
         exit 0
     fi
 
@@ -74,6 +77,14 @@ process GTDBTK_CLASSIFY {
     # Ensure directory is not empty (Nextflow needs at least one file)
     if [ -z "\$(ls gtdbtk_trees/ 2>/dev/null)" ]; then
         touch gtdbtk_trees/.empty
+    fi
+
+    # Copy markers_summary TSVs for GTDB-Tk quality metrics
+    find gtdbtk_out -name 'gtdbtk.bac120.markers_summary.tsv' -exec cp {} gtdbtk_markers/ \\; 2>/dev/null || true
+    find gtdbtk_out -name 'gtdbtk.ar53.markers_summary.tsv' -exec cp {} gtdbtk_markers/ \\; 2>/dev/null || true
+    find gtdbtk_out -name 'gtdbtk.bac120.tree.mapping.tsv' -exec cp {} gtdbtk_markers/ \\; 2>/dev/null || true
+    if [ -z "\$(ls gtdbtk_markers/*.tsv 2>/dev/null)" ]; then
+        touch gtdbtk_markers/.empty
     fi
     """
 }

@@ -688,6 +688,32 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
     if assembly_info is not None:
         len_map = dict(zip(assembly_info['#seq_name'], assembly_info['length']))
 
+    # GTDB-Tk marker gene quality (completeness/contamination from SCG counts)
+    gtdbtk_quality = {}  # bin_name -> {completeness, contamination}
+    for domain, total_markers in [('bac120', 120), ('ar53', 53)]:
+        markers_path = resolve_path(results_dir, 'taxonomy', 'gtdbtk',
+                                    'gtdbtk_markers', f'gtdbtk.{domain}.markers_summary.tsv')
+        markers_df = load_tsv(markers_path)
+        if markers_df is None:
+            continue
+        for _, mrow in markers_df.iterrows():
+            bin_name = mrow['name']
+            unique = int(mrow['number_unique_genes'])
+            multi_unique = int(mrow['number_multiple_unique_genes'])
+            comp = round(unique / total_markers * 100, 2)
+            cont = round(multi_unique / total_markers * 100, 2)
+            # If bin appears in both bac120 and ar53, keep the one with more unique genes
+            if bin_name in gtdbtk_quality:
+                if unique <= gtdbtk_quality[bin_name]['_unique']:
+                    continue
+            gtdbtk_quality[bin_name] = {
+                'completeness': comp,
+                'contamination': cont,
+                '_unique': unique,
+            }
+    if gtdbtk_quality:
+        print(f"  Loaded GTDB-Tk marker quality for {len(gtdbtk_quality)} bins")
+
     records = []
     for _, row in checkm2_df.iterrows():
         name = row['Name']
@@ -732,10 +758,13 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
         n_defense = sum(len(defense_contig_map.get(c, [])) for c in contigs)
         n_integron = sum(1 for c in contigs if c in integron_contigs)
 
+        gtq = gtdbtk_quality.get(name)
         records.append({
             'name': name,
             'completeness': round(float(row['Completeness']), 2),
             'contamination': round(float(row['Contamination']), 2),
+            'gtdbtk_completeness': gtq['completeness'] if gtq else None,
+            'gtdbtk_contamination': gtq['contamination'] if gtq else None,
             'genome_size': int(row['Genome_Size']),
             'gc': round(float(row['GC_Content']), 4),
             'n50': int(row['Contig_N50']),

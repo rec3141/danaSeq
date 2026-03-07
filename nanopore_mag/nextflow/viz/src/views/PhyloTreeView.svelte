@@ -2,14 +2,14 @@
   import PhylocanvasTree from '../components/charts/PhylocanvasTree.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
   import { onMount } from 'svelte';
-  import { phyloTree, loadPhyloTree, checkm2All, loadCheckm2All } from '../stores/data.js';
+  import { phyloTree, loadPhyloTree, binQuality, loadBinQuality } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
 
   let treeData = $derived($phyloTree);
 
-  let allBins = $derived($checkm2All);
+  let allBins = $derived($binQuality);
 
-  onMount(() => { loadPhyloTree(); loadCheckm2All(); });
+  onMount(() => { loadPhyloTree(); loadBinQuality(); });
 
   // ---- Tree selector ----
   let treeNames = $derived.by(() => {
@@ -126,7 +126,7 @@
     return map;
   });
 
-  // Cross-reference: name -> checkm2All quality data (completeness, gc, genome_size, n50, etc.)
+  // Cross-reference: name -> binQuality quality data (completeness, gc, genome_size, n50, etc.)
   let qualityByName = $derived.by(() => {
     const map = {};
     if (!allBins) return map;

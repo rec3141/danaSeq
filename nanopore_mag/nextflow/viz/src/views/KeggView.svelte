@@ -2,14 +2,14 @@
   import D3Heatmap from '../components/charts/D3Heatmap.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
   import { onMount } from 'svelte';
-  import { keggHeatmap, checkm2All, loadCheckm2All } from '../stores/data.js';
+  import { keggHeatmap, binQuality, loadBinQuality } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
 
   let keggData = $derived($keggHeatmap);
-  let allBins = $derived($checkm2All);
+  let allBins = $derived($binQuality);
   let selected = $derived($selectedMag);
 
-  onMount(() => { loadCheckm2All(); });
+  onMount(() => { loadBinQuality(); });
 
   // Taxonomy source for detail panel
   let taxSource = $state('kaiju');
@@ -245,7 +245,7 @@
     return { nMags, nMods, completeModules, avgCompleteness: count > 0 ? sum / count : 0 };
   });
 
-  // Unified detail lookup — checkm2All has taxonomy + MGE for all bins
+  // Unified detail lookup — binQuality has taxonomy + MGE for all bins
   let selectedBinData = $derived.by(() => {
     if (!selected || !allBins) return null;
     return allBins.find(b => b.dastool_name === selected)

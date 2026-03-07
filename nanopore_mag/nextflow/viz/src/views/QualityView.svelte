@@ -4,14 +4,14 @@
   import DataTable from '../components/ui/DataTable.svelte';
   import QualityBadge from '../components/ui/QualityBadge.svelte';
   import D3Heatmap from '../components/charts/D3Heatmap.svelte';
-  import { checkm2All, loadCheckm2All, contigExplorer, loadContigExplorer, scgHeatmap } from '../stores/data.js';
+  import { binQuality, loadBinQuality, contigExplorer, loadContigExplorer, scgHeatmap } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
 
-  let allBins = $derived($checkm2All);
+  let allBins = $derived($binQuality);
   let contigs = $derived($contigExplorer);
   let selected = $derived($selectedMag);
 
-  onMount(() => { loadCheckm2All(); loadContigExplorer(); });
+  onMount(() => { loadBinQuality(); loadContigExplorer(); });
 
   // Binner toggles — DAS Tool on by default
   let activeBinners = $state(new Set(['dastool']));
@@ -54,6 +54,26 @@
     return counts;
   });
 
+  // Quality source toggle (CheckM2 vs GTDB-Tk SCG)
+  let qualitySource = $state('checkm2');
+  const qualitySources = [
+    { key: 'checkm2', label: 'CheckM2' },
+    { key: 'gtdbtk', label: 'GTDB-Tk SCG' },
+  ];
+  function cycleQualitySource() {
+    const keys = qualitySources.map(s => s.key);
+    qualitySource = keys[(keys.indexOf(qualitySource) + 1) % keys.length];
+  }
+  function qualitySourceLabel() {
+    return qualitySources.find(s => s.key === qualitySource)?.label || qualitySource;
+  }
+  function getComp(b) {
+    return qualitySource === 'gtdbtk' ? b.gtdbtk_completeness : b.completeness;
+  }
+  function getCont(b) {
+    return qualitySource === 'gtdbtk' ? b.gtdbtk_contamination : b.contamination;
+  }
+
   // Quality filter sliders
   let minCompleteness = $state(0);
   let maxContamination = $state(100);
@@ -63,16 +83,21 @@
     if (!allBins) return [];
     return allBins.filter(b => {
       const bk = b.is_dastool ? 'dastool' : b.binner;
-      return activeBinners.has(bk)
-        && b.completeness >= minCompleteness
-        && b.contamination <= maxContamination;
+      if (!activeBinners.has(bk)) return false;
+      const comp = getComp(b);
+      const cont = getCont(b);
+      if (comp == null || cont == null) return false;
+      return comp >= minCompleteness && cont <= maxContamination;
     });
   });
 
   // Quality tier helper
   function qualityTier(b) {
-    if (b.completeness >= 90 && b.contamination < 5) return 'HQ';
-    if (b.completeness >= 50 && b.contamination < 10) return 'MQ';
+    const comp = getComp(b);
+    const cont = getCont(b);
+    if (comp == null || cont == null) return 'LQ';
+    if (comp >= 90 && cont < 5) return 'HQ';
+    if (comp >= 50 && cont < 10) return 'MQ';
     return 'LQ';
   }
 
@@ -91,11 +116,11 @@
         type: 'scatter',
         mode: 'markers',
         name: tier.label,
-        x: bins.map(b => b.contamination),
-        y: bins.map(b => b.completeness),
+        x: bins.map(b => getCont(b)),
+        y: bins.map(b => getComp(b)),
         text: bins.map(b => {
           const name = b.is_dastool ? (b.dastool_name || b.name) : b.name;
-          return `${name}<br>Comp: ${b.completeness}%<br>Cont: ${b.contamination}%<br>Binner: ${b.binner}<br>Size: ${(b.genome_size/1e6).toFixed(1)} Mbp`;
+          return `${name}<br>Comp: ${getComp(b)}%<br>Cont: ${getCont(b)}%<br>Binner: ${b.binner}<br>Size: ${(b.genome_size/1e6).toFixed(1)} Mbp`;
         }),
         customdata: bins.map(b => b.is_dastool ? (b.dastool_name || b.name) : b.name),
         marker: {
@@ -110,7 +135,7 @@
   });
 
   let scatterLayout = $derived({
-    title: { text: 'CheckM2 Quality Assessment', font: { size: 14 } },
+    title: { text: `${qualitySourceLabel()} Quality Assessment`, font: { size: 14 } },
     xaxis: { title: 'Contamination (%)', range: [0, 15], constrain: 'domain', constraintoward: 'left' },
     yaxis: { title: 'Completeness (%)', range: [0, 105], fixedrange: true },
     shapes: [
@@ -171,8 +196,8 @@
       return {
         name: b.is_dastool ? (b.dastool_name || b.name) : b.name,
         quality: qualityTier(b),
-        completeness: b.completeness,
-        contamination: b.contamination,
+        completeness: getComp(b),
+        contamination: getCont(b),
         binner: b.binner,
         size: b.genome_size,
         n50: b.n50,
@@ -365,7 +390,7 @@
     return 'unknown';
   }
 
-  // Lookup map: bin name -> checkm2All record
+  // Lookup map: bin name -> binQuality record
   let binMetaMap = $derived.by(() => {
     if (!allBins) return {};
     const map = {};
@@ -388,8 +413,11 @@
         if (!activeBinners.has(scgMagBinner(id))) return -1;
         const meta = binMetaMap[id];
         if (meta) {
-          if (meta.completeness < minCompleteness) return -1;
-          if (meta.contamination > maxContamination) return -1;
+          const comp = getComp(meta);
+          const cont = getCont(meta);
+          if (comp == null || cont == null) return -1;
+          if (comp < minCompleteness) return -1;
+          if (cont > maxContamination) return -1;
         } else if (hasQualityFilter) {
           return -1; // Exclude bins without metadata when filters active
         }
@@ -411,15 +439,15 @@
           case 'name':
             return idA.localeCompare(idB);
           case 'completeness':
-            return (metaB?.completeness ?? 0) - (metaA?.completeness ?? 0);
+            return (getComp(metaB) ?? 0) - (getComp(metaA) ?? 0);
           case 'contamination':
-            return (metaA?.contamination ?? 0) - (metaB?.contamination ?? 0);
+            return (getCont(metaA) ?? 0) - (getCont(metaB) ?? 0);
           case 'quality': {
             const tierOrder = { HQ: 0, MQ: 1, LQ: 2 };
             const tA = metaA ? qualityTier(metaA) : 'LQ';
             const tB = metaB ? qualityTier(metaB) : 'LQ';
             const d = (tierOrder[tA] ?? 3) - (tierOrder[tB] ?? 3);
-            return d !== 0 ? d : (metaB?.completeness ?? 0) - (metaA?.completeness ?? 0);
+            return d !== 0 ? d : (getComp(metaB) ?? 0) - (getComp(metaA) ?? 0);
           }
           case 'size':
             return (metaB?.genome_size ?? 0) - (metaA?.genome_size ?? 0);
@@ -493,7 +521,9 @@
         label: 'Comp%',
         values: ids.map(id => {
           const m = binMetaMap[id];
-          return m ? m.completeness.toFixed(0) : '-';
+          if (!m) return '-';
+          const v = getComp(m);
+          return v != null ? v.toFixed(0) : '-';
         }),
         colorFn: compColor,
       },
@@ -501,7 +531,9 @@
         label: 'Cont%',
         values: ids.map(id => {
           const m = binMetaMap[id];
-          return m ? m.contamination.toFixed(1) : '-';
+          if (!m) return '-';
+          const v = getCont(m);
+          return v != null ? v.toFixed(1) : '-';
         }),
         colorFn: contColor,
       },
@@ -567,6 +599,14 @@
     {/each}
     <span class="text-slate-500">{filteredBins.length} bins</span>
     <span class="text-slate-600">|</span>
+    <span class="text-slate-400">Quality:</span>
+    <button
+      class="px-3 py-1 rounded-md border transition-colors text-center border-cyan-400 bg-cyan-400/10 text-cyan-400"
+      style="min-width: 6.5rem"
+      onclick={cycleQualitySource}
+      title={`Click to cycle: ${qualitySources.map(s => s.label).join(' \u2192 ')}`}
+    >{qualitySourceLabel()} &#x25BE;</button>
+    <span class="text-slate-600">|</span>
     <span class="text-slate-400">Classifier:</span>
     <button
       class="px-3 py-1 rounded-md border transition-colors text-center border-cyan-400 bg-cyan-400/10 text-cyan-400"
@@ -625,11 +665,11 @@
         <dl class="space-y-2 text-sm">
           <div class="flex justify-between">
             <dt class="text-slate-400">Completeness</dt>
-            <dd class="font-mono text-emerald-400">{selectedBinData.completeness}%</dd>
+            <dd class="font-mono text-emerald-400">{getComp(selectedBinData) ?? '-'}%</dd>
           </div>
           <div class="flex justify-between">
             <dt class="text-slate-400">Contamination</dt>
-            <dd class="font-mono text-amber-400">{selectedBinData.contamination}%</dd>
+            <dd class="font-mono text-amber-400">{getCont(selectedBinData) ?? '-'}%</dd>
           </div>
           <div class="flex justify-between">
             <dt class="text-slate-400">GC Content</dt>

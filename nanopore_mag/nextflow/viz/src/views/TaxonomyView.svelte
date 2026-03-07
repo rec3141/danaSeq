@@ -3,13 +3,13 @@
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
   import { onMount } from 'svelte';
-  import { taxonomySunburst, checkm2All, loadCheckm2All } from '../stores/data.js';
+  import { taxonomySunburst, binQuality, loadBinQuality } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
 
   let taxData = $derived($taxonomySunburst);
-  let allBins = $derived($checkm2All);
+  let allBins = $derived($binQuality);
 
-  onMount(() => { loadCheckm2All(); });
+  onMount(() => { loadBinQuality(); });
 
   // Classifier source (cycles)
   let source = $state('kaiju');
