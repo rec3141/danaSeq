@@ -12,6 +12,8 @@ dependencies:
   - perl=5.32.1
   - curl
   - python-duckdb
+  - numpy
+  - scikit-learn
   - r-base=4.5.2
   - r-dbi=1.2.3
   - r-duckdb=1.4.4

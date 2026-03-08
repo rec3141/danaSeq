@@ -224,11 +224,16 @@ process DB_SYNC {
 
         # Regenerate viz JSON after each sync cycle
         viz_preprocess="${projectDir}/viz/preprocess/preprocess.py"
+        read_tsne="${projectDir}/viz/preprocess/compute_read_tsne.py"
         viz_output="${outdir}/viz"
         if [ -f "\${viz_preprocess}" ]; then
             echo "[INFO] DB_SYNC tick=\${tick}: running viz preprocess"
             mkdir -p "\${viz_output}"
             python3 "\${viz_preprocess}" --input "${outdir}" --output "\${viz_output}" 2>&1 | sed 's/^/  [VIZ] /' || true
+        fi
+        if [ -f "\${read_tsne}" ]; then
+            echo "[INFO] DB_SYNC tick=\${tick}: running read t-SNE"
+            python3 "\${read_tsne}" --input "${outdir}" --output "\${viz_output}" 2>&1 | sed 's/^/  [VIZ] /' || true
         fi
 
         echo "[INFO] DB_SYNC tick=\${tick}: complete, sleeping ${sync_seconds}s"
