@@ -598,11 +598,19 @@ process BINETTE_CONSENSUS {
     mkdir -p bins
 
     # Binette consensus refinement — set operations + internal CheckM2 evaluation
+    # Resolve the DIAMOND .dmnd file from the CheckM2 database directory
+    CHECKM2_DMND=\$(find ${params.checkm2_db} -name '*.dmnd' -type f | head -1)
+    if [ -z "\$CHECKM2_DMND" ]; then
+        echo "[ERROR] No .dmnd file found in ${params.checkm2_db}" >&2
+        exit 1
+    fi
+    echo "[INFO] Using CheckM2 DIAMOND db: \$CHECKM2_DMND" >&2
+
     set +e
     binette \\
         --bin_dirs ${dirs_list} \\
         --contigs ${assembly} \\
-        --checkm2_db ${params.checkm2_db} \\
+        --checkm2_db "\$CHECKM2_DMND" \\
         --threads ${task.cpus} \\
         -o binette_out
     binette_exit=\$?
