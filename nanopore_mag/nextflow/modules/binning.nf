@@ -288,14 +288,14 @@ process BIN_COMEBIN {
 
 process BIN_VAMB {
     tag "vamb"
-    label 'process_medium'
+    label 'process_gpu'
     conda "${projectDir}/conda-envs/dana-mag-vamb"
     publishDir "${params.outdir}/binning/vamb", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/vamb" : null
 
     input:
     path(assembly)
-    path(bams)
+    path(depths)
 
     output:
     path("vamb_bins.tsv"), emit: bins
@@ -306,20 +306,73 @@ process BIN_VAMB {
     mkdir -p bins
 
     # VAMB — variational autoencoder for metagenomic binning (TNF + coverage)
-    # Stage BAMs into a directory for --bamdir
-    mkdir -p bam_dir
-    for bam in *.sorted.bam; do
-        [ -e "\$bam" ] || continue
-        ln -s "\$PWD/\$bam" "bam_dir/\$bam"
-    done
+    # Convert CoverM MetaBAT2-format depth table to VAMB abundance TSV:
+    #   - Rename contigName → contigname (VAMB requirement)
+    #   - Drop contigLen, totalAvgDepth, and *-var columns
+    #   - Drop samples (columns) where all depths are zero
+    python3 -c "
+import sys, csv
+
+with open('${depths}') as f:
+    reader = csv.reader(f, delimiter='\\t')
+    header = next(reader)
+
+# Identify depth columns (skip contigName, contigLen, totalAvgDepth, and *-var)
+depth_cols = []
+for i, h in enumerate(header):
+    if i >= 3 and not h.endswith('-var'):
+        depth_cols.append(i)
+
+# Read all rows (VAMB does its own length filtering with -m 2000)
+rows = []
+with open('${depths}') as f:
+    reader = csv.reader(f, delimiter='\\t')
+    next(reader)  # skip header
+    for row in reader:
+        rows.append(row)
+
+# Find columns with non-zero sum (VAMB crashes on all-zero samples)
+keep = []
+for j, ci in enumerate(depth_cols):
+    col_sum = sum(float(rows[r][ci]) for r in range(len(rows)))
+    if col_sum > 0:
+        keep.append(ci)
+
+skipped = len(depth_cols) - len(keep)
+print(f'[INFO] VAMB abundance: {len(rows)} contigs, {len(keep)} samples ({skipped} zero-depth dropped)', file=sys.stderr)
+
+# Write VAMB abundance TSV
+with open('vamb_abundance.tsv', 'w') as out:
+    # Header: contigname + sample names
+    sample_names = [header[ci] for ci in keep]
+    out.write('contigname\\t' + '\\t'.join(sample_names) + '\\n')
+    for row in rows:
+        out.write(row[0] + '\\t' + '\\t'.join(row[ci] for ci in keep) + '\\n')
+"
+
+    n_samples=\$(head -1 vamb_abundance.tsv | awk -F'\\t' '{print NF-1}')
+    if [ "\$n_samples" -lt 1 ]; then
+        echo "[WARNING] No samples with non-zero depth — skipping VAMB" >&2
+        touch vamb_bins.tsv
+    else
+
+    # Auto-detect GPU: use --cuda if available, fall back to CPU
+    CUDA_FLAG=""
+    if python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+        CUDA_FLAG="--cuda"
+        echo "[INFO] VAMB: GPU detected, using CUDA" >&2
+    else
+        echo "[INFO] VAMB: No GPU detected, using CPU" >&2
+    fi
 
     set +e
     vamb bin default \
         --outdir vamb_out \
         --fasta "${assembly}" \
-        --bamdir bam_dir \
+        --abundance_tsv vamb_abundance.tsv \
         -m 2000 \
         --minfasta 200000 \
+        \$CUDA_FLAG \
         -p ${task.cpus}
     vamb_exit=\$?
     set -e
@@ -354,6 +407,8 @@ process BIN_VAMB {
     if [ ! -s vamb_bins.tsv ]; then
         echo "[WARNING] VAMB produced no bins" >&2
     fi
+
+    fi  # end: samples check
     """
 }
 

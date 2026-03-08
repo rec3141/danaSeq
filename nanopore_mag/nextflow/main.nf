@@ -639,9 +639,9 @@ workflow {
         )
     }
 
-    // VAMB (optional, BAM-based — variational autoencoder binner)
+    // VAMB (optional, depth-based — variational autoencoder binner)
     if (params.run_vamb) {
-        BIN_VAMB(ch_assembly, ch_bam_files)
+        BIN_VAMB(ch_assembly, CALCULATE_DEPTHS.out.jgi_depth)
         ch_binner_results = ch_binner_results.mix(
             BIN_VAMB.out.bins.map { ['vamb', it] }
         )
