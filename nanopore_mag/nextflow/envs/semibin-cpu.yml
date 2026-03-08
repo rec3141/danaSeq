@@ -7,4 +7,4 @@ dependencies:
   - pytorch-cpu           # CPU-only PyTorch (~500MB vs ~5GB for GPU)
   - biopython             # LorBin dependency (hmmer, prodigal, bedtools already in SemiBin2)
   - pip:
-    - lorbin @ git+https://github.com/LorMeBioAI/LorBin.git
+    - lorbin @ git+https://github.com/rec3141/LorBin.git
