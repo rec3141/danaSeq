@@ -53,6 +53,7 @@ def helpMessage() {
       --run_lorbin       Include LorBin in consensus binning [default: true]
       --run_comebin      Include COMEBin in consensus binning [default: true]
       --run_vamb         Include VAMB (variational autoencoder) in consensus [default: false]
+      --run_vamb_tax     Run VAMB taxvamb (taxonomy-guided, needs --gtdbtk_db) [default: false]
       --run_binette      Run Binette consensus refinement (needs --checkm2_db) [default: false]
       --run_magscot      Run MAGScoT consensus refinement [default: false]
       --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 50000]
@@ -322,6 +323,7 @@ include { BIN_MAXBIN2 }         from './modules/binning'
 include { BIN_LORBIN }          from './modules/binning'
 include { BIN_COMEBIN }         from './modules/binning'
 include { BIN_VAMB }            from './modules/binning'
+include { BIN_VAMB_TAX }        from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { BINETTE_CONSENSUS }   from './modules/binning'
 include { MAGSCOT_CONSENSUS }   from './modules/binning'
@@ -766,6 +768,15 @@ workflow {
         ch_gtdbtk_bins = ch_gtdbtk_bins.collect()
 
         GTDBTK_CLASSIFY(ch_gtdbtk_bins)
+    }
+
+    // 7c. VAMB taxvamb — taxonomy-guided binning using sendsketch per-contig GTDB taxonomy
+    if (params.run_vamb_tax && params.run_sendsketch) {
+        BIN_VAMB_TAX(
+            ch_assembly,
+            CALCULATE_DEPTHS.out.jgi_depth,
+            SENDSKETCH_CLASSIFY.out.contig_taxonomy
+        )
     }
 
     // 8. Viz dashboard: preprocess results into JSON + build static site

@@ -412,6 +412,170 @@ with open('vamb_abundance.tsv', 'w') as out:
     """
 }
 
+process BIN_VAMB_TAX {
+    tag "vamb_tax"
+    label 'process_gpu'
+    conda "${projectDir}/conda-envs/dana-mag-vamb"
+    publishDir "${params.outdir}/binning/vamb_tax", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/binning/vamb_tax" : null
+
+    input:
+    path(assembly)
+    path(depths)
+    path(sendsketch_contigs)
+
+    output:
+    path("vamb_tax_bins.tsv"), emit: bins
+    path("bins/"),             emit: fastas
+
+    script:
+    """
+    mkdir -p bins
+
+    # Convert sendsketch per-contig GTDB taxonomy to VAMB format
+    # sendsketch: contig_id\tstatus\tANI\tref_name\td__X;p__Y;...
+    # VAMB wants: contigname\tDomain;Phylum;Class;... (no GTDB prefixes, no empty ranks)
+    # VAMB requires ALL contigs ≥ -m length to be in the taxonomy file
+    python3 -c "
+import sys
+
+# 1. Read sendsketch taxonomy
+tax = {}
+with open('${sendsketch_contigs}') as f:
+    f.readline()  # skip header
+    for line in f:
+        parts = line.strip().split('\\t')
+        if len(parts) < 5:
+            continue
+        contig = parts[0]
+        lineage = parts[4]
+        ranks = []
+        for rank in lineage.split(';'):
+            if '__' in rank:
+                rank = rank.split('__', 1)[1]
+            if rank:
+                ranks.append(rank)
+        if ranks:
+            tax[contig] = ';'.join(ranks)
+
+# 2. Read ALL contig names from FASTA to ensure completeness
+all_contigs = []
+with open('${assembly}') as f:
+    for line in f:
+        if line.startswith('>'):
+            all_contigs.append(line[1:].strip().split()[0])
+
+# 3. Write taxonomy for all contigs (unclassified get 'Bacteria' placeholder)
+n_mapped = 0
+with open('vamb_taxonomy.tsv', 'w') as out:
+    out.write('contigs\\tpredictions\\n')
+    for contig in all_contigs:
+        if contig in tax:
+            out.write(contig + '\\t' + tax[contig] + '\\n')
+            n_mapped += 1
+        else:
+            out.write(contig + '\\tBacteria\\n')
+
+print('[INFO] VAMB taxonomy: %d/%d contigs classified (%d unclassified → Bacteria)' % (n_mapped, len(all_contigs), len(all_contigs) - n_mapped), file=sys.stderr)
+"
+
+    # Reuse same depth conversion as BIN_VAMB
+    python3 -c "
+import sys, csv
+
+with open('${depths}') as f:
+    reader = csv.reader(f, delimiter='\\t')
+    header = next(reader)
+
+depth_cols = []
+for i, h in enumerate(header):
+    if i >= 3 and not h.endswith('-var'):
+        depth_cols.append(i)
+
+rows = []
+with open('${depths}') as f:
+    reader = csv.reader(f, delimiter='\\t')
+    next(reader)
+    for row in reader:
+        rows.append(row)
+
+keep = []
+for j, ci in enumerate(depth_cols):
+    col_sum = sum(float(rows[r][ci]) for r in range(len(rows)))
+    if col_sum > 0:
+        keep.append(ci)
+
+skipped = len(depth_cols) - len(keep)
+print('[INFO] VAMB-tax abundance: %d contigs, %d samples (%d zero-depth dropped)' % (len(rows), len(keep), skipped), file=sys.stderr)
+
+with open('vamb_abundance.tsv', 'w') as out:
+    sample_names = [header[ci] for ci in keep]
+    out.write('contigname\\t' + '\\t'.join(sample_names) + '\\n')
+    for row in rows:
+        out.write(row[0] + '\\t' + '\\t'.join(row[ci] for ci in keep) + '\\n')
+"
+
+    n_tax=\$(tail -n +2 vamb_taxonomy.tsv | wc -l)
+    n_samples=\$(head -1 vamb_abundance.tsv | awk -F'\\t' '{print NF-1}')
+    if [ "\$n_tax" -lt 1 ] || [ "\$n_samples" -lt 1 ]; then
+        echo "[WARNING] Insufficient data for taxvamb (tax=\$n_tax, samples=\$n_samples)" >&2
+        touch vamb_tax_bins.tsv
+    else
+
+    CUDA_FLAG=""
+    if python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+        CUDA_FLAG="--cuda"
+        echo "[INFO] VAMB-tax: GPU detected, using CUDA" >&2
+    else
+        echo "[INFO] VAMB-tax: No GPU detected, using CPU" >&2
+    fi
+
+    set +e
+    vamb bin taxvamb \
+        --outdir vamb_out \
+        --fasta "${assembly}" \
+        --abundance_tsv vamb_abundance.tsv \
+        --taxonomy vamb_taxonomy.tsv \
+        -m 2000 \
+        --minfasta 200000 \
+        \$CUDA_FLAG \
+        -p ${task.cpus}
+    vamb_exit=\$?
+    set -e
+
+    if [ \$vamb_exit -ne 0 ]; then
+        echo "[WARNING] VAMB taxvamb exited with code \$vamb_exit" >&2
+        touch vamb_tax_bins.tsv
+    elif [ -d vamb_out/bins ] && ls vamb_out/bins/*.fna 1>/dev/null 2>&1; then
+        > vamb_tax_bins.tsv
+        bin_num=0
+        for bin_file in vamb_out/bins/*.fna; do
+            [ -e "\$bin_file" ] || continue
+            bin_num=\$((bin_num + 1))
+            bin_name=\$(printf 'vamb_tax_%03d' \$bin_num)
+            cp "\$bin_file" "bins/\${bin_name}.fa"
+            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+                printf '%s\\t%s\\n' "\$contig" "\$bin_name"
+            done >> vamb_tax_bins.tsv
+        done
+        echo "[INFO] VAMB taxvamb produced \$bin_num bins" >&2
+    elif [ -f vamb_out/vae_clusters_unsplit.tsv ]; then
+        tail -n +2 vamb_out/vae_clusters_unsplit.tsv | \
+            awk -F'\\t' '{print \$2 "\\t" \$1}' > vamb_tax_bins.tsv
+        echo "[INFO] VAMB taxvamb produced clusters but no FASTA bins above size threshold" >&2
+    else
+        echo "[WARNING] VAMB taxvamb produced no output" >&2
+        touch vamb_tax_bins.tsv
+    fi
+
+    if [ ! -s vamb_tax_bins.tsv ]; then
+        echo "[WARNING] VAMB taxvamb produced no bins" >&2
+    fi
+
+    fi  # end: data check
+    """
+}
+
 process BINETTE_CONSENSUS {
     tag "binette"
     label 'process_medium'

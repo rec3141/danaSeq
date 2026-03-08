@@ -431,7 +431,7 @@ def build_contig_lengths(assembly_info, depths_df=None, results_dir=None):
         if positive.any():
             binned_contigs = set()
             if results_dir:
-                for binner in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']:
+                for binner in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb', 'vamb_tax']:
                     btsv = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
                     bdf = load_tsv(btsv, header=None, names=['contig', 'bin'])
                     if bdf is not None:
@@ -645,7 +645,7 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
     dastool_names = set(dastool_summary['bin'].values)
 
     # Separate contig maps for DAS Tool vs raw binner bins
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb', 'vamb_tax']
     dastool_bin_contigs = {}  # dastool full name -> [contig_ids]
     binner_bin_contigs = {}   # raw bin name -> [contig_ids]
 
@@ -844,7 +844,7 @@ def build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin, se
 
     # Per-binner length-weighted composition at each rank
     # Load per-binner contig sets
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb', 'vamb_tax']
     binner_contigs = {}  # binner -> set of contig ids
 
     # DAS Tool
@@ -997,7 +997,7 @@ def build_scg_heatmap(results_dir):
     print("Building scg_heatmap.json ...")
 
     # Load contig2bin maps for all binners
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb', 'vamb_tax']
     contig_to_bins = defaultdict(set)  # contig -> set of bin names
 
     # DAS Tool consensus (prefixed names like dastool-semibin_001)
@@ -1233,7 +1233,7 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     dastool_bins = list(dastool_summary['bin'].values)
 
     # All binners
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb', 'vamb_tax']
     all_bins = []   # list of {id, binner, depths: []}
     all_matrix = []
 
@@ -1507,7 +1507,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
             c2b[row.iloc[0]] = row.iloc[1]
 
     # Load per-binner contig2bin maps
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb', 'vamb_tax']
     binner_maps = {}
     for binner in binners:
         bins_path = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
@@ -1762,7 +1762,7 @@ def build_phylotree(results_dir, checkm2_df, gtdbtk_db=None):
 
         # Determine binner source from bin name prefix
         binner = 'unknown'
-        for prefix in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb', 'binette', 'magscot']:
+        for prefix in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb_tax', 'vamb', 'binette', 'magscot']:
             if genome.startswith(prefix + '_'):
                 binner = prefix
                 break
