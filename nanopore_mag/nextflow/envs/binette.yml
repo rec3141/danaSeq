@@ -1,7 +1,6 @@
-name: dana-bbmap
+name: dana-mag-binette
 channels:
   - conda-forge
   - bioconda
 dependencies:
-  - bbmap>=39.12
-  - pigz
+  - binette=1.2.1

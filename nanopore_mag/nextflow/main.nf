@@ -6,8 +6,9 @@ nextflow.enable.dsl = 2
 // ============================================================================
 //
 // Nextflow implementation of the MAG assembly and binning workflow.
-// Co-assembles all reads (Flye, metaMDBG, or myloasm), maps reads back, runs five binners
-// (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin) in parallel, integrates with DAS_Tool,
+// Co-assembles all reads (Flye, metaMDBG, or myloasm), maps reads back, runs up to six binners
+// (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, VAMB) in parallel, integrates with
+// DAS_Tool consensus (+ optional Binette and MAGScoT parallel consensus),
 // classifies contigs as prokaryotic/eukaryotic/organellar (Tiara + Whokaryote),
 // detects mobile genetic elements (viruses, plasmids, proviruses) with geNomad + CheckV,
 // and identifies anti-phage defense systems with DefenseFinder.
@@ -51,6 +52,9 @@ def helpMessage() {
       --run_maxbin       Include MaxBin2 in consensus binning [default: true]
       --run_lorbin       Include LorBin in consensus binning [default: true]
       --run_comebin      Include COMEBin in consensus binning [default: true]
+      --run_vamb         Include VAMB (variational autoencoder) in consensus [default: false]
+      --run_binette      Run Binette consensus refinement (needs --checkm2_db) [default: false]
+      --run_magscot      Run MAGScoT consensus refinement [default: false]
       --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 50000]
       --lorbin_min_length N LorBin minimum bin size in bp [default: 80000]
 
@@ -317,7 +321,10 @@ include { BIN_METABAT2 }        from './modules/binning'
 include { BIN_MAXBIN2 }         from './modules/binning'
 include { BIN_LORBIN }          from './modules/binning'
 include { BIN_COMEBIN }         from './modules/binning'
+include { BIN_VAMB }            from './modules/binning'
 include { DASTOOL_CONSENSUS }   from './modules/binning'
+include { BINETTE_CONSENSUS }   from './modules/binning'
+include { MAGSCOT_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
 include { GTDBTK_CLASSIFY }     from './modules/phylogeny'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
@@ -632,6 +639,14 @@ workflow {
         )
     }
 
+    // VAMB (optional, BAM-based — variational autoencoder binner)
+    if (params.run_vamb) {
+        BIN_VAMB(ch_assembly, ch_bam_files)
+        ch_binner_results = ch_binner_results.mix(
+            BIN_VAMB.out.bins.map { ['vamb', it] }
+        )
+    }
+
     // 6. DAS Tool consensus -- collects all binner outputs dynamically
     ch_bin_labels = ch_binner_results.collect { it[0] }
     ch_bin_files  = ch_binner_results.collect { it[1] }
@@ -641,6 +656,32 @@ workflow {
         ch_bin_files,
         ch_bin_labels
     )
+
+    // 6a. Binette consensus refinement (parallel with DAS Tool, needs checkm2_db)
+    if (params.run_binette && params.checkm2_db) {
+        ch_binner_fastas = BIN_METABAT2.out.fastas
+        if (params.run_semibin) {
+            ch_binner_fastas = ch_binner_fastas.mix(BIN_SEMIBIN2.out.fastas)
+        }
+        if (params.run_maxbin) {
+            ch_binner_fastas = ch_binner_fastas.mix(BIN_MAXBIN2.out.fastas)
+        }
+        if (params.run_lorbin) {
+            ch_binner_fastas = ch_binner_fastas.mix(BIN_LORBIN.out.fastas)
+        }
+        if (params.run_comebin) {
+            ch_binner_fastas = ch_binner_fastas.mix(BIN_COMEBIN.out.fastas)
+        }
+        if (params.run_vamb) {
+            ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB.out.fastas)
+        }
+        BINETTE_CONSENSUS(ch_assembly, ch_binner_fastas.collect())
+    }
+
+    // 6a2. MAGScoT consensus refinement (parallel with DAS Tool, marker gene scoring)
+    if (params.run_magscot) {
+        MAGSCOT_CONSENSUS(ch_assembly, ch_bin_files, ch_bin_labels)
+    }
 
     // 6b. Metabolic profiling: merge annotations and map to bins
     //     (Deferred to here because MAP_TO_BINS needs DASTOOL_CONSENSUS.out.contig2bin)
@@ -680,9 +721,18 @@ workflow {
         if (params.run_comebin) {
             ch_all_bins = ch_all_bins.mix(BIN_COMEBIN.out.fastas)
         }
+        if (params.run_vamb) {
+            ch_all_bins = ch_all_bins.mix(BIN_VAMB.out.fastas)
+        }
         ch_all_bins = ch_all_bins
             .mix(DASTOOL_CONSENSUS.out.bins)
-            .collect()
+        if (params.run_binette && params.checkm2_db) {
+            ch_all_bins = ch_all_bins.mix(BINETTE_CONSENSUS.out.fastas)
+        }
+        if (params.run_magscot) {
+            ch_all_bins = ch_all_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
+        }
+        ch_all_bins = ch_all_bins.collect()
 
         CHECKM2(ch_all_bins)
     }
@@ -702,9 +752,18 @@ workflow {
         if (params.run_comebin) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_COMEBIN.out.fastas)
         }
+        if (params.run_vamb) {
+            ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB.out.fastas)
+        }
         ch_gtdbtk_bins = ch_gtdbtk_bins
             .mix(DASTOOL_CONSENSUS.out.bins)
-            .collect()
+        if (params.run_binette && params.checkm2_db) {
+            ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BINETTE_CONSENSUS.out.fastas)
+        }
+        if (params.run_magscot) {
+            ch_gtdbtk_bins = ch_gtdbtk_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
+        }
+        ch_gtdbtk_bins = ch_gtdbtk_bins.collect()
 
         GTDBTK_CLASSIFY(ch_gtdbtk_bins)
     }

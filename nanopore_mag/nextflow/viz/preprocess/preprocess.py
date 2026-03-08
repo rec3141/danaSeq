@@ -431,7 +431,7 @@ def build_contig_lengths(assembly_info, depths_df=None, results_dir=None):
         if positive.any():
             binned_contigs = set()
             if results_dir:
-                for binner in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']:
+                for binner in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']:
                     btsv = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
                     bdf = load_tsv(btsv, header=None, names=['contig', 'bin'])
                     if bdf is not None:
@@ -645,7 +645,7 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
     dastool_names = set(dastool_summary['bin'].values)
 
     # Separate contig maps for DAS Tool vs raw binner bins
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
     dastool_bin_contigs = {}  # dastool full name -> [contig_ids]
     binner_bin_contigs = {}   # raw bin name -> [contig_ids]
 
@@ -658,6 +658,14 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
     # Per-binner contig2bin (keyed by raw bin name)
     for binner in binners:
         bins_path = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is not None:
+            for _, row in bdf.iterrows():
+                binner_bin_contigs.setdefault(row['bin'], []).append(row['contig'])
+
+    # Consensus method contig2bin (Binette, MAGScoT — same format as raw binners)
+    for consensus in ['binette', 'magscot']:
+        bins_path = resolve_path(results_dir, 'binning', consensus, f'{consensus}_bins.tsv')
         bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
         if bdf is not None:
             for _, row in bdf.iterrows():
@@ -836,7 +844,7 @@ def build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin, se
 
     # Per-binner length-weighted composition at each rank
     # Load per-binner contig sets
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
     binner_contigs = {}  # binner -> set of contig ids
 
     # DAS Tool
@@ -851,6 +859,13 @@ def build_taxonomy_sunburst(results_dir, kaiju_df, assembly_info, contig2bin, se
         bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
         if bdf is not None:
             binner_contigs[binner] = set(bdf['contig'].values)
+
+    # Consensus methods (Binette, MAGScoT)
+    for consensus in ['binette', 'magscot']:
+        bins_path = resolve_path(results_dir, 'binning', consensus, f'{consensus}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is not None:
+            binner_contigs[consensus] = set(bdf['contig'].values)
 
     # Compute: composition[binner][source][rank] = {taxon: total_bp, ...}
     comp = {}
@@ -982,7 +997,7 @@ def build_scg_heatmap(results_dir):
     print("Building scg_heatmap.json ...")
 
     # Load contig2bin maps for all binners
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
     contig_to_bins = defaultdict(set)  # contig -> set of bin names
 
     # DAS Tool consensus (prefixed names like dastool-semibin_001)
@@ -995,6 +1010,14 @@ def build_scg_heatmap(results_dir):
     # Per-binner maps
     for binner in binners:
         bins_path = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is not None:
+            for _, row in bdf.iterrows():
+                contig_to_bins[row['contig']].add(row['bin'])
+
+    # Consensus methods (Binette, MAGScoT)
+    for consensus in ['binette', 'magscot']:
+        bins_path = resolve_path(results_dir, 'binning', consensus, f'{consensus}_bins.tsv')
         bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
         if bdf is not None:
             for _, row in bdf.iterrows():
@@ -1210,7 +1233,7 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     dastool_bins = list(dastool_summary['bin'].values)
 
     # All binners
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
     all_bins = []   # list of {id, binner, depths: []}
     all_matrix = []
 
@@ -1233,6 +1256,20 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
             all_bins.append({'id': name, 'binner': binner})
             all_matrix.append(d)
         print(f"  {binner}: {len(bin_names)} bins")
+
+    # Add consensus method bins (Binette, MAGScoT)
+    for consensus in ['binette', 'magscot']:
+        bins_path = resolve_path(results_dir, 'binning', consensus, f'{consensus}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is None:
+            continue
+        c2b_map = dict(zip(bdf['contig'], bdf['bin']))
+        bin_names = sorted(set(c2b_map.values()))
+        depths = compute_bin_depths(c2b_map, bin_names)
+        for name, d in zip(bin_names, depths):
+            all_bins.append({'id': name, 'binner': consensus})
+            all_matrix.append(d)
+        print(f"  {consensus}: {len(bin_names)} bins")
 
     mat = np.array(all_matrix)
     print(f"  Total bins: {len(all_bins)} x {len(sample_names)} samples")
@@ -1470,7 +1507,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
             c2b[row.iloc[0]] = row.iloc[1]
 
     # Load per-binner contig2bin maps
-    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']
+    binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb']
     binner_maps = {}
     for binner in binners:
         bins_path = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
@@ -1479,6 +1516,15 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
             bmap = dict(zip(bdf['contig'], bdf['bin']))
             binner_maps[binner] = bmap
             print(f"  {binner}: {len(set(bmap.values()))} bins, {len(bmap)} contigs")
+
+    # Load consensus method contig2bin maps (Binette, MAGScoT)
+    for consensus in ['binette', 'magscot']:
+        bins_path = resolve_path(results_dir, 'binning', consensus, f'{consensus}_bins.tsv')
+        bdf = load_tsv(bins_path, header=None, names=['contig', 'bin'])
+        if bdf is not None:
+            bmap = dict(zip(bdf['contig'], bdf['bin']))
+            binner_maps[consensus] = bmap
+            print(f"  {consensus}: {len(set(bmap.values()))} bins, {len(bmap)} contigs")
 
     # Per-source taxonomy maps (shared helper)
     tax_sources = build_taxonomy_maps(results_dir, kaiju_df, sendsketch_df)
@@ -1716,7 +1762,7 @@ def build_phylotree(results_dir, checkm2_df, gtdbtk_db=None):
 
         # Determine binner source from bin name prefix
         binner = 'unknown'
-        for prefix in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin']:
+        for prefix in ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb', 'binette', 'magscot']:
             if genome.startswith(prefix + '_'):
                 binner = prefix
                 break

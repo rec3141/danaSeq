@@ -172,6 +172,9 @@ usage() {
     echo "  --run_maxbin BOOL    Include MaxBin2 in consensus [default: true]"
     echo "  --run_lorbin BOOL    Include LorBin in consensus [default: true]"
     echo "  --run_comebin BOOL   Include COMEBin in consensus [default: true]"
+    echo "  --run_vamb BOOL      Include VAMB (variational autoencoder) in consensus [default: false]"
+    echo "  --run_binette BOOL   Run Binette consensus refinement (needs checkm2_db) [default: false]"
+    echo "  --run_magscot BOOL   Run MAGScoT consensus refinement [default: false]"
     echo "  --lorbin_min_length N LorBin minimum bin size in bp [default: 80000]"
     echo "  --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 50000]"
     echo "  --assembly_cpus N    CPUs for assembly [default: 24]"
@@ -310,6 +313,9 @@ while (( $# )); do
                 --run_eukaryotic true
                 --run_metaeuk true
                 --run_marferret true
+                --run_vamb true
+                --run_binette true
+                --run_magscot true
             )
             shift ;;
         --resume)

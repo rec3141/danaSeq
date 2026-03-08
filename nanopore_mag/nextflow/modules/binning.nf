@@ -1,8 +1,11 @@
-// Binning: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, DAS_Tool consensus.
+// Binning: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, VAMB,
+//          DAS_Tool consensus, Binette consensus, MAGScoT consensus.
 //
-// Five binners run in parallel, each emitting a DAS_Tool-format TSV (contig\tbin).
+// Up to six binners run in parallel, each emitting a DAS_Tool-format TSV (contig\tbin).
 // All outputs are mixed into ch_binner_results in main.nf and collected by
 // DASTOOL_CONSENSUS for score-based consensus integration.
+// BINETTE_CONSENSUS and MAGSCOT_CONSENSUS run in parallel with DAS_Tool as
+// alternative consensus methods for quality comparison.
 //
 // Each binner catches failures and emits an empty TSV so the pipeline continues.
 // DAS_Tool filters out empty inputs and handles the "no bins above threshold" case.
@@ -279,6 +282,226 @@ process BIN_COMEBIN {
 
     if [ ! -s comebin_bins.tsv ]; then
         echo "[WARNING] COMEBin produced no bins" >&2
+    fi
+    """
+}
+
+process BIN_VAMB {
+    tag "vamb"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-vamb"
+    publishDir "${params.outdir}/binning/vamb", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/binning/vamb" : null
+
+    input:
+    path(assembly)
+    path(bams)
+
+    output:
+    path("vamb_bins.tsv"), emit: bins
+    path("bins/"),         emit: fastas
+
+    script:
+    """
+    mkdir -p bins
+
+    # VAMB — variational autoencoder for metagenomic binning (TNF + coverage)
+    # Stage BAMs into a directory for --bamdir
+    mkdir -p bam_dir
+    for bam in *.sorted.bam; do
+        [ -e "\$bam" ] || continue
+        ln -s "\$PWD/\$bam" "bam_dir/\$bam"
+    done
+
+    set +e
+    vamb bin default \
+        --outdir vamb_out \
+        --fasta "${assembly}" \
+        --bamdir bam_dir \
+        -m 2000 \
+        --minfasta 200000 \
+        -p ${task.cpus}
+    vamb_exit=\$?
+    set -e
+
+    if [ \$vamb_exit -ne 0 ]; then
+        echo "[WARNING] VAMB exited with code \$vamb_exit" >&2
+        touch vamb_bins.tsv
+    elif [ -d vamb_out/bins ] && ls vamb_out/bins/*.fna 1>/dev/null 2>&1; then
+        > vamb_bins.tsv
+        bin_num=0
+        for bin_file in vamb_out/bins/*.fna; do
+            [ -e "\$bin_file" ] || continue
+            bin_num=\$((bin_num + 1))
+            bin_name=\$(printf 'vamb_%03d' \$bin_num)
+            cp "\$bin_file" "bins/\${bin_name}.fa"
+            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+                printf '%s\\t%s\\n' "\$contig" "\$bin_name"
+            done >> vamb_bins.tsv
+        done
+        echo "[INFO] VAMB produced \$bin_num bins" >&2
+    elif [ -f vamb_out/vae_clusters_unsplit.tsv ]; then
+        # No FASTA bins (all below --minfasta), build TSV from cluster file
+        # VAMB format: clustername\tcontigname — swap to contig\tbin
+        tail -n +2 vamb_out/vae_clusters_unsplit.tsv | \
+            awk -F'\\t' '{print \$2 "\\t" \$1}' > vamb_bins.tsv
+        echo "[INFO] VAMB produced clusters but no FASTA bins above size threshold" >&2
+    else
+        echo "[WARNING] VAMB produced no output" >&2
+        touch vamb_bins.tsv
+    fi
+
+    if [ ! -s vamb_bins.tsv ]; then
+        echo "[WARNING] VAMB produced no bins" >&2
+    fi
+    """
+}
+
+process BINETTE_CONSENSUS {
+    tag "binette"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-binette"
+    publishDir "${params.outdir}/binning/binette", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/binning/binette" : null
+
+    input:
+    path(assembly)
+    path(bin_dirs, stageAs: 'binner_?')
+
+    output:
+    path("binette_bins.tsv"), emit: bins
+    path("bins/"),            emit: fastas
+
+    script:
+    // Build space-separated list of staged bin directories
+    def dirs_list = bin_dirs instanceof List ? bin_dirs.join(' ') : bin_dirs
+    """
+    mkdir -p bins
+
+    # Binette consensus refinement — set operations + internal CheckM2 evaluation
+    set +e
+    binette \\
+        --bin_dirs ${dirs_list} \\
+        --contigs ${assembly} \\
+        --checkm2_db ${params.checkm2_db} \\
+        --threads ${task.cpus} \\
+        -o binette_out
+    binette_exit=\$?
+    set -e
+
+    if [ \$binette_exit -ne 0 ]; then
+        echo "[WARNING] Binette exited with code \$binette_exit" >&2
+        touch binette_bins.tsv
+    elif [ -d binette_out/final_bins ]; then
+        > binette_bins.tsv
+        bin_num=0
+        for bin_file in binette_out/final_bins/*.fa; do
+            [ -e "\$bin_file" ] || continue
+            bin_num=\$((bin_num + 1))
+            bin_name=\$(printf 'binette_%03d' \$bin_num)
+            cp "\$bin_file" "bins/\${bin_name}.fa"
+            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+                printf '%s\\t%s\\n' "\$contig" "\$bin_name"
+            done >> binette_bins.tsv
+        done
+    else
+        echo "[WARNING] Binette produced no final_bins directory" >&2
+        touch binette_bins.tsv
+    fi
+
+    if [ ! -s binette_bins.tsv ]; then
+        echo "[WARNING] Binette produced no bins" >&2
+    fi
+    """
+}
+
+process MAGSCOT_CONSENSUS {
+    tag "magscot"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-magscot"
+    publishDir "${params.outdir}/binning/magscot", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/binning/magscot" : null
+
+    input:
+    path(assembly)
+    path(bin_files)
+    val(bin_labels)
+
+    output:
+    path("magscot_bins.tsv"), emit: bins
+    path("bins/"),            emit: fastas
+
+    script:
+    // Build comma-separated file and label lists from collected inputs
+    def files_csv = bin_files instanceof List ? bin_files.join(',') : bin_files
+    def labels_csv = bin_labels instanceof List ? bin_labels.join(',') : bin_labels
+    """
+    mkdir -p bins
+
+    # 1. Predict proteins with Prodigal (meta mode)
+    prodigal -i ${assembly} -a proteins.faa -o proteins.gff -p meta -f gff
+
+    # 2. HMM search against GTDB bac120 + ar53 markers (shipped in MAGScoT repo)
+    MAGSCOT_DIR=\$(dirname \$(readlink -f \$(which MAGScoT.R)))/..
+    cat \$MAGSCOT_DIR/hmm/gtdb_bac120.hmm \$MAGSCOT_DIR/hmm/gtdb_ar53.hmm > markers.hmm
+    hmmsearch --tblout markers.tblout --noali --cpu ${task.cpus} markers.hmm proteins.faa > /dev/null
+
+    # 3. Parse HMM results into MAGScoT format: gene_id \\t marker_id
+    grep -v '^#' markers.tblout | awk '{print \$1 "\\t" \$3}' > markers.tsv
+
+    # 4. Build combined contig-to-bin TSV with binner labels
+    > contig2bin.tsv
+    IFS=',' read -ra F_ARR <<< "${files_csv}"
+    IFS=',' read -ra L_ARR <<< "${labels_csv}"
+    for i in "\${!F_ARR[@]}"; do
+        if [ -s "\${F_ARR[\$i]}" ]; then
+            awk -v lbl="\${L_ARR[\$i]}" '{print \$1 "\\t" \$2 "\\t" lbl}' "\${F_ARR[\$i]}" >> contig2bin.tsv
+        fi
+    done
+
+    if [ ! -s contig2bin.tsv ]; then
+        echo "[WARNING] All binners produced empty output -- skipping MAGScoT" >&2
+        touch magscot_bins.tsv
+    else
+        # 5. Run MAGScoT
+        set +e
+        Rscript \$(which MAGScoT.R) -i contig2bin.tsv --hmm markers.tsv -o magscot_out
+        magscot_exit=\$?
+        set -e
+
+        if [ \$magscot_exit -ne 0 ]; then
+            echo "[WARNING] MAGScoT exited with code \$magscot_exit" >&2
+            touch magscot_bins.tsv
+        elif [ -f magscot_out.refined.contig_to_bin.out ]; then
+            # Convert MAGScoT output to standard bins TSV + extract bin FASTAs
+            > magscot_bins.tsv
+            awk '{print \$1 "\\t" \$2}' magscot_out.refined.contig_to_bin.out > magscot_raw.tsv
+
+            # Get unique bin names and renumber sequentially
+            cut -f2 magscot_raw.tsv | sort -u > magscot_bin_list.txt
+            bin_num=0
+            for old_bin in \$(cat magscot_bin_list.txt); do
+                bin_num=\$((bin_num + 1))
+                bin_name=\$(printf 'magscot_%03d' \$bin_num)
+                # Extract contigs for this bin
+                awk -v b="\$old_bin" '\$2 == b {print \$1}' magscot_raw.tsv > tmp_contigs.txt
+                while read -r contig; do
+                    printf '%s\\t%s\\n' "\$contig" "\$bin_name"
+                done < tmp_contigs.txt >> magscot_bins.tsv
+                # Extract bin FASTA from assembly
+                awk 'BEGIN{while((getline<"tmp_contigs.txt")>0) keep[\$1]=1}
+                     /^>/{p=keep[substr(\$1,2)]}p' ${assembly} > "bins/\${bin_name}.fa"
+                rm -f tmp_contigs.txt
+            done
+            rm -f magscot_bin_list.txt
+        else
+            echo "[WARNING] MAGScoT produced no output" >&2
+            touch magscot_bins.tsv
+        fi
+    fi
+
+    if [ ! -s magscot_bins.tsv ]; then
+        echo "[WARNING] MAGScoT produced no bins" >&2
     fi
     """
 }

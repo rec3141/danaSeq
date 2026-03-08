@@ -8,7 +8,7 @@ set -euo pipefail
 # Creates isolated conda environments for the MAG assembly pipeline.
 # All envs are prefix-installed under ./conda-envs/.
 #
-# Twenty-one environments are needed because of dependency conflicts:
+# Environments are needed because of dependency conflicts:
 #   dana-mag-flye    - Flye + Filtlong (Python version conflicts)
 #   dana-mag-mapping - minimap2, samtools (universal, no conflicts)
 #   dana-mag-semibin - SemiBin2, LorBin (ML dependencies: PyTorch isolated)
@@ -43,6 +43,8 @@ set -euo pipefail
 #   dana-mag-strainy   - Strainy (strain-aware assembly from long reads)
 #   dana-mag-floria    - Floria (strain-aware phasing from long reads)
 #   dana-mag-skder     - skDER (fast skani-based dereplication; Python 3.10 pin)
+#   dana-mag-binette   - Binette (consensus bin refinement via set operations + CheckM2)
+#   dana-mag-magscot   - MAGScoT (consensus bin refinement via marker gene scoring)
 #
 # BBMap (for optional dedupe) is shared with the realtime pipeline via
 # symlinked YAML; its env is named dana-bbmap.
@@ -129,6 +131,9 @@ ENV_YAMLS=(
     floria.yml
     skder.yml
     comebin.yml
+    vamb.yml
+    binette.yml
+    magscot.yml
 )
 
 # Which tool binary to check for each environment
@@ -169,6 +174,9 @@ declare -A ENV_CHECK=(
     [dana-mag-strainy]="strainy"
     [dana-mag-floria]="floria"
     [dana-mag-skder]="skder"
+    [dana-mag-vamb]="vamb"
+    [dana-mag-binette]="binette"
+    [dana-mag-magscot]="MAGScoT.R"
 )
 
 # Additional binaries to verify
@@ -284,6 +292,20 @@ WRAPPER
                 chmod +x "${env_path}/bin/gen_cov_file.sh"
             fi
             echo "  COMEBin installed from ${comebin_repo}@${comebin_branch}"
+        fi
+
+        # Post-install: clone MAGScoT and wire up MAGScoT.R into bin/
+        if [[ "${env_name}" == "dana-mag-magscot" ]]; then
+            echo "  Installing MAGScoT from GitHub..."
+            local magscot_repo="https://github.com/ikmb/MAGScoT.git"
+            local magscot_dir="${env_path}/share/MAGScoT"
+            git clone --depth 1 "${magscot_repo}" "${magscot_dir}" \
+                > /dev/null 2>&1
+            if [[ -f "${magscot_dir}/MAGScoT.R" ]]; then
+                ln -sf "${magscot_dir}/MAGScoT.R" "${env_path}/bin/MAGScoT.R"
+                chmod +x "${env_path}/bin/MAGScoT.R"
+            fi
+            echo "  MAGScoT installed from ${magscot_repo}"
         fi
 
         # Post-install: install KEGGDecoder + clone MinPath into the pathway env

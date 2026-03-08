@@ -1,7 +1,7 @@
-name: dana-bbmap
+name: dana-mag-vamb
 channels:
   - conda-forge
   - bioconda
 dependencies:
-  - bbmap>=39.12
-  - pigz
+  - vamb=5.0.4
+  - samtools

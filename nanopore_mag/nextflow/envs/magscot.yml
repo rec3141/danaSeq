@@ -1,0 +1,14 @@
+name: dana-mag-magscot
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base
+  - r-optparse
+  - r-dplyr
+  - r-readr
+  - r-funr
+  - r-digest
+  - hmmer
+  - prodigal
+  - parallel
