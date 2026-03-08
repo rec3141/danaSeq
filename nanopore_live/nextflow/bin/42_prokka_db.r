@@ -26,28 +26,42 @@ read_prokka_tsv <- function(path) {
 }
 
 read_bakta_tsv <- function(path) {
+  # Bakta TSV has 2 comment lines then a #-prefixed header line.
+  # Read header separately since comment="#" would skip it.
+  header_line <- readLines(path, n = 10)
+  header_line <- header_line[startsWith(header_line, "#Sequence")]
+  if (length(header_line) == 0) return(data.frame())
+  col_names <- tolower(gsub(" ", "_", strsplit(sub("^#", "", header_line[1]), "\t")[[1]]))
+
   df <- read_tsv(
     path,
     col_types = cols(),
     show_col_types = FALSE,
     progress = FALSE,
-    comment = "#"
+    comment = "#",
+    col_names = col_names
   )
-  colnames(df) <- tolower(gsub(" ", "_", colnames(df)))
 
-  df <- df[df$type %in% c("cds", "tRNA", "rRNA", "CDS"), ]
+  # CDS-only mode (--skip-trna etc.) omits the Type column; assume all CDS
+  if ("type" %in% colnames(df)) {
+    df <- df[df$type %in% c("cds", "tRNA", "rRNA", "CDS"), ]
+  }
   if (nrow(df) == 0) return(df)
 
   # Map Bakta columns to Prokka DuckDB schema:
   # Prokka schema: locus_tag, ftype, length_bp, gene, ec_number, cog, product
+  ftype_col <- if ("type" %in% colnames(df)) toupper(df$type) else rep("CDS", nrow(df))
+  gene_col  <- if ("gene" %in% colnames(df)) ifelse(is.na(df$gene), "", df$gene) else rep("", nrow(df))
+  prod_col  <- if ("product" %in% colnames(df)) ifelse(is.na(df$product), "", df$product) else rep("", nrow(df))
+
   result <- data.frame(
     locus_tag = df$locus_tag,
-    ftype     = toupper(df$type),
+    ftype     = ftype_col,
     length_bp = abs(as.integer(df$stop) - as.integer(df$start)) + 1L,
-    gene      = ifelse(is.na(df$gene), "", df$gene),
+    gene      = gene_col,
     ec_number = "",
     cog       = "",
-    product   = ifelse(is.na(df$product), "", df$product),
+    product   = prod_col,
     stringsAsFactors = FALSE
   )
 
@@ -179,12 +193,15 @@ for (i in seq_along(files_tsv)) {
 
 
 # Also scan bakta/ directories and import into the same tables
+# Only match the main annotation TSV (exclude .hypotheticals.tsv, .inference.tsv)
 files_bakta_tsv <- list.files(
   "bakta",
-  pattern = "\\.tsv$",
+  pattern = "[^.]\\.tsv$",
   full.names = TRUE,
   recursive = TRUE
 )
+# Filter out .hypotheticals.tsv and .inference.tsv
+files_bakta_tsv <- files_bakta_tsv[!grepl("\\.(hypotheticals|inference)\\.tsv$", files_bakta_tsv)]
 
 allfiles_bakta <- dbGetQuery(con,
                       "SELECT filename FROM import_log WHERE filename LIKE 'bakta%tsv'")
@@ -196,14 +213,19 @@ if (nrow(allfiles_bakta) > 0) {
 files_bakta_gff <- sub("\\.tsv$", ".gff3", files_bakta_tsv)
 
 if (length(files_bakta_tsv) > 0) {
-  for (i in 1:length(files_bakta_tsv)) {
+  for (i in seq_along(files_bakta_tsv)) {
     df_tsv <- read_bakta_tsv(files_bakta_tsv[i])
     if (nrow(df_tsv) > 0) {
       df_gff <- read_bakta_gff(files_bakta_gff[i])
 
       invisible(dbAppendTable(con, "prokka_annotations", df_tsv))
       invisible(dbAppendTable(con, "locus_index", df_gff$gff))
-      invisible(dbAppendTable(con, "stats", df_gff$len))
+      # Bakta renames reads to contig_1, contig_2, ... so seqids collide across
+      # files.  Skip duplicates rather than failing on PK violation.
+      tryCatch(
+        invisible(dbAppendTable(con, "stats", df_gff$len)),
+        error = function(e) if (!grepl("Duplicate key", e$message)) stop(e)
+      )
     }
     invisible(dbExecute(
       con,
