@@ -401,9 +401,11 @@
     return map;
   });
 
+  let scgDomainKey = $derived(qualitySource === 'gtdbtk' ? 'gtdbtk_' + scgDomain : scgDomain);
+
   let filteredScgData = $derived.by(() => {
-    if (!scgData?.[scgDomain]) return null;
-    const domain = scgData[scgDomain];
+    if (!scgData?.[scgDomainKey]) return null;
+    const domain = scgData[scgDomainKey];
     if (!domain.mag_ids?.length) return null;
 
     // Filter rows by active binners + quality thresholds
@@ -769,7 +771,7 @@
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 mt-6">
       <div class="flex items-center justify-between mb-2">
         <h3 class="text-sm font-medium text-slate-400">
-          Single-Copy Gene Heatmap ({scgDomain === 'bacteria' ? 'Bacteria' : 'Archaea'}, {filteredScgData.mag_ids.length} bins × {filteredScgData.module_ids.length} markers)
+          Single-Copy Gene Heatmap ({qualitySource === 'gtdbtk' ? 'GTDB-Tk ' : 'DAS Tool '}{scgDomain === 'bacteria' ? (qualitySource === 'gtdbtk' ? 'bac120' : 'Bacteria') : (qualitySource === 'gtdbtk' ? 'ar53' : 'Archaea')}, {filteredScgData.mag_ids.length} bins × {filteredScgData.module_ids.length} markers)
         </h3>
         <div class="flex items-center gap-2">
           <button

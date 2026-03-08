@@ -699,9 +699,9 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
         for _, mrow in markers_df.iterrows():
             bin_name = mrow['name']
             unique = int(mrow['number_unique_genes'])
-            multi_unique = int(mrow['number_multiple_unique_genes'])
+            multi = int(mrow['number_multiple_genes'])
             comp = round(unique / total_markers * 100, 2)
-            cont = round(multi_unique / total_markers * 100, 2)
+            cont = round(multi / total_markers * 100, 2)
             # If bin appears in both bac120 and ar53, keep the one with more unique genes
             if bin_name in gtdbtk_quality:
                 if unique <= gtdbtk_quality[bin_name]['_unique']:
@@ -1078,6 +1078,101 @@ def build_scg_heatmap(results_dir):
             'col_order': list(range(n_cols)),
         }
         print(f"  {scg_set}: {n_rows} bins × {n_cols} markers")
+
+    return result
+
+
+def build_gtdbtk_scg_heatmap(results_dir):
+    """Build GTDB-Tk marker gene heatmap (bac120/ar53) from markers_summary TSVs."""
+    print("Building GTDB-Tk SCG heatmap ...")
+    result = {}
+    for domain, key in [('bac120', 'gtdbtk_bacteria'), ('ar53', 'gtdbtk_archaea')]:
+        markers_path = resolve_path(results_dir, 'taxonomy', 'gtdbtk',
+                                    'gtdbtk_markers', f'gtdbtk.{domain}.markers_summary.tsv')
+        markers_df = load_tsv(markers_path)
+        if markers_df is None or markers_df.empty:
+            result[key] = {
+                'mag_ids': [], 'module_ids': [], 'module_names': [],
+                'matrix': [], 'row_order': [], 'col_order': [],
+            }
+            continue
+
+        # Collect full marker set from all gene lists across all bins
+        all_markers = set()
+        bin_marker_counts = {}
+
+        for _, mrow in markers_df.iterrows():
+            bin_name = mrow['name']
+            counts = Counter()
+
+            unique_str = str(mrow.get('list_unique_genes', '') or '')
+            multi_str = str(mrow.get('list_multiple_genes', '') or '')
+            missing_str = str(mrow.get('list_missing_genes', '') or '')
+
+            unique_genes = [g.strip() for g in unique_str.split(',') if g.strip()]
+            multi_genes = [g.strip() for g in multi_str.split(',') if g.strip()]
+            missing_genes = [g.strip() for g in missing_str.split(',') if g.strip()]
+
+            for g in unique_genes:
+                counts[g] = 1
+                all_markers.add(g)
+            for g in multi_genes:
+                counts[g] = 2
+                all_markers.add(g)
+            for g in missing_genes:
+                all_markers.add(g)
+                # counts stays 0 (absent)
+
+            bin_marker_counts[bin_name] = counts
+
+        if not bin_marker_counts or not all_markers:
+            result[key] = {
+                'mag_ids': [], 'module_ids': [], 'module_names': [],
+                'matrix': [], 'row_order': [], 'col_order': [],
+            }
+            continue
+
+        mag_ids = sorted(bin_marker_counts.keys())
+        marker_ids = sorted(all_markers)
+
+        # Build count matrix
+        matrix = []
+        for mag in mag_ids:
+            row = [bin_marker_counts[mag].get(m, 0) for m in marker_ids]
+            matrix.append(row)
+        mat = np.array(matrix, dtype=float)
+
+        # Ward hierarchical clustering on rows and columns
+        if mat.shape[0] > 2:
+            row_dist = pdist(mat, metric='euclidean')
+            row_linkage = linkage(row_dist, method='ward')
+            row_order = leaves_list(row_linkage).tolist()
+        else:
+            row_order = list(range(mat.shape[0]))
+
+        if mat.shape[1] > 2:
+            col_dist = pdist(mat.T, metric='euclidean')
+            col_linkage = linkage(col_dist, method='ward')
+            col_order = leaves_list(col_linkage).tolist()
+        else:
+            col_order = list(range(mat.shape[1]))
+
+        reordered = mat[row_order][:, col_order].tolist()
+        reordered_mags = [mag_ids[i] for i in row_order]
+        reordered_markers = [marker_ids[i] for i in col_order]
+
+        n_rows = len(reordered_mags)
+        n_cols = len(reordered_markers)
+
+        result[key] = {
+            'mag_ids': reordered_mags,
+            'module_ids': reordered_markers,
+            'module_names': reordered_markers,
+            'matrix': [[int(v) for v in row] for row in reordered],
+            'row_order': list(range(n_rows)),
+            'col_order': list(range(n_cols)),
+        }
+        print(f"  {key}: {n_rows} bins × {n_cols} markers")
 
     return result
 
@@ -1928,12 +2023,18 @@ def main():
 
     # 6b. scg_heatmap.json
     scg = build_scg_heatmap(results_dir)
+    gtdbtk_scg = build_gtdbtk_scg_heatmap(results_dir)
+    scg.update(gtdbtk_scg)
     write_json_gz(os.path.join(output_dir, 'scg_heatmap.json'), scg)
     bact_n = len(scg.get('bacteria', {}).get('mag_ids', []))
     bact_m = len(scg.get('bacteria', {}).get('module_ids', []))
     arch_n = len(scg.get('archaea', {}).get('mag_ids', []))
     arch_m = len(scg.get('archaea', {}).get('module_ids', []))
-    print(f"  Wrote scg_heatmap.json (bacteria: {bact_n}×{bact_m}, archaea: {arch_n}×{arch_m})")
+    gb_n = len(scg.get('gtdbtk_bacteria', {}).get('mag_ids', []))
+    gb_m = len(scg.get('gtdbtk_bacteria', {}).get('module_ids', []))
+    ga_n = len(scg.get('gtdbtk_archaea', {}).get('mag_ids', []))
+    ga_m = len(scg.get('gtdbtk_archaea', {}).get('module_ids', []))
+    print(f"  Wrote scg_heatmap.json (bacteria: {bact_n}×{bact_m}, archaea: {arch_n}×{arch_m}, gtdbtk_bacteria: {gb_n}×{gb_m}, gtdbtk_archaea: {ga_n}×{ga_m})")
 
     # 7. coverage.json
     coverage = build_coverage(results_dir, dastool_summary, contig2bin, depths_df)
