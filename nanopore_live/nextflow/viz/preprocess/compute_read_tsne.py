@@ -208,8 +208,10 @@ def main():
     # Build tetramer matrix
     tetra_matrix = np.array(all_tetra, dtype=np.float32)
 
-    # Handle any NaN/inf
+    # Handle any NaN/inf, then fourth-root transform to reduce dominance of
+    # high-frequency tetramers and better resolve compositional differences
     tetra_matrix = np.nan_to_num(tetra_matrix, nan=0.0, posinf=0.0, neginf=0.0)
+    tetra_matrix = np.power(tetra_matrix, 0.25)
 
     # Compute t-SNE
     perplexity = min(30, max(5, len(all_reads) // 10))
