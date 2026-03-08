@@ -474,6 +474,14 @@ download_checkm2() {
         fi
         "${checkm2_bin}" database --download --path "${db_path}" || return 1
     fi
+    # Create a stable top-level symlink to the DIAMOND db file
+    # (Binette and other tools need the .dmnd path, not the directory)
+    local dmnd_file
+    dmnd_file=$(find "${db_path}" -maxdepth 2 -name '*.dmnd' -type f | head -1)
+    if [ -n "${dmnd_file}" ]; then
+        ln -sf "$(realpath --relative-to="${db_path}" "${dmnd_file}")" "${db_path}/checkm2.dmnd"
+    fi
+
     echo "[SUCCESS] CheckM2 database downloaded to ${db_path}"
     echo "  Use with: --checkm2_db ${db_path}"
 }
