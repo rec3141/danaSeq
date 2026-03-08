@@ -185,7 +185,7 @@ def create_fastq_channel() {
         def existing = file("${params.input}/**/fastq_pass/barcode*/*.fastq.gz") +
                        file("${params.input}/fastq_pass/barcode*/*.fastq.gz")
         def skipped = existing ? existing.findAll { it.size() < params.min_file_size } : []
-        log.info "Watch mode: ${existing ? existing.size() : 0} existing FASTQ files (${skipped.size()} skipped, < ${params.min_file_size} bytes)"
+        log.info "Watch mode: ${existing ? existing.size() : 0} existing FASTQ files (${skipped.size()} skipped, < ${params.min_file_size} bytes; adjust with --min_file_size)"
         def ch_existing = existing ? Channel.from(existing) : Channel.empty()
         def ch_watch = Channel.watchPath("${params.input}/${params.watch_glob}", 'create')
         ch_raw = ch_existing.mix(ch_watch)
@@ -222,7 +222,7 @@ def create_fastq_channel() {
         }
 
         def skipped = found.findAll { it.size() < params.min_file_size }
-        log.info "Found ${found.size()} FASTQ files (${skipped.size()} skipped, < ${params.min_file_size} bytes)"
+        log.info "Found ${found.size()} FASTQ files (${skipped.size()} skipped, < ${params.min_file_size} bytes; adjust with --min_file_size)"
         ch_raw = Channel.from(found)
     }
 
