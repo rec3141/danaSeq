@@ -188,12 +188,14 @@ process BIN_LORBIN {
     # where contig names have a sample prefix delimited by '-'.
     # Co-assemblies (Flye) use plain contig names, so we omit --multi.
     set +e
+    # Cast to int: LorBin argparse bug — missing type=int (github.com/LorMeBioAI/LorBin/issues/2)
+    LORBIN_MIN_LEN=\$(printf '%d' "${params.lorbin_min_length}")
     LorBin bin \\
         -o lorbin_out \\
         -fa "${assembly}" \\
         -b *.sorted.bam \\
         --num_process ${task.cpus} \\
-        --bin_length ${params.lorbin_min_length}
+        --bin_length \$LORBIN_MIN_LEN
     lorbin_exit=\$?
     set -e
 
