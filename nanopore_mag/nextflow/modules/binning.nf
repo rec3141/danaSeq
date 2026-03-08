@@ -668,21 +668,31 @@ process MAGSCOT_CONSENSUS {
     # 1. Predict proteins with Prodigal (meta mode)
     prodigal -i ${assembly} -a proteins.faa -o proteins.gff -p meta -f gff
 
-    # 2. HMM search against GTDB bac120 + ar53 markers (shipped in MAGScoT repo)
-    MAGSCOT_DIR=\$(dirname \$(readlink -f \$(which MAGScoT.R)))/..
-    cat \$MAGSCOT_DIR/hmm/gtdb_bac120.hmm \$MAGSCOT_DIR/hmm/gtdb_ar53.hmm > markers.hmm
-    hmmsearch --tblout markers.tblout --noali --cpu ${task.cpus} markers.hmm proteins.faa > /dev/null
+    # 2. HMM search against GTDBtk rel207 markers (shipped in MAGScoT repo)
+    MAGSCOT_DIR=\$(dirname \$(readlink -f \$(which MAGScoT.R)))
+    echo "[INFO] MAGScoT dir: \$MAGSCOT_DIR" >&2
 
-    # 3. Parse HMM results into MAGScoT format: gene_id \\t marker_id
-    grep -v '^#' markers.tblout | awk '{print \$1 "\\t" \$3}' > markers.tsv
+    # TIGRFAM and Pfam HMMs use different tblout column layouts
+    hmmsearch --tblout tigr.tblout --noali --notextw --cut_nc \
+        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_tigrfam.hmm proteins.faa > /dev/null
+    hmmsearch --tblout pfam.tblout --noali --notextw --cut_nc \
+        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_Pfam-A.hmm proteins.faa > /dev/null
 
-    # 4. Build combined contig-to-bin TSV with binner labels
+    # 3. Parse HMM results: gene_id, marker_name, e-value
+    #    TIGRFAM: target=\$1, query=\$3, evalue=\$5
+    #    Pfam:    target=\$1, query=\$4, evalue=\$5
+    grep -v '^#' tigr.tblout | awk '{print \$1 "\\t" \$3 "\\t" \$5}' > markers.tsv
+    grep -v '^#' pfam.tblout | awk '{print \$1 "\\t" \$4 "\\t" \$5}' >> markers.tsv
+    echo "[INFO] Found \$(wc -l < markers.tsv) marker gene hits" >&2
+
+    # 4. Build combined contig-to-bin TSV: bin \\t contig \\t binner
     > contig2bin.tsv
     IFS=',' read -ra F_ARR <<< "${files_csv}"
     IFS=',' read -ra L_ARR <<< "${labels_csv}"
     for i in "\${!F_ARR[@]}"; do
         if [ -s "\${F_ARR[\$i]}" ]; then
-            awk -v lbl="\${L_ARR[\$i]}" '{print \$1 "\\t" \$2 "\\t" lbl}' "\${F_ARR[\$i]}" >> contig2bin.tsv
+            # Input TSVs are contig\\tbin; MAGScoT expects bin\\tcontig\\tbinner
+            awk -v lbl="\${L_ARR[\$i]}" '{print \$2 "\\t" \$1 "\\t" lbl}' "\${F_ARR[\$i]}" >> contig2bin.tsv
         fi
     done
 
@@ -700,18 +710,19 @@ process MAGSCOT_CONSENSUS {
             echo "[WARNING] MAGScoT exited with code \$magscot_exit" >&2
             touch magscot_bins.tsv
         elif [ -f magscot_out.refined.contig_to_bin.out ]; then
-            # Convert MAGScoT output to standard bins TSV + extract bin FASTAs
-            > magscot_bins.tsv
-            awk '{print \$1 "\\t" \$2}' magscot_out.refined.contig_to_bin.out > magscot_raw.tsv
+            # MAGScoT output: header + bin\\tcontig
+            # Skip header, extract bin\\tcontig pairs
+            tail -n +2 magscot_out.refined.contig_to_bin.out > magscot_raw.tsv
 
-            # Get unique bin names and renumber sequentially
-            cut -f2 magscot_raw.tsv | sort -u > magscot_bin_list.txt
+            # Get unique bin names (column 1) and renumber sequentially
+            > magscot_bins.tsv
+            cut -f1 magscot_raw.tsv | sort -u > magscot_bin_list.txt
             bin_num=0
             for old_bin in \$(cat magscot_bin_list.txt); do
                 bin_num=\$((bin_num + 1))
                 bin_name=\$(printf 'magscot_%03d' \$bin_num)
-                # Extract contigs for this bin
-                awk -v b="\$old_bin" '\$2 == b {print \$1}' magscot_raw.tsv > tmp_contigs.txt
+                # Extract contigs for this bin (column 2 where column 1 matches)
+                awk -v b="\$old_bin" '\$1 == b {print \$2}' magscot_raw.tsv > tmp_contigs.txt
                 while read -r contig; do
                     printf '%s\\t%s\\n' "\$contig" "\$bin_name"
                 done < tmp_contigs.txt >> magscot_bins.tsv
@@ -720,6 +731,7 @@ process MAGSCOT_CONSENSUS {
                      /^>/{p=keep[substr(\$1,2)]}p' ${assembly} > "bins/\${bin_name}.fa"
                 rm -f tmp_contigs.txt
             done
+            echo "[INFO] MAGScoT produced \$bin_num bins" >&2
             rm -f magscot_bin_list.txt
         else
             echo "[WARNING] MAGScoT produced no output" >&2
