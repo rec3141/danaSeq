@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS sendsketch (
 result = dbExecute(con,
                    "
 CREATE TABLE IF NOT EXISTS stats (
-  seqid     TEXT PRIMARY KEY,
+  seqid     TEXT,
   length   INTEGER
 );")
 

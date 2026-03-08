@@ -220,12 +220,7 @@ if (length(files_bakta_tsv) > 0) {
 
       invisible(dbAppendTable(con, "prokka_annotations", df_tsv))
       invisible(dbAppendTable(con, "locus_index", df_gff$gff))
-      # Bakta renames reads to contig_1, contig_2, ... so seqids collide across
-      # files.  Skip duplicates rather than failing on PK violation.
-      tryCatch(
-        invisible(dbAppendTable(con, "stats", df_gff$len)),
-        error = function(e) if (!grepl("Duplicate key", e$message)) stop(e)
-      )
+      invisible(dbAppendTable(con, "stats", df_gff$len))
     }
     invisible(dbExecute(
       con,
