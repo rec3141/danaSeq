@@ -304,6 +304,8 @@ WRAPPER
             if [[ -f "${magscot_dir}/MAGScoT.R" ]]; then
                 ln -sf "${magscot_dir}/MAGScoT.R" "${env_path}/bin/MAGScoT.R"
                 chmod +x "${env_path}/bin/MAGScoT.R"
+                # MAGScoT.R resolves profiles/ relative to its own path (funr::sys.script)
+                ln -sf "${magscot_dir}/profiles" "${env_path}/bin/profiles"
             fi
             echo "  MAGScoT installed from ${magscot_repo}"
         fi
