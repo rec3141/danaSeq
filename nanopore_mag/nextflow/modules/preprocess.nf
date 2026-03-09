@@ -22,6 +22,9 @@ process CONCAT_READS {
 
     script:
     """
+    # Always produce output so downstream .collect() never deadlocks
+    touch ${meta.id}.fastq.gz
+
     # Concatenate all FASTQ files for this barcode
     cat ${fastqs} > ${meta.id}_raw.fastq.gz
 
@@ -29,22 +32,28 @@ process CONCAT_READS {
     filesize=\$(stat -c%s ${meta.id}_raw.fastq.gz)
     if [ "\$filesize" -lt 1024 ]; then
         echo "[WARNING] ${meta.id}: concat size \${filesize} bytes < 1 KB, skipping" >&2
-        touch ${meta.id}.fastq.gz
         exit 0
     fi
 
     if [ "${params.dedupe}" = "true" ]; then
-        # Deduplicate by read UUID only — same read basecalled twice shares a UUID
-        # but may have different header metadata (field order, timezone format, runid).
-        # BBMap dedupe uses full-header matching so misses these; awk on the first
-        # whitespace-delimited field (the UUID) is exact. Uses ~200 MB regardless
-        # of file size; pigz parallelises the output compression.
-        zcat ${meta.id}_raw.fastq.gz \\
-            | paste - - - - \\
-            | awk -F'\\t' '{id=\$1; sub(/^@/,"",id); sub(/ .*/,"",id); if (!seen[id]++) print}' \\
-            | tr '\\t' '\\n' \\
-            | pigz -p ${task.cpus} > ${meta.id}.fastq.gz
-        rm -f ${meta.id}_raw.fastq.gz
+        # Check if there are actually duplicate read IDs before doing the
+        # expensive decompress-dedup-recompress cycle. Single-pass awk: count
+        # total headers and unique IDs; exits early on first duplicate found.
+        has_dupes=\$(zcat ${meta.id}_raw.fastq.gz \\
+            | awk 'NR%4==1 {sub(/^@/,""); sub(/ .*/,""); if (seen[\$0]++) {print "yes"; exit}}')
+
+        if [ "\$has_dupes" = "yes" ]; then
+            echo "[INFO] ${meta.id}: duplicate read IDs found, deduplicating" >&2
+            zcat ${meta.id}_raw.fastq.gz \\
+                | paste - - - - \\
+                | awk -F'\\t' '{id=\$1; sub(/^@/,"",id); sub(/ .*/,"",id); if (!seen[id]++) print}' \\
+                | tr '\\t' '\\n' \\
+                | pigz -p ${task.cpus} > ${meta.id}.fastq.gz
+            rm -f ${meta.id}_raw.fastq.gz
+        else
+            echo "[INFO] ${meta.id}: no duplicate read IDs, skipping dedup" >&2
+            mv ${meta.id}_raw.fastq.gz ${meta.id}.fastq.gz
+        fi
     else
         mv ${meta.id}_raw.fastq.gz ${meta.id}.fastq.gz
     fi
