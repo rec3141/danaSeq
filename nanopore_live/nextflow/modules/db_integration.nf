@@ -100,9 +100,9 @@ process CLEANUP {
     echo "[INFO] CLEANUP: \$imported_count files in import_log for ${barcode_dir}"
     before=\$(du -sh "${barcode_dir}" | cut -f1)
 
-    # fa/: gzip FASTA files in place (not in DuckDB, keep as compressed backup)
-    find "${barcode_dir}/fa" -name '*.fa' -exec gzip {} \\; 2>/dev/null || true
-    echo "[INFO] Compressed fa/*.fa in place"
+    # fa/: leave alone — Nextflow publishDir re-copies .fa on -resume,
+    # so gzipping here just creates .fa + .fa.gz duplicates.
+    # fa/ is not loaded into DuckDB; disk reclamation happens via MAG assembly.
 
     # kraken/, sketch/, tetra/: delete files already loaded into DuckDB
     for subdir in kraken sketch tetra; do
@@ -111,10 +111,11 @@ process CLEANUP {
         echo "[INFO] Deleted files in \$subdir/"
     done
 
-    # prokka/: delete loaded TSVs, compress annotation files in place
+    # prokka/bakta: delete loaded TSVs only.
+    # Leave .gff/.faa/.ffn uncompressed — Nextflow publishDir re-copies on -resume.
     find "${barcode_dir}/prokka" -name 'PROKKA_*.tsv' -delete 2>/dev/null || true
-    find "${barcode_dir}/prokka" \\( -name '*.gff' -o -name '*.faa' -o -name '*.ffn' \\) ! -name '*.gz' -exec gzip {} \\; 2>/dev/null || true
-    echo "[INFO] Deleted prokka TSVs, compressed .gff/.faa/.ffn"
+    find "${barcode_dir}/bakta" -name '*.tsv' -delete 2>/dev/null || true
+    echo "[INFO] Deleted annotation TSVs (prokka/bakta)"
 
     after=\$(du -sh "${barcode_dir}" | cut -f1)
     echo "[INFO] Space: \$before -> \$after"
@@ -131,6 +132,7 @@ process CLEANUP {
 process DB_SYNC {
     tag "db-sync"
     label 'process_medium'
+    time '30d'    // Long-lived process: runs indefinitely in watch mode
     conda "${projectDir}/conda-envs/dana-tools"
     maxForks 1
     executor 'local'
@@ -171,8 +173,8 @@ process DB_SYNC {
         echo "[INFO] CLEANUP: \$imported_count files in import_log for \$bdir"
         local before=\$(du -sh "\$bdir" | cut -f1)
 
-        # fa/: gzip in place (not in DuckDB, keep as compressed backup)
-        find "\${bdir}/fa" -name '*.fa' -exec gzip {} \\; 2>/dev/null || true
+        # fa/: leave alone — Nextflow publishDir re-copies .fa on -resume,
+        # so gzipping here just creates .fa + .fa.gz duplicates.
 
         # kraken/, sketch/, tetra/: delete files (data lives in DuckDB)
         for subdir in kraken sketch tetra; do
@@ -180,9 +182,10 @@ process DB_SYNC {
             find "\${bdir}/\$subdir" -type f -delete 2>/dev/null || true
         done
 
-        # prokka/: delete loaded TSVs, compress annotation files
+        # prokka/bakta: delete loaded TSVs only.
+        # Leave .gff/.faa/.ffn uncompressed — Nextflow publishDir re-copies on -resume.
         find "\${bdir}/prokka" -name 'PROKKA_*.tsv' -delete 2>/dev/null || true
-        find "\${bdir}/prokka" \\( -name '*.gff' -o -name '*.faa' -o -name '*.ffn' \\) ! -name '*.gz' -exec gzip {} \\; 2>/dev/null || true
+        find "\${bdir}/bakta" -name '*.tsv' -delete 2>/dev/null || true
 
         local after=\$(du -sh "\$bdir" | cut -f1)
         echo "[INFO] CLEANUP \$bdir: \$before -> \$after"

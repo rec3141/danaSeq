@@ -5,7 +5,7 @@ nextflow.enable.dsl = 2
 // Dana Pipeline - Real-Time Nanopore Processing (Nextflow DSL2)
 // ============================================================================
 //
-// Nextflow implementation of the 24_process_reads_optimized.sh pipeline.
+// Nextflow implementation of the real-time nanopore processing pipeline.
 // Provides DAG-based parallelism, native resume (-resume), and resource-aware
 // scheduling without manual checkpoint logic or semaphores.
 //
@@ -152,7 +152,6 @@ if (effective_annotator == 'bakta' && !params.bakta_db) {
 
 // Import modules
 include { VALIDATE_FASTQ }   from './modules/validate'
-include { QC_BBDUK }         from './modules/qc'
 include { QC_FILTLONG }      from './modules/qc'
 include { CONVERT_TO_FASTA } from './modules/qc'
 include { KRAKEN2_CLASSIFY }  from './modules/kraken'
@@ -255,9 +254,10 @@ workflow {
     // Stage 1: Validate FASTQ integrity (repair corrupted gzip)
     VALIDATE_FASTQ(ch_input)
 
-    // Stage 2: Quality control pipeline
-    QC_BBDUK(VALIDATE_FASTQ.out.validated)
-    QC_FILTLONG(QC_BBDUK.out.trimmed)
+    // Stage 2: Quality control — Filtlong for nanopore length+quality filtering
+    // (BBDuk removed: its Illumina-style Q15 end-trimming is inappropriate for
+    // nanopore reads and was discarding ~50% of data)
+    QC_FILTLONG(VALIDATE_FASTQ.out.validated)
     CONVERT_TO_FASTA(QC_FILTLONG.out.filtered)
 
     // FASTA channel feeds all downstream analyses
