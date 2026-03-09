@@ -307,6 +307,14 @@ while (( $# )); do
             NF_ARGS+=(
                 --dedupe
                 --bakta_extra
+                --run_semibin true
+                --run_maxbin true
+                --run_lorbin true
+                --run_comebin true
+                --run_vamb true
+                --run_vamb_tax true
+                --run_binette true
+                --run_magscot true
                 --run_kraken2 true
                 --run_sendsketch true
                 --run_rrna true
@@ -314,10 +322,6 @@ while (( $# )); do
                 --run_eukaryotic true
                 --run_metaeuk true
                 --run_marferret true
-                --run_vamb true
-                --run_vamb_tax true
-                --run_binette true
-                --run_magscot true
             )
             shift ;;
         --resume)
