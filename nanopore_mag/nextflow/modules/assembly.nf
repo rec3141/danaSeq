@@ -1,19 +1,20 @@
-// Co-assembly: concatenate all reads, optional filtlong, Flye metagenomic assembly
+// Flye assembly split into two stages so the expensive disjointig assembly
+// is cached independently. The flye.yml conda env includes samtools>=1.17
+// to replace Flye's bundled samtools 1.9 which deadlocks on large BAMs
+// (github.com/samtools/htslib/issues/831).
 
-process ASSEMBLY_FLYE {
-    tag "co-assembly"
+process FLYE_ASSEMBLE {
+    tag "flye-assemble"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-flye"
-    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+    storeDir params.store_dir ? "${params.store_dir}/assembly/flye_assemble" : null
 
     input:
     path(reads)
 
     output:
-    path("assembly.fasta"),      emit: assembly
-    path("assembly_info.txt"),   emit: info
-    path("assembly_graph.gfa"),  emit: graph
+    path("flye_out"),            emit: flye_out
+    path("all_reads.fastq.gz"),  emit: reads
 
     script:
     def filtlong_cmd = ""
@@ -30,14 +31,48 @@ process ASSEMBLY_FLYE {
 
     ${filtlong_cmd}
 
-    # Run Flye metagenomic assembly
+    # Run Flye disjointig assembly only (most expensive stage)
     flye \\
         --meta \\
         --min-overlap ${params.min_overlap} \\
         ${params.polish ? '' : '--iterations 0'} \\
         --nano-hq all_reads.fastq.gz \\
         --out-dir flye_out \\
-        --threads ${task.cpus}
+        --threads ${task.cpus} \\
+        --stop-after assembly
+    """
+}
+
+process FLYE_FINISH {
+    tag "flye-finish"
+    label 'process_high'
+    conda "${projectDir}/conda-envs/dana-mag-flye"
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+
+    input:
+    path(prev_flye_out)
+    path(reads)
+
+    output:
+    path("assembly.fasta"),      emit: assembly
+    path("assembly_info.txt"),   emit: info
+    path("assembly_graph.gfa"),  emit: graph
+
+    script:
+    """
+    # Copy previous stage output (Flye writes in-place)
+    cp -r ${prev_flye_out} flye_out
+
+    # Resume from consensus through polishing
+    flye \\
+        --meta \\
+        --min-overlap ${params.min_overlap} \\
+        ${params.polish ? '' : '--iterations 0'} \\
+        --nano-hq ${reads} \\
+        --out-dir flye_out \\
+        --threads ${task.cpus} \\
+        --resume-from consensus
 
     # Validate assembly
     if [ ! -s flye_out/assembly.fasta ]; then
@@ -73,9 +108,6 @@ process ASSEMBLY_FLYE {
     awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} \$1=="P"&&(\$2 in map){\$2=map[\$2]} {print}' name_map.tsv flye_out/assembly_graph.gfa > assembly_graph.gfa
 
     rm -f name_map.tsv
-
-    # Cleanup intermediate files
-    rm -f all_reads.fastq.gz
     """
 }
 

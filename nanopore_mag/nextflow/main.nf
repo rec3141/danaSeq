@@ -310,7 +310,8 @@ log.info "Assembler: ${params.assembler}"
 
 // Import modules
 include { CONCAT_READS }        from './modules/preprocess'
-include { ASSEMBLY_FLYE }       from './modules/assembly'
+include { FLYE_ASSEMBLE }       from './modules/assembly'
+include { FLYE_FINISH }         from './modules/assembly'
 include { ASSEMBLY_METAMDBG }   from './modules/assembly'
 include { ASSEMBLY_MYLOASM }    from './modules/assembly'
 include { CALCULATE_TNF }       from './modules/assembly'
@@ -425,10 +426,11 @@ workflow {
     ch_all_reads = ch_reads.map { meta, fastq -> fastq }.collect()
 
     if (params.assembler == 'flye') {
-        ASSEMBLY_FLYE(ch_all_reads)
-        ch_assembly = ASSEMBLY_FLYE.out.assembly
-        ch_asm_info = ASSEMBLY_FLYE.out.info
-        ch_asm_graph = ASSEMBLY_FLYE.out.graph
+        FLYE_ASSEMBLE(ch_all_reads)
+        FLYE_FINISH(FLYE_ASSEMBLE.out.flye_out, FLYE_ASSEMBLE.out.reads)
+        ch_assembly = FLYE_FINISH.out.assembly
+        ch_asm_info = FLYE_FINISH.out.info
+        ch_asm_graph = FLYE_FINISH.out.graph
     } else if (params.assembler == 'metamdbg') {
         ASSEMBLY_METAMDBG(ch_all_reads)
         ch_assembly = ASSEMBLY_METAMDBG.out.assembly
