@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**dānaSeq MAG Assembly** is a metagenome-assembled genome (MAG) reconstruction pipeline that runs alongside the real-time processing pipeline. It co-assembles nanopore reads (Flye, metaMDBG, or myloasm — selectable via `--assembler`), maps reads back, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus.
+**dānaSeq MAG Assembly** is a metagenome-assembled genome (MAG) reconstruction pipeline that runs alongside the real-time processing pipeline. It co-assembles nanopore reads (Flye, metaMDBG, or myloasm — selectable via `--assembler`), maps reads back, runs up to seven binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, VAMB, VAMB taxvamb), and integrates results with three parallel consensus methods (DAS Tool, Binette, MAGScoT).
 
 The pipeline is implemented in **Nextflow DSL2** in `nextflow/`. Legacy bash scripts are preserved in the parent directory for reference but are not actively maintained.
 
@@ -22,8 +22,9 @@ nanopore_mag/
 │   │   ├── assembly.nf         ASSEMBLY_FLYE, ASSEMBLY_METAMDBG, ASSEMBLY_MYLOASM, CALCULATE_TNF
 │   │   ├── mapping.nf          MAP_READS, CALCULATE_DEPTHS, CALCULATE_GENE_DEPTHS
 │   │   ├── binning.nf          BIN_SEMIBIN2, BIN_METABAT2, BIN_MAXBIN2,
-│   │   │                       BIN_LORBIN, BIN_COMEBIN,
-│   │   │                       DASTOOL_CONSENSUS, CHECKM2
+│   │   │                       BIN_LORBIN, BIN_COMEBIN, BIN_VAMB, BIN_VAMB_TAX,
+│   │   │                       DASTOOL_CONSENSUS, BINETTE_CONSENSUS,
+│   │   │                       MAGSCOT_CONSENSUS, CHECKM2
 │   │   ├── annotation.nf       PROKKA_ANNOTATE, BAKTA_BASIC, BAKTA_EXTRA
 │   │   ├── taxonomy.nf         KAIJU_CONTIG_CLASSIFY, KAIJU_CLASSIFY,
 │   │   │                       KRAKEN2_CLASSIFY, SENDSKETCH_CLASSIFY
@@ -65,6 +66,9 @@ nanopore_mag/
 │   │   ├── marferret.yml      MarFERReT (DIAMOND + Python/pandas)
 │   │   ├── rrna.yml            barrnap + vsearch (rRNA gene classification)
 │   │   ├── bbmap.yml           BBMap (optional dedupe)
+│   │   ├── vamb.yml            VAMB (variational autoencoder binner)
+│   │   ├── binette.yml         Binette (consensus bin refinement)
+│   │   ├── magscot.yml         MAGScoT (R + HMMER + prodigal, marker gene scoring)
 │   │   └── viz.yml             Node.js + Python/pandas/scipy (viz dashboard)
 │   ├── bin/                    Pipeline scripts (tetramer_freqs.py, islandpath_dimob.py,
 │   │                           merge_annotations.py, map_annotations_to_bins.py,
@@ -303,11 +307,12 @@ Sample FASTQs (N files)
                            ┌──────┼──────┐                                                    │
                      KEGG_MODULES MINPATH KEGG_DECODER                                        │
          │                                                                                    │
-    ┌────┼────┬────┬────┐                                                                     │
- SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin   Binning (parallel)                               │
-    └────┼────┴────┴────┘                                                                     │
-   DASTOOL_CONSENSUS      Consensus integration                                               │
-         │ collect()                                                                          │
+    ┌────┼────┬────┬────┬────┬────┐                                                           │
+ SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin VAMB VAMB_TAX   Binning (parallel, all optional)   │
+    └────┼────┴────┴────┴────┴────┘                                                           │
+   ┌─────┼──────────────┐                                                                     │
+ DAS_Tool  Binette  MAGScoT   3 parallel consensus methods                                   │
+   └─────┼──────────────┘                                                                     │
    CHECKM2                Quality assessment (optional, needs --checkm2_db)                   │
    GTDBTK_CLASSIFY        GTDB-Tk phylogenetic classification (optional, needs --gtdbtk_db)   │
          │                                                                                    │
@@ -320,7 +325,7 @@ Sample FASTQs (N files)
 
 **Supplementary alignment filtering:** MAP_READS uses `samtools view -F 0x904` to drop unmapped, secondary, and supplementary alignments before sorting. Long reads produce chimeric alignments that cause massive depth overcounting.
 
-**Dynamic binner architecture:** Binners emit `[label, file]` tuples that are mixed into a single channel and collected for DAS_Tool. New binners can be added by appending to `ch_binner_results` in `main.nf` -- no changes needed in the DAS_Tool process.
+**Dynamic binner architecture:** Binners emit `[label, file]` tuples that are mixed into a single channel (`ch_binner_results`) and collected for all three consensus methods (DAS Tool, Binette, MAGScoT). New binners can be added by appending to `ch_binner_results` in `main.nf` — no changes needed in the consensus processes. The three consensus methods run in parallel after all binners complete, and all outputs (raw binner + consensus) go to CheckM2 and GTDB-Tk for quality assessment.
 
 **Graceful failure handling:** SemiBin2 catches crashes on small datasets (0 bins → empty ORFs → hmmsearch fail) and produces an empty output file. DAS_Tool filters out empty binner inputs and handles the "no bins above score threshold" case. The pipeline completes successfully even when individual binners fail.
 
@@ -373,6 +378,9 @@ Isolated conda environments avoid dependency conflicts:
 | `dana-mag-skder` | skder | Genome database dereplication |
 | `dana-mag-pathway` | MinPath, KEGG-Decoder | Pathway analysis (parsimony reconstruction + biogeochemical scoring) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
+| `dana-mag-vamb` | VAMB | Variational autoencoder binner (depth-based) |
+| `dana-mag-binette` | Binette 1.2.1 | Consensus bin refinement via set operations + internal CheckM2 |
+| `dana-mag-magscot` | R, HMMER, prodigal | MAGScoT consensus via marker gene scoring (R script from GitHub) |
 
 ### Nextflow Config Profiles
 
@@ -413,6 +421,8 @@ results/
 │   ├── maxbin/maxbin_bins.tsv
 │   ├── lorbin/lorbin_bins.tsv
 │   ├── comebin/comebin_bins.tsv
+│   ├── vamb/vamb_bins.tsv              (if --run_vamb)
+│   ├── vamb_tax/vamb_tax_bins.tsv      (if --run_vamb_tax + --sendsketch_address)
 │   ├── dastool/
 │   │   ├── bins/*.fa           Final consensus MAG FASTAs
 │   │   ├── contig2bin.tsv      Contig-to-bin assignments
@@ -421,8 +431,14 @@ results/
 │   │   ├── summary.tsv         DAS_Tool consensus winners with scores
 │   │   ├── bacteria.scg        Bacterial single-copy gene assignments (protein_id\tSCG_name)
 │   │   └── archaea.scg         Archaeal single-copy gene assignments (protein_id\tSCG_name)
+│   ├── binette/                         (if --run_binette + --checkm2_db)
+│   │   ├── binette_bins.tsv    Binette consensus contig-to-bin
+│   │   └── bins/*.fa           Binette refined MAG FASTAs
+│   ├── magscot/                         (if --run_magscot)
+│   │   ├── magscot_bins.tsv    MAGScoT consensus contig-to-bin
+│   │   └── bins/*.fa           MAGScoT refined MAG FASTAs
 │   └── checkm2/
-│       └── quality_report.tsv  CheckM2 quality (if --checkm2_db set)
+│       └── quality_report.tsv  CheckM2 quality for all binners + consensus (if --checkm2_db)
 ├── mge/                           MGE detection (if --genomad_db set)
 │   ├── genomad/
 │   │   ├── virus_summary.tsv      Virus contigs with scores + taxonomy
@@ -542,8 +558,13 @@ this logging, making it impossible to reliably resume later.
        BIN_NEWTOOL.out.bins.map { ['newtool', it] }
    )
    ```
-3. Add a conda env YAML if needed, or add the tool to an existing env
-4. Add a `--run_newtool` param to `nextflow.config` if it should be optional
+3. Add the binner's `out.fastas` to `ch_all_bins` (CheckM2) and `ch_gtdbtk_bins` (GTDB-Tk)
+4. Add a conda env YAML if needed, or add the tool to an existing env
+5. Add a `--run_newtool` param to `nextflow.config` if it should be optional
+6. Add `'newtool'` to the binner lists in `viz/preprocess/preprocess.py`
+
+Binners added to `ch_binner_results` automatically feed into all three consensus methods
+(DAS Tool, Binette, MAGScoT). Consensus methods run in parallel after all binners complete.
 
 ### Modifying an Existing Module
 

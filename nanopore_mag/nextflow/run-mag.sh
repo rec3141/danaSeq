@@ -173,7 +173,7 @@ usage() {
     echo "  --run_lorbin BOOL    Include LorBin in consensus [default: true]"
     echo "  --run_comebin BOOL   Include COMEBin in consensus [default: true]"
     echo "  --run_vamb BOOL      Include VAMB (variational autoencoder) in consensus [default: false]"
-    echo "  --run_vamb_tax BOOL  Run VAMB taxvamb (taxonomy-guided, needs gtdbtk_db) [default: false]"
+    echo "  --run_vamb_tax BOOL  Run VAMB taxvamb (taxonomy-guided, needs sendsketch_address) [default: false]"
     echo "  --run_binette BOOL   Run Binette consensus refinement (needs checkm2_db) [default: false]"
     echo "  --run_magscot BOOL   Run MAGScoT consensus refinement [default: false]"
     echo "  --lorbin_min_length N LorBin minimum bin size in bp [default: 80000]"
