@@ -928,13 +928,58 @@ process CHECKM2 {
     mkdir -p "\$TMPDIR"
     trap 'rm -rf "\$TMPDIR"' EXIT
 
-    checkm2 predict \\
-        --threads ${task.cpus} \\
-        --input all_bins \\
-        --output-directory checkm2_out \\
-        -x fa \\
-        --database_path "\$DB_PATH"
+    # Batch bins to avoid DIAMOND "free(): invalid pointer" crash on large inputs
+    BATCH_SIZE=2000
+    N_BINS=\$(ls all_bins/*.fa | wc -l)
+    echo "[INFO] CheckM2: \$N_BINS bins, batch size \$BATCH_SIZE" >&2
 
-    cp checkm2_out/quality_report.tsv .
+    if [ "\$N_BINS" -le "\$BATCH_SIZE" ]; then
+        # Small enough for single run
+        checkm2 predict \\
+            --threads ${task.cpus} \\
+            --input all_bins \\
+            --output-directory checkm2_out \\
+            -x fa \\
+            --database_path "\$DB_PATH"
+        cp checkm2_out/quality_report.tsv .
+    else
+        # Split bins into batches and run CheckM2 per batch
+        mkdir -p batches
+        BATCH_NUM=0
+        FILE_NUM=0
+        BATCH_DIR="batches/batch_\${BATCH_NUM}"
+        mkdir -p "\$BATCH_DIR"
+        for f in all_bins/*.fa; do
+            if [ "\$FILE_NUM" -ge "\$BATCH_SIZE" ]; then
+                BATCH_NUM=\$((BATCH_NUM + 1))
+                BATCH_DIR="batches/batch_\${BATCH_NUM}"
+                mkdir -p "\$BATCH_DIR"
+                FILE_NUM=0
+            fi
+            ln "\$f" "\$BATCH_DIR/" 2>/dev/null || cp "\$f" "\$BATCH_DIR/"
+            FILE_NUM=\$((FILE_NUM + 1))
+        done
+
+        # Run CheckM2 on each batch
+        HEADER_SAVED=false
+        > quality_report.tsv
+        for BATCH_DIR in batches/batch_*; do
+            BATCH_NAME=\$(basename "\$BATCH_DIR")
+            echo "[INFO] Running CheckM2 on \$BATCH_NAME (\$(ls "\$BATCH_DIR"/*.fa | wc -l) bins)" >&2
+            rm -rf "checkm2_\${BATCH_NAME}"
+            checkm2 predict \\
+                --threads ${task.cpus} \\
+                --input "\$BATCH_DIR" \\
+                --output-directory "checkm2_\${BATCH_NAME}" \\
+                -x fa \\
+                --database_path "\$DB_PATH"
+            if [ "\$HEADER_SAVED" = false ]; then
+                cat "checkm2_\${BATCH_NAME}/quality_report.tsv" >> quality_report.tsv
+                HEADER_SAVED=true
+            else
+                tail -n +2 "checkm2_\${BATCH_NAME}/quality_report.tsv" >> quality_report.tsv
+            fi
+        done
+    fi
     """
 }
