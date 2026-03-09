@@ -53,7 +53,7 @@ def helpMessage() {
       --run_lorbin       Include LorBin in consensus binning [default: true]
       --run_comebin      Include COMEBin in consensus binning [default: true]
       --run_vamb         Include VAMB (variational autoencoder) in consensus [default: false]
-      --run_vamb_tax     Run VAMB taxvamb (taxonomy-guided, needs --gtdbtk_db) [default: false]
+      --run_vamb_tax     Run VAMB taxvamb (taxonomy-guided, needs --sendsketch_address) [default: false]
       --run_binette      Run Binette consensus refinement (needs --checkm2_db) [default: false]
       --run_magscot      Run MAGScoT consensus refinement [default: false]
       --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 50000]
@@ -649,6 +649,18 @@ workflow {
         )
     }
 
+    // VAMB taxvamb (optional — taxonomy-guided VAMB using sendsketch GTDB taxonomy)
+    if (params.run_vamb_tax && params.run_sendsketch) {
+        BIN_VAMB_TAX(
+            ch_assembly,
+            CALCULATE_DEPTHS.out.jgi_depth,
+            SENDSKETCH_CLASSIFY.out.contig_taxonomy
+        )
+        ch_binner_results = ch_binner_results.mix(
+            BIN_VAMB_TAX.out.bins.map { ['vamb_tax', it] }
+        )
+    }
+
     // 6. DAS Tool consensus -- collects all binner outputs dynamically
     ch_bin_labels = ch_binner_results.collect { it[0] }
     ch_bin_files  = ch_binner_results.collect { it[1] }
@@ -682,7 +694,7 @@ workflow {
 
     // 6a2. MAGScoT consensus refinement (parallel with DAS Tool, marker gene scoring)
     if (params.run_magscot) {
-        MAGSCOT_CONSENSUS(ch_assembly, ch_bin_files, ch_bin_labels)
+        MAGSCOT_CONSENSUS(ch_assembly, ch_proteins, ch_bin_files, ch_bin_labels)
     }
 
     // 6b. Metabolic profiling: merge annotations and map to bins
@@ -726,6 +738,9 @@ workflow {
         if (params.run_vamb) {
             ch_all_bins = ch_all_bins.mix(BIN_VAMB.out.fastas)
         }
+        if (params.run_vamb_tax && params.run_sendsketch) {
+            ch_all_bins = ch_all_bins.mix(BIN_VAMB_TAX.out.fastas)
+        }
         ch_all_bins = ch_all_bins
             .mix(DASTOOL_CONSENSUS.out.bins)
         if (params.run_binette && params.checkm2_db) {
@@ -739,7 +754,7 @@ workflow {
         CHECKM2(ch_all_bins)
     }
 
-    // 7b. Phylogenetic classification with GTDB-Tk (optional — requires database path)
+    // 7c. Phylogenetic classification with GTDB-Tk (optional — requires database path)
     if (params.gtdbtk_db) {
         ch_gtdbtk_bins = BIN_METABAT2.out.fastas
         if (params.run_semibin) {
@@ -757,6 +772,9 @@ workflow {
         if (params.run_vamb) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB.out.fastas)
         }
+        if (params.run_vamb_tax && params.run_sendsketch) {
+            ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB_TAX.out.fastas)
+        }
         ch_gtdbtk_bins = ch_gtdbtk_bins
             .mix(DASTOOL_CONSENSUS.out.bins)
         if (params.run_binette && params.checkm2_db) {
@@ -768,15 +786,6 @@ workflow {
         ch_gtdbtk_bins = ch_gtdbtk_bins.collect()
 
         GTDBTK_CLASSIFY(ch_gtdbtk_bins)
-    }
-
-    // 7c. VAMB taxvamb — taxonomy-guided binning using sendsketch per-contig GTDB taxonomy
-    if (params.run_vamb_tax && params.run_sendsketch) {
-        BIN_VAMB_TAX(
-            ch_assembly,
-            CALCULATE_DEPTHS.out.jgi_depth,
-            SENDSKETCH_CLASSIFY.out.contig_taxonomy
-        )
     }
 
     // 8. Viz dashboard: preprocess results into JSON + build static site

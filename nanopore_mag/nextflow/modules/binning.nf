@@ -651,6 +651,7 @@ process MAGSCOT_CONSENSUS {
 
     input:
     path(assembly)
+    path(proteins)
     path(bin_files)
     val(bin_labels)
 
@@ -665,18 +666,15 @@ process MAGSCOT_CONSENSUS {
     """
     mkdir -p bins
 
-    # 1. Predict proteins with Prodigal (meta mode)
-    prodigal -i ${assembly} -a proteins.faa -o proteins.gff -p meta -f gff
-
-    # 2. HMM search against GTDBtk rel207 markers (shipped in MAGScoT repo)
+    # 1. HMM search against GTDBtk rel207 markers (shipped in MAGScoT repo)
     MAGSCOT_DIR=\$(dirname \$(readlink -f \$(which MAGScoT.R)))
     echo "[INFO] MAGScoT dir: \$MAGSCOT_DIR" >&2
 
     # TIGRFAM and Pfam HMMs use different tblout column layouts
     hmmsearch --tblout tigr.tblout --noali --notextw --cut_nc \
-        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_tigrfam.hmm proteins.faa > /dev/null
+        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_tigrfam.hmm ${proteins} > /dev/null
     hmmsearch --tblout pfam.tblout --noali --notextw --cut_nc \
-        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_Pfam-A.hmm proteins.faa > /dev/null
+        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_Pfam-A.hmm ${proteins} > /dev/null
 
     # 3. Parse HMM results: gene_id, marker_name, e-value
     #    TIGRFAM: target=\$1, query=\$3, evalue=\$5
