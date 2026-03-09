@@ -651,7 +651,6 @@ process MAGSCOT_CONSENSUS {
 
     input:
     path(assembly)
-    path(proteins)
     path(bin_files)
     val(bin_labels)
 
@@ -666,15 +665,25 @@ process MAGSCOT_CONSENSUS {
     """
     mkdir -p bins
 
-    # 1. HMM search against GTDBtk rel207 markers (shipped in MAGScoT repo)
+    # 1. Predict proteins with Prodigal (meta mode, parallelized)
+    # MAGScoT requires prodigal-style gene IDs (contig_N) to map genes → contigs
+    mkdir -p prodigal_chunks prodigal_out
+    awk 'BEGIN{n=0; f="prodigal_chunks/chunk_000.fa"} /^>/{n++; if(n%1000==1){f=sprintf("prodigal_chunks/chunk_%03d.fa",int(n/1000))}} {print > f}' ${assembly}
+    ls prodigal_chunks/*.fa | parallel -j ${task.cpus} \
+        'prodigal -i {} -a prodigal_out/{/.}.faa -o /dev/null -p meta -f gff 2>/dev/null'
+    cat prodigal_out/*.faa > proteins.faa
+    rm -rf prodigal_chunks prodigal_out
+    echo "[INFO] Prodigal predicted \$(grep -c "^>" proteins.faa) proteins" >&2
+
+    # 2. HMM search against GTDBtk rel207 markers (shipped in MAGScoT repo)
     MAGSCOT_DIR=\$(dirname \$(readlink -f \$(which MAGScoT.R)))
     echo "[INFO] MAGScoT dir: \$MAGSCOT_DIR" >&2
 
     # TIGRFAM and Pfam HMMs use different tblout column layouts
     hmmsearch --tblout tigr.tblout --noali --notextw --cut_nc \
-        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_tigrfam.hmm ${proteins} > /dev/null
+        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_tigrfam.hmm proteins.faa > /dev/null
     hmmsearch --tblout pfam.tblout --noali --notextw --cut_nc \
-        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_Pfam-A.hmm ${proteins} > /dev/null
+        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_Pfam-A.hmm proteins.faa > /dev/null
 
     # 3. Parse HMM results: gene_id, marker_name, e-value
     #    TIGRFAM: target=\$1, query=\$3, evalue=\$5

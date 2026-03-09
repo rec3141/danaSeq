@@ -694,7 +694,7 @@ workflow {
 
     // 6a2. MAGScoT consensus refinement (parallel with DAS Tool, marker gene scoring)
     if (params.run_magscot) {
-        MAGSCOT_CONSENSUS(ch_assembly, ch_proteins, ch_bin_files, ch_bin_labels)
+        MAGSCOT_CONSENSUS(ch_assembly, ch_bin_files, ch_bin_labels)
     }
 
     // 6b. Metabolic profiling: merge annotations and map to bins
