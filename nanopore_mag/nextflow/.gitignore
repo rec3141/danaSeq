@@ -7,6 +7,10 @@ results/
 .nextflow/
 .nextflow.log*
 
+# Compiled binaries
+bin/fastq_filter
+*.sif
+
 # Site-specific configs (use computecanada.config as template)
 fir.config
 cedar.config
