@@ -4,3 +4,4 @@ channels:
   - bioconda
 dependencies:
   - checkm2
+  - pyrodigal>=3.7

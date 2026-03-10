@@ -910,7 +910,10 @@ process CHECKM2 {
         exit 0
     fi
 
-    # Resolve database path: accept either a .dmnd file or a directory containing one
+    N_BINS=\$(ls all_bins/*.fa | wc -l)
+    echo "[INFO] CheckM2: \$N_BINS bins" >&2
+
+    # Resolve database path
     DB_PATH="${params.checkm2_db}"
     if [ -d "\$DB_PATH" ]; then
         DMND_FILE=\$(find "\$DB_PATH" -name '*.dmnd' -type f | head -1)
@@ -928,58 +931,28 @@ process CHECKM2 {
     mkdir -p "\$TMPDIR"
     trap 'rm -rf "\$TMPDIR"' EXIT
 
-    # Batch bins to avoid DIAMOND "free(): invalid pointer" crash on large inputs
-    BATCH_SIZE=2000
-    N_BINS=\$(ls all_bins/*.fa | wc -l)
-    echo "[INFO] CheckM2: \$N_BINS bins, batch size \$BATCH_SIZE" >&2
+    # Shim prodigal → pyrodigal to avoid free(): invalid pointer crash.
+    # Prodigal 2.6.3 (C) has a known memory-safety bug that triggers under
+    # CheckM2's Python multiprocessing. Pyrodigal (Cython rewrite) is safe.
+    # CheckM2 calls 'prodigal -p meta -q -m -f gff ...' but pyrodigal doesn't
+    # accept -q (quiet), so the wrapper strips it.
+    mkdir -p shims
+    cat > shims/prodigal <<'SHIM'
+#!/bin/bash
+args=()
+for a in "\$@"; do [ "\$a" != "-q" ] && args+=("\$a"); done
+exec pyrodigal "\${args[@]}"
+SHIM
+    chmod +x shims/prodigal
+    export PATH="\$PWD/shims:\$PATH"
 
-    if [ "\$N_BINS" -le "\$BATCH_SIZE" ]; then
-        # Small enough for single run
-        checkm2 predict \\
-            --threads ${task.cpus} \\
-            --input all_bins \\
-            --output-directory checkm2_out \\
-            -x fa \\
-            --database_path "\$DB_PATH"
-        cp checkm2_out/quality_report.tsv .
-    else
-        # Split bins into batches and run CheckM2 per batch
-        mkdir -p batches
-        BATCH_NUM=0
-        FILE_NUM=0
-        BATCH_DIR="batches/batch_\${BATCH_NUM}"
-        mkdir -p "\$BATCH_DIR"
-        for f in all_bins/*.fa; do
-            if [ "\$FILE_NUM" -ge "\$BATCH_SIZE" ]; then
-                BATCH_NUM=\$((BATCH_NUM + 1))
-                BATCH_DIR="batches/batch_\${BATCH_NUM}"
-                mkdir -p "\$BATCH_DIR"
-                FILE_NUM=0
-            fi
-            ln "\$f" "\$BATCH_DIR/" 2>/dev/null || cp "\$f" "\$BATCH_DIR/"
-            FILE_NUM=\$((FILE_NUM + 1))
-        done
+    checkm2 predict \\
+        --threads ${task.cpus} \\
+        --input all_bins \\
+        --output-directory checkm2_out \\
+        -x fa \\
+        --database_path "\$DB_PATH"
 
-        # Run CheckM2 on each batch
-        HEADER_SAVED=false
-        > quality_report.tsv
-        for BATCH_DIR in batches/batch_*; do
-            BATCH_NAME=\$(basename "\$BATCH_DIR")
-            echo "[INFO] Running CheckM2 on \$BATCH_NAME (\$(ls "\$BATCH_DIR"/*.fa | wc -l) bins)" >&2
-            rm -rf "checkm2_\${BATCH_NAME}"
-            checkm2 predict \\
-                --threads ${task.cpus} \\
-                --input "\$BATCH_DIR" \\
-                --output-directory "checkm2_\${BATCH_NAME}" \\
-                -x fa \\
-                --database_path "\$DB_PATH"
-            if [ "\$HEADER_SAVED" = false ]; then
-                cat "checkm2_\${BATCH_NAME}/quality_report.tsv" >> quality_report.tsv
-                HEADER_SAVED=true
-            else
-                tail -n +2 "checkm2_\${BATCH_NAME}/quality_report.tsv" >> quality_report.tsv
-            fi
-        done
-    fi
+    cp checkm2_out/quality_report.tsv .
     """
 }
