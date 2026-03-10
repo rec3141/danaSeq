@@ -64,6 +64,27 @@
     return ids;
   });
 
+  let selectedIds = $state(null);  // Set of selected read IDs from lasso
+
+  function handleSelect(ids) {
+    selectedIds = ids ? new Set(ids) : null;
+  }
+
+  function exportSelection() {
+    if (!selectedIds || !$readExplorer?.reads) return;
+    const selected = $readExplorer.reads.filter(r => selectedIds.has(r.id));
+    const cols = ['id', 'sample', 'length', 'gc', 'kraken_domain', 'kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_genus'];
+    const header = cols.join('\t');
+    const rows = selected.map(r => cols.map(c => r[c] ?? '').join('\t'));
+    const tsv = header + '\n' + rows.join('\n') + '\n';
+    const blob = new Blob([tsv], { type: 'text/tab-separated-values' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `selected_reads_${selected.length}.tsv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   let selectedDetail = $derived.by(() => {
     if (!$selectedRead || !$readExplorer?.reads) return null;
     return $readExplorer.reads.find(r => r.id === $selectedRead);
@@ -143,6 +164,21 @@
       {/if}
     </div>
 
+    <!-- Selection bar -->
+    {#if selectedIds}
+      <div class="flex items-center gap-3 bg-slate-800/80 border border-cyan-900 rounded-lg px-4 py-2">
+        <span class="text-cyan-400 text-sm font-semibold">{selectedIds.size.toLocaleString()} reads selected</span>
+        <button
+          class="px-3 py-1 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded transition-colors"
+          onclick={exportSelection}
+        >Export TSV</button>
+        <button
+          class="px-3 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
+          onclick={() => { selectedIds = null; }}
+        >Clear</button>
+      </div>
+    {/if}
+
     <!-- Scatter -->
     <div class="flex gap-6">
       <div class="flex-1 h-[700px] flex flex-col">
@@ -154,6 +190,8 @@
             {sizeScale}
             mode="tsne"
             {searchMatchIds}
+            onselect={handleSelect}
+            onclick={(id) => { $selectedRead = id; }}
             exportName={`danaseq_read_tsne_color-${colorBy}`}
           />
         {:else}

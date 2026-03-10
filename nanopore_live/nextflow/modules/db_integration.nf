@@ -105,9 +105,10 @@ process CLEANUP {
     # fa/ is not loaded into DuckDB; disk reclamation happens via MAG assembly.
 
     # kraken/, sketch/, tetra/: delete files already loaded into DuckDB
+    # Keep .lengths files in tetra/ — needed by viz (not in DuckDB)
     for subdir in kraken sketch tetra; do
         [ ! -d "${barcode_dir}/\$subdir" ] && continue
-        find "${barcode_dir}/\$subdir" -type f -delete 2>/dev/null || true
+        find "${barcode_dir}/\$subdir" -type f ! -name '*.lengths' -delete 2>/dev/null || true
         echo "[INFO] Deleted files in \$subdir/"
     done
 
@@ -176,9 +177,10 @@ process DB_SYNC {
         # so gzipping here just creates .fa + .fa.gz duplicates.
 
         # kraken/, sketch/, tetra/: delete files (data lives in DuckDB)
+        # Keep .lengths files in tetra/ — needed by viz (not in DuckDB)
         for subdir in kraken sketch tetra; do
             [ ! -d "\${bdir}/\$subdir" ] && continue
-            find "\${bdir}/\$subdir" -type f -delete 2>/dev/null || true
+            find "\${bdir}/\$subdir" -type f ! -name '*.lengths' -delete 2>/dev/null || true
         done
 
         # prokka/bakta: delete loaded TSVs only.
@@ -191,51 +193,88 @@ process DB_SYNC {
     }
 
     tick=0
+    last_tsne_time=0
+    last_tsne_rows=0
+    last_sync_files=0
+    tsne_interval=3600  # Run t-SNE at most once per hour
     while true; do
         echo "[INFO] DB_SYNC tick=\${tick}: scanning ${outdir} for barcode directories"
 
-        # Find all barcode directories (outdir/flowcell/barcodeNN)
-        for barcode_dir in \$(find ${outdir} -mindepth 2 -maxdepth 2 -type d -name 'barcode*' 2>/dev/null | sort); do
-            echo "[INFO] DB_SYNC: processing \${barcode_dir}"
+        # Count pending data files to detect new data
+        cur_files=\$(find ${outdir} -mindepth 3 -maxdepth 3 \\( -path '*/kraken/*.tsv' -o -path '*/sketch/*.txt' -o -path '*/tetra/*.lrn' -o -path '*/prokka/*' -o -path '*/bakta/*' \\) 2>/dev/null | wc -l)
+        has_new_data=false
+        if [ \$cur_files -ne \$last_sync_files ]; then
+            has_new_data=true
+        fi
 
-            if [ -d "\${barcode_dir}/kraken" ] && ls "\${barcode_dir}"/kraken/*.tsv >/dev/null 2>&1; then
-                run_r_script ${danadir}/40_kraken_db.r "\${barcode_dir}"
-                run_r_script ${danadir}/41_krakenreport_db.r "\${barcode_dir}"
-            fi
+        if [ "\$has_new_data" = "true" ]; then
+            # Find all barcode directories (outdir/flowcell/barcodeNN)
+            for barcode_dir in \$(find ${outdir} -mindepth 2 -maxdepth 2 -type d -name 'barcode*' 2>/dev/null | sort); do
+                echo "[INFO] DB_SYNC: processing \${barcode_dir}"
 
-            if [ -d "\${barcode_dir}/prokka" ] || [ -d "\${barcode_dir}/bakta" ]; then
-                run_r_script ${danadir}/42_prokka_db.r "\${barcode_dir}"
-            fi
-
-            if [ -d "\${barcode_dir}/sketch" ] && ls "\${barcode_dir}"/sketch/*.txt >/dev/null 2>&1; then
-                run_r_script ${danadir}/43_sketch_db.r "\${barcode_dir}"
-            fi
-
-            if [ -d "\${barcode_dir}/tetra" ] && ls "\${barcode_dir}"/tetra/*.lrn >/dev/null 2>&1; then
-                if [ ! -s "\${barcode_dir}/tnfs.txt" ]; then
-                    printf '${TETRA_COLS}\\n' > "\${barcode_dir}/tnfs.txt"
+                if [ -d "\${barcode_dir}/kraken" ] && ls "\${barcode_dir}"/kraken/*.tsv >/dev/null 2>&1; then
+                    run_r_script ${danadir}/40_kraken_db.r "\${barcode_dir}"
+                    run_r_script ${danadir}/41_krakenreport_db.r "\${barcode_dir}"
                 fi
-                run_r_script ${danadir}/44_tetra_db.r "\${barcode_dir}"
-            fi
 
-            # Post-sync cleanup if enabled
-            if [ "${cleanup_enabled}" = "true" ]; then
-                run_cleanup "\${barcode_dir}"
-            fi
-        done
+                if [ -d "\${barcode_dir}/prokka" ] || [ -d "\${barcode_dir}/bakta" ]; then
+                    run_r_script ${danadir}/42_prokka_db.r "\${barcode_dir}"
+                fi
 
-        # Regenerate viz JSON after each sync cycle
-        viz_preprocess="${projectDir}/viz/preprocess/preprocess.py"
+                if [ -d "\${barcode_dir}/sketch" ] && ls "\${barcode_dir}"/sketch/*.txt >/dev/null 2>&1; then
+                    run_r_script ${danadir}/43_sketch_db.r "\${barcode_dir}"
+                fi
+
+                if [ -d "\${barcode_dir}/tetra" ] && ls "\${barcode_dir}"/tetra/*.lrn >/dev/null 2>&1; then
+                    if [ ! -s "\${barcode_dir}/tnfs.txt" ]; then
+                        printf '${TETRA_COLS}\\n' > "\${barcode_dir}/tnfs.txt"
+                    fi
+                    run_r_script ${danadir}/44_tetra_db.r "\${barcode_dir}"
+                fi
+
+                # Post-sync cleanup if enabled
+                if [ "${cleanup_enabled}" = "true" ]; then
+                    run_cleanup "\${barcode_dir}"
+                fi
+            done
+
+            last_sync_files=\$cur_files
+
+            # Regenerate viz JSON when new data was imported
+            viz_preprocess="${projectDir}/viz/preprocess/preprocess.py"
+            viz_output="${outdir}/viz"
+            if [ -f "\${viz_preprocess}" ]; then
+                echo "[INFO] DB_SYNC tick=\${tick}: running viz preprocess"
+                mkdir -p "\${viz_output}"
+                python3 "\${viz_preprocess}" --input "${outdir}" --output "\${viz_output}" 2>&1 | sed 's/^/  [VIZ] /' || true
+            fi
+        else
+            echo "[INFO] DB_SYNC tick=\${tick}: no new data files (count=\${cur_files})"
+        fi
+
+        # t-SNE: run at most once per hour, and only if new data arrived since last t-SNE
         read_tsne="${projectDir}/viz/preprocess/compute_read_tsne.py"
         viz_output="${outdir}/viz"
-        if [ -f "\${viz_preprocess}" ]; then
-            echo "[INFO] DB_SYNC tick=\${tick}: running viz preprocess"
-            mkdir -p "\${viz_output}"
-            python3 "\${viz_preprocess}" --input "${outdir}" --output "\${viz_output}" 2>&1 | sed 's/^/  [VIZ] /' || true
-        fi
         if [ -f "\${read_tsne}" ]; then
-            echo "[INFO] DB_SYNC tick=\${tick}: running read t-SNE"
-            python3 "\${read_tsne}" --input "${outdir}" --output "\${viz_output}" 2>&1 | sed 's/^/  [VIZ] /' || true
+            now=\$(date +%s)
+            elapsed=\$((now - last_tsne_time))
+            # Count total tetra_data rows across all samples
+            cur_rows=0
+            for barcode_dir in \$(find ${outdir} -mindepth 2 -maxdepth 2 -type d -name 'barcode*' 2>/dev/null); do
+                db="\${barcode_dir}/dana.duckdb"
+                [ -f "\$db" ] || continue
+                nr=\$(python3 -c "import duckdb; c=duckdb.connect('\$db',read_only=True); print(c.execute('SELECT count(*) FROM tetra_data').fetchone()[0])" 2>/dev/null || echo 0)
+                cur_rows=\$((cur_rows + nr))
+            done
+            if [ \$elapsed -ge \$tsne_interval ] && [ \$cur_rows -gt \$last_tsne_rows ]; then
+                echo "[INFO] DB_SYNC tick=\${tick}: running read t-SNE (\${cur_rows} rows, \${last_tsne_rows} last time)"
+                mkdir -p "\${viz_output}"
+                python3 "\${read_tsne}" --input "${outdir}" --output "\${viz_output}" 2>&1 | sed 's/^/  [VIZ] /' || true
+                last_tsne_time=\$(date +%s)
+                last_tsne_rows=\$cur_rows
+            else
+                echo "[INFO] DB_SYNC tick=\${tick}: skipping t-SNE (elapsed=\${elapsed}s, rows=\${cur_rows}, last=\${last_tsne_rows})"
+            fi
         fi
 
         echo "[INFO] DB_SYNC tick=\${tick}: complete, sleeping ${sync_seconds}s"
