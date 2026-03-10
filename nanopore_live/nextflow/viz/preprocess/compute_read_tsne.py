@@ -9,6 +9,7 @@ for the WebGL scatter plot.
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -46,6 +47,38 @@ def discover_samples(input_dir):
     return samples
 
 
+def build_lineage_lookup(con):
+    """Build taxid → {domain, phylum, class, order, family, genus} from krakenreport.
+
+    Uses the taxonomy (semicolon-separated lineage) and rank_full (space-separated
+    rank codes) columns which are parallel arrays, so zipping them maps each
+    ancestor name to its rank."""
+    lookup = {}
+    try:
+        rows = con.execute(
+            "SELECT taxid, taxonomy, rank_full FROM krakenreport "
+            "WHERE taxonomy IS NOT NULL AND rank_full IS NOT NULL"
+        ).fetchall()
+        for taxid, taxonomy, rank_full in rows:
+            tax_parts = [x.strip() for x in taxonomy.split(';')]
+            rank_parts = rank_full.split()
+            if len(tax_parts) != len(rank_parts):
+                continue
+            lineage = dict(zip(rank_parts, tax_parts))
+            # R2 = domain/superkingdom (Bacteria/Archaea/Eukaryota)
+            lookup[taxid] = {
+                'domain':  lineage.get('R2'),
+                'phylum':  lineage.get('P'),
+                'class':   lineage.get('C'),
+                'order':   lineage.get('O'),
+                'family':  lineage.get('F'),
+                'genus':   lineage.get('G'),
+            }
+    except Exception:
+        pass  # krakenreport may not exist
+    return lookup
+
+
 def extract_reads(db_path, sample_id, max_per_sample):
     """Extract reads with tetramer, stats, and taxonomy from a single DuckDB."""
     reads = []
@@ -68,6 +101,11 @@ def extract_reads(db_path, sample_id, max_per_sample):
             con.close()
             return [], []
 
+        # Build taxid → lineage lookup from krakenreport
+        has_kraken = 'kraken' in tables
+        has_krakenreport = 'krakenreport' in tables
+        lineage_lookup = build_lineage_lookup(con) if has_krakenreport else {}
+
         # Check which optional columns exist in stats
         has_stats = 'stats' in tables
         stats_cols = set()
@@ -78,7 +116,6 @@ def extract_reads(db_path, sample_id, max_per_sample):
 
         has_gc = 'gc' in stats_cols
         has_length = 'length' in stats_cols
-        has_kraken = 'kraken' in tables
 
         # Build SELECT clause dynamically
         tetra_col_str = ', '.join(f't."{c}"' for c in tetra_cols)
@@ -110,14 +147,6 @@ def extract_reads(db_path, sample_id, max_per_sample):
         query = f"SELECT {select_str} FROM {from_str} LIMIT {max_per_sample}"
         rows = con.execute(query).fetchall()
 
-        # GC tetramers for estimation when gc column is missing
-        gc_tetras = set()
-        for nt in tetra_cols:
-            gc_count = nt.count('G') + nt.count('C')
-            if gc_count >= 3:  # mostly GC content
-                gc_tetras.add(nt)
-        gc_indices = [i for i, c in enumerate(tetra_cols) if c in gc_tetras]
-
         for row in rows:
             seqid = row[0]
             length = row[1]
@@ -127,7 +156,6 @@ def extract_reads(db_path, sample_id, max_per_sample):
 
             # Estimate GC from tetramer frequencies if not available
             if gc is None and tetra_values:
-                # Sum of tetramers weighted by their GC content
                 gc_est = sum(
                     tetra_values[i] * (tetra_cols[i].count('G') + tetra_cols[i].count('C')) / 4.0
                     for i in range(len(tetra_cols))
@@ -136,24 +164,24 @@ def extract_reads(db_path, sample_id, max_per_sample):
             elif gc is not None:
                 gc = round(gc, 1)
 
-            # Parse taxonomy
-            kraken_phylum = None
-            kraken_class = None
-            kraken_domain = None
+            # Resolve full lineage via taxid → krakenreport lookup
+            lineage = {}
             if taxa_name:
-                import re
-                match = re.match(r'(.+?)(?:\s*\(taxid \d+\))?$', str(taxa_name))
-                name = match.group(1).strip() if match else str(taxa_name).strip()
-                kraken_phylum = name
+                m = re.search(r'\(taxid[_ ](\d+)\)', str(taxa_name))
+                if m:
+                    lineage = lineage_lookup.get(int(m.group(1)), {})
 
             reads.append({
                 'id': seqid,
                 'sample': sample_id,
                 'length': length,
                 'gc': gc,
-                'kraken_phylum': kraken_phylum,
-                'kraken_domain': kraken_domain,
-                'kraken_class': kraken_class,
+                'kraken_domain': lineage.get('domain'),
+                'kraken_phylum': lineage.get('phylum'),
+                'kraken_class':  lineage.get('class'),
+                'kraken_order':  lineage.get('order'),
+                'kraken_family': lineage.get('family'),
+                'kraken_genus':  lineage.get('genus'),
             })
             tetra_rows.append(tetra_values)
 

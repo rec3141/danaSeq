@@ -19,8 +19,8 @@
   }
 
   // Color-by groups
-  const taxGroup =    { values: ['kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_domain'],
-                        labels: ['Phylum', 'Class', 'Order', 'Family', 'Domain'] };
+  const taxGroup =    { values: ['kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_genus', 'kraken_domain'],
+                        labels: ['Phylum', 'Class', 'Order', 'Family', 'Genus', 'Domain'] };
   const metricGroup = { values: ['gc', 'length'], labels: ['GC%', 'Length'] };
 
   const BW = { sample: '4.5rem', taxonomy: '4.5rem', metric: '4.5rem' };
@@ -173,11 +173,23 @@
             <div class="text-slate-400">Sample</div><div class="text-slate-200 font-mono">{selectedDetail.sample}</div>
             <div class="text-slate-400">Length</div><div class="text-slate-200 font-mono">{selectedDetail.length?.toLocaleString() ?? '-'} bp</div>
             <div class="text-slate-400">GC%</div><div class="text-slate-200 font-mono">{selectedDetail.gc?.toFixed(1) ?? '-'}</div>
+            {#if selectedDetail.kraken_domain}
+              <div class="text-slate-400">Domain</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.kraken_domain}</div>
+            {/if}
             {#if selectedDetail.kraken_phylum}
               <div class="text-slate-400">Phylum</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.kraken_phylum}</div>
             {/if}
             {#if selectedDetail.kraken_class}
               <div class="text-slate-400">Class</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.kraken_class}</div>
+            {/if}
+            {#if selectedDetail.kraken_order}
+              <div class="text-slate-400">Order</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.kraken_order}</div>
+            {/if}
+            {#if selectedDetail.kraken_family}
+              <div class="text-slate-400">Family</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.kraken_family}</div>
+            {/if}
+            {#if selectedDetail.kraken_genus}
+              <div class="text-slate-400">Genus</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.kraken_genus}</div>
             {/if}
             {#if selectedDetail.sketch_hit}
               <div class="text-slate-400">Sketch Hit</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.sketch_hit}</div>
