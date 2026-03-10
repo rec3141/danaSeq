@@ -117,6 +117,9 @@ def main():
     parser.add_argument(
         "-o", "--output", default=None, help="Output file [stdout]"
     )
+    parser.add_argument(
+        "--lengths", default=None, help="Output seqid<TAB>length TSV"
+    )
     args = parser.parse_args()
 
     canonical = build_canonical_kmers(4)
@@ -128,6 +131,7 @@ def main():
         kmer_to_canonical[revcomp(kmer)] = kmer
 
     out = open(args.output, "w") if args.output else sys.stdout
+    len_out = open(args.lengths, "w") if args.lengths else None
     n_contigs = 0
     n_written = 0
 
@@ -144,10 +148,14 @@ def main():
             freqs = count_tetras(frag, canonical, kmer_to_canonical)
             freq_str = "\t".join(f"{f:.10g}" for f in freqs)
             out.write(f"{contig_id}\t{freq_str}\n")
+            if len_out:
+                len_out.write(f"{contig_id}\t{len(frag)}\n")
             n_written += 1
 
     if out is not sys.stdout:
         out.close()
+    if len_out:
+        len_out.close()
 
     print(
         f"[INFO] tetramer_freqs.py: {n_contigs} contigs read, {n_written} written",

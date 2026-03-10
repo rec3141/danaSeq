@@ -153,9 +153,11 @@
       const fn = CONTINUOUS[colorBy];
       const raw = new Float64Array(n);
       for (let i = 0; i < n; i++) raw[i] = fn(sorted[i]);
-      const [vMin, vMax] = d3.extent(raw);
-      const vRange = vMax - vMin || 1;
-      for (let i = 0; i < n; i++) valueA[i] = Math.max(0, Math.min(1, (raw[i] - vMin) / vRange));
+      // Rank-based normalization: spread colors evenly by percentile
+      // so narrow distributions (e.g. GC 40-55%) still show full color range
+      const indices = Array.from({length: n}, (_, i) => i);
+      indices.sort((a, b) => raw[a] - raw[b]);
+      for (let rank = 0; rank < n; rank++) valueA[indices[rank]] = rank / (n - 1 || 1);
       colorCfg = { colorBy: 'valueA', pointColor: VIRIDIS, opacityBy: null, opacity: 0.75 };
     } else {
       const useMap = colorMap && Object.keys(colorMap).length > 0;

@@ -43,8 +43,24 @@ def discover_samples(input_dir):
                 samples.append({
                     'id': f"{flowcell}_{barcode_dir.name}",
                     'db_path': str(db_path),
+                    'dir': str(barcode_dir),
                 })
     return samples
+
+
+def load_lengths(sample_dir):
+    """Load seqid → length from .lengths files in tetra/ directory."""
+    lengths = {}
+    tetra_dir = Path(sample_dir) / 'tetra'
+    if not tetra_dir.is_dir():
+        return lengths
+    for f in tetra_dir.glob('*.lengths'):
+        with open(f) as fh:
+            for line in fh:
+                parts = line.rstrip('\n').split('\t')
+                if len(parts) == 2:
+                    lengths[parts[0]] = int(parts[1])
+    return lengths
 
 
 def build_lineage_lookup(con):
@@ -79,7 +95,7 @@ def build_lineage_lookup(con):
     return lookup
 
 
-def extract_reads(db_path, sample_id, max_per_sample):
+def extract_reads(db_path, sample_id, max_per_sample, seq_lengths=None):
     """Extract reads with tetramer, stats, and taxonomy from a single DuckDB."""
     reads = []
     tetra_rows = []
@@ -154,6 +170,10 @@ def extract_reads(db_path, sample_id, max_per_sample):
             taxa_name = row[3]
             tetra_values = [float(v) if v is not None else 0.0 for v in row[4:]]
 
+            # Use .lengths file if stats join didn't provide length
+            if length is None and seq_lengths:
+                length = seq_lengths.get(seqid)
+
             # Estimate GC from tetramer frequencies if not available
             if gc is None and tetra_values:
                 gc_est = sum(
@@ -212,7 +232,8 @@ def main():
 
     for i, s in enumerate(samples):
         print(f"  [{i+1}/{len(samples)}] {s['id']}...", file=sys.stderr, end='', flush=True)
-        reads, tetra = extract_reads(s['db_path'], s['id'], max_per_sample)
+        seq_lengths = load_lengths(s['dir'])
+        reads, tetra = extract_reads(s['db_path'], s['id'], max_per_sample, seq_lengths)
         all_reads.extend(reads)
         all_tetra.extend(tetra)
         print(f" {len(reads)} reads", file=sys.stderr)

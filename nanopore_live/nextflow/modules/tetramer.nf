@@ -1,5 +1,5 @@
-// Tetranucleotide frequency analysis for ESOM clustering
-// tetramer_freqs_esom.pl is not available via conda; downloaded from GitHub at build time
+// Tetranucleotide frequency analysis
+// Uses tetramer_freqs.py (Python replacement for tetramer_freqs_esom.pl)
 
 process TETRAMER_FREQ {
     tag "${meta.id}"
@@ -12,35 +12,15 @@ process TETRAMER_FREQ {
 
     output:
     tuple val(meta), path("${meta.id}.lrn"), emit: lrn
+    tuple val(meta), path("${meta.id}.lengths"), emit: lengths
 
     script:
     """
-    # Resolve tetramer_freqs_esom.pl: use from PATH, or download as fallback
-    TETRA_SCRIPT="\$(command -v tetramer_freqs_esom.pl 2>/dev/null || true)"
-    if [ -z "\$TETRA_SCRIPT" ]; then
-        curl -fsSL https://raw.githubusercontent.com/tetramerFreqs/Binning/master/tetramer_freqs_esom.pl \
-            -o tetramer_freqs_esom.pl
-        chmod +x tetramer_freqs_esom.pl
-        TETRA_SCRIPT="./tetramer_freqs_esom.pl"
-    fi
-
-    # Create annotation file from FASTA headers
-    grep '>' "${fasta}" | sed 's/>//' | paste - - - > annotation.txt
-
-    # Calculate tetranucleotide frequencies
-    perl "\$TETRA_SCRIPT" \
+    python3 ${projectDir}/bin/tetramer_freqs.py \
         -f "${fasta}" \
-        -a annotation.txt \
         -min ${params.min_readlen} \
-        -max 10000000
-
-    # Combine names and frequency data into final output
-    if ls Tetra_*.names >/dev/null 2>&1 && ls Tetra_*.lrn >/dev/null 2>&1; then
-        paste <(awk '\$1!~/^%/' Tetra_*.names) <(awk '\$1!~/^%/' Tetra_*.lrn) \
-            | cut -f3,5- > "${meta.id}.lrn"
-    else
-        echo "[ERROR] Tetramer output files not generated for ${meta.id}" >&2
-        exit 1
-    fi
+        -max 10000000 \
+        -o "${meta.id}.lrn" \
+        --lengths "${meta.id}.lengths"
     """
 }
