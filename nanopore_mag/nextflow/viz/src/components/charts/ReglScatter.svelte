@@ -188,16 +188,18 @@
       const raw = new Float64Array(n);
       for (let i = 0; i < n; i++) raw[i] = fn(sorted[i]);
       // Use global fixed range for sample_depth (consistent across samples),
-      // per-data extent for other continuous modes
-      let vMin, vMax;
+      // rank-based normalization for other continuous modes (spreads colors
+      // evenly by percentile so narrow distributions show full color range)
       if (colorBy === 'sample_depth' && sampleDepthData?.maxDepth != null) {
-        vMin = Math.log10(0.01);
-        vMax = Math.log10(sampleDepthData.maxDepth + 0.01);
+        const vMin = Math.log10(0.01);
+        const vMax = Math.log10(sampleDepthData.maxDepth + 0.01);
+        const vRange = vMax - vMin || 1;
+        for (let i = 0; i < n; i++) valueA[i] = Math.max(0, Math.min(1, (raw[i] - vMin) / vRange));
       } else {
-        [vMin, vMax] = d3.extent(raw);
+        const indices = Array.from({length: n}, (_, i) => i);
+        indices.sort((a, b) => raw[a] - raw[b]);
+        for (let rank = 0; rank < n; rank++) valueA[indices[rank]] = rank / (n - 1 || 1);
       }
-      const vRange = vMax - vMin || 1;
-      for (let i = 0; i < n; i++) valueA[i] = Math.max(0, Math.min(1, (raw[i] - vMin) / vRange));
       colorCfg = { colorBy: 'valueA', pointColor: VIRIDIS, opacityBy: null, opacity: 0.75 };
     } else {
       // Use stable colorMap from parent (derived from full unfiltered dataset)

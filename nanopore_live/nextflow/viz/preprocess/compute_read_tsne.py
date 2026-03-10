@@ -21,6 +21,7 @@ except ImportError:
 
 try:
     import numpy as np
+    from sklearn.decomposition import PCA
     from sklearn.manifold import TSNE
 except ImportError:
     print("[ERROR] numpy + scikit-learn required: pip install numpy scikit-learn", file=sys.stderr)
@@ -160,7 +161,7 @@ def extract_reads(db_path, sample_id, max_per_sample, seq_lengths=None):
         if has_kraken:
             from_str += ' LEFT JOIN kraken k ON t.seqid = k.seqid'
 
-        query = f"SELECT {select_str} FROM {from_str} LIMIT {max_per_sample}"
+        query = f"SELECT {select_str} FROM {from_str} USING SAMPLE {max_per_sample}"
         rows = con.execute(query).fetchall()
 
         for row in rows:
@@ -261,6 +262,11 @@ def main():
     # high-frequency tetramers and better resolve compositional differences
     tetra_matrix = np.nan_to_num(tetra_matrix, nan=0.0, posinf=0.0, neginf=0.0)
     tetra_matrix = np.power(tetra_matrix, 0.25)
+
+    # PCA to 50 dims first (matches Rtsne default, massive speedup)
+    n_pca = min(50, tetra_matrix.shape[1], tetra_matrix.shape[0])
+    print(f"[INFO] PCA {tetra_matrix.shape[1]} → {n_pca} dims", file=sys.stderr)
+    tetra_matrix = PCA(n_components=n_pca, svd_solver='randomized', random_state=42).fit_transform(tetra_matrix)
 
     # Compute t-SNE
     perplexity = min(30, max(5, len(all_reads) // 10))

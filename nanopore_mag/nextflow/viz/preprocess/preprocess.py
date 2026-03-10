@@ -1630,7 +1630,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     tnf_scaled = scaler.fit_transform(tnf_transformed)
 
     n_components = min(50, tnf_scaled.shape[1], tnf_scaled.shape[0])
-    pca = PCA(n_components=n_components)
+    pca = PCA(n_components=n_components, svd_solver='randomized', random_state=42)
     pca_coords = pca.fit_transform(tnf_scaled)
     pca_input = pca_coords[:, :min(50, n_components)]
 
