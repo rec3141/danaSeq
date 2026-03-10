@@ -132,7 +132,6 @@ process CLEANUP {
 process DB_SYNC {
     tag "db-sync"
     label 'process_medium'
-    time '30d'    // Long-lived process: runs indefinitely in watch mode
     conda "${projectDir}/conda-envs/dana-tools"
     maxForks 1
     executor 'local'
