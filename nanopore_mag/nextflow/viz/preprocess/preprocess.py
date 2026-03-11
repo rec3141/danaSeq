@@ -1411,10 +1411,31 @@ def build_biosynthetic(results_dir, contig2bin):
     """Build biosynthetic.json from antiSMASH output (JSON + summary TSV)."""
     print("Building biosynthetic.json ...")
 
+    # DAS Tool consensus bin
     c2b = {}
     if contig2bin is not None:
         for _, row in contig2bin.iterrows():
             c2b[row.iloc[0]] = row.iloc[1]
+
+    # All binner assignments: contig -> {binner_label: bin_name}
+    BINNER_LABELS = {
+        'semibin': 'SemiBin2', 'metabat': 'MetaBAT2', 'maxbin': 'MaxBin2',
+        'lorbin': 'LorBin', 'comebin': 'COMEBin', 'vamb': 'VAMB',
+        'vamb_tax': 'VAMB-tax', 'binette': 'Binette', 'magscot': 'MAGScoT',
+    }
+    c2bins_all = defaultdict(dict)  # contig -> {label: bin_name}
+    for binner, label in BINNER_LABELS.items():
+        if binner in ('binette', 'magscot'):
+            bpath = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        else:
+            bpath = resolve_path(results_dir, 'binning', binner, f'{binner}_bins.tsv')
+        bdf = load_tsv(bpath, header=None, names=['contig', 'bin'])
+        if bdf is not None:
+            for _, row in bdf.iterrows():
+                c2bins_all[row['contig']][label] = row['bin']
+    # Add DAS Tool
+    for contig, binname in c2b.items():
+        c2bins_all[contig]['DAS Tool'] = binname
 
     regions = []
     type_counts = Counter()
@@ -1496,6 +1517,7 @@ def build_biosynthetic(results_dir, contig2bin):
                     type_counts[prod] += 1
 
                 mag = c2b.get(contig_id, '_unbinned')
+                bins = c2bins_all.get(contig_id, {})
                 region = {
                     'contig': contig_id,
                     'start': start,
@@ -1508,6 +1530,7 @@ def build_biosynthetic(results_dir, contig2bin):
                     'known_matches': known_matches[:3],
                     'gene_kinds': dict(gene_kinds) if gene_kinds else {},
                     'mag': mag,
+                    'bins': bins,
                 }
                 regions.append(region)
                 per_bin[mag].append(region)
@@ -1534,6 +1557,7 @@ def build_biosynthetic(results_dir, contig2bin):
                     if known != 'NA' and str(sim) != 'NA':
                         known_matches = [{'description': known, 'similarity': float(sim) if str(sim) != 'NA' else 0}]
 
+                    bins = c2bins_all.get(contig_id, {})
                     region = {
                         'contig': contig_id,
                         'start': int(row.get('start', 0)) if str(row.get('start', '')) != 'NA' else 0,
@@ -1542,6 +1566,7 @@ def build_biosynthetic(results_dir, contig2bin):
                         'products': [p.strip() for p in products if p.strip() and p.strip() != 'NA'],
                         'known_matches': known_matches,
                         'mag': mag,
+                        'bins': bins,
                     }
                     region['length'] = region['end'] - region['start']
                     regions.append(region)
