@@ -97,6 +97,8 @@
     const rows = data.regions.map((r, i) => {
       const best = r.known_matches?.[0];
       const badge = noveltyBadge(r);
+      const bins = r.bins || {};
+      const binCount = Object.keys(bins).length;
       return {
         _idx: i,
         _region: r,
@@ -104,6 +106,8 @@
         products_str: r.products?.join(', ') || '?',
         length: r.length,
         mag: r.mag === '_unbinned' ? '' : r.mag,
+        bins_str: binCount ? Object.entries(bins).map(([k, v]) => `${k}: ${v}`).join(', ') : '-',
+        bin_count: binCount,
         novelty: badge.label,
         best_match: best?.description || '',
         similarity_val: best?.similarity ?? -1,
@@ -127,16 +131,20 @@
   // TSV export
   function exportTSV() {
     if (!data?.regions) return;
-    const header = ['contig', 'start', 'end', 'length_bp', 'type', 'mag', 'novelty', 'best_known_match', 'similarity_pct', 'match_accession', 'match_type', 'protoclusters', 'gene_biosynthetic', 'gene_transport', 'gene_regulatory', 'gene_other'].join('\t');
+    const header = ['contig', 'start', 'end', 'length_bp', 'type', 'dastool_bin', 'n_binners', 'all_bins', 'novelty', 'best_known_match', 'similarity_pct', 'match_accession', 'match_type', 'protoclusters', 'gene_biosynthetic', 'gene_transport', 'gene_regulatory', 'gene_other'].join('\t');
     const lines = sortedRegions.map(row => {
       const r = row._region;
       const best = r.known_matches?.[0];
       const badge = noveltyBadge(r);
       const gk = r.gene_kinds || {};
+      const bins = r.bins || {};
+      const allBins = Object.entries(bins).map(([k, v]) => `${k}:${v}`).join(';');
       return [
         r.contig, r.start, r.end, r.length,
         r.products?.join(';') || '',
         r.mag === '_unbinned' ? '' : r.mag,
+        Object.keys(bins).length,
+        allBins,
         badge.label,
         best?.description || '', best?.similarity ?? '', best?.accession || '', best?.cluster_type || '',
         (r.protoclusters || []).map(p => p.product).join(';'),
@@ -242,7 +250,7 @@
             <th class="text-left py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('contig')}>Contig{sortIcon('contig')}</th>
             <th class="text-left py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('products_str')}>Type{sortIcon('products_str')}</th>
             <th class="text-right py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('length')}>Length{sortIcon('length')}</th>
-            <th class="text-left py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('mag')}>MAG{sortIcon('mag')}</th>
+            <th class="text-left py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('bin_count')}>Bins{sortIcon('bin_count')}</th>
             <th class="text-center py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('novelty')}>Novelty{sortIcon('novelty')}</th>
             <th class="text-left py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('best_match')}>Best Known Match{sortIcon('best_match')}</th>
             <th class="text-right py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('similarity_val')}>Similarity{sortIcon('similarity_val')}</th>
@@ -268,7 +276,14 @@
                 </div>
               </td>
               <td class="py-1 px-2 text-right text-slate-400 font-mono">{(region.length / 1000).toFixed(1)} kb</td>
-              <td class="py-1 px-2 text-slate-400">{row.mag || '-'}</td>
+              <td class="py-1 px-2 text-slate-400 max-w-[200px]" title={row.bins_str}>
+                {#if row.bin_count}
+                  <span class="text-slate-300">{row.bin_count}</span>
+                  <span class="text-slate-500 text-[10px] ml-1">{row.mag || Object.values(region.bins)[0]}</span>
+                {:else}
+                  -
+                {/if}
+              </td>
               <td class="py-1 px-2 text-center">
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-medium border {badge.color}">{badge.label}</span>
               </td>
@@ -303,6 +318,18 @@
             {/each}
           </div>
         </div>
+
+        <!-- Bin assignments -->
+        {#if expandedDetail.bins && Object.keys(expandedDetail.bins).length}
+          <div>
+            <h5 class="text-slate-500 mb-1 font-medium">Bin Assignments ({Object.keys(expandedDetail.bins).length})</h5>
+            {#each Object.entries(expandedDetail.bins) as [binner, binName]}
+              <div class="text-slate-300 mb-0.5">
+                <span class="text-slate-500">{binner}:</span> <span class="text-cyan-400">{binName}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
 
         <!-- Protoclusters -->
         {#if expandedDetail.protoclusters?.length}
