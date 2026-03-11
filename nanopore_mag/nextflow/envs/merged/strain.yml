@@ -13,7 +13,7 @@ dependencies:
   - seaborn-base
   - networkx
   - h5py
-  - biopython<1.83
+  - biopython
   - lmfit
   - tqdm
   - psutil
