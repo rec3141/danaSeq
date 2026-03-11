@@ -16,5 +16,6 @@ dependencies:
   - prodigal
   - scikit-learn
   - biopython
+  - skorch
   - pip
   - setuptools
