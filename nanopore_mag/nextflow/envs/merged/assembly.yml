@@ -1,0 +1,16 @@
+name: dana-mag-assembly
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - flye=2.9.5
+  - filtlong=0.3.1
+  - samtools>=1.17
+  - minimap2=2.28
+  - coverm
+  - bbmap>=39.12
+  - pigz
+  - metamdbg=1.3.1
+  - myloasm=0.4.0
+  - nextflow>=25.10.3
+  - openjdk>=17

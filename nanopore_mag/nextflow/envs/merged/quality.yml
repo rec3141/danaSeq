@@ -1,0 +1,22 @@
+name: dana-mag-quality
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # geNomad (tensorflow-based)
+  - genomad
+  # CheckM2 (tensorflow-based — shares TF with genomad)
+  - checkm2
+  - pyrodigal>=3.7
+  # CheckV
+  - checkv
+  # Whokaryote + tiara deps (installed via pip to avoid bioconda tiara pytorch<1.8 pin)
+  - pytorch-cpu
+  - python>=3.10
+  - prodigal
+  - scikit-learn
+  - biopython
+  - pip
+  - pip:
+    - whokaryote>=1.1.2
+    - tiara

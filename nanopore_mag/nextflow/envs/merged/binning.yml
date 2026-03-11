@@ -1,0 +1,42 @@
+name: dana-mag-binning
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # Binning tools
+  - metabat2=2.17
+  - maxbin2=2.2.7
+  - das_tool=1.1.7
+  # SemiBin + LorBin
+  - semibin=2.1.0
+  - pytorch-cpu
+  - biopython
+  # COMEBin deps (code installed via pip from fork)
+  - python>=3.10
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - bedtools
+  - bwa
+  - samtools
+  - prodigal
+  - hmmer
+  - fraggenescan
+  - pplacer
+  - scanpy
+  - networkx
+  - numba
+  - joblib
+  - leidenalg
+  - seaborn
+  - statsmodels
+  - click
+  - pyyaml
+  - tqdm
+  - pip
+  - pip:
+    - lorbin @ git+https://github.com/rec3141/LorBin.git
+    - hnswlib
+    # TODO: replace with forked COMEBin once tested
+    # - comebin @ git+https://github.com/rec3141/COMEBin.git

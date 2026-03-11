@@ -98,14 +98,19 @@ static double inv_normal(double p) {
 static void usage(const char* prog) {
     fprintf(stderr,
         "Usage: %s [options] [input.fastq.gz ...]\n"
-        "  -t, --target_bases N   Target bases to keep (0 = dedup only)\n"
-        "  -k, --keep_percent F   Keep top F%% of reads by score (1-100)\n"
-        "  -m, --min_length N     Minimum read length (default: 0)\n"
-        "  -w, --window_size N    Quality window size (default: 250)\n"
-        "  -D, --no_dedupe        Skip deduplication\n"
-        "  -o, --output FILE      Output file (default: stdout)\n"
+        "\n  Output thresholds (compatible with filtlong):\n"
+        "  -t, --target_bases N   Keep only the best reads up to this many total bases\n"
+        "  -p, --keep_percent F   Keep only this percentage of the best reads (1-100)\n"
+        "  --min_length N         Minimum length threshold (default: 0)\n"
+        "  --min_mean_q F         Minimum mean quality threshold (0-100, default: 0)\n"
+        "  --min_window_q F       Minimum window quality threshold (0-100, default: 0)\n"
+        "\n  Additional options:\n"
+        "  --window_size N        Quality scoring window (default: 250)\n"
+        "  -D, --no_dedupe        Skip deduplication (filtlong has no dedup)\n"
+        "  -o, --output FILE      Output file (default: stdout, .gz for gzipped)\n"
         "  -h, --help             Show this help\n"
-        "\nReads from stdin if no files given.\n", prog);
+        "\nReads from stdin if no files given.\n"
+        "Deduplication is ON by default (unique to fastq_filter).\n", prog);
 }
 
 int main(int argc, char** argv) {
@@ -114,14 +119,18 @@ int main(int argc, char** argv) {
     long long target_bases = 0;
     double keep_percent = 0.0;  // 0 = disabled
     int min_length = 0;
+    double min_mean_q = 0.0;
+    double min_window_q = 0.0;
     int window_size = 250;
     bool dedupe = true;
     const char* output_path = nullptr;
 
     static struct option long_opts[] = {
         {"target_bases",  required_argument, 0, 't'},
-        {"keep_percent",  required_argument, 0, 'k'},
+        {"keep_percent",  required_argument, 0, 'p'},
         {"min_length",    required_argument, 0, 'm'},
+        {"min_mean_q",    required_argument, 0, 'Q'},
+        {"min_window_q",  required_argument, 0, 'W'},
         {"window_size",   required_argument, 0, 'w'},
         {"no_dedupe",     no_argument,       0, 'D'},
         {"output",        required_argument, 0, 'o'},
@@ -130,11 +139,13 @@ int main(int argc, char** argv) {
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "t:k:m:w:Do:h", long_opts, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:p:m:w:Do:h", long_opts, nullptr)) != -1) {
         switch (c) {
             case 't': target_bases = atoll(optarg); break;
-            case 'k': keep_percent = atof(optarg); break;
+            case 'p': keep_percent = atof(optarg); break;
             case 'm': min_length = atoi(optarg); break;
+            case 'Q': min_mean_q = atof(optarg); break;
+            case 'W': min_window_q = atof(optarg); break;
             case 'w': window_size = atoi(optarg); break;
             case 'D': dedupe = false; break;
             case 'o': output_path = optarg; break;
@@ -145,6 +156,7 @@ int main(int argc, char** argv) {
 
     bool filter_by_bases = target_bases > 0;
     bool filter_by_pct = keep_percent > 0.0 && keep_percent < 100.0;
+    bool filter_by_qual = min_mean_q > 0.0 || min_window_q > 0.0;
     bool filtering = filter_by_bases || filter_by_pct;
 
     // For percentage mode, compute the z-score threshold for the target percentile.
@@ -205,7 +217,7 @@ int main(int argc, char** argv) {
     double threshold = 0.0;
 
     // Stats
-    long long total_reads = 0, dup_reads = 0, short_reads = 0;
+    long long total_reads = 0, dup_reads = 0, short_reads = 0, qual_reads = 0;
     long long accepted_reads = 0, accepted_bases = 0;
 
     // Score histograms (1000 bins from 0-100)
@@ -290,7 +302,34 @@ int main(int argc, char** argv) {
                 continue;
             }
 
-            // No filtering — just dedup and output
+            // Min quality thresholds (filtlong-compatible, applied before scoring)
+            if (filter_by_qual) {
+                double total_q = 0.0;
+                for (int i = 0; i < slen; i++)
+                    total_q += PHRED_LUT[(unsigned char)qual_buf[i]];
+                double mq = total_q / slen * 100.0;
+                if (mq < min_mean_q) { qual_reads++; continue; }
+                if (min_window_q > 0) {
+                    double wq;
+                    if (slen <= window_size) {
+                        wq = mq;
+                    } else {
+                        double wsum = 0.0;
+                        for (int i = 0; i < window_size; i++)
+                            wsum += PHRED_LUT[(unsigned char)qual_buf[i]];
+                        double min_wsum = wsum;
+                        for (int i = 1; i <= slen - window_size; i++) {
+                            wsum += PHRED_LUT[(unsigned char)qual_buf[i + window_size - 1]]
+                                  - PHRED_LUT[(unsigned char)qual_buf[i - 1]];
+                            if (wsum < min_wsum) min_wsum = wsum;
+                        }
+                        wq = min_wsum / window_size * 100.0;
+                    }
+                    if (wq < min_window_q) { qual_reads++; continue; }
+                }
+            }
+
+            // No score-based filtering — just dedup/length/quality and output
             if (!filtering) {
                 write_record(hdr_buf, hlen, seq_buf, slen, qual_buf, qlen);
                 accepted_reads++;
@@ -318,17 +357,15 @@ int main(int argc, char** argv) {
                 double score_std = (n_scored > 1) ? sqrt(score_m2 / n_scored) : 0;
                 if (score_std > 0) {
                     if (filter_by_pct) {
-                        // Percentage mode: use feedback to converge on target.
-                        // Current actual keep rate vs desired keep rate drives
-                        // the threshold percentile we target in the histogram.
+                        // Percentage mode: use histogram percentile with feedback.
+                        // Track by read count (not bases) for accurate percentages.
                         double target_frac = keep_percent / 100.0;
-                        double actual_frac = (scored_bases > 0)
-                            ? (double)accepted_bases / scored_bases : 1.0;
+                        double actual_frac = (n_scored > 0)
+                            ? (double)accepted_reads / n_scored : 1.0;
                         // Error: positive = keeping too much
                         double error = actual_frac - target_frac;
-                        // Compensate: if we're over, target a stricter percentile
-                        // Clamp compensation to avoid wild swings
-                        double comp_frac = target_frac - 2.0 * error;
+                        // Compensate with gain=3: if we're 5pp over, aim 15pp stricter
+                        double comp_frac = target_frac - 3.0 * error;
                         if (comp_frac < 0.01) comp_frac = 0.01;
                         if (comp_frac > 0.99) comp_frac = 0.99;
 
@@ -390,6 +427,8 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[fastq_filter] Dupes removed: %lld\n", dup_reads);
     if (short_reads)
         fprintf(stderr, "[fastq_filter] Below min_len: %lld\n", short_reads);
+    if (qual_reads)
+        fprintf(stderr, "[fastq_filter] Below min_q:   %lld\n", qual_reads);
     fprintf(stderr, "[fastq_filter] Accepted:     %lld reads, %lld bases (%.1f Gbp)\n",
             accepted_reads, accepted_bases, accepted_bases / 1e9);
     if (filtering) {
@@ -400,8 +439,8 @@ int main(int argc, char** argv) {
             fprintf(stderr, "[fastq_filter] Overshoot:    %+.1f%%\n", overshoot);
         }
         if (filter_by_pct) {
-            double actual_pct = scored_bases > 0 ? (double)accepted_bases / scored_bases * 100 : 0;
-            fprintf(stderr, "[fastq_filter] Target pct:   %.1f%% (actual: %.1f%%)\n",
+            double actual_pct = n_scored > 0 ? (double)accepted_reads / n_scored * 100 : 0;
+            fprintf(stderr, "[fastq_filter] Target pct:   %.1f%% of reads (actual: %.1f%%)\n",
                     keep_percent, actual_pct);
         }
         fprintf(stderr, "[fastq_filter] Final thresh: %.2f (mean=%.2f)\n",
