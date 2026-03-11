@@ -652,6 +652,16 @@ will warn but not fail. Check the sed patterns in `scripts/patch-phylocanvas.sh`
 ### Conda environment build fails
 Run `./install.sh --check` to diagnose. Ensure mamba is on PATH. Build requires internet access.
 
+**Channel order matters under strict priority:** Bioconda's official setup requires
+`conda-forge` listed **before** `bioconda` in the channel list. With `channel_priority: strict`
+(the modern default), the solver refuses to pull a dependency from a lower-priority channel
+even if no compatible version exists in the higher one. If a YAML has `bioconda` first and
+the package pins a dependency only available on conda-forge (e.g., antismash pins
+`biopython==1.81`), the solve will fail with a misleading "no viable options" error. The fix
+is to list `conda-forge` before `bioconda` in the YAML's `channels:` block. This matches
+bioconda's own recommended configuration (`conda config --add channels bioconda` then
+`conda config --add channels conda-forge`, which puts conda-forge highest).
+
 ### Depth values are wrong (overflow/negative)
 This pipeline uses CoverM instead of `jgi_summarize_bam_contig_depths` to avoid the MetaBAT2 integer overflow bug. If you see overflow values, ensure the CALCULATE_DEPTHS process is using CoverM (check `modules/mapping.nf`).
 

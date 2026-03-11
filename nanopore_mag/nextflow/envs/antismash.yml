@@ -1,6 +1,6 @@
 name: dana-mag-antismash
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
 dependencies:
   - antismash>=8.0
