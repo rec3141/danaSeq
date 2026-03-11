@@ -36,31 +36,40 @@ RUN mkdir -p /opt/checkm_data_stub/genome_tree \
 ENV CHECKM_DATA_DIR=/opt/checkm_data_stub
 
 # 1. Assembly: flye, minimap2, samtools, coverm, bbmap, metamdbg, myloasm
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-assembly  -f /tmp/envs/assembly.yml  && mamba clean -afy
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-assembly  -f /tmp/envs/assembly.yml
 
 # 2. Binning: metabat2, maxbin2, das_tool, semibin, comebin deps
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-binning   -f /tmp/envs/binning.yml   && mamba clean -afy
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-binning   -f /tmp/envs/binning.yml
 
 # 3. Quality: genomad, checkm2, checkv, whokaryote+tiara (pip)
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-quality   -f /tmp/envs/quality.yml   && mamba clean -afy
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-quality   -f /tmp/envs/quality.yml
 
 # 4. Annotate: bakta, emapper, diamond
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-annotate  -f /tmp/envs/annotate.yml  && mamba clean -afy
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-annotate  -f /tmp/envs/annotate.yml
 
 # 5. Classify: kaiju, kraken2, barrnap, vsearch, kofamscan, metaeuk
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-classify  -f /tmp/envs/classify.yml  && mamba clean -afy
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-classify  -f /tmp/envs/classify.yml
 
 # 6. Genomic: defensefinder, macsyfinder, integron_finder, dbcan
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-genomic   -f /tmp/envs/genomic.yml   && mamba clean -afy
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-genomic   -f /tmp/envs/genomic.yml
 
 # 7. Derep: galah, skani, sourmash, skder, drep
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-derep     -f /tmp/envs/derep.yml     && mamba clean -afy
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-derep     -f /tmp/envs/derep.yml
 
 # 8. Strain: strainy, instrain (pip), floria
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-strain    -f /tmp/envs/strain.yml    && mamba clean -afy
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-strain    -f /tmp/envs/strain.yml
 
 # 9. PathViz: pathway tools, viz, nodejs
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-pathviz   -f /tmp/envs/pathviz.yml   && mamba clean -afy
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-pathviz   -f /tmp/envs/pathviz.yml
 
 # Remove CheckM sentinel stub
 ENV CHECKM_DATA_DIR=

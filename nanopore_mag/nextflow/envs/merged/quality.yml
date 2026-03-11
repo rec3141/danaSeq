@@ -17,6 +17,7 @@ dependencies:
   - scikit-learn
   - biopython
   - pip
+  - setuptools
   - pip:
     - whokaryote @ git+https://github.com/LottePronk/whokaryote.git
     - tiara
