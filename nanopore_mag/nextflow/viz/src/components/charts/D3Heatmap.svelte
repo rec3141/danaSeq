@@ -33,9 +33,9 @@
     const orderedNames = cOrder.map(i => module_names[i]);
     const orderedMatrix = rOrder.map(ri => cOrder.map(ci => matrix[ri][ci]));
 
-    const cellW = 14;
+    const cellW = orderedMods.length > 60 ? 7 : 14;
     const cellH = 16;
-    const marginLeft = 180;
+    const marginLeft = 10;
     const marginTop = 260;
     const marginBottom = 20;
 
@@ -124,22 +124,7 @@
       }
     }
 
-    // Row labels (MAG names)
-    for (let i = 0; i < orderedMags.length; i++) {
-      const isSelected = selectedRow && orderedMags[i] === selectedRow;
-      svg.append('text')
-        .attr('x', marginLeft - 4)
-        .attr('y', marginTop + i * cellH + cellH / 2)
-        .attr('text-anchor', 'end')
-        .attr('dominant-baseline', 'central')
-        .attr('fill', isSelected ? '#22d3ee' : '#94a3b8')
-        .attr('font-size', '9px')
-        .attr('font-weight', isSelected ? 'bold' : 'normal')
-        .attr('font-family', 'JetBrains Mono, monospace')
-        .text(orderedMags[i])
-        .style('cursor', 'pointer')
-        .on('click', () => onRowClick && onRowClick(orderedMags[i]));
-    }
+    // Row labels moved to right-side annotations (see rowAnnotations rendering below)
 
     // Column labels (module names, rotated)
     for (let j = 0; j < orderedMods.length; j++) {
@@ -190,15 +175,20 @@
             : annoX + annoColOffsets[c] + colW / 2;
           const val = col.values[rOrder[i]] ?? '';
           const color = col.colorFn ? col.colorFn(val) : (isSelected ? '#22d3ee' : '#94a3b8');
-          svg.append('text')
+          const el = svg.append('text')
             .attr('x', xPos)
             .attr('y', marginTop + i * cellH + cellH / 2)
             .attr('text-anchor', align)
             .attr('dominant-baseline', 'central')
             .attr('fill', color)
-            .attr('font-size', '8px')
+            .attr('font-size', c === 0 ? '9px' : '8px')
+            .attr('font-weight', c === 0 && isSelected ? 'bold' : 'normal')
             .attr('font-family', 'JetBrains Mono, monospace')
             .text(val);
+          if (c === 0 && onRowClick) {
+            el.style('cursor', 'pointer')
+              .on('click', () => onRowClick(orderedMags[i]));
+          }
         }
       }
     }

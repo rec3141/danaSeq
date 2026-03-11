@@ -12,6 +12,13 @@
   ];
 
   let { activeTab = 'overview' } = $props();
+  let datasetName = $state(localStorage.getItem('datasetName') || '');
+  let editing = $state(false);
+
+  function save() {
+    editing = false;
+    localStorage.setItem('datasetName', datasetName);
+  }
 </script>
 
 <nav class="bg-slate-900 border-b border-slate-700 sticky top-0 z-50">
@@ -33,6 +40,27 @@
           <span class="font-semibold text-lg tracking-tight">d&#257;naSeq</span>
         </a>
         <span class="text-slate-400 text-sm">MAG Dashboard</span>
+        <span class="text-slate-600 text-sm mx-1">/</span>
+        {#if editing}
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            type="text"
+            bind:value={datasetName}
+            onblur={save}
+            onkeydown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { editing = false; } }}
+            autofocus
+            placeholder="dataset name"
+            class="bg-slate-800 text-slate-200 text-sm px-2 py-0.5 rounded border border-slate-600 focus:border-cyan-500 focus:outline-none w-48"
+          />
+        {:else}
+          <button
+            onclick={() => { editing = true; }}
+            class="text-slate-400 hover:text-slate-200 text-sm px-1 py-0.5 rounded hover:bg-slate-800 transition-colors"
+            title="Click to edit dataset name"
+          >
+            {datasetName || 'unnamed dataset'}
+          </button>
+        {/if}
       </div>
       <div class="flex gap-1 overflow-x-auto">
         {#each tabs as tab}
