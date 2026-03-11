@@ -1431,40 +1431,47 @@ def build_biosynthetic(results_dir, contig2bin):
             contig_id = rec.get('id', 'unknown')
 
             # Regions are in areas (antiSMASH 8.x)
-            for area in rec.get('areas', []):
+            for area_idx, area in enumerate(rec.get('areas', [])):
                 products = area.get('products', [])
                 start = area.get('start', 0)
                 end = area.get('end', 0)
 
-                # Protoclusters within this region
+                # Protoclusters within this region (dict with string keys or list)
                 protoclusters = []
-                for pc in area.get('protoclusters', []):
-                    protoclusters.append({
-                        'product': pc.get('product', 'unknown'),
-                        'category': pc.get('category', ''),
-                        'core_start': pc.get('core_start', 0),
-                        'core_end': pc.get('core_end', 0),
-                    })
+                pcs_raw = area.get('protoclusters', {})
+                pc_items = pcs_raw.values() if isinstance(pcs_raw, dict) else pcs_raw
+                for pc in pc_items:
+                    if isinstance(pc, dict):
+                        protoclusters.append({
+                            'product': pc.get('product', 'unknown'),
+                            'category': pc.get('category', ''),
+                            'core_start': pc.get('core_start', 0),
+                            'core_end': pc.get('core_end', 0),
+                        })
 
                 # Candidate clusters (combinations)
                 candidates = []
-                for cc in area.get('candidates', []):
-                    candidates.append({
-                        'kind': cc.get('kind', ''),
-                        'protoclusters': cc.get('protoclusters', []),
-                    })
+                cands_raw = area.get('candidates', [])
+                cand_items = cands_raw.values() if isinstance(cands_raw, dict) else cands_raw
+                for cc in cand_items:
+                    if isinstance(cc, dict):
+                        candidates.append({
+                            'kind': cc.get('kind', ''),
+                            'protoclusters': cc.get('protoclusters', []),
+                        })
 
-                # Known cluster matches from clusterblast
+                # Known cluster matches from clusterblast (match by 1-based region_number)
                 known_matches = []
+                region_num = area_idx + 1  # areas are 0-indexed, regions 1-indexed
                 cb_mod = rec.get('modules', {}).get('antismash.modules.clusterblast', {})
                 kc_results = cb_mod.get('knowncluster', {}).get('results', [])
                 for kcr in kc_results:
-                    region_num = kcr.get('region_number', 0)
-                    # Match by region number (1-based)
+                    if kcr.get('region_number', 0) != region_num:
+                        continue
                     for rank_entry in kcr.get('ranking', [])[:3]:  # top 3 matches
-                        if isinstance(rank_entry, list) and len(rank_entry) >= 2:
-                            desc = rank_entry[0]
-                            score = rank_entry[1]
+                        if isinstance(rank_entry, (list, tuple)) and len(rank_entry) >= 2:
+                            desc = rank_entry[0] if isinstance(rank_entry[0], dict) else {}
+                            score = rank_entry[1] if isinstance(rank_entry[1], dict) else {}
                             known_matches.append({
                                 'accession': desc.get('accession', ''),
                                 'description': desc.get('description', ''),
@@ -1472,17 +1479,18 @@ def build_biosynthetic(results_dir, contig2bin):
                                 'similarity': score.get('similarity', 0),
                             })
 
-                # Gene function annotations (biosynthetic/transport/regulatory)
+                # Gene function annotations from CDS qualifiers
                 gene_kinds = Counter()
                 for feat in rec.get('features', []):
-                    if feat.get('type') == 'CDS':
-                        loc = feat.get('location', {})
-                        feat_start = loc.get('start', 0) if isinstance(loc, dict) else 0
-                        feat_end = loc.get('end', 0) if isinstance(loc, dict) else 0
-                        if feat_start >= start and feat_end <= end:
-                            gk = feat.get('gene_kind', '')
-                            if gk:
-                                gene_kinds[gk] += 1
+                    if feat.get('type') != 'CDS':
+                        continue
+                    loc = feat.get('location', '')
+                    # Check if feature overlaps this region
+                    quals = feat.get('qualifiers', {})
+                    gk = quals.get('gene_kind', [None])
+                    gk_val = gk[0] if isinstance(gk, list) else gk
+                    if gk_val:
+                        gene_kinds[gk_val] += 1
 
                 for prod in products:
                     type_counts[prod] += 1
