@@ -125,7 +125,6 @@ process EMAPPER {
             --output "\$name" \\
             --override \\
             --dmnd_iterate no \\
-            --dmnd_algo ctg \\
             --temp_dir .
         chunk_exit=\$?
         set -e
