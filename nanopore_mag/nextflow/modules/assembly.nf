@@ -6,7 +6,7 @@
 process FLYE_ASSEMBLE {
     tag "flye-assemble"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-mag-flye"
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
     storeDir params.store_dir ? "${params.store_dir}/assembly/flye_assemble" : null
 
     input:
@@ -46,7 +46,7 @@ process FLYE_ASSEMBLE {
 process FLYE_FINISH {
     tag "flye-finish"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-mag-flye"
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
@@ -114,7 +114,7 @@ process FLYE_FINISH {
 process ASSEMBLY_METAMDBG {
     tag "co-assembly-metamdbg"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-mag-metamdbg"
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
@@ -219,7 +219,7 @@ process ASSEMBLY_METAMDBG {
 process ASSEMBLY_MYLOASM {
     tag "co-assembly-myloasm"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-mag-myloasm"
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
@@ -320,7 +320,7 @@ process ASSEMBLY_MYLOASM {
 process CALCULATE_TNF {
     tag "tnf"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-mag-flye"
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 

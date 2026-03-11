@@ -12,7 +12,7 @@
 process MAP_READS {
     tag "${meta.id}"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-mapping"
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/mapping", mode: 'copy', enabled: !params.store_dir, pattern: '*.{bam,bai}'
     storeDir params.store_dir ? "${params.store_dir}/mapping" : null
 
@@ -45,7 +45,7 @@ process MAP_READS {
 process CALCULATE_DEPTHS {
     tag "depths"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-mag-mapping"
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/mapping", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mapping" : null
 
@@ -78,7 +78,7 @@ process CALCULATE_DEPTHS {
 process CALCULATE_GENE_DEPTHS {
     tag "gene_depths"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-mag-mapping"
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/mapping", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mapping" : null
 

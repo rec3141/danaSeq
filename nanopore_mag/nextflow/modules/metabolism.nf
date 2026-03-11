@@ -7,7 +7,7 @@
 process KOFAMSCAN {
     tag "kofamscan"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-kofamscan"
+    conda "${projectDir}/conda-envs/dana-mag-classify"
     publishDir "${params.outdir}/metabolism/kofamscan", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/kofamscan" : null
 
@@ -53,7 +53,7 @@ process KOFAMSCAN {
 process EMAPPER {
     tag "emapper"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-emapper"
+    conda "${projectDir}/conda-envs/dana-mag-annotate"
     publishDir "${params.outdir}/metabolism/emapper", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/emapper" : null
 
@@ -176,7 +176,7 @@ process EMAPPER {
 process DBCAN {
     tag "dbcan"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-dbcan"
+    conda "${projectDir}/conda-envs/dana-mag-genomic"
     publishDir "${params.outdir}/metabolism/dbcan", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/dbcan" : null
 
@@ -239,7 +239,7 @@ process DBCAN {
 process MERGE_ANNOTATIONS {
     tag "merge"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-mag-kofamscan"
+    conda "${projectDir}/conda-envs/dana-mag-classify"
     publishDir "${params.outdir}/metabolism/merged", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/merged" : null
 
@@ -270,7 +270,7 @@ process MERGE_ANNOTATIONS {
 process MAP_TO_BINS {
     tag "map_to_bins"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-mag-kofamscan"
+    conda "${projectDir}/conda-envs/dana-mag-classify"
     publishDir "${params.outdir}/metabolism", mode: 'copy', enabled: !params.store_dir, pattern: 'per_mag'
     publishDir "${params.outdir}/metabolism/community", mode: 'copy', enabled: !params.store_dir, pattern: 'community_annotations.tsv'
     storeDir params.store_dir ? "${params.store_dir}/metabolism/per_mag" : null
@@ -305,7 +305,7 @@ process MAP_TO_BINS {
 process KEGG_MODULES {
     tag "kegg_modules"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-mag-kofamscan"
+    conda "${projectDir}/conda-envs/dana-mag-classify"
     publishDir "${params.outdir}/metabolism/modules", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/modules" : null
 
@@ -332,7 +332,7 @@ process KEGG_MODULES {
 process MINPATH {
     tag "minpath"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-mag-pathway"
+    conda "${projectDir}/conda-envs/dana-mag-pathviz"
     publishDir "${params.outdir}/metabolism/minpath", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/minpath" : null
 
@@ -344,7 +344,7 @@ process MINPATH {
     path("details/"),              emit: details, optional: true
 
     script:
-    def minpath_dir = "${projectDir}/conda-envs/dana-mag-pathway/share/minpath"
+    def minpath_dir = "${projectDir}/conda-envs/dana-mag-pathviz/share/minpath"
     """
     # MinPath (Ye & Doak, 2009): parsimony pathway reconstruction
     # Finds the minimum set of KEGG pathways consistent with observed KOs,
@@ -362,7 +362,7 @@ process MINPATH {
 process KEGG_DECODER {
     tag "kegg_decoder"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-mag-pathway"
+    conda "${projectDir}/conda-envs/dana-mag-pathviz"
     publishDir "${params.outdir}/metabolism/kegg_decoder", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/kegg_decoder" : null
 

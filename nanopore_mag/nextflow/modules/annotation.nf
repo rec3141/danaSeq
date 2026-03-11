@@ -56,7 +56,7 @@ process PROKKA_ANNOTATE {
 process BAKTA_BASIC {
     tag "bakta_basic"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-bakta"
+    conda "${projectDir}/conda-envs/dana-mag-annotate"
     publishDir "${params.outdir}/annotation/bakta/basic", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/basic" : null
 
@@ -103,7 +103,7 @@ process BAKTA_BASIC {
 process BAKTA_EXTRA {
     tag "bakta_extra"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-bakta"
+    conda "${projectDir}/conda-envs/dana-mag-annotate"
     publishDir "${params.outdir}/annotation/bakta/extra", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/extra" : null
 

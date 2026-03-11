@@ -81,10 +81,10 @@ container_run() {
 }
 
 # Detect conda/mamba — prefer pre-built envs, fall back to PATH (warning deferred to after arg parsing)
-if [ -x "${ENV_DIR}/dana-mag-flye/bin/mamba" ]; then
-    CONDA_CMD="${ENV_DIR}/dana-mag-flye/bin/mamba"
-elif [ -x "${ENV_DIR}/dana-mag-flye/bin/conda" ]; then
-    CONDA_CMD="${ENV_DIR}/dana-mag-flye/bin/conda"
+if [ -x "${ENV_DIR}/dana-mag-assembly/bin/mamba" ]; then
+    CONDA_CMD="${ENV_DIR}/dana-mag-assembly/bin/mamba"
+elif [ -x "${ENV_DIR}/dana-mag-assembly/bin/conda" ]; then
+    CONDA_CMD="${ENV_DIR}/dana-mag-assembly/bin/conda"
 elif command -v mamba &>/dev/null; then
     CONDA_CMD="mamba"
 elif command -v conda &>/dev/null; then
@@ -360,7 +360,7 @@ download_genomad() {
     if $USE_CONTAINER; then
         container_run genomad download-database /data/db || return 1
     else
-        local genomad_bin="${ENV_DIR}/dana-mag-genomad/bin/genomad"
+        local genomad_bin="${ENV_DIR}/dana-mag-quality/bin/genomad"
         if [ ! -x "${genomad_bin}" ]; then
             echo "[ERROR] geNomad not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -386,7 +386,7 @@ download_checkv() {
     if $USE_CONTAINER; then
         container_run checkv download_database /data/db/checkv_db || return 1
     else
-        local checkv_bin="${ENV_DIR}/dana-mag-checkv/bin/checkv"
+        local checkv_bin="${ENV_DIR}/dana-mag-quality/bin/checkv"
         if [ ! -x "${checkv_bin}" ]; then
             echo "[ERROR] CheckV not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -442,7 +442,7 @@ download_checkm() {
     rm -f "${tarball}"
 
     # Point each env that has checkm-genome to the shared data directory
-    for env_name in dana-mag-comebin dana-mag-drep; do
+    for env_name in dana-mag-binning dana-mag-derep; do
         local env_path="${ENV_DIR}/${env_name}"
         local checkm_bin="${env_path}/bin/checkm"
         if [ -x "${checkm_bin}" ]; then
@@ -471,7 +471,7 @@ download_checkm2() {
     if $USE_CONTAINER; then
         container_run checkm2 database --download --path /data/db/checkm2_db || return 1
     else
-        local checkm2_bin="${ENV_DIR}/dana-mag-checkm2/bin/checkm2"
+        local checkm2_bin="${ENV_DIR}/dana-mag-quality/bin/checkm2"
         if [ ! -x "${checkm2_bin}" ]; then
             echo "[ERROR] CheckM2 not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -508,7 +508,7 @@ download_kaiju() {
         # kaiju-makedb downloads sequences and builds the FM-index
         container_run sh -c 'cd /data/db/kaiju_db && kaiju-makedb -s refseq_ref' || return 1
     else
-        local kaiju_makedb="${ENV_DIR}/dana-mag-kaiju/bin/kaiju-makedb"
+        local kaiju_makedb="${ENV_DIR}/dana-mag-classify/bin/kaiju-makedb"
         if [ ! -x "${kaiju_makedb}" ]; then
             echo "[ERROR] Kaiju not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -539,7 +539,7 @@ download_macsyfinder() {
         container_run msf_data install --target /data/db/macsyfinder_models TXSScan || return 1
         container_run msf_data install --target /data/db/macsyfinder_models CONJScan || return 1
     else
-        local msf_data_bin="${ENV_DIR}/dana-mag-macsyfinder/bin/msf_data"
+        local msf_data_bin="${ENV_DIR}/dana-mag-genomic/bin/msf_data"
         if [ ! -x "${msf_data_bin}" ]; then
             echo "[ERROR] MacSyFinder not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -576,7 +576,7 @@ download_defensefinder() {
             container_run msf_data install --target /data/db/defensefinder_models CasFinder==3.1.0 || return 1
         fi
     else
-        local df_bin="${ENV_DIR}/dana-mag-defensefinder/bin/defense-finder"
+        local df_bin="${ENV_DIR}/dana-mag-genomic/bin/defense-finder"
         if [ ! -x "${df_bin}" ]; then
             echo "[ERROR] DefenseFinder not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -586,7 +586,7 @@ download_defensefinder() {
         # incompatible with macsyfinder 2.1.4 bundled with defense-finder 2.0.1
         # (https://github.com/mdmparis/defense-finder/issues/91)
         # Downgrade to 3.1.0 which uses compatible model definition version 2.0
-        local msf_data_bin="${ENV_DIR}/dana-mag-defensefinder/bin/macsydata"
+        local msf_data_bin="${ENV_DIR}/dana-mag-genomic/bin/macsydata"
         if [ -x "${msf_data_bin}" ]; then
             local cf_ver
             cf_ver=$(cat "${db_path}/CasFinder/metadata.yml" 2>/dev/null | grep -oP 'vers: \K.*' | head -1)
@@ -617,7 +617,7 @@ download_bakta() {
     if $USE_CONTAINER; then
         container_run bakta_db download --output /data/db/bakta --type full || return 1
     else
-        local bakta_env="${ENV_DIR}/dana-mag-bakta"
+        local bakta_env="${ENV_DIR}/dana-mag-annotate"
         if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
             echo "[ERROR] Bakta not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -645,7 +645,7 @@ download_bakta_light() {
     if $USE_CONTAINER; then
         container_run bakta_db download --output /data/db/bakta --type light || return 1
     else
-        local bakta_env="${ENV_DIR}/dana-mag-bakta"
+        local bakta_env="${ENV_DIR}/dana-mag-annotate"
         if [ ! -x "${bakta_env}/bin/bakta_db" ]; then
             echo "[ERROR] Bakta not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -702,7 +702,7 @@ download_eggnog() {
         # (eggnogdb.embl.de returns 404; eggnog5.embl.de is the working host)
         container_run sh -c "sed -i 's|eggnogdb.embl.de|eggnog5.embl.de|g' \$(which download_eggnog_data.py); download_eggnog_data.py --data_dir /data/db/eggnog_db -y" || return 1
     else
-        local emapper_bin="${ENV_DIR}/dana-mag-emapper/bin/download_eggnog_data.py"
+        local emapper_bin="${ENV_DIR}/dana-mag-annotate/bin/download_eggnog_data.py"
         if [ ! -x "${emapper_bin}" ]; then
             echo "[ERROR] eggNOG-mapper not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -738,12 +738,12 @@ download_dbcan() {
         for hmm_name in dbCAN.hmm dbCAN-sub.hmm STP.hmm TF.hmm; do
             if [ -f "${db_path}/${hmm_name}" ] && [ ! -f "${db_path}/${hmm_name}.h3i" ]; then
                 echo "  Pressing ${hmm_name}..."
-                container_run /opt/conda/envs/dana-mag-kofamscan/bin/hmmpress "/data/db/dbcan_db/${hmm_name}" || return 1
+                container_run /opt/conda/envs/dana-mag-genomic/bin/hmmpress "/data/db/dbcan_db/${hmm_name}" || return 1
             fi
         done
     else
-        local run_dbcan="${ENV_DIR}/dana-mag-dbcan/bin/run_dbcan"
-        local hmmpress="${ENV_DIR}/dana-mag-dbcan/bin/hmmpress"
+        local run_dbcan="${ENV_DIR}/dana-mag-genomic/bin/run_dbcan"
+        local hmmpress="${ENV_DIR}/dana-mag-genomic/bin/hmmpress"
         if [ ! -x "${run_dbcan}" ]; then
             echo "[ERROR] dbCAN not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
@@ -803,7 +803,7 @@ download_metaeuk() {
     if $USE_CONTAINER; then
         container_run metaeuk createdb /data/db/metaeuk_db/Eukaryota.fa /data/db/metaeuk_db/metaeuk_db || return 1
     else
-        local metaeuk_bin="${ENV_DIR}/dana-mag-metaeuk/bin/metaeuk"
+        local metaeuk_bin="${ENV_DIR}/dana-mag-classify/bin/metaeuk"
         if [ ! -x "${metaeuk_bin}" ]; then
             echo "[ERROR] MetaEuk not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1

@@ -5,49 +5,27 @@ set -euo pipefail
 # Dana MAG Assembly Pipeline - Conda Environment Installer
 # ============================================================================
 #
-# Creates isolated conda environments for the MAG assembly pipeline.
+# Creates conda environments for the MAG assembly pipeline.
 # All envs are prefix-installed under ./conda-envs/.
 #
-# Environments are needed because of dependency conflicts:
-#   dana-mag-flye    - Flye + Filtlong (Python version conflicts)
-#   dana-mag-mapping - minimap2, samtools (universal, no conflicts)
-#   dana-mag-semibin - SemiBin2, LorBin (ML dependencies: PyTorch isolated)
-#   dana-mag-comebin - COMEBin (cloned from fork; modern Python 3.11 + numpy/torch)
-#   dana-mag-binning - MetaBAT2, MaxBin2, DAS_Tool (binning suite)
-#   dana-mag-prokka  - Prokka gene annotation
-#   dana-mag-kofamscan - KofamScan (KEGG Orthology via adaptive HMM thresholds)
-#   dana-mag-emapper  - eggNOG-mapper (COG/GO/EC/KEGG/Pfam annotation)
-#   dana-mag-dbcan    - run_dbcan / dbCAN3 (CAZyme annotation)
-#   dana-mag-genomad  - geNomad (virus + plasmid + provirus detection)
-#   dana-mag-checkv   - CheckV (viral quality assessment)
-#   dana-mag-integron  - IntegronFinder (integron + gene cassette detection)
-#   dana-mag-islandpath  - IslandPath-DIMOB (genomic island detection)
-#   dana-mag-macsyfinder - MacSyFinder (secretion systems + conjugation)
-#   dana-mag-defensefinder - DefenseFinder (anti-phage defense systems)
-#   dana-mag-kaiju    - Kaiju (protein-level taxonomy via Prokka)
-#   dana-mag-kraken2  - Kraken2 (k-mer contig-level taxonomy)
-#   dana-mag-checkm2  - CheckM2 (quality assessment)
-#   dana-mag-tiara    - Tiara (deep learning eukaryotic contig classification)
-#   dana-mag-whokaryote - Whokaryote (gene structure-based eukaryotic classification)
-#   dana-mag-metaeuk  - MetaEuk (eukaryotic gene prediction, multi-exon)
-#   dana-mag-rrna     - barrnap + vsearch (rRNA gene detection + SILVA classification)
-#   dana-mag-pathway  - MinPath + KEGG-Decoder (parsimony pathways + biogeochemical heatmaps)
-#   dana-mag-marferret - DIAMOND + Python/pandas (MarFERReT marine eukaryotic classification)
-#   dana-mag-viz      - Node.js + Python/pandas/scipy (viz dashboard preprocessing + build)
+# Merged environments (9 envs, matching the slim Docker image):
+#   dana-mag-assembly  - Flye, metaMDBG, myloasm, BBMap, minimap2, samtools, filtlong
+#   dana-mag-binning   - MetaBAT2, MaxBin2, SemiBin2, COMEBin, LorBin, DAS_Tool
+#   dana-mag-quality   - geNomad, CheckV, CheckM2, Tiara, Whokaryote
+#   dana-mag-annotate  - Bakta, eggNOG-mapper, MarFERReT/DIAMOND
+#   dana-mag-classify  - Kaiju, Kraken2, barrnap/vsearch, KofamScan, MetaEuk
+#   dana-mag-genomic   - IntegronFinder, IslandPath, MacSyFinder, DefenseFinder, dbCAN
+#   dana-mag-pathviz   - MinPath, KEGG-Decoder, viz dashboard (Node.js + Python)
+#   dana-mag-strain    - Strainy, Floria, InStrain
+#   dana-mag-derep     - galah, skani, sourmash
 #
-#   dana-mag-metamdbg  - metaMDBG / nanoMDBG (de Bruijn graph ONT metagenome assembler)
-#   dana-mag-myloasm   - myloasm (high-resolution ONT strain assembler)
-#   dana-mag-derep     - galah, skani, sourmash (fast MAG dereplication + ANI + sketching)
-#   dana-mag-drep      - dRep (established MAG dereplication; heavy deps, isolated)
-#   dana-mag-instrain  - InStrain (strain-level population genomics; ancient biopython pin)
-#   dana-mag-strainy   - Strainy (strain-aware assembly from long reads)
-#   dana-mag-floria    - Floria (strain-aware phasing from long reads)
-#   dana-mag-skder     - skDER (fast skani-based dereplication; Python 3.10 pin)
-#   dana-mag-binette   - Binette (consensus bin refinement via set operations + CheckM2)
-#   dana-mag-magscot   - MAGScoT (consensus bin refinement via marker gene scoring)
-#
-# BBMap (for optional dedupe) is shared with the realtime pipeline via
-# symlinked YAML; its env is named dana-bbmap.
+# Standalone environments (too large or conflicting to merge):
+#   dana-mag-prokka    - Prokka gene annotation
+#   dana-mag-gtdbtk    - GTDB-Tk phylogenetic classification
+#   dana-mag-vamb      - VAMB variational autoencoder binning
+#   dana-mag-binette   - Binette consensus refinement
+#   dana-mag-magscot   - MAGScoT marker-gene consensus refinement
+#   dana-mag-antismash - antiSMASH secondary metabolite prediction
 #
 # Usage:
 #   ./install.sh              # Install all environments
@@ -60,7 +38,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_DIR="${SCRIPT_DIR}/conda-envs"
-ENVS_YAML_DIR="${SCRIPT_DIR}/envs"
+MERGED_YAML_DIR="${SCRIPT_DIR}/envs/merged"
+STANDALONE_YAML_DIR="${SCRIPT_DIR}/envs"
 
 # Detect conda/mamba
 if command -v mamba &>/dev/null; then
@@ -93,113 +72,62 @@ done
 # Environment definitions
 # ============================================================================
 
-# Ordered list of YAML files to install
-ENV_YAMLS=(
-    flye.yml
-    mapping.yml
-    semibin.yml
+# Merged environments — installed from envs/merged/*.yml
+MERGED_YAMLS=(
+    assembly.yml
     binning.yml
-    prokka.yml
-    bakta.yml
-    kofamscan.yml
-    emapper.yml
-    dbcan.yml
-    genomad.yml
-    checkv.yml
-    integron.yml
-    islandpath.yml
-    macsyfinder.yml
-    defensefinder.yml
-    kaiju.yml
-    kraken2.yml
-    checkm2.yml
-    gtdbtk.yml
-    tiara.yml
-    whokaryote.yml
-    metaeuk.yml
-    rrna.yml
-    pathway.yml
-    marferret.yml
-    bbmap.yml
-    viz.yml
-    metamdbg.yml
-    myloasm.yml
+    quality.yml
+    annotate.yml
+    classify.yml
+    genomic.yml
+    pathviz.yml
+    strain.yml
     derep.yml
-    drep.yml
-    instrain.yml
-    strainy.yml
-    floria.yml
-    skder.yml
-    comebin.yml
+)
+
+# Standalone environments — installed from envs/*.yml
+STANDALONE_YAMLS=(
+    prokka.yml
+    gtdbtk.yml
     vamb.yml
     binette.yml
     magscot.yml
+    antismash.yml
 )
 
 # Which tool binary to check for each environment
 declare -A ENV_CHECK=(
-    [dana-mag-flye]="flye"
-    [dana-mag-mapping]="minimap2"
-    [dana-mag-semibin]="SemiBin2"
+    # Merged envs
+    [dana-mag-assembly]="flye"
     [dana-mag-binning]="metabat2"
-    [dana-mag-comebin]="run_comebin.sh"
-    [dana-mag-prokka]="prokka"
-    [dana-mag-bakta]="bakta"
-    [dana-mag-kofamscan]="exec_annotation"
-    [dana-mag-emapper]="emapper.py"
-    [dana-mag-dbcan]="run_dbcan"
-    [dana-mag-genomad]="genomad"
-    [dana-mag-checkv]="checkv"
-    [dana-mag-integron]="integron_finder"
-    [dana-mag-islandpath]="hmmscan"
-    [dana-mag-macsyfinder]="macsyfinder"
-    [dana-mag-defensefinder]="defense-finder"
-    [dana-mag-kaiju]="kaiju"
-    [dana-mag-kraken2]="kraken2"
-    [dana-mag-checkm2]="checkm2"
-    [dana-mag-gtdbtk]="gtdbtk"
-    [dana-mag-tiara]="tiara"
-    [dana-mag-whokaryote]="whokaryote.py"
-    [dana-mag-metaeuk]="metaeuk"
-    [dana-mag-rrna]="barrnap"
-    [dana-mag-pathway]="KEGG-decoder"
-    [dana-mag-marferret]="diamond"
-    [dana-bbmap]="bbduk.sh"
-    [dana-mag-viz]="node"
-    [dana-mag-metamdbg]="metaMDBG"
-    [dana-mag-myloasm]="myloasm"
+    [dana-mag-quality]="genomad"
+    [dana-mag-annotate]="bakta"
+    [dana-mag-classify]="kaiju"
+    [dana-mag-genomic]="integron_finder"
+    [dana-mag-pathviz]="KEGG-decoder"
+    [dana-mag-strain]="inStrain"
     [dana-mag-derep]="galah"
-    [dana-mag-drep]="dRep"
-    [dana-mag-instrain]="inStrain"
-    [dana-mag-strainy]="strainy"
-    [dana-mag-floria]="floria"
-    [dana-mag-skder]="skder"
+    # Standalone envs
+    [dana-mag-prokka]="prokka"
+    [dana-mag-gtdbtk]="gtdbtk"
     [dana-mag-vamb]="vamb"
     [dana-mag-binette]="binette"
     [dana-mag-magscot]="MAGScoT.R"
+    [dana-mag-antismash]="antismash"
 )
 
-# Additional binaries to verify
+# Additional binaries to verify per env
 declare -A ENV_EXTRAS=(
-    [dana-mag-flye]="filtlong nextflow java"
-    [dana-mag-mapping]="samtools"
-    [dana-mag-semibin]="LorBin"
-    [dana-mag-comebin]="gen_cov_file.sh"
-    [dana-mag-binning]="run_MaxBin.pl DAS_Tool jgi_summarize_bam_contig_depths"
-    [dana-mag-viz]="npm python3"
+    [dana-mag-assembly]="filtlong minimap2 samtools bbduk.sh metaMDBG myloasm nextflow java"
+    [dana-mag-binning]="SemiBin2 LorBin run_MaxBin.pl DAS_Tool jgi_summarize_bam_contig_depths"
+    [dana-mag-quality]="checkm2 checkv tiara"
+    [dana-mag-annotate]="emapper.py diamond"
+    [dana-mag-classify]="kraken2 barrnap exec_annotation metaeuk"
+    [dana-mag-genomic]="hmmscan macsyfinder defense-finder run_dbcan"
+    [dana-mag-pathviz]="node npm python3"
+    [dana-mag-strain]="strainy floria"
     [dana-mag-derep]="skani sourmash"
 )
-
-yaml_to_envname() {
-    local yaml="$1"
-    local base="${yaml%.yml}"
-    # bbmap.yml -> dana-bbmap (matches realtime pipeline)
-    if [[ "$base" == "bbmap" ]]; then
-        echo "dana-bbmap"
-    else
-        echo "dana-mag-${base}"
-    fi
-}
 
 # ============================================================================
 # Actions
@@ -207,23 +135,24 @@ yaml_to_envname() {
 
 do_install() {
     mkdir -p "${ENV_DIR}"
-    local total=${#ENV_YAMLS[@]}
+    local total=$(( ${#MERGED_YAMLS[@]} + ${#STANDALONE_YAMLS[@]} ))
     local count=0
     local failed=0
 
     echo ""
     echo "Installing ${total} conda environments into: ${ENV_DIR}"
-    echo "Using pinned YAML files from: ${ENVS_YAML_DIR}"
+    echo "  Merged envs from: ${MERGED_YAML_DIR}"
+    echo "  Standalone envs from: ${STANDALONE_YAML_DIR}"
     echo ""
 
-    for yaml in "${ENV_YAMLS[@]}"; do
+    # --- Install merged environments ---
+    for yaml in "${MERGED_YAMLS[@]}"; do
         count=$((count + 1))
-        local env_name
-        env_name=$(yaml_to_envname "$yaml")
+        local env_name="dana-mag-${yaml%.yml}"
         local env_path="${ENV_DIR}/${env_name}"
-        local yaml_path="${ENVS_YAML_DIR}/${yaml}"
+        local yaml_path="${MERGED_YAML_DIR}/${yaml}"
 
-        echo "[$count/$total] ${env_name} (from ${yaml})"
+        echo "[$count/$total] ${env_name} (merged, from ${yaml})"
 
         if [[ ! -f "${yaml_path}" ]]; then
             echo "  [ERROR] YAML file not found: ${yaml_path}" >&2
@@ -249,86 +178,47 @@ do_install() {
         fi
         rm -f "${log_file}"
 
-        # Post-install: ensure conda is on PATH for Nextflow env activation.
-        # Nextflow's .command.run calls `conda info --json` to activate prefix envs.
-        # The flye env hosts Nextflow and its bin/ is on PATH for all spawned processes.
-        if [[ "${env_name}" == "dana-mag-flye" ]]; then
-            local conda_bin
-            conda_bin=$(which conda 2>/dev/null || echo "")
-            if [[ -n "${conda_bin}" && ! -e "${env_path}/bin/conda" ]]; then
-                ln -sf "${conda_bin}" "${env_path}/bin/conda"
-                echo "  Symlinked conda into flye env for Nextflow activation"
-            fi
+        # Post-install hooks for merged envs
+        post_install_merged "${env_name}" "${env_path}"
+
+        echo "  Done"
+    done
+
+    # --- Install standalone environments ---
+    for yaml in "${STANDALONE_YAMLS[@]}"; do
+        count=$((count + 1))
+        local env_name="dana-mag-${yaml%.yml}"
+        local env_path="${ENV_DIR}/${env_name}"
+        local yaml_path="${STANDALONE_YAML_DIR}/${yaml}"
+
+        echo "[$count/$total] ${env_name} (standalone, from ${yaml})"
+
+        if [[ ! -f "${yaml_path}" ]]; then
+            echo "  [ERROR] YAML file not found: ${yaml_path}" >&2
+            failed=$((failed + 1))
+            continue
         fi
 
-        # Post-install: clone COMEBin fork and wire up bin/ scripts
-        if [[ "${env_name}" == "dana-mag-comebin" ]]; then
-            echo "  Installing COMEBin from fork..."
-            local comebin_repo="https://github.com/rec3141/COMEBin.git"
-            local comebin_branch="codex/recent-dependencies-fix"
-            local comebin_dir="${env_path}/share/COMEBin"
-            git clone --depth 1 -b "${comebin_branch}" "${comebin_repo}" "${comebin_dir}" \
-                > /dev/null 2>&1
-            # Create wrapper that cd's into the COMEBin source dir and runs the
-            # inner run_comebin.sh (which uses pwd-relative paths to ../auxiliary/).
-            cat > "${env_path}/bin/run_comebin.sh" <<'WRAPPER'
-#!/usr/bin/env bash
-# Resolve path args (-a/-o/-p) in caller's CWD before cd into source tree
-COMEBIN_ROOT="$(dirname "$(dirname "$(readlink -f "$0")")")/share/COMEBin/COMEBin"
-ORIG_CWD="$(pwd)"
-RESOLVED_ARGS=()
-while (( $# )); do
-    case "$1" in
-        -a|-o|-p) RESOLVED_ARGS+=("$1"); shift
-                  RESOLVED_ARGS+=("$(cd "${ORIG_CWD}" && realpath "$1")"); shift ;;
-        *) RESOLVED_ARGS+=("$1"); shift ;;
-    esac
-done
-cd "${COMEBIN_ROOT}" && exec bash run_comebin.sh "${RESOLVED_ARGS[@]}"
-WRAPPER
-            chmod +x "${env_path}/bin/run_comebin.sh"
-            if [[ -f "${comebin_dir}/COMEBin/scripts/gen_cov_file.sh" ]]; then
-                ln -sf "${comebin_dir}/COMEBin/scripts/gen_cov_file.sh" "${env_path}/bin/gen_cov_file.sh"
-                chmod +x "${env_path}/bin/gen_cov_file.sh"
-            fi
-            echo "  COMEBin installed from ${comebin_repo}@${comebin_branch}"
+        if [[ -d "${env_path}/conda-meta" ]]; then
+            echo "  Already exists, skipping (use --clean to rebuild)"
+            continue
         fi
 
-        # Post-install: clone MAGScoT and wire up MAGScoT.R into bin/
-        if [[ "${env_name}" == "dana-mag-magscot" ]]; then
-            echo "  Installing MAGScoT from GitHub..."
-            local magscot_repo="https://github.com/ikmb/MAGScoT.git"
-            local magscot_dir="${env_path}/share/MAGScoT"
-            git clone --depth 1 "${magscot_repo}" "${magscot_dir}" \
-                > /dev/null 2>&1
-            if [[ -f "${magscot_dir}/MAGScoT.R" ]]; then
-                ln -sf "${magscot_dir}/MAGScoT.R" "${env_path}/bin/MAGScoT.R"
-                chmod +x "${env_path}/bin/MAGScoT.R"
-                # MAGScoT.R resolves profiles/ relative to its own path (funr::sys.script)
-                ln -sf "${magscot_dir}/profiles" "${env_path}/bin/profiles"
-            fi
-            echo "  MAGScoT installed from ${magscot_repo}"
+        echo "  Creating environment from ${yaml}..."
+        local log_file
+        log_file=$(mktemp)
+        if ! ${CONDA_CMD} env create -y -p "${env_path}" -f "${yaml_path}" \
+            > "${log_file}" 2>&1; then
+            echo "  [ERROR] Failed to create ${env_name}" >&2
+            sed 's/^/  /' "${log_file}" >&2
+            rm -f "${log_file}"
+            failed=$((failed + 1))
+            continue
         fi
+        rm -f "${log_file}"
 
-        # Post-install: install KEGGDecoder + clone MinPath into the pathway env
-        if [[ "${env_name}" == "dana-mag-pathway" ]]; then
-            # KEGGDecoder via pip (--no-deps: matplotlib already from conda)
-            echo "  Installing KEGGDecoder via pip..."
-            "${env_path}/bin/pip" install --no-deps KEGGDecoder > /dev/null 2>&1
-            echo "  KEGGDecoder installed"
-
-            # Clone MinPath
-            local minpath_dir="${env_path}/share/minpath"
-            if [[ ! -d "${minpath_dir}" ]]; then
-                echo "  Cloning MinPath..."
-                git clone --depth 1 https://github.com/mgtools/MinPath.git "${minpath_dir}" \
-                    > /dev/null 2>&1
-                chmod +x "${minpath_dir}/MinPath.py" 2>/dev/null || true
-                echo "  MinPath installed to ${minpath_dir}"
-            else
-                echo "  MinPath already present at ${minpath_dir}"
-            fi
-        fi
+        # Post-install hooks for standalone envs
+        post_install_standalone "${env_name}" "${env_path}"
 
         echo "  Done"
     done
@@ -346,6 +236,113 @@ WRAPPER
     fi
 }
 
+post_install_merged() {
+    local env_name="$1"
+    local env_path="$2"
+
+    # Ensure conda is on PATH for Nextflow env activation.
+    # Nextflow's .command.run calls `conda info --json` to activate prefix envs.
+    if [[ "${env_name}" == "dana-mag-assembly" ]]; then
+        local conda_bin
+        conda_bin=$(which conda 2>/dev/null || echo "")
+        if [[ -n "${conda_bin}" && ! -e "${env_path}/bin/conda" ]]; then
+            ln -sf "${conda_bin}" "${env_path}/bin/conda"
+            echo "  Symlinked conda into assembly env for Nextflow activation"
+        fi
+    fi
+
+    # Install pip packages that can't be in the conda YAML (build isolation issues)
+    if [[ "${env_name}" == "dana-mag-binning" ]]; then
+        echo "  Installing LorBin via pip..."
+        "${env_path}/bin/pip" install --no-deps \
+            'lorbin @ git+https://github.com/rec3141/LorBin.git' hnswlib \
+            > /dev/null 2>&1
+        echo "  LorBin installed"
+
+        # Clone COMEBin fork and wire up bin/ scripts
+        echo "  Installing COMEBin from fork..."
+        local comebin_repo="https://github.com/rec3141/COMEBin.git"
+        local comebin_branch="codex/recent-dependencies-fix"
+        local comebin_dir="${env_path}/share/COMEBin"
+        git clone --depth 1 -b "${comebin_branch}" "${comebin_repo}" "${comebin_dir}" \
+            > /dev/null 2>&1
+        cat > "${env_path}/bin/run_comebin.sh" <<'WRAPPER'
+#!/usr/bin/env bash
+# Resolve path args (-a/-o/-p) in caller's CWD before cd into source tree
+COMEBIN_ROOT="$(dirname "$(dirname "$(readlink -f "$0")")")/share/COMEBin/COMEBin"
+ORIG_CWD="$(pwd)"
+RESOLVED_ARGS=()
+while (( $# )); do
+    case "$1" in
+        -a|-o|-p) RESOLVED_ARGS+=("$1"); shift
+                  RESOLVED_ARGS+=("$(cd "${ORIG_CWD}" && realpath "$1")"); shift ;;
+        *) RESOLVED_ARGS+=("$1"); shift ;;
+    esac
+done
+cd "${COMEBIN_ROOT}" && exec bash run_comebin.sh "${RESOLVED_ARGS[@]}"
+WRAPPER
+        chmod +x "${env_path}/bin/run_comebin.sh"
+        if [[ -f "${comebin_dir}/COMEBin/scripts/gen_cov_file.sh" ]]; then
+            ln -sf "${comebin_dir}/COMEBin/scripts/gen_cov_file.sh" "${env_path}/bin/gen_cov_file.sh"
+            chmod +x "${env_path}/bin/gen_cov_file.sh"
+        fi
+        echo "  COMEBin installed from ${comebin_repo}@${comebin_branch}"
+    fi
+
+    if [[ "${env_name}" == "dana-mag-quality" ]]; then
+        echo "  Installing whokaryote + tiara via pip..."
+        "${env_path}/bin/pip" install --no-deps \
+            'whokaryote @ git+https://github.com/LottePronk/whokaryote.git' tiara \
+            > /dev/null 2>&1
+        echo "  whokaryote + tiara installed"
+    fi
+
+    if [[ "${env_name}" == "dana-mag-strain" ]]; then
+        echo "  Installing inStrain via pip..."
+        "${env_path}/bin/pip" install --no-deps \
+            'instrain @ git+https://github.com/rec3141/inStrain.git@fix-biopython-compat' \
+            > /dev/null 2>&1
+        echo "  inStrain installed"
+    fi
+
+    if [[ "${env_name}" == "dana-mag-pathviz" ]]; then
+        # KEGGDecoder via pip (--no-deps: matplotlib already from conda)
+        echo "  Installing KEGGDecoder via pip..."
+        "${env_path}/bin/pip" install --no-deps KEGGDecoder > /dev/null 2>&1
+        echo "  KEGGDecoder installed"
+
+        # Clone MinPath
+        local minpath_dir="${env_path}/share/minpath"
+        if [[ ! -d "${minpath_dir}" ]]; then
+            echo "  Cloning MinPath..."
+            git clone --depth 1 https://github.com/mgtools/MinPath.git "${minpath_dir}" \
+                > /dev/null 2>&1
+            chmod +x "${minpath_dir}/MinPath.py" 2>/dev/null || true
+            echo "  MinPath installed to ${minpath_dir}"
+        fi
+    fi
+}
+
+post_install_standalone() {
+    local env_name="$1"
+    local env_path="$2"
+
+    # Clone MAGScoT and wire up MAGScoT.R into bin/
+    if [[ "${env_name}" == "dana-mag-magscot" ]]; then
+        echo "  Installing MAGScoT from GitHub..."
+        local magscot_repo="https://github.com/ikmb/MAGScoT.git"
+        local magscot_dir="${env_path}/share/MAGScoT"
+        git clone --depth 1 "${magscot_repo}" "${magscot_dir}" \
+            > /dev/null 2>&1
+        if [[ -f "${magscot_dir}/MAGScoT.R" ]]; then
+            ln -sf "${magscot_dir}/MAGScoT.R" "${env_path}/bin/MAGScoT.R"
+            chmod +x "${env_path}/bin/MAGScoT.R"
+            ln -sf "${magscot_dir}/profiles" "${env_path}/bin/profiles"
+        fi
+        echo "  MAGScoT installed from ${magscot_repo}"
+    fi
+}
+
 do_check() {
     echo ""
     echo "Checking conda environments in: ${ENV_DIR}"
@@ -354,11 +351,18 @@ do_check() {
     local ok=0
     local missing=0
 
-    for yaml in "${ENV_YAMLS[@]}"; do
-        local env_name
-        env_name=$(yaml_to_envname "$yaml")
+    # Check all envs (merged + standalone)
+    local all_envs=()
+    for yaml in "${MERGED_YAMLS[@]}"; do
+        all_envs+=("dana-mag-${yaml%.yml}")
+    done
+    for yaml in "${STANDALONE_YAMLS[@]}"; do
+        all_envs+=("dana-mag-${yaml%.yml}")
+    done
+
+    for env_name in "${all_envs[@]}"; do
         local env_path="${ENV_DIR}/${env_name}"
-        local check_bin="${ENV_CHECK[$env_name]}"
+        local check_bin="${ENV_CHECK[$env_name]:-}"
 
         printf "  %-25s" "${env_name}"
 
@@ -368,14 +372,17 @@ do_check() {
             continue
         fi
 
-        if [[ -x "${env_path}/bin/${check_bin}" ]]; then
+        if [[ -n "${check_bin}" && -x "${env_path}/bin/${check_bin}" ]]; then
             local version
             version=$("${env_path}/bin/${check_bin}" --version 2>&1 | head -1) || version="(installed)"
             echo "OK  ${version}"
             ok=$((ok + 1))
-        else
+        elif [[ -n "${check_bin}" ]]; then
             echo "BROKEN (${check_bin} not found in env)"
             missing=$((missing + 1))
+        else
+            echo "OK  (no check binary defined)"
+            ok=$((ok + 1))
         fi
     done
 
@@ -410,9 +417,15 @@ do_clean() {
     echo ""
 
     local total=0
-    for yaml in "${ENV_YAMLS[@]}"; do
-        local env_name
-        env_name=$(yaml_to_envname "$yaml")
+    local all_envs=()
+    for yaml in "${MERGED_YAMLS[@]}"; do
+        all_envs+=("dana-mag-${yaml%.yml}")
+    done
+    for yaml in "${STANDALONE_YAMLS[@]}"; do
+        all_envs+=("dana-mag-${yaml%.yml}")
+    done
+
+    for env_name in "${all_envs[@]}"; do
         if [[ -d "${ENV_DIR}/${env_name}" ]]; then
             echo "  ${env_name}"
             total=$((total + 1))
@@ -427,9 +440,7 @@ do_clean() {
     echo ""
     read -rp "Remove ${total} environments? [y/N] " confirm
     if [[ "${confirm}" =~ ^[Yy] ]]; then
-        for yaml in "${ENV_YAMLS[@]}"; do
-            local env_name
-            env_name=$(yaml_to_envname "$yaml")
+        for env_name in "${all_envs[@]}"; do
             if [[ -d "${ENV_DIR}/${env_name}" ]]; then
                 echo "  Removing ${env_name}..."
                 rm -rf "${ENV_DIR}/${env_name}"

@@ -30,7 +30,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VIZ_DIR="${SCRIPT_DIR}/viz"
-CONDA_ENV="${SCRIPT_DIR}/conda-envs/dana-mag-viz"
+CONDA_ENV="${SCRIPT_DIR}/conda-envs/dana-mag-pathviz"
 
 # Defaults
 OUTDIR=""

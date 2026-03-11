@@ -17,7 +17,7 @@
 process GENOMAD_CLASSIFY {
     tag "genomad"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-genomad"
+    conda "${projectDir}/conda-envs/dana-mag-quality"
     publishDir "${params.outdir}/mge/genomad", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/genomad" : null
 
@@ -94,7 +94,7 @@ process GENOMAD_CLASSIFY {
 process CHECKV_QUALITY {
     tag "checkv"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-checkv"
+    conda "${projectDir}/conda-envs/dana-mag-quality"
     publishDir "${params.outdir}/mge/checkv", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/checkv" : null
 
@@ -160,7 +160,7 @@ process CHECKV_QUALITY {
 process INTEGRONFINDER {
     tag "integronfinder"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-integron"
+    conda "${projectDir}/conda-envs/dana-mag-genomic"
     publishDir "${params.outdir}/mge/integrons", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/integrons" : null
 
@@ -222,7 +222,7 @@ process INTEGRONFINDER {
 process ISLANDPATH_DIMOB {
     tag "islandpath"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-islandpath"
+    conda "${projectDir}/conda-envs/dana-mag-genomic"
     publishDir "${params.outdir}/mge/islandpath", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/islandpath" : null
 
@@ -235,7 +235,7 @@ process ISLANDPATH_DIMOB {
     path("genomic_islands.tsv"), emit: islands
 
     script:
-    def hmm_db = params.islandpath_hmm_db ? "${params.islandpath_hmm_db}/Pfam-A_mobgenes_201512_prok" : "${projectDir}/conda-envs/dana-mag-islandpath/opt/islandpath/hmmpfam/Pfam-A_mobgenes_201512_prok"
+    def hmm_db = params.islandpath_hmm_db ? "${params.islandpath_hmm_db}/Pfam-A_mobgenes_201512_prok" : "${projectDir}/conda-envs/dana-mag-genomic/opt/islandpath/hmmpfam/Pfam-A_mobgenes_201512_prok"
     """
     # IslandPath-DIMOB: detect genomic islands via dinucleotide bias + mobility genes
     # Python reimplementation — works directly with GFF + FASTA + FAA from Prokka
@@ -264,7 +264,7 @@ process ISLANDPATH_DIMOB {
 process MACSYFINDER {
     tag "macsyfinder"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-macsyfinder"
+    conda "${projectDir}/conda-envs/dana-mag-genomic"
     publishDir "${params.outdir}/mge/macsyfinder", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/macsyfinder" : null
 
@@ -331,7 +331,7 @@ process MACSYFINDER {
 process DEFENSEFINDER {
     tag "defensefinder"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-defensefinder"
+    conda "${projectDir}/conda-envs/dana-mag-genomic"
     publishDir "${params.outdir}/mge/defensefinder", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/mge/defensefinder" : null
 

@@ -549,7 +549,7 @@ echo ""
 mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
 # Resolve Python for the watcher (use viz conda env if available)
-WATCHER_PYTHON="${SCRIPT_DIR}/conda-envs/dana-mag-viz/bin/python3"
+WATCHER_PYTHON="${SCRIPT_DIR}/conda-envs/dana-mag-pathviz/bin/python3"
 if [[ ! -x "$WATCHER_PYTHON" ]]; then
     WATCHER_PYTHON="python3"
 fi

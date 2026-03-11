@@ -3,7 +3,7 @@
 process VIZ_PREPROCESS {
     tag "viz_preprocess"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-mag-viz"
+    conda "${projectDir}/conda-envs/dana-mag-pathviz"
     // No publishDir or storeDir — writes directly to outdir/viz/
 
     input:
@@ -25,8 +25,8 @@ process VIZ_PREPROCESS {
     """
     # Ensure the viz conda env's Python is used (has numpy, pandas, scipy, etc.)
     # In container mode, conda is disabled and the wrapper may not be on PATH
-    if [ -d /opt/conda/envs/dana-mag-viz/bin ]; then
-        export PATH="/opt/conda/envs/dana-mag-viz/bin:\$PATH"
+    if [ -d /opt/conda/envs/dana-mag-pathviz/bin ]; then
+        export PATH="/opt/conda/envs/dana-mag-pathviz/bin:\$PATH"
     fi
 
     # Copy Nextflow log for pipeline status parsing

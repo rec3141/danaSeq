@@ -5,7 +5,7 @@
 process TIARA_CLASSIFY {
     tag "tiara"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-tiara"
+    conda "${projectDir}/conda-envs/dana-mag-quality"
     publishDir "${params.outdir}/eukaryotic/tiara", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/eukaryotic/tiara" : null
 
@@ -50,7 +50,7 @@ process TIARA_CLASSIFY {
 process WHOKARYOTE_CLASSIFY {
     tag "whokaryote"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-whokaryote"
+    conda "${projectDir}/conda-envs/dana-mag-quality"
     publishDir "${params.outdir}/eukaryotic/whokaryote", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/eukaryotic/whokaryote" : null
 
@@ -93,7 +93,7 @@ process WHOKARYOTE_CLASSIFY {
 process METAEUK_PREDICT {
     tag "metaeuk"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-metaeuk"
+    conda "${projectDir}/conda-envs/dana-mag-classify"
     publishDir "${params.outdir}/eukaryotic/metaeuk", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/eukaryotic/metaeuk" : null
 
@@ -174,7 +174,7 @@ process METAEUK_PREDICT {
 process MARFERRET_CLASSIFY {
     tag "marferret"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-marferret"
+    conda "${projectDir}/conda-envs/dana-mag-annotate"
     publishDir "${params.outdir}/eukaryotic/marferret", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/eukaryotic/marferret" : null
 
