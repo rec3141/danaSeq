@@ -5,7 +5,7 @@
 
   const RANKS = ['domain', 'phylum', 'class', 'order', 'family', 'genus'];
   const SOURCE_LABELS = { kaiju: 'Kaiju', kraken2: 'Kraken2', rrna: 'rRNA', sendsketch: 'BBSketch' };
-  const BIN_FIELDS = ['bin', 'semibin_bin', 'metabat_bin', 'maxbin_bin', 'lorbin_bin', 'comebin_bin'];
+  const BIN_FIELDS = ['bin', 'semibin_bin', 'metabat_bin', 'maxbin_bin', 'lorbin_bin', 'comebin_bin', 'vamb_bin', 'vamb_tax_bin', 'binette_bin', 'magscot_bin'];
 
   let fullTaxString = $derived.by(() => {
     if (!contig) return '';

@@ -28,7 +28,7 @@
     return s * scale;
   }
 
-  const BIN_LABELS = { bin: 'DAS Tool', semibin_bin: 'SemiBin2', metabat_bin: 'MetaBAT2', maxbin_bin: 'MaxBin2', lorbin_bin: 'LorBin', comebin_bin: 'COMEBin' };
+  const BIN_LABELS = { bin: 'DAS Tool', semibin_bin: 'SemiBin2', metabat_bin: 'MetaBAT2', maxbin_bin: 'MaxBin2', lorbin_bin: 'LorBin', comebin_bin: 'COMEBin', vamb_bin: 'VAMB', vamb_tax_bin: 'VAMB-tax', binette_bin: 'Binette', magscot_bin: 'MAGScoT' };
 
   function hoverText(c, colorBy, sampleDepthData, selectedSample) {
     let tax = c.kaiju_phylum || c.kraken2_phylum || c.sendsketch_phylum || c.rrna_phylum || '?';

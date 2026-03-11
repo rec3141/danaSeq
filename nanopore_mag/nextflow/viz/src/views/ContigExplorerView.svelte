@@ -62,8 +62,8 @@
   });
 
   // Cycle group definitions
-  const binGroup =     { values: ['bin', 'semibin_bin', 'metabat_bin', 'maxbin_bin', 'lorbin_bin', 'comebin_bin'],
-                         labels: ['DAS Tool', 'SemiBin2', 'MetaBAT2', 'MaxBin2', 'LorBin', 'COMEBin'] };
+  const binGroup =     { values: ['bin', 'semibin_bin', 'metabat_bin', 'maxbin_bin', 'lorbin_bin', 'comebin_bin', 'vamb_bin', 'vamb_tax_bin', 'binette_bin', 'magscot_bin'],
+                         labels: ['DAS Tool', 'SemiBin2', 'MetaBAT2', 'MaxBin2', 'LorBin', 'COMEBin', 'VAMB', 'VAMB-tax', 'Binette', 'MAGScoT'] };
   const sourceGroup =  { values: ['kaiju', 'kraken2', 'sendsketch', 'rrna', 'genomad'],
                          labels: ['Kaiju', 'Kraken2', 'BBSketch', 'rRNA', 'geNomad'] };
   const rankGroup =    { values: ['domain', 'phylum', 'class', 'order', 'family', 'genus'],
@@ -260,7 +260,7 @@
     ...['kaiju', 'kraken2', 'sendsketch', 'rrna', 'genomad'].flatMap(s =>
       ['domain', 'phylum', 'class', 'order', 'family', 'genus'].map(r => `${s}_${r}`)
     ),
-    'bin', 'semibin_bin', 'metabat_bin', 'maxbin_bin', 'lorbin_bin', 'comebin_bin',
+    'bin', 'semibin_bin', 'metabat_bin', 'maxbin_bin', 'lorbin_bin', 'comebin_bin', 'vamb_bin', 'vamb_tax_bin', 'binette_bin', 'magscot_bin',
     'replicon', 'tiara', 'whokaryote',
   ];
 

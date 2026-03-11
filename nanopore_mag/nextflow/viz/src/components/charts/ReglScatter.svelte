@@ -18,7 +18,7 @@
   let hoveredIdx = -1;  // track hovered point for click
   let prevMode = null;  // track embedding mode to detect coordinate changes
 
-  const BIN_LABELS = { bin: 'DAS Tool', semibin_bin: 'SemiBin2', metabat_bin: 'MetaBAT2', maxbin_bin: 'MaxBin2', lorbin_bin: 'LorBin', comebin_bin: 'COMEBin' };
+  const BIN_LABELS = { bin: 'DAS Tool', semibin_bin: 'SemiBin2', metabat_bin: 'MetaBAT2', maxbin_bin: 'MaxBin2', lorbin_bin: 'LorBin', comebin_bin: 'COMEBin', vamb_bin: 'VAMB', vamb_tax_bin: 'VAMB-tax', binette_bin: 'Binette', magscot_bin: 'MAGScoT' };
   const BG = [15/255, 23/255, 42/255, 1]; // #0f172a
   const PALETTE = ['#22d3ee','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c',
                    '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8',

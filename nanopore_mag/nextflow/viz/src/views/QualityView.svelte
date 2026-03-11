@@ -23,15 +23,21 @@
     { key: 'maxbin',  label: 'MaxBin2' },
     { key: 'lorbin',  label: 'LorBin' },
     { key: 'comebin', label: 'COMEBin' },
+    { key: 'vamb',    label: 'VAMB' },
+    { key: 'vamb_tax', label: 'VAMB-tax' },
+    { key: 'binette', label: 'Binette' },
+    { key: 'magscot', label: 'MAGScoT' },
   ];
 
   const binnerColors = {
     dastool: '#22d3ee', semibin: '#22d3ee', metabat: '#34d399', maxbin: '#fbbf24',
-    lorbin: '#a78bfa', comebin: '#fb923c',
+    lorbin: '#a78bfa', comebin: '#fb923c', vamb: '#2dd4bf', vamb_tax: '#818cf8',
+    binette: '#f472b6', magscot: '#e879f9',
   };
   const binnerSymbols = {
     semibin: 'circle', metabat: 'square', maxbin: 'diamond',
-    lorbin: 'triangle-up', comebin: 'pentagon',
+    lorbin: 'triangle-up', comebin: 'pentagon', vamb: 'hexagon',
+    vamb_tax: 'hexagon2', binette: 'star', magscot: 'cross',
   };
 
   function toggleBinner(key) {
@@ -238,7 +244,8 @@
     if (binCtgs.length > 0) return binCtgs;
     // Try per-binner fields
     const binnerFields = { semibin: 'semibin_bin', metabat: 'metabat_bin', maxbin: 'maxbin_bin',
-                           lorbin: 'lorbin_bin', comebin: 'comebin_bin' };
+                           lorbin: 'lorbin_bin', comebin: 'comebin_bin', vamb: 'vamb_bin',
+                           vamb_tax: 'vamb_tax_bin', binette: 'binette_bin', magscot: 'magscot_bin' };
     for (const [, field] of Object.entries(binnerFields)) {
       binCtgs = allCtgs.filter(c => c[field] === selected);
       if (binCtgs.length > 0) return binCtgs;
@@ -381,6 +388,10 @@
     { key: 'maxbin',   prefix: 'maxbin_' },
     { key: 'lorbin',   prefix: 'lorbin_' },
     { key: 'comebin',  prefix: 'comebin_' },
+    { key: 'vamb',     prefix: 'vamb_' },
+    { key: 'vamb_tax', prefix: 'vamb_tax_' },
+    { key: 'binette',  prefix: 'binette_' },
+    { key: 'magscot',  prefix: 'magscot_' },
   ];
 
   function scgMagBinner(id) {
@@ -511,6 +522,12 @@
     };
 
     return [
+      {
+        label: 'Bin',
+        values: ids.map(id => id),
+        align: 'start',
+        width: 180,
+      },
       {
         label: 'Quality',
         values: ids.map(id => {
