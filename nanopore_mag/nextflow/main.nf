@@ -698,6 +698,9 @@ workflow {
         if (params.run_vamb) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB.out.fastas)
         }
+        if (params.run_vamb_tax && params.run_sendsketch) {
+            ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB_TAX.out.fastas)
+        }
         BINETTE_CONSENSUS(ch_assembly, ch_binner_fastas.collect())
     }
 
