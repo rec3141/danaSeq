@@ -77,12 +77,80 @@
     });
   });
 
+  // Sorting state
+  let sortKey = $state('similarity_val');
+  let sortDir = $state(-1); // -1 = desc, 1 = asc
+
+  function toggleSort(key) {
+    if (sortKey === key) sortDir = -sortDir;
+    else { sortKey = key; sortDir = key === 'contig' || key === 'products_str' || key === 'mag' ? 1 : -1; }
+  }
+
+  function sortIcon(key) {
+    if (sortKey !== key) return '';
+    return sortDir === 1 ? ' \u25B2' : ' \u25BC';
+  }
+
+  // Sorted regions for the table
+  let sortedRegions = $derived.by(() => {
+    if (!data?.regions) return [];
+    const rows = data.regions.map((r, i) => {
+      const best = r.known_matches?.[0];
+      const badge = noveltyBadge(r);
+      return {
+        _idx: i,
+        _region: r,
+        contig: r.contig,
+        products_str: r.products?.join(', ') || '?',
+        length: r.length,
+        mag: r.mag === '_unbinned' ? '' : r.mag,
+        novelty: badge.label,
+        best_match: best?.description || '',
+        similarity_val: best?.similarity ?? -1,
+      };
+    });
+    rows.sort((a, b) => {
+      let va = a[sortKey], vb = b[sortKey];
+      if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+      return ((va ?? 0) - (vb ?? 0)) * sortDir;
+    });
+    return rows;
+  });
+
   let expandedRegion = $state(null);
 
   let expandedDetail = $derived.by(() => {
     if (expandedRegion == null || !data?.regions) return null;
     return data.regions[expandedRegion] || null;
   });
+
+  // TSV export
+  function exportTSV() {
+    if (!data?.regions) return;
+    const header = ['contig', 'start', 'end', 'length_bp', 'type', 'mag', 'novelty', 'best_known_match', 'similarity_pct', 'match_accession', 'match_type', 'protoclusters', 'gene_biosynthetic', 'gene_transport', 'gene_regulatory', 'gene_other'].join('\t');
+    const lines = sortedRegions.map(row => {
+      const r = row._region;
+      const best = r.known_matches?.[0];
+      const badge = noveltyBadge(r);
+      const gk = r.gene_kinds || {};
+      return [
+        r.contig, r.start, r.end, r.length,
+        r.products?.join(';') || '',
+        r.mag === '_unbinned' ? '' : r.mag,
+        badge.label,
+        best?.description || '', best?.similarity ?? '', best?.accession || '', best?.cluster_type || '',
+        (r.protoclusters || []).map(p => p.product).join(';'),
+        gk['biosynthetic'] || 0, gk['transport'] || 0, gk['regulatory'] || 0, gk['other'] || 0,
+      ].join('\t');
+    });
+    const blob = new Blob([header + '\n' + lines.join('\n') + '\n'], { type: 'text/tab-separated-values' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'antismash_bgc_regions.tsv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   // Novelty classification
   function noveltyBadge(region) {
@@ -159,27 +227,35 @@
 
   <!-- All regions table -->
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-    <h3 class="text-sm font-medium text-slate-400 mb-2">All BGC Regions ({data.n_regions})</h3>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-medium text-slate-400">All BGC Regions ({data.n_regions})</h3>
+      <button
+        class="px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors text-xs"
+        onclick={exportTSV}
+        title="Export BGC regions as TSV"
+      >TSV</button>
+    </div>
     <div class="overflow-x-auto max-h-[500px] overflow-y-auto">
       <table class="w-full text-xs">
         <thead class="sticky top-0 bg-slate-800 z-10">
           <tr class="text-slate-500 border-b border-slate-700">
-            <th class="text-left py-1.5 px-2 font-medium">Contig</th>
-            <th class="text-left py-1.5 px-2 font-medium">Type</th>
-            <th class="text-right py-1.5 px-2 font-medium">Length</th>
-            <th class="text-left py-1.5 px-2 font-medium">MAG</th>
-            <th class="text-center py-1.5 px-2 font-medium">Novelty</th>
-            <th class="text-left py-1.5 px-2 font-medium">Best Known Match</th>
-            <th class="text-right py-1.5 px-2 font-medium">Similarity</th>
+            <th class="text-left py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('contig')}>Contig{sortIcon('contig')}</th>
+            <th class="text-left py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('products_str')}>Type{sortIcon('products_str')}</th>
+            <th class="text-right py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('length')}>Length{sortIcon('length')}</th>
+            <th class="text-left py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('mag')}>MAG{sortIcon('mag')}</th>
+            <th class="text-center py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('novelty')}>Novelty{sortIcon('novelty')}</th>
+            <th class="text-left py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('best_match')}>Best Known Match{sortIcon('best_match')}</th>
+            <th class="text-right py-1.5 px-2 font-medium cursor-pointer select-none hover:text-slate-300" onclick={() => toggleSort('similarity_val')}>Similarity{sortIcon('similarity_val')}</th>
           </tr>
         </thead>
         <tbody>
-          {#each data.regions as region, i}
+          {#each sortedRegions as row}
+            {@const region = row._region}
             {@const badge = noveltyBadge(region)}
             {@const best = region.known_matches?.[0]}
             <tr
-              class="border-b border-slate-700/50 hover:bg-slate-700/30 cursor-pointer {expandedRegion === i ? 'bg-slate-700/40' : ''}"
-              onclick={() => { expandedRegion = expandedRegion === i ? null : i; }}
+              class="border-b border-slate-700/50 hover:bg-slate-700/30 cursor-pointer {expandedRegion === row._idx ? 'bg-slate-700/40' : ''}"
+              onclick={() => { expandedRegion = expandedRegion === row._idx ? null : row._idx; }}
             >
               <td class="py-1 px-2 text-slate-300 font-mono text-[10px]">{region.contig}</td>
               <td class="py-1 px-2">
@@ -192,7 +268,7 @@
                 </div>
               </td>
               <td class="py-1 px-2 text-right text-slate-400 font-mono">{(region.length / 1000).toFixed(1)} kb</td>
-              <td class="py-1 px-2 text-slate-400">{region.mag === '_unbinned' ? '-' : region.mag}</td>
+              <td class="py-1 px-2 text-slate-400">{row.mag || '-'}</td>
               <td class="py-1 px-2 text-center">
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-medium border {badge.color}">{badge.label}</span>
               </td>
