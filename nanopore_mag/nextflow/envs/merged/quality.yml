@@ -18,6 +18,3 @@ dependencies:
   - biopython
   - pip
   - setuptools
-  - pip:
-    - whokaryote @ git+https://github.com/LottePronk/whokaryote.git
-    - tiara
