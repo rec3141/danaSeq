@@ -1,6 +1,6 @@
 # MAG Assembly Pipeline
 
-Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes gene annotation (Prokka/Bakta), four taxonomy classifiers (Kaiju, Kraken2, sendsketch, rRNA/SILVA), mobile genetic element detection (geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder), metabolic profiling with pathway analysis (KofamScan, eggNOG-mapper, dbCAN3, MinPath, KEGG-Decoder), eukaryotic analysis (Tiara, Whokaryote, MetaEuk, MarFERReT).
+Metagenome-assembled genome (MAG) reconstruction from Oxford Nanopore long reads. Co-assembles reads with Flye, maps back with minimap2, runs five binning algorithms (SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin), and integrates results with DAS Tool consensus. Includes gene annotation (Prokka/Bakta), four taxonomy classifiers (Kaiju, Kraken2, sendsketch, rRNA/SILVA), mobile genetic element detection (geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder), metabolic profiling with pathway analysis (KofamScan, eggNOG-mapper, dbCAN3, MinPath, KEGG-Decoder), biosynthetic gene cluster detection (antiSMASH), eukaryotic analysis (Tiara, Whokaryote, MetaEuk, MarFERReT).
 
 ## Quick Start
 
@@ -55,6 +55,8 @@ cd nextflow
     --kofam_db /path/to/kofam_db \
     --eggnog_db /path/to/eggnog_db \
     --dbcan_db /path/to/dbcan_db \
+    --run_antismash true \
+    --antismash_db /path/to/antismash_db \
     --run_eukaryotic true \
     --run_metaeuk true --metaeuk_db /path/to/metaeuk_db \
     --run_marferret true --marferret_db /path/to/marferret_db \
@@ -105,6 +107,8 @@ Sample FASTQs (N files)
       +-- KEGG_MODULES      Module completeness scoring + heatmap
       +-- MINPATH            Parsimony pathway reconstruction (Ye & Doak 2009)
       +-- KEGG_DECODER       Biogeochemical function scoring + heatmap (Graham et al. 2018)
+
+   ANTISMASH               Biosynthetic gene cluster detection (assembly + GFF, independent)
 
    KAIJU_CONTIG_CLASSIFY     Six-frame translation taxonomy on contigs (primary Kaiju mode)
    KRAKEN2_CLASSIFY          k-mer contig-level taxonomy (no annotation needed)
@@ -226,6 +230,10 @@ results/
 │   ├── kegg_decoder/
 │   │   ├── kegg_decoder_output.tsv  MAG x function completeness (~80 functions)
 │   │   └── function_heatmap.svg     Publication-quality biogeochemical heatmap
+│   ├── antismash/                         (if --run_antismash)
+│   │   ├── antismash_summary.tsv    Per-region BGC summary (type, known cluster, similarity)
+│   │   ├── antismash_geneclusters/  Region GenBank files
+│   │   └── antismash_json/          Full antiSMASH JSON output
 │   └── community/
 │       └── community_annotations.tsv  All proteins with bin_id column
 ├── viz/                          Interactive dashboard (if --run_viz)
@@ -402,6 +410,8 @@ load times with no server configuration needed.
 | `--kofam_db` | (skip) | Path to KOfam profiles dir (contains `profiles/` + `ko_list`) |
 | `--eggnog_db` | (skip) | Path to eggNOG-mapper database dir |
 | `--dbcan_db` | (skip) | Path to dbCAN database dir |
+| `--run_antismash` | `false` | Run antiSMASH biosynthetic gene cluster detection |
+| `--antismash_db` | (skip) | Path to antiSMASH database dir |
 
 ### Eukaryotic Analysis
 
@@ -464,6 +474,7 @@ cd nextflow
 ./download-databases.sh --bakta            # ~1.5 GB  (light) or ~30 GB (full)
 ./download-databases.sh --metaeuk          # ~18 GB   (OrthoDB eukaryotic proteins)
 ./download-databases.sh --marferret        # ~9 GB    (MarFERReT marine eukaryotic proteins)
+./download-databases.sh --antismash        # ~2 GB    (antiSMASH BGC detection databases)
 ./download-databases.sh --all              # All databases
 ```
 
@@ -564,6 +575,7 @@ Isolated environments avoid dependency conflicts:
 | `dana-mag-kofamscan` | KofamScan, HMMER (KEGG Orthology) |
 | `dana-mag-emapper` | eggNOG-mapper, DIAMOND (COG/GO/EC/Pfam) |
 | `dana-mag-dbcan` | run_dbcan, HMMER, DIAMOND (CAZyme) |
+| `dana-mag-antismash` | antiSMASH 8.0.4 (biosynthetic gene cluster detection) |
 | `dana-mag-pathway` | MinPath, KEGG-Decoder (pathway analysis) |
 | `dana-mag-tiara` | Tiara (deep learning eukaryotic classification) |
 | `dana-mag-whokaryote` | Whokaryote, Prodigal (gene structure eukaryotic classification) |
@@ -620,6 +632,7 @@ Isolated environments avoid dependency conflicts:
 - dbCAN3: Zheng et al., *Nucleic Acids Research* 2023
 - MinPath: Ye & Doak, *PLoS Computational Biology* 2009
 - KEGG-Decoder: Graham et al., *bioRxiv* 2018
+- antiSMASH: Blin et al., *Nucleic Acids Research* 2023
 
 **Eukaryotic Analysis:**
 - Tiara: Karlicki et al., *Bioinformatics* 2022

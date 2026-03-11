@@ -75,6 +75,7 @@ resolve_db_dir() {
         [--marferret_db]="marferret_db"
         [--gtdbtk_db]="gtdbtk_db"
         [--metaeuk_db]="metaeuk_db/metaeuk_db"
+        [--antismash_db]="antismash_db"
     )
     for flag in "${!fixed_dbs[@]}"; do
         path="${base}/${fixed_dbs[$flag]}"
@@ -319,6 +320,7 @@ while (( $# )); do
                 --run_sendsketch true
                 --run_rrna true
                 --run_metabolism true
+                --run_antismash true
                 --run_eukaryotic true
                 --run_metaeuk true
                 --run_marferret true

@@ -29,6 +29,7 @@ set -euo pipefail
 #   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
 #   ./download-databases.sh --gtdbtk          # Download GTDB-Tk r226 reference data (~132 GB)
+#   ./download-databases.sh --antismash      # Download antiSMASH databases (~2 GB)
 #   ./download-databases.sh --docker            # Use Docker to run tool CLIs
 #   ./download-databases.sh --apptainer         # Use Apptainer/Singularity (auto-pulls SIF)
 #   ./download-databases.sh --container         # Auto-detect: apptainer > singularity > docker
@@ -110,6 +111,7 @@ DOWNLOAD_KRAKEN2=false
 DOWNLOAD_SILVA=false
 DOWNLOAD_MARFERRET=false
 DOWNLOAD_GTDBTK=false
+DOWNLOAD_ANTISMASH=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -141,6 +143,7 @@ while (( $# )); do
         --silva)     DOWNLOAD_SILVA=true; INTERACTIVE=false; shift ;;
         --marferret) DOWNLOAD_MARFERRET=true; INTERACTIVE=false; shift ;;
         --gtdbtk)    DOWNLOAD_GTDBTK=true; INTERACTIVE=false; shift ;;
+        --antismash) DOWNLOAD_ANTISMASH=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -167,6 +170,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_SILVA=true
     DOWNLOAD_MARFERRET=true
     DOWNLOAD_GTDBTK=true
+    DOWNLOAD_ANTISMASH=true
 fi
 
 # Auto-detect container runtime if --container was used
@@ -1000,6 +1004,31 @@ download_gtdbtk() {
     echo "  Use with: --gtdbtk_db ${db_path}"
 }
 
+download_antismash() {
+    local db_path="${DB_DIR}/antismash_db"
+    if [ -d "${db_path}" ] && [ -f "${db_path}/clusterblast/proteins.dmnd" ]; then
+        echo "[INFO] antiSMASH database already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading antiSMASH databases..."
+    echo "  Destination: ${db_path}"
+
+    local antismash_bin="${ENV_DIR}/dana-mag-antismash/bin/download-antismash-databases"
+    if [ ! -x "$antismash_bin" ]; then
+        echo "[ERROR] antiSMASH conda env not found. Install it first:" >&2
+        echo "  mamba create -p ${ENV_DIR}/dana-mag-antismash -y -c bioconda -c conda-forge --override-channels --channel-priority flexible 'antismash>=8.0'" >&2
+        return 1
+    fi
+
+    "$antismash_bin" --database-dir "${db_path}" || return 1
+
+    echo "[SUCCESS] antiSMASH databases downloaded to ${db_path}"
+    echo "  Use with: --antismash_db ${db_path}"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -1077,6 +1106,10 @@ if $DOWNLOAD_GTDBTK; then
     ( download_gtdbtk ) || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_ANTISMASH; then
+    ( download_antismash ) || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -1103,4 +1136,5 @@ else
     ! $DOWNLOAD_SILVA   || echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
     ! $DOWNLOAD_MARFERRET || echo "  --marferret_db ${DB_DIR}/marferret_db"
     ! $DOWNLOAD_GTDBTK   || echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
+    ! $DOWNLOAD_ANTISMASH || echo "  --antismash_db ${DB_DIR}/antismash_db"
 fi

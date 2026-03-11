@@ -85,6 +85,8 @@ def helpMessage() {
       --kofam_db PATH    Path to KOfam profiles dir (contains profiles/ + ko_list)
       --eggnog_db PATH   Path to eggNOG-mapper database dir
       --dbcan_db PATH    Path to dbCAN database dir
+      --run_antismash    Run antiSMASH biosynthetic gene cluster detection [default: false]
+      --antismash_db PATH  Path to antiSMASH database dir; null = use default
 
     Mobile Genetic Elements:
       --run_genomad      Run geNomad virus + plasmid detection [default: true]
@@ -231,6 +233,10 @@ def helpMessage() {
       │   ├── kegg_decoder/
       │   │   ├── kegg_decoder_output.tsv  MAG × function completeness (~80 functions)
       │   │   └── function_heatmap.svg     Publication-quality heatmap
+      │   ├── antismash/                  (if --run_antismash)
+      │   │   ├── antismash_summary.tsv    Per-region BGC summary (type, known cluster, similarity)
+      │   │   ├── antismash_geneclusters/  Region GenBank files
+      │   │   └── antismash_json/          Full antiSMASH JSON output
       │   └── community/
       │       └── community_annotations.tsv  All proteins with bin_id column
       ├── eukaryotic/                   (if --run_eukaryotic)
@@ -356,6 +362,7 @@ include { MAP_TO_BINS }         from './modules/metabolism'
 include { KEGG_MODULES }        from './modules/metabolism'
 include { MINPATH }             from './modules/metabolism'
 include { KEGG_DECODER }        from './modules/metabolism'
+include { ANTISMASH }           from './modules/metabolism'
 include { VIZ_PREPROCESS as VIZ_STAGE1 } from './modules/viz'  // after TNF, computes t-SNE + UMAP
 include { VIZ_PREPROCESS as VIZ_STAGE2 } from './modules/viz'  // after BAKTA_BASIC, skip embeddings
 include { VIZ_PREPROCESS as VIZ_STAGE3 } from './modules/viz'  // after DAS_Tool+CheckM2, skip embeddings
@@ -720,6 +727,12 @@ workflow {
 
         // KEGG-Decoder biogeochemical function scoring + heatmap (parallel)
         KEGG_DECODER(MAP_TO_BINS.out.per_mag)
+    }
+
+    // 6c. antiSMASH biosynthetic gene cluster detection (independent of KO-based metabolism)
+    if (params.run_antismash) {
+        def antismash_gff = ch_gff ?: file('NO_GFF')
+        ANTISMASH(ch_assembly, antismash_gff)
     }
 
     // 7. Quality assessment with CheckM2 (optional — requires database path)

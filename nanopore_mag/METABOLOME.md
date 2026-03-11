@@ -1,6 +1,6 @@
 # Metabolic Profiling Tools for MAG Analysis
 
-> **Implementation status (2026-02-14):** Phase 1 is implemented in `nextflow/modules/metabolism.nf`. The pipeline includes KofamScan, eggNOG-mapper, and dbCAN3 annotation with merged per-MAG output and KEGG module completeness scoring. Enable with `--run_metabolism` and provide database paths (`--kofam_db`, `--eggnog_db`, `--dbcan_db`). See `nextflow/README.md` and `nextflow/main.nf --help` for usage.
+> **Implementation status (2026-03-11):** Phase 1 is implemented in `nextflow/modules/metabolism.nf`. The pipeline includes KofamScan, eggNOG-mapper, and dbCAN3 annotation with merged per-MAG output and KEGG module completeness scoring. Enable with `--run_metabolism` and provide database paths (`--kofam_db`, `--eggnog_db`, `--dbcan_db`). antiSMASH 8.0.4 biosynthetic gene cluster detection is also available via `--run_antismash` (independent of `--run_metabolism`). See `nextflow/README.md` and `nextflow/main.nf --help` for usage.
 
 Reference guide for metabolic annotation, functional profiling, and pathway reconstruction tools evaluated for integration with the danaSeq MAG assembly pipeline. Focused on **environmental/aquatic metagenomes** assembled from **Oxford Nanopore long reads** with Flye, binned via DAS Tool consensus.
 

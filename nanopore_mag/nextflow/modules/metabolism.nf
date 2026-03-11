@@ -414,3 +414,95 @@ process KEGG_DECODER {
     fi
     """
 }
+
+process ANTISMASH {
+    tag "antismash"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-antismash"
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/antismash" : null
+
+    input:
+    path(assembly)
+    path(gff)
+
+    output:
+    path("antismash_summary.tsv"),   emit: summary
+    path("antismash_geneclusters/"), emit: geneclusters
+    path("antismash_json/"),         emit: json, optional: true
+
+    script:
+    def db_arg = params.antismash_db ? "--databases ${params.antismash_db}" : ""
+    def genefinding = gff.name != 'NO_GFF' ? "--genefinding-gff3 ${gff}" : "--genefinding-tool prodigal-m"
+    """
+    set +e
+    antismash \\
+        --cpus ${task.cpus} \\
+        --output-dir antismash_out \\
+        --output-basename antismash \\
+        ${db_arg} \\
+        ${genefinding} \\
+        --cb-general \\
+        --cb-knownclusters \\
+        --cc-mibig \\
+        --minlength 1000 \\
+        --allow-long-headers \\
+        --taxon bacteria \\
+        "${assembly}"
+    antismash_exit=\$?
+    set -e
+
+    mkdir -p antismash_geneclusters antismash_json
+
+    if [ \$antismash_exit -ne 0 ]; then
+        echo "[WARNING] antiSMASH exited with code \$antismash_exit" >&2
+        printf 'region\\tcontig\\tstart\\tend\\ttype\\tmost_similar_known_cluster\\tsimilarity\\n' > antismash_summary.tsv
+        exit 0
+    fi
+
+    # Collect region GenBank files
+    find antismash_out -name "*.region*.gbk" -exec cp {} antismash_geneclusters/ \\; 2>/dev/null || true
+
+    # Collect JSON output
+    [ -f antismash_out/antismash.json ] && cp antismash_out/antismash.json antismash_json/ || true
+
+    # Parse JSON to summary TSV
+    python3 -c "
+import json, os, sys
+
+header = 'region\\tcontig\\tstart\\tend\\ttype\\tmost_similar_known_cluster\\tsimilarity'
+rows = []
+jf = 'antismash_out/antismash.json'
+if os.path.isfile(jf):
+    with open(jf) as f:
+        data = json.load(f)
+    for rec in data.get('records', []):
+        contig = rec.get('id', 'unknown')
+        for feat in rec.get('areas', rec.get('features', [])):
+            if feat.get('type') == 'region':
+                loc = feat.get('location', '')
+                start = feat.get('start', '')
+                end = feat.get('end', '')
+                products = ','.join(feat.get('products', feat.get('product', ['unknown'])))
+                knowncluster = feat.get('knownclusterblast', [{}])
+                if knowncluster:
+                    kc = knowncluster[0] if isinstance(knowncluster, list) else knowncluster
+                    similar = kc.get('description', 'NA')
+                    sim_pct = kc.get('similarity', 'NA')
+                else:
+                    similar = 'NA'
+                    sim_pct = 'NA'
+                rows.append(f'{contig}_region\\t{contig}\\t{start}\\t{end}\\t{products}\\t{similar}\\t{sim_pct}')
+
+# Fallback: parse region GBKs if JSON parsing yielded nothing
+if not rows:
+    for gbk in sorted(os.listdir('antismash_geneclusters')):
+        if gbk.endswith('.gbk'):
+            name = gbk.replace('.gbk','')
+            rows.append(f'{name}\\tNA\\tNA\\tNA\\tNA\\tNA\\tNA')
+
+print(header)
+for r in rows:
+    print(r)
+" > antismash_summary.tsv
+    """
+}

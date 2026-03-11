@@ -34,7 +34,8 @@ nanopore_mag/
 │   │   ├── mge.nf              GENOMAD_CLASSIFY, CHECKV_QUALITY, INTEGRONFINDER,
 │   │   │                       ISLANDPATH_DIMOB, MACSYFINDER, DEFENSEFINDER
 │   │   ├── metabolism.nf       KOFAMSCAN, EMAPPER, DBCAN, MERGE_ANNOTATIONS,
-│   │   │                       MAP_TO_BINS, KEGG_MODULES, MINPATH, KEGG_DECODER
+│   │   │                       MAP_TO_BINS, KEGG_MODULES, MINPATH, KEGG_DECODER,
+│   │   │                       ANTISMASH
 │   │   ├── phylogeny.nf       GTDBTK_CLASSIFY (GTDB-Tk phylogenetic classification)
 │   │   └── viz.nf              VIZ_PREPROCESS (dashboard JSON + static site build)
 │   ├── envs/                   Conda YAML specs
@@ -55,6 +56,7 @@ nanopore_mag/
 │   │   ├── kofamscan.yml      KofamScan (KEGG Orthology)
 │   │   ├── emapper.yml        eggNOG-mapper (COG/GO/EC/KEGG/Pfam)
 │   │   ├── dbcan.yml          dbCAN3 (CAZyme annotation)
+│   │   ├── antismash.yml     antiSMASH (biosynthetic gene cluster detection)
 │   │   ├── kaiju.yml            Kaiju (protein-level taxonomy)
 │   │   ├── kraken2.yml         Kraken2 (k-mer contig-level taxonomy)
 │   │   ├── prokka.yml          Prokka (gene annotation)
@@ -163,6 +165,8 @@ cd nextflow
     --dbcan_db /data/scratch/refdbs/dbcan_db \
     --macsyfinder_models /data/scratch/refdbs/macsyfinder_models \
     --defensefinder_models /data/scratch/refdbs/defensefinder_models \
+    --run_antismash true \
+    --antismash_db /data/scratch/refdbs/antismash_db \
     --run_eukaryotic true \
     --run_metaeuk true \
     --metaeuk_db /data/scratch/refdbs/metaeuk_db/metaeuk_db \
@@ -299,7 +303,7 @@ Sample FASTQs (N files)
                             │                                                           │     │
                   ┌─────────┼──────────┬─────────────────────┐                          │     │
             ISLANDPATH   KOFAMSCAN  EMAPPER  DBCAN   TIARA + WHOKARYOTE   METAEUK → MARFERRET │
-            MACSYFINDER  DEFENSEFINDER │                                                      │
+            MACSYFINDER  DEFENSEFINDER │              ANTISMASH (assembly + GFF)              │
             KAIJU_CLASSIFY   └─────┬───┘                                                      │
                           MERGE_ANNOTATIONS                                                   │
                                   │                                                           │
@@ -376,6 +380,7 @@ Isolated conda environments avoid dependency conflicts:
 | `dana-mag-strainy` | strainy | Strain-aware assembly phasing |
 | `dana-mag-floria` | floria | Strain-resolved metagenome analysis |
 | `dana-mag-skder` | skder | Genome database dereplication |
+| `dana-mag-antismash` | antiSMASH 8.0.4 | Biosynthetic gene cluster detection (NRPS, PKS, terpenes, etc.) |
 | `dana-mag-pathway` | MinPath, KEGG-Decoder | Pathway analysis (parsimony reconstruction + biogeochemical scoring) |
 | `dana-bbmap` | BBMap | Optional dedupe (only if `params.dedupe`) |
 | `dana-mag-vamb` | VAMB | Variational autoencoder binner (depth-based) |
@@ -489,6 +494,10 @@ results/
 │   ├── kegg_decoder/
 │   │   ├── kegg_decoder_output.tsv  MAG × function completeness (~80 functions)
 │   │   └── function_heatmap.svg     Publication-quality heatmap
+│   ├── antismash/                         (if --run_antismash)
+│   │   ├── antismash_summary.tsv    Per-region BGC summary (type, known cluster, similarity)
+│   │   ├── antismash_geneclusters/  Region GenBank files
+│   │   └── antismash_json/          Full antiSMASH JSON output
 │   └── community/
 │       └── community_annotations.tsv  All proteins with bin_id column
 ├── taxonomy/                      Taxonomy classification
@@ -704,6 +713,7 @@ Current database paths for pipeline flags:
 - `--silva_lsu_db /data/scratch/refdbs/silva_db/SILVA_138.2_LSURef_NR99.fasta`
 - `--marferret_db /data/scratch/refdbs/marferret_db`
 - `--gtdbtk_db /data/scratch/refdbs/gtdbtk_db`
+- `--antismash_db /data/scratch/refdbs/antismash_db`
 - `--sendsketch_address http://10.151.50.41:3068/sketch`  (Ratnakara GTDB TaxServer)
 
 ---
