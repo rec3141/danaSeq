@@ -46,7 +46,7 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 # 3. Quality: genomad, checkm2, checkv, whokaryote+tiara (pip)
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-quality   -f /tmp/envs/quality.yml
-RUN /opt/conda/envs/dana-mag-quality/bin/pip install --no-build-isolation \
+RUN /opt/conda/envs/dana-mag-quality/bin/pip install --no-deps \
     'whokaryote @ git+https://github.com/LottePronk/whokaryote.git' tiara
 
 # 4. Annotate: bakta, emapper, diamond
