@@ -42,6 +42,8 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 # 2. Binning: metabat2, maxbin2, das_tool, semibin, comebin deps
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-binning   -f /tmp/envs/binning.yml
+RUN /opt/conda/envs/dana-mag-binning/bin/pip install --no-deps \
+    'lorbin @ git+https://github.com/rec3141/LorBin.git' hnswlib
 
 # 3. Quality: genomad, checkm2, checkv, whokaryote+tiara (pip)
 RUN --mount=type=cache,target=/opt/conda/pkgs \
@@ -68,6 +70,7 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 # 8. Strain: strainy, instrain (pip), floria
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-strain    -f /tmp/envs/strain.yml
+RUN /opt/conda/envs/dana-mag-strain/bin/pip install --no-deps instrain
 
 # 9. PathViz: pathway tools, viz, nodejs
 RUN --mount=type=cache,target=/opt/conda/pkgs \

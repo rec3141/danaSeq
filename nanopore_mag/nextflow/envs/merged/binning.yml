@@ -35,8 +35,4 @@ dependencies:
   - pyyaml
   - tqdm
   - pip
-  - pip:
-    - lorbin @ git+https://github.com/rec3141/LorBin.git
-    - hnswlib
-    # TODO: replace with forked COMEBin once tested
-    # - comebin @ git+https://github.com/rec3141/COMEBin.git
+  - setuptools
