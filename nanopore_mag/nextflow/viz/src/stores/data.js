@@ -15,6 +15,7 @@ export const contigLengths = writable(null);
 // Lazy-loaded (large files)
 export const contigExplorer = writable(null);
 export const phyloTree = writable(null);
+export const biosynthetic = writable(null);
 
 export const loading = writable(true);
 export const error = writable(null);
@@ -223,6 +224,22 @@ export async function loadSampleDepths() {
     sampleDepths.set({ samples: [], depths: {} });
   } finally {
     sampleDepthsLoading = false;
+  }
+}
+
+// Lazy load biosynthetic data (antiSMASH BGC regions)
+let biosyntheticLoading = false;
+export async function loadBiosynthetic() {
+  if (biosyntheticLoading || get(biosynthetic) !== null) return;
+  biosyntheticLoading = true;
+  try {
+    const data = await fetchJSON('/data/biosynthetic.json');
+    biosynthetic.set(data);
+  } catch (e) {
+    console.warn('Biosynthetic data not available:', e.message);
+    biosynthetic.set({ n_regions: 0, type_counts: {}, regions: [], per_bin: {} });
+  } finally {
+    biosyntheticLoading = false;
   }
 }
 

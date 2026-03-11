@@ -872,6 +872,10 @@ workflow {
             ch_viz_stage4 = ch_viz_stage4.mix(MINPATH.out.pathways.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(KEGG_DECODER.out.output.collect())
         }
+        if (params.run_antismash) {
+            ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.summary.collect())
+            ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.json.collect())
+        }
         if (params.gtdbtk_db) {
             ch_viz_stage4 = ch_viz_stage4.mix(GTDBTK_CLASSIFY.out.taxonomy.collect())
         }

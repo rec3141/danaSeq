@@ -13,6 +13,7 @@
   import EukaryoticView from './views/EukaryoticView.svelte';
   import ContigExplorerView from './views/ContigExplorerView.svelte';
   import PhyloTreeView from './views/PhyloTreeView.svelte';
+  import BiosyntheticView from './views/BiosyntheticView.svelte';
 
   let activeTab = $state('overview');
 
@@ -60,6 +61,8 @@
         <PhyloTreeView />
       {:else if activeTab === 'contigs'}
         <ContigExplorerView />
+      {:else if activeTab === 'biosynthetic'}
+        <BiosyntheticView />
       {/if}
     {/if}
   </main>

@@ -1407,6 +1407,159 @@ def build_mge_per_bin(contig2bin, virus_df, plasmid_df, defense_df, integron_df)
     return dict(per_bin)
 
 
+def build_biosynthetic(results_dir, contig2bin):
+    """Build biosynthetic.json from antiSMASH output (JSON + summary TSV)."""
+    print("Building biosynthetic.json ...")
+
+    c2b = {}
+    if contig2bin is not None:
+        for _, row in contig2bin.iterrows():
+            c2b[row.iloc[0]] = row.iloc[1]
+
+    regions = []
+    type_counts = Counter()
+    per_bin = defaultdict(list)
+
+    # Try full antiSMASH JSON first (richer data)
+    json_path = resolve_path(results_dir, 'metabolism', 'antismash', 'antismash_json', 'antismash.json')
+    if os.path.isfile(json_path):
+        print(f"  Parsing antiSMASH JSON: {json_path}")
+        with open(json_path) as f:
+            as_data = json.load(f)
+
+        for rec in as_data.get('records', []):
+            contig_id = rec.get('id', 'unknown')
+
+            # Regions are in areas (antiSMASH 8.x)
+            for area in rec.get('areas', []):
+                products = area.get('products', [])
+                start = area.get('start', 0)
+                end = area.get('end', 0)
+
+                # Protoclusters within this region
+                protoclusters = []
+                for pc in area.get('protoclusters', []):
+                    protoclusters.append({
+                        'product': pc.get('product', 'unknown'),
+                        'category': pc.get('category', ''),
+                        'core_start': pc.get('core_start', 0),
+                        'core_end': pc.get('core_end', 0),
+                    })
+
+                # Candidate clusters (combinations)
+                candidates = []
+                for cc in area.get('candidates', []):
+                    candidates.append({
+                        'kind': cc.get('kind', ''),
+                        'protoclusters': cc.get('protoclusters', []),
+                    })
+
+                # Known cluster matches from clusterblast
+                known_matches = []
+                cb_mod = rec.get('modules', {}).get('antismash.modules.clusterblast', {})
+                kc_results = cb_mod.get('knowncluster', {}).get('results', [])
+                for kcr in kc_results:
+                    region_num = kcr.get('region_number', 0)
+                    # Match by region number (1-based)
+                    for rank_entry in kcr.get('ranking', [])[:3]:  # top 3 matches
+                        if isinstance(rank_entry, list) and len(rank_entry) >= 2:
+                            desc = rank_entry[0]
+                            score = rank_entry[1]
+                            known_matches.append({
+                                'accession': desc.get('accession', ''),
+                                'description': desc.get('description', ''),
+                                'cluster_type': desc.get('cluster_type', ''),
+                                'similarity': score.get('similarity', 0),
+                            })
+
+                # Gene function annotations (biosynthetic/transport/regulatory)
+                gene_kinds = Counter()
+                for feat in rec.get('features', []):
+                    if feat.get('type') == 'CDS':
+                        loc = feat.get('location', {})
+                        feat_start = loc.get('start', 0) if isinstance(loc, dict) else 0
+                        feat_end = loc.get('end', 0) if isinstance(loc, dict) else 0
+                        if feat_start >= start and feat_end <= end:
+                            gk = feat.get('gene_kind', '')
+                            if gk:
+                                gene_kinds[gk] += 1
+
+                for prod in products:
+                    type_counts[prod] += 1
+
+                mag = c2b.get(contig_id, '_unbinned')
+                region = {
+                    'contig': contig_id,
+                    'start': start,
+                    'end': end,
+                    'length': end - start,
+                    'products': products,
+                    'n_protoclusters': len(protoclusters),
+                    'protoclusters': protoclusters,
+                    'candidates': candidates,
+                    'known_matches': known_matches[:3],
+                    'gene_kinds': dict(gene_kinds) if gene_kinds else {},
+                    'mag': mag,
+                }
+                regions.append(region)
+                per_bin[mag].append(region)
+
+    else:
+        # Fall back to summary TSV
+        tsv_path = resolve_path(results_dir, 'metabolism', 'antismash', 'antismash_summary.tsv')
+        if os.path.isfile(tsv_path):
+            print(f"  Parsing antiSMASH summary TSV: {tsv_path}")
+            df = load_tsv(tsv_path)
+            if df is not None and len(df) > 0:
+                for _, row in df.iterrows():
+                    contig_id = str(row.get('contig', 'unknown'))
+                    products = str(row.get('type', '')).split(',')
+                    mag = c2b.get(contig_id, '_unbinned')
+
+                    for prod in products:
+                        if prod and prod != 'NA':
+                            type_counts[prod.strip()] += 1
+
+                    known = str(row.get('most_similar_known_cluster', 'NA'))
+                    sim = row.get('similarity', 'NA')
+                    known_matches = []
+                    if known != 'NA' and str(sim) != 'NA':
+                        known_matches = [{'description': known, 'similarity': float(sim) if str(sim) != 'NA' else 0}]
+
+                    region = {
+                        'contig': contig_id,
+                        'start': int(row.get('start', 0)) if str(row.get('start', '')) != 'NA' else 0,
+                        'end': int(row.get('end', 0)) if str(row.get('end', '')) != 'NA' else 0,
+                        'length': 0,
+                        'products': [p.strip() for p in products if p.strip() and p.strip() != 'NA'],
+                        'known_matches': known_matches,
+                        'mag': mag,
+                    }
+                    region['length'] = region['end'] - region['start']
+                    regions.append(region)
+                    per_bin[mag].append(region)
+        else:
+            print("  [WARNING] No antiSMASH output found", file=sys.stderr)
+
+    # Build per-MAG summary counts
+    mag_bgc_counts = {}
+    for mag, bgc_list in per_bin.items():
+        mag_types = Counter()
+        for r in bgc_list:
+            for p in r.get('products', []):
+                mag_types[p] += 1
+        mag_bgc_counts[mag] = {'total': len(bgc_list), 'types': dict(mag_types)}
+
+    result = {
+        'n_regions': len(regions),
+        'type_counts': dict(type_counts.most_common()),
+        'regions': regions,
+        'per_bin': mag_bgc_counts,
+    }
+    print(f"  Found {len(regions)} BGC regions across {len(per_bin)} MAGs/bins")
+    return result
+
+
 def build_eukaryotic(results_dir, assembly_info):
     """Build eukaryotic.json with Tiara/Whokaryote/MarFERReT summaries."""
     print("Building eukaryotic.json ...")
@@ -2096,6 +2249,11 @@ def main():
     mge_per_bin = build_mge_per_bin(contig2bin, virus_df, plasmid_df, defense_df, integron_df)
     write_json_gz(os.path.join(output_dir, 'mge_per_bin.json'), mge_per_bin)
     print(f"  Wrote mge_per_bin.json ({len(mge_per_bin)} bins)")
+
+    # 9b. biosynthetic.json (antiSMASH BGCs)
+    biosynthetic = build_biosynthetic(results_dir, contig2bin)
+    write_json_gz(os.path.join(output_dir, 'biosynthetic.json'), biosynthetic)
+    print(f"  Wrote biosynthetic.json ({biosynthetic['n_regions']} regions)")
 
     # 10. eukaryotic.json
     eukaryotic = build_eukaryotic(results_dir, assembly_info)
