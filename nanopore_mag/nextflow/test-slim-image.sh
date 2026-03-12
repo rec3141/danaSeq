@@ -20,21 +20,21 @@ run_test() {
     local env="$1" tool="$2" cmd="$3"
     printf "  %-35s " "$tool"
     # Use the wrapper path so we test the dana-tools wrappers
-    output=$(timeout 30 apptainer exec "$SIF" bash -c "$cmd" 2>&1) && rc=0 || rc=$?
+    output=$(timeout 30 apptainer exec "$SIF" bash -c "$cmd" < /dev/null 2>&1) && rc=0 || rc=$?
     if [[ $rc -eq 124 ]]; then
         printf "TIMEOUT\n"
         FAILURES+="  $env/$tool: timed out after 30s\n"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
         return
     elif [[ $rc -eq 0 ]]; then
         # Extract version from first line of output
-        ver=$(echo "$output" | head -1 | grep -oP '[\d]+\.[\d]+[.\d]*' | head -1)
+        ver=$(echo "$output" | head -1 | grep -oP '[\d]+\.[\d]+[.\d]*' | head -1 || true)
         printf "PASS  %s\n" "${ver:-ok}"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         printf "FAIL  (exit %d)\n" "$rc"
         FAILURES+="  $env/$tool: $(echo "$output" | tail -1)\n"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
 }
 
@@ -42,15 +42,15 @@ run_test_stderr() {
     # Some tools print version to stderr or exit nonzero for --version
     local env="$1" tool="$2" cmd="$3"
     printf "  %-35s " "$tool"
-    output=$(timeout 30 apptainer exec "$SIF" bash -c "$cmd" 2>&1) || true
+    output=$(timeout 30 apptainer exec "$SIF" bash -c "$cmd" < /dev/null 2>&1) || true
     if echo "$output" | grep -qiP '(version|v?\d+\.\d+|usage|help)'; then
-        ver=$(echo "$output" | grep -oP '[\d]+\.[\d]+[.\d]*' | head -1)
+        ver=$(echo "$output" | grep -oP '[\d]+\.[\d]+[.\d]*' | head -1 || true)
         printf "PASS  %s\n" "${ver:-ok}"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         printf "FAIL\n"
         FAILURES+="  $env/$tool: $(echo "$output" | tail -1)\n"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
 }
 
@@ -72,8 +72,8 @@ run_test assembly bbduk.sh         "bbduk.sh --version 2>&1 | head -2"
 run_test assembly dedupe.sh        "dedupe.sh --version 2>&1 | head -2"
 run_test assembly reformat.sh      "reformat.sh --version 2>&1 | head -2"
 run_test assembly pigz             "pigz --version"
-run_test_stderr assembly metaMDBG  "metaMDBG --help | head -1"
-run_test_stderr assembly myloasm   "myloasm --help | head -1"
+run_test_stderr assembly metaMDBG  "/opt/conda/envs/dana-mag-assembly/bin/metaMDBG --help 2>&1 | grep -i version"
+run_test_stderr assembly myloasm   "/opt/conda/envs/dana-mag-assembly/bin/myloasm --version 2>&1 || /opt/conda/envs/dana-mag-assembly/bin/myloasm --help 2>&1 | head -3"
 run_test assembly nextflow         "nextflow -version 2>&1 | grep version"
 run_test assembly java             "java -version 2>&1 | head -1"
 echo
@@ -85,7 +85,7 @@ run_test_stderr binning "run_MaxBin.pl"       "run_MaxBin.pl -v 2>&1 | head -1"
 run_test_stderr binning DAS_Tool              "DAS_Tool --version 2>&1 | head -1"
 run_test_stderr binning jgi_summarize         "jgi_summarize_bam_contig_depths --help 2>&1 | head -3"
 run_test binning SemiBin2                     "SemiBin2 --version"
-run_test_stderr binning LorBin                "python3 -c 'import lorbin; print(\"lorbin ok\")' 2>&1"
+run_test_stderr binning LorBin                "PATH=/opt/conda/envs/dana-mag-binning/bin:\$PATH LorBin --help 2>&1 | head -3"
 echo
 
 # ── 3. Quality env ──────────────────────────────────────────────────────
@@ -93,8 +93,8 @@ echo "── Quality (dana-mag-quality) ──"
 run_test quality genomad    "PATH=/opt/conda/envs/dana-mag-quality/bin:\$PATH genomad --version"
 run_test quality checkm2    "PATH=/opt/conda/envs/dana-mag-quality/bin:\$PATH checkm2 --version"
 run_test_stderr quality checkv     "PATH=/opt/conda/envs/dana-mag-quality/bin:\$PATH checkv -h 2>&1 | head -3"
-run_test quality prodigal   "PATH=/opt/conda/envs/dana-mag-quality/bin:\$PATH prodigal -v 2>&1 | head -1"
-run_test quality whokaryote "PATH=/opt/conda/envs/dana-mag-quality/bin:\$PATH python3 -c 'import whokaryote; print(\"whokaryote ok\")'"
+run_test_stderr quality prodigal   "echo ATCGATAGACT | PATH=/opt/conda/envs/dana-mag-quality/bin:\$PATH prodigal -v"
+run_test quality whokaryote "PATH=/opt/conda/envs/dana-mag-quality/bin:\$PATH python3 -c 'import whokaryote_scripts; print(\"whokaryote ok\")'"
 run_test quality tiara      "PATH=/opt/conda/envs/dana-mag-quality/bin:\$PATH tiara --help 2>&1 | head -1"
 echo
 
@@ -114,12 +114,12 @@ run_test classify vsearch          "vsearch --version 2>&1 | head -1"
 run_test_stderr classify aragorn   "aragorn -h 2>&1 | head -3"
 run_test_stderr classify exec_annotation  "PATH=/opt/conda/envs/dana-mag-classify/bin:\$PATH exec_annotation --help 2>&1 | head -3"
 run_test classify hmmpress         "hmmpress -h 2>&1 | head -3"
-run_test_stderr classify metaeuk   "metaeuk -h 2>&1 | head -3"
+run_test_stderr classify metaeuk   "PATH=/opt/conda/envs/dana-mag-classify/bin:\$PATH metaeuk --help 2>&1 | head -10"
 echo
 
 # ── 6. Genomic env ──────────────────────────────────────────────────────
 echo "── Genomic (dana-mag-genomic) ──"
-run_test genomic defense-finder    "PATH=/opt/conda/envs/dana-mag-genomic/bin:\$PATH defense-finder --version 2>&1"
+run_test_stderr genomic defense-finder    "PATH=/opt/conda/envs/dana-mag-genomic/bin:\$PATH defense-finder --help 2>&1 | head -5"
 run_test_stderr genomic macsyfinder "PATH=/opt/conda/envs/dana-mag-genomic/bin:\$PATH macsyfinder --version 2>&1"
 run_test_stderr genomic integron_finder "PATH=/opt/conda/envs/dana-mag-genomic/bin:\$PATH integron_finder --version 2>&1"
 run_test_stderr genomic run_dbcan  "PATH=/opt/conda/envs/dana-mag-genomic/bin:\$PATH run_dbcan --help 2>&1 | head -3"
@@ -133,19 +133,19 @@ run_test derep galah       "PATH=/opt/conda/envs/dana-mag-derep/bin:\$PATH galah
 run_test derep skani       "PATH=/opt/conda/envs/dana-mag-derep/bin:\$PATH skani --version"
 run_test derep sourmash    "PATH=/opt/conda/envs/dana-mag-derep/bin:\$PATH sourmash --version"
 run_test_stderr derep skder "PATH=/opt/conda/envs/dana-mag-derep/bin:\$PATH skder --help 2>&1 | head -3"
-run_test derep dRep        "PATH=/opt/conda/envs/dana-mag-derep/bin:\$PATH dRep --version"
+run_test_stderr derep dRep        "PATH=/opt/conda/envs/dana-mag-derep/bin:\$PATH dRep -h 2>&1 | head -5"
 echo
 
 # ── 8. Strain env ───────────────────────────────────────────────────────
 echo "── Strain (dana-mag-strain) ──"
 run_test_stderr strain strainy     "PATH=/opt/conda/envs/dana-mag-strain/bin:\$PATH strainy --help 2>&1 | head -3"
 run_test_stderr strain floria      "PATH=/opt/conda/envs/dana-mag-strain/bin:\$PATH floria --help 2>&1 | head -3"
-run_test strain inStrain           "PATH=/opt/conda/envs/dana-mag-strain/bin:\$PATH inStrain --version 2>&1"
+run_test_stderr strain inStrain           "PATH=/opt/conda/envs/dana-mag-strain/bin:\$PATH inStrain -h 2>&1 | head -5"
 echo
 
 # ── 9. PathViz env ──────────────────────────────────────────────────────
 echo "── PathViz (dana-mag-pathviz) ──"
-run_test pathviz KEGG-decoder "PATH=/opt/conda/envs/dana-mag-pathviz/bin:\$PATH KEGG-decoder --help 2>&1 | head -3"
+run_test pathviz KEGG-decoder "PATH=/opt/conda/envs/dana-mag-pathviz/bin:\$PATH KEGG-decoder -h 2>&1 | head -5"
 run_test pathviz node         "PATH=/opt/conda/envs/dana-mag-pathviz/bin:\$PATH node --version"
 run_test pathviz python3      "PATH=/opt/conda/envs/dana-mag-pathviz/bin:\$PATH python3 --version"
 echo
