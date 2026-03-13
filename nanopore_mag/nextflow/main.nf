@@ -659,7 +659,7 @@ workflow {
     }
 
     // VAMB taxvamb (optional — taxonomy-guided VAMB using sendsketch GTDB taxonomy)
-    if (params.run_vamb_tax && params.run_sendsketch) {
+    if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
         BIN_VAMB_TAX(
             ch_assembly,
             CALCULATE_DEPTHS.out.jgi_depth,
@@ -698,7 +698,7 @@ workflow {
         if (params.run_vamb) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB.out.fastas)
         }
-        if (params.run_vamb_tax && params.run_sendsketch) {
+        if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB_TAX.out.fastas)
         }
         BINETTE_CONSENSUS(ch_assembly, ch_binner_fastas.collect())
@@ -756,7 +756,7 @@ workflow {
         if (params.run_vamb) {
             ch_all_bins = ch_all_bins.mix(BIN_VAMB.out.fastas)
         }
-        if (params.run_vamb_tax && params.run_sendsketch) {
+        if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
             ch_all_bins = ch_all_bins.mix(BIN_VAMB_TAX.out.fastas)
         }
         ch_all_bins = ch_all_bins
@@ -790,7 +790,7 @@ workflow {
         if (params.run_vamb) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB.out.fastas)
         }
-        if (params.run_vamb_tax && params.run_sendsketch) {
+        if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB_TAX.out.fastas)
         }
         ch_gtdbtk_bins = ch_gtdbtk_bins
