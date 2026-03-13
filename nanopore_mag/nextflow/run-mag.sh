@@ -76,6 +76,7 @@ resolve_db_dir() {
         [--gtdbtk_db]="gtdbtk_db"
         [--metaeuk_db]="metaeuk_db/metaeuk_db"
         [--antismash_db]="antismash_db"
+        [--magscot_hmm_dir]="magscot_hmm"
     )
     for flag in "${!fixed_dbs[@]}"; do
         path="${base}/${fixed_dbs[$flag]}"
