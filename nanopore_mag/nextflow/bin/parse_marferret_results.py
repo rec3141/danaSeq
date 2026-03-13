@@ -13,11 +13,10 @@ Writes:
 
 import sys
 import os
+import csv
 import gzip
 import argparse
 from collections import defaultdict, Counter
-
-import pandas as pd
 
 
 def load_taxonomy(path):
@@ -57,35 +56,41 @@ def load_pfam(path):
         return pfam
 
     try:
-        df = pd.read_csv(path, compression='infer', low_memory=False)
+        opener = gzip.open if path.endswith('.gz') else open
+        with opener(path, 'rt') as f:
+            reader = csv.DictReader(f)
+            headers = reader.fieldnames or []
+
+            # Identify the sequence ID column
+            id_col = None
+            for candidate in ['ref_name', 'sequence_id', 'seq_id', 'protein_id']:
+                if candidate in headers:
+                    id_col = candidate
+                    break
+            if id_col is None and headers:
+                id_col = headers[0]
+
+            # Identify Pfam column
+            pfam_col = None
+            for candidate in ['best_pfam', 'pfam_accession', 'pfam', 'pfam_id', 'Pfam']:
+                if candidate in headers:
+                    pfam_col = candidate
+                    break
+            if pfam_col is None and headers:
+                pfam_col = headers[-1]
+
+            if not id_col or not pfam_col:
+                print(f'[WARNING] MarFERReT: could not identify columns in Pfam file', file=sys.stderr)
+                return pfam
+
+            for row in reader:
+                seq_id = row.get(id_col, '')
+                pfam_val = row.get(pfam_col, '')
+                if seq_id and pfam_val and pfam_val not in ('', 'nan', 'NA'):
+                    pfam[seq_id] = pfam_val
     except Exception as e:
         print(f'[WARNING] MarFERReT: could not parse Pfam file: {e}', file=sys.stderr)
         return pfam
-
-    # Identify the sequence ID column (first column or 'ref_name')
-    id_col = None
-    for candidate in ['ref_name', 'sequence_id', 'seq_id', 'protein_id']:
-        if candidate in df.columns:
-            id_col = candidate
-            break
-    if id_col is None:
-        id_col = df.columns[0]
-
-    # Identify Pfam column
-    pfam_col = None
-    for candidate in ['best_pfam', 'pfam_accession', 'pfam', 'pfam_id', 'Pfam']:
-        if candidate in df.columns:
-            pfam_col = candidate
-            break
-    if pfam_col is None:
-        # Use the last column as a fallback
-        pfam_col = df.columns[-1]
-
-    for _, row in df.iterrows():
-        seq_id = str(row[id_col])
-        pfam_val = str(row[pfam_col]) if pd.notna(row[pfam_col]) else ''
-        if pfam_val and pfam_val != 'nan':
-            pfam[seq_id] = pfam_val
 
     print(f'[INFO] MarFERReT: loaded {len(pfam)} Pfam annotations', file=sys.stderr)
     return pfam

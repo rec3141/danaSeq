@@ -78,6 +78,7 @@ RUN mamba env create -y -p /opt/conda/envs/dana-mag-instrain    -f /tmp/envs/ins
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-strainy     -f /tmp/envs/strainy.yml      && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-floria      -f /tmp/envs/floria.yml       && mamba clean -afy
 RUN mamba env create -y -p /opt/conda/envs/dana-mag-skder       -f /tmp/envs/skder.yml        && mamba clean -afy
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-magscot     -f /tmp/envs/magscot.yml      && mamba clean -afy
 
 # Remove CheckM sentinel stub now that comebin + drep envs are installed
 ENV CHECKM_DATA_DIR=
@@ -206,7 +207,7 @@ RUN mkdir -p /usr/local/bin/dana-tools \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
-    && for tool in barrnap vsearch; do \
+    && for tool in barrnap vsearch aragorn; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-rrna/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
@@ -263,6 +264,11 @@ RUN mkdir -p /usr/local/bin/dana-tools \
     done \
     && for tool in skder; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-skder/bin:$PATH\nexec %s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && for tool in MAGScoT.R Rscript parallel prodigal-gv; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-magscot/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done

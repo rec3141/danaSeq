@@ -48,7 +48,8 @@ process RNA_CLASSIFY {
     cat rrna_bac.fasta rrna_arc.fasta rrna_euk.fasta > rrna_sequences.fasta
 
     # Check if any rRNA genes were found
-    n_seqs=\$(grep -c '^>' rrna_sequences.fasta 2>/dev/null || echo 0)
+    n_seqs=\$(grep -c '^>' rrna_sequences.fasta 2>/dev/null || true)
+    n_seqs=\${n_seqs:-0}
     if [ "\$n_seqs" -eq 0 ]; then
         echo "[INFO] No rRNA genes detected in assembly" >&2
         printf 'gene_id\\tcontig_id\\tstart\\tend\\tstrand\\trrna_type\\tkingdom\\tgene_length\\tgene_completeness\\tbarrnap_score\\tbest_match\\tvsearch_identity\\tvsearch_coverage\\ttaxonomy\\n' > rrna_genes.tsv
