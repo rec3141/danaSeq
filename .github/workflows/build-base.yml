@@ -1,7 +1,8 @@
-name: Build base image (conda envs)
+name: Build base image (conda envs) [DEPRECATED - use build-base-slim]
 
 on:
-  workflow_dispatch:
+  # Disabled — replaced by build-base-slim.yml with merged conda envs
+  # workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
