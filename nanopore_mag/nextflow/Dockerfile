@@ -22,7 +22,7 @@
 #
 # ============================================================================
 
-FROM ghcr.io/rec3141/danaseq-mag-base:latest
+FROM ghcr.io/rec3141/danaseq-mag-base-slim:latest
 
 LABEL maintainer="rec3141@gmail.com"
 LABEL description="Dana MAG Assembly Pipeline - Metagenome-assembled genome reconstruction"
