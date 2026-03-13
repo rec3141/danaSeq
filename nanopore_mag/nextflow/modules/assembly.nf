@@ -31,12 +31,38 @@ process FLYE_ASSEMBLE {
 
     ${filtlong_cmd}
 
+    # Auto-detect read type from median quality scores
+    if [ "${params.read_type}" = "auto" ]; then
+        MEDIAN_Q=\$(zcat all_reads.fastq.gz | head -40000 | awk 'NR%4==0' | head -10000 | \
+            python3 -c "
+import sys
+quals = []
+for line in sys.stdin:
+    line = line.strip()
+    if line:
+        avg = sum(ord(c)-33 for c in line) / len(line)
+        quals.append(avg)
+quals.sort()
+print(int(quals[len(quals)//2]) if quals else 10)
+")
+        if [ -z "\$MEDIAN_Q" ] || [ "\$MEDIAN_Q" -lt 1 ]; then MEDIAN_Q=10; fi
+        echo "[INFO] Median read quality: Q\${MEDIAN_Q}"
+        if [ "\$MEDIAN_Q" -ge 20 ]; then
+            FLYE_READ_TYPE="--nano-hq"
+        else
+            FLYE_READ_TYPE="--nano-raw"
+        fi
+    else
+        FLYE_READ_TYPE="--${params.read_type}"
+    fi
+    echo "[INFO] Flye read type: \$FLYE_READ_TYPE"
+
     # Run Flye disjointig assembly only (most expensive stage)
     flye \\
         --meta \\
         --min-overlap ${params.min_overlap} \\
         ${params.polish ? '' : '--iterations 0'} \\
-        --nano-hq all_reads.fastq.gz \\
+        \$FLYE_READ_TYPE all_reads.fastq.gz \\
         --out-dir flye_out \\
         --threads ${task.cpus} \\
         --stop-after assembly
@@ -64,12 +90,36 @@ process FLYE_FINISH {
     # Copy previous stage output (Flye writes in-place)
     cp -r ${prev_flye_out} flye_out
 
+    # Determine read type (same logic as assembly stage)
+    if [ "${params.read_type}" = "auto" ]; then
+        MEDIAN_Q=\$(zcat ${reads} | head -40000 | awk 'NR%4==0' | head -10000 | \
+            python3 -c "
+import sys
+quals = []
+for line in sys.stdin:
+    line = line.strip()
+    if line:
+        avg = sum(ord(c)-33 for c in line) / len(line)
+        quals.append(avg)
+quals.sort()
+print(int(quals[len(quals)//2]) if quals else 10)
+")
+        if [ -z "\$MEDIAN_Q" ] || [ "\$MEDIAN_Q" -lt 1 ]; then MEDIAN_Q=10; fi
+        if [ "\$MEDIAN_Q" -ge 20 ]; then
+            FLYE_READ_TYPE="--nano-hq"
+        else
+            FLYE_READ_TYPE="--nano-raw"
+        fi
+    else
+        FLYE_READ_TYPE="--${params.read_type}"
+    fi
+
     # Resume from consensus through polishing
     flye \\
         --meta \\
         --min-overlap ${params.min_overlap} \\
         ${params.polish ? '' : '--iterations 0'} \\
-        --nano-hq ${reads} \\
+        \$FLYE_READ_TYPE ${reads} \\
         --out-dir flye_out \\
         --threads ${task.cpus} \\
         --resume-from consensus
