@@ -459,18 +459,22 @@ install_viz() {
         echo "[INFO] No viz/ directory found, skipping dashboard setup"
         return 0
     fi
-    if ! command -v npm &>/dev/null; then
-        echo "[WARNING] npm not found — skipping viz dashboard install"
-        echo "  Install Node.js >= 18 to enable the MAG dashboard"
+    # Use npm from pathviz conda env (nodejs>=18 is a conda dependency)
+    local npm_bin="${ENV_DIR}/dana-mag-pathviz/bin/npm"
+    if [[ ! -x "${npm_bin}" ]]; then
+        echo "[WARNING] npm not found in dana-mag-pathviz env — skipping viz dashboard install"
+        echo "  Re-run install to create the pathviz env first"
         return 0
     fi
     echo ""
     echo "Installing visualization dashboard dependencies ..."
-    (cd "${viz_dir}" && npm install --no-audit --no-fund) || {
+    local node_dir
+    node_dir="$(dirname "${npm_bin}")"
+    (cd "${viz_dir}" && PATH="${node_dir}:${PATH}" "${npm_bin}" install --no-audit --no-fund) || {
         echo "[WARNING] viz npm install failed (non-fatal)"
         return 0
     }
-    echo "[SUCCESS] Viz dashboard ready. Run: cd viz && npm run dev"
+    echo "[SUCCESS] Viz dashboard ready"
 }
 
 # Run the requested action
