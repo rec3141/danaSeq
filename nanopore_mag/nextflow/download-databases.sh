@@ -112,6 +112,7 @@ DOWNLOAD_SILVA=false
 DOWNLOAD_MARFERRET=false
 DOWNLOAD_GTDBTK=false
 DOWNLOAD_ANTISMASH=false
+DOWNLOAD_MAGSCOT=false
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -144,6 +145,7 @@ while (( $# )); do
         --marferret) DOWNLOAD_MARFERRET=true; INTERACTIVE=false; shift ;;
         --gtdbtk)    DOWNLOAD_GTDBTK=true; INTERACTIVE=false; shift ;;
         --antismash) DOWNLOAD_ANTISMASH=true; INTERACTIVE=false; shift ;;
+        --magscot)   DOWNLOAD_MAGSCOT=true; INTERACTIVE=false; shift ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -171,6 +173,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_MARFERRET=true
     DOWNLOAD_GTDBTK=true
     DOWNLOAD_ANTISMASH=true
+    DOWNLOAD_MAGSCOT=true
 fi
 
 # Auto-detect container runtime if --container was used
@@ -1029,6 +1032,28 @@ download_antismash() {
     echo "  Use with: --antismash_db ${db_path}"
 }
 
+download_magscot() {
+    local db_path="${DB_DIR}/magscot_hmm"
+    if [ -d "${db_path}" ] && [ -f "${db_path}/gtdbtk_rel207_tigrfam.hmm" ] && [ -f "${db_path}/gtdbtk_rel207_Pfam-A.hmm" ]; then
+        echo "[INFO] MAGScoT HMMs already exist at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading MAGScoT GTDB rel207 marker HMMs..."
+    echo "  Destination: ${db_path}"
+
+    mkdir -p "${db_path}"
+
+    local base_url="https://raw.githubusercontent.com/ikmb/MAGScoT/main/hmm"
+    curl -fSL "${base_url}/gtdbtk_rel207_tigrfam.hmm" -o "${db_path}/gtdbtk_rel207_tigrfam.hmm" || return 1
+    curl -fSL "${base_url}/gtdbtk_rel207_Pfam-A.hmm"  -o "${db_path}/gtdbtk_rel207_Pfam-A.hmm"  || return 1
+
+    echo "[SUCCESS] MAGScoT HMMs downloaded to ${db_path}"
+    echo "  Use with: --magscot_hmm_dir ${db_path}"
+}
+
 # ============================================================================
 # Execute downloads
 # ============================================================================
@@ -1110,6 +1135,10 @@ if $DOWNLOAD_ANTISMASH; then
     ( download_antismash ) || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_MAGSCOT; then
+    ( download_magscot ) || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -1137,4 +1166,5 @@ else
     ! $DOWNLOAD_MARFERRET || echo "  --marferret_db ${DB_DIR}/marferret_db"
     ! $DOWNLOAD_GTDBTK   || echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
     ! $DOWNLOAD_ANTISMASH || echo "  --antismash_db ${DB_DIR}/antismash_db"
+    ! $DOWNLOAD_MAGSCOT   || echo "  --magscot_hmm_dir ${DB_DIR}/magscot_hmm"
 fi

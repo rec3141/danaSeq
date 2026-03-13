@@ -24,7 +24,6 @@ set -euo pipefail
 #   dana-mag-gtdbtk    - GTDB-Tk phylogenetic classification
 #   dana-mag-vamb      - VAMB variational autoencoder binning
 #   dana-mag-binette   - Binette consensus refinement
-#   dana-mag-magscot   - MAGScoT marker-gene consensus refinement
 #   dana-mag-antismash - antiSMASH secondary metabolite prediction
 #
 # Usage:
@@ -91,7 +90,6 @@ STANDALONE_YAMLS=(
     gtdbtk.yml
     vamb.yml
     binette.yml
-    magscot.yml
     antismash.yml
 )
 
@@ -112,7 +110,6 @@ declare -A ENV_CHECK=(
     [dana-mag-gtdbtk]="gtdbtk"
     [dana-mag-vamb]="vamb"
     [dana-mag-binette]="binette"
-    [dana-mag-magscot]="MAGScoT.R"
     [dana-mag-antismash]="antismash"
 )
 
@@ -327,20 +324,7 @@ post_install_standalone() {
     local env_name="$1"
     local env_path="$2"
 
-    # Clone MAGScoT and wire up MAGScoT.R into bin/
-    if [[ "${env_name}" == "dana-mag-magscot" ]]; then
-        echo "  Installing MAGScoT from GitHub..."
-        local magscot_repo="https://github.com/ikmb/MAGScoT.git"
-        local magscot_dir="${env_path}/share/MAGScoT"
-        git clone --depth 1 "${magscot_repo}" "${magscot_dir}" \
-            > /dev/null 2>&1
-        if [[ -f "${magscot_dir}/MAGScoT.R" ]]; then
-            ln -sf "${magscot_dir}/MAGScoT.R" "${env_path}/bin/MAGScoT.R"
-            chmod +x "${env_path}/bin/MAGScoT.R"
-            ln -sf "${magscot_dir}/profiles" "${env_path}/bin/profiles"
-        fi
-        echo "  MAGScoT installed from ${magscot_repo}"
-    fi
+    # (magscot standalone env removed — Python port in bin/magscot.py uses binning env)
 }
 
 do_check() {

@@ -645,7 +645,7 @@ process BINETTE_CONSENSUS {
 process MAGSCOT_CONSENSUS {
     tag "magscot"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-magscot"
+    conda "${projectDir}/conda-envs/dana-mag-binning"
     publishDir "${params.outdir}/binning/magscot", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/magscot" : null
 
@@ -669,21 +669,21 @@ process MAGSCOT_CONSENSUS {
     # MAGScoT requires prodigal-style gene IDs (contig_N) to map genes → contigs
     mkdir -p prodigal_chunks prodigal_out
     awk 'BEGIN{n=0; f="prodigal_chunks/chunk_000.fa"} /^>/{n++; if(n%1000==1){f=sprintf("prodigal_chunks/chunk_%03d.fa",int(n/1000))}} {print > f}' ${assembly}
-    ls prodigal_chunks/*.fa | parallel -j ${task.cpus} \
-        'prodigal -i {} -a prodigal_out/{/.}.faa -o /dev/null -p meta -f gff 2>/dev/null'
+    ls prodigal_chunks/*.fa | xargs -P ${task.cpus} -I {} sh -c \
+        'prodigal -i "\$1" -a "prodigal_out/\$(basename "\$1" .fa).faa" -o /dev/null -p meta -f gff 2>/dev/null' _ {}
     cat prodigal_out/*.faa > proteins.faa
     rm -rf prodigal_chunks prodigal_out
     echo "[INFO] Prodigal predicted \$(grep -c "^>" proteins.faa) proteins" >&2
 
-    # 2. HMM search against GTDBtk rel207 markers (shipped in MAGScoT repo)
-    MAGSCOT_DIR=\$(dirname \$(readlink -f \$(which MAGScoT.R)))
-    echo "[INFO] MAGScoT dir: \$MAGSCOT_DIR" >&2
+    # 2. HMM search against GTDBtk rel207 markers
+    MAGSCOT_HMM="${params.magscot_hmm_dir}"
+    echo "[INFO] MAGScoT HMM dir: \$MAGSCOT_HMM" >&2
 
     # TIGRFAM and Pfam HMMs use different tblout column layouts
     hmmsearch --tblout tigr.tblout --noali --notextw --cut_nc \
-        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_tigrfam.hmm proteins.faa > /dev/null
+        --cpu ${task.cpus} \$MAGSCOT_HMM/gtdbtk_rel207_tigrfam.hmm proteins.faa > /dev/null
     hmmsearch --tblout pfam.tblout --noali --notextw --cut_nc \
-        --cpu ${task.cpus} \$MAGSCOT_DIR/hmm/gtdbtk_rel207_Pfam-A.hmm proteins.faa > /dev/null
+        --cpu ${task.cpus} \$MAGSCOT_HMM/gtdbtk_rel207_Pfam-A.hmm proteins.faa > /dev/null
 
     # 3. Parse HMM results: gene_id, marker_name, e-value
     #    TIGRFAM: target=\$1, query=\$3, evalue=\$5
@@ -707,9 +707,12 @@ process MAGSCOT_CONSENSUS {
         echo "[WARNING] All binners produced empty output -- skipping MAGScoT" >&2
         touch magscot_bins.tsv
     else
-        # 5. Run MAGScoT
+        # 5. Run MAGScoT (Python port — no R dependency)
         set +e
-        Rscript \$(which MAGScoT.R) -i contig2bin.tsv --hmm markers.tsv -o magscot_out
+        python3 ${projectDir}/bin/magscot.py \
+            -i contig2bin.tsv --hmm markers.tsv \
+            --profile_dir ${projectDir}/bin/profiles \
+            -o magscot_out
         magscot_exit=\$?
         set -e
 
