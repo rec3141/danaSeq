@@ -460,7 +460,7 @@ download_checkm() {
 
 download_checkm2() {
     local db_path="${DB_DIR}/checkm2_db"
-    if [ -d "${db_path}" ] && find "${db_path}" -maxdepth 2 -name '*.dmnd' 2>/dev/null | grep -q .; then
+    if [ -d "${db_path}" ] && find -L "${db_path}" -maxdepth 2 -name '*.dmnd' 2>/dev/null | grep -q .; then
         echo "[INFO] CheckM2 database already exists at ${db_path}"
         echo "  Delete ${db_path} and re-run to force re-download."
         return 0
@@ -484,7 +484,7 @@ download_checkm2() {
     # Create a stable top-level symlink to the DIAMOND db file
     # (Binette and other tools need the .dmnd path, not the directory)
     local dmnd_file
-    dmnd_file=$(find "${db_path}" -maxdepth 2 -name '*.dmnd' -type f | head -1)
+    dmnd_file=$(find -L "${db_path}" -maxdepth 2 -name '*.dmnd' -type f | head -1)
     if [ -n "${dmnd_file}" ]; then
         ln -sf "$(realpath --relative-to="${db_path}" "${dmnd_file}")" "${db_path}/checkm2.dmnd"
     fi
@@ -495,31 +495,31 @@ download_checkm2() {
 
 download_kaiju() {
     local db_path="${DB_DIR}/kaiju_db"
-    if [ -d "${db_path}" ] && ls "${db_path}"/*.fmi 1>/dev/null 2>&1; then
+    if [ -d "${db_path}" ] && find -L "${db_path}" -maxdepth 2 -name '*.fmi' 2>/dev/null | grep -q .; then
         echo "[INFO] Kaiju database already exists at ${db_path}"
         echo "  Delete ${db_path} and re-run to force re-download."
         return 0
     fi
 
     echo ""
-    echo "[INFO] Downloading Kaiju RefSeq reference database (~47 GB)..."
-    echo "  This is a large download and will take a while."
+    echo "[INFO] Downloading Kaiju pre-built RefSeq database..."
     echo "  Destination: ${db_path}"
 
     mkdir -p "${db_path}"
-    if $USE_CONTAINER; then
-        # kaiju-makedb downloads sequences and builds the FM-index
-        container_run sh -c 'cd /data/db/kaiju_db && kaiju-makedb -s refseq_ref' || return 1
-    else
-        local kaiju_makedb="${ENV_DIR}/dana-mag-classify/bin/kaiju-makedb"
-        if [ ! -x "${kaiju_makedb}" ]; then
-            echo "[ERROR] Kaiju not installed. Run ./install.sh first or use --docker/--apptainer." >&2
-            return 1
-        fi
-        # kaiju-makedb downloads sequences and builds the FM-index
-        # -s refseq_ref: RefSeq reference genomes (bacteria, archaea, viruses)
-        (cd "${db_path}" && "${kaiju_makedb}" -s refseq_ref) || return 1
+
+    # Download pre-built index from kaiju server (NOT kaiju-makedb which rebuilds from GenBank)
+    local base_url="https://kaiju-idx.s3.eu-central-1.amazonaws.com/2024"
+    local tarball="kaiju_db_refseq_ref_2024-08-14.tgz"
+    if [ ! -f "${db_path}/${tarball}" ]; then
+        echo "  Downloading pre-built index: ${tarball}"
+        wget -c -q --show-progress -O "${db_path}/${tarball}" \
+            "${base_url}/${tarball}" || return 1
     fi
+
+    echo "[INFO] Extracting ${tarball}..."
+    tar xzf "${db_path}/${tarball}" -C "${db_path}" || return 1
+    rm -f "${db_path}/${tarball}"
+
     echo "[SUCCESS] Kaiju database downloaded to ${db_path}"
     echo "  Use with: --kaiju_db ${db_path}"
 }
@@ -539,16 +539,16 @@ download_macsyfinder() {
 
     mkdir -p "${db_path}"
     if $USE_CONTAINER; then
-        container_run msf_data install --target /data/db/macsyfinder_models TXSScan || return 1
-        container_run msf_data install --target /data/db/macsyfinder_models CONJScan || return 1
+        container_run macsydata install --target /data/db/macsyfinder_models TXSScan || return 1
+        container_run macsydata install --target /data/db/macsyfinder_models CONJScan || return 1
     else
-        local msf_data_bin="${ENV_DIR}/dana-mag-genomic/bin/msf_data"
-        if [ ! -x "${msf_data_bin}" ]; then
+        local macsydata_bin="${ENV_DIR}/dana-mag-genomic/bin/macsydata"
+        if [ ! -x "${macsydata_bin}" ]; then
             echo "[ERROR] MacSyFinder not installed. Run ./install.sh first or use --docker/--apptainer." >&2
             return 1
         fi
-        "${msf_data_bin}" install --target "${db_path}" TXSScan || return 1
-        "${msf_data_bin}" install --target "${db_path}" CONJScan || return 1
+        "${macsydata_bin}" install --target "${db_path}" TXSScan || return 1
+        "${macsydata_bin}" install --target "${db_path}" CONJScan || return 1
     fi
     echo "[SUCCESS] MacSyFinder models downloaded to ${db_path}"
     echo "  Use with: --macsyfinder_models ${db_path}"
