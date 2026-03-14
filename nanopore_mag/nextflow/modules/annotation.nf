@@ -130,7 +130,9 @@ process BAKTA_EXTRA {
         --force \
         --skip-trna --skip-tmrna --skip-rrna \
         --skip-ncrna --skip-ncrna-region \
+        --skip-crispr \
         "${assembly}"
+    # --skip-crispr: PILER-CR assertion crash on metagenomes (https://github.com/oschwengers/bakta/issues/433)
 
     if [ ! -s bakta_out/annotation.faa ]; then
         echo "[WARNING] Bakta full produced no protein output" >&2
