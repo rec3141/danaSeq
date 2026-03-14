@@ -84,31 +84,20 @@ process CALCULATE_GENE_DEPTHS {
 
     input:
     path(bams)
+    path(annotation_tsv)
 
     output:
     path("gene_depths.tsv"), emit: gene_depths
 
     script:
-    // Discover annotation TSV using same priority as viz.nf
-    def storeRoot = params.store_dir ?: ''
     """
     #!/bin/bash
     set -euo pipefail
 
-    # Discover annotation TSV: BAKTA_EXTRA > BAKTA_BASIC > PROKKA
-    STORE="${storeRoot}"
-    OUT="${params.outdir}"
-    find_first() { for f in "\$@"; do [ -f "\${f}" ] && echo "\${f}" && return; done; }
-    ANNOT_TSV=\$(find_first \\
-        "\${STORE:+\${STORE}/annotation/bakta/extra/annotation.tsv}" \\
-        "\${OUT}/annotation/bakta/extra/annotation.tsv" \\
-        "\${STORE:+\${STORE}/annotation/bakta/basic/annotation.tsv}" \\
-        "\${OUT}/annotation/bakta/basic/annotation.tsv" \\
-        "\${STORE:+\${STORE}/annotation/prokka/annotation.tsv}" \\
-        "\${OUT}/annotation/prokka/annotation.tsv")
+    ANNOT_TSV="${annotation_tsv}"
 
-    if [ -z "\${ANNOT_TSV}" ]; then
-        echo "[WARNING] No annotation TSV found — writing empty gene_depths.tsv" >&2
+    if [ ! -s "\${ANNOT_TSV}" ]; then
+        echo "[WARNING] Annotation TSV is empty — writing empty gene_depths.tsv" >&2
         echo -e "locus_tag\\tcontig\\tstart\\tend\\tmean_depth" > gene_depths.tsv
         exit 0
     fi

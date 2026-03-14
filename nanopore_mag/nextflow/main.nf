@@ -454,18 +454,21 @@ workflow {
     CALCULATE_TNF(ch_assembly)
 
     // 2c. Gene annotation on co-assembly (optional: prokka, bakta, or none)
-    ch_proteins = Channel.empty()
-    ch_gff      = Channel.empty()
+    ch_proteins       = Channel.empty()
+    ch_gff            = Channel.empty()
+    ch_annotation_tsv = Channel.empty()
 
     if (effective_annotator == 'prokka') {
         PROKKA_ANNOTATE(ch_assembly)
-        ch_proteins = PROKKA_ANNOTATE.out.proteins
-        ch_gff      = PROKKA_ANNOTATE.out.gff
+        ch_proteins       = PROKKA_ANNOTATE.out.proteins
+        ch_gff            = PROKKA_ANNOTATE.out.gff
+        ch_annotation_tsv = PROKKA_ANNOTATE.out.tsv
     } else if (effective_annotator == 'bakta') {
         // Fast path: basic annotation with light DB (minutes) — feeds all downstream tools
         BAKTA_BASIC(ch_assembly)
-        ch_proteins = BAKTA_BASIC.out.proteins
-        ch_gff      = BAKTA_BASIC.out.gff
+        ch_proteins       = BAKTA_BASIC.out.proteins
+        ch_gff            = BAKTA_BASIC.out.gff
+        ch_annotation_tsv = BAKTA_BASIC.out.tsv
 
         // Slow path: full Bakta annotation with expert systems (hours, optional)
         // Waits for BAKTA_BASIC to finish first — prevents resource starvation of the
@@ -475,6 +478,8 @@ workflow {
                 .combine(ch_assembly)
                 .map { prot, asm -> asm }
             BAKTA_EXTRA(ch_assembly_after_basic)
+            // Use EXTRA annotation if available (more complete than BASIC)
+            ch_annotation_tsv = BAKTA_EXTRA.out.tsv
         }
     }
 
@@ -603,9 +608,8 @@ workflow {
     CALCULATE_DEPTHS(ch_bam_files, ch_assembly)
 
     // 4b. Per-gene depths from all BAMs + annotation TSV
-    //     Discovers annotation TSV at runtime (same priority as viz.nf)
     if (effective_annotator != 'none') {
-        CALCULATE_GENE_DEPTHS(ch_bam_files)
+        CALCULATE_GENE_DEPTHS(ch_bam_files, ch_annotation_tsv)
     }
 
     // 5. Binners run in parallel; each emits [label, contig_bins.tsv]

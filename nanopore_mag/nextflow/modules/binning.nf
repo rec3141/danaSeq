@@ -142,11 +142,19 @@ process BIN_MAXBIN2 {
     cut -f1,3 "${jgi_depth}" | tail -n +2 > coverage.txt
 
     mkdir -p maxbin_out
+    set +e
     run_MaxBin.pl \\
         -contig "${assembly}" \\
         -abund coverage.txt \\
         -out maxbin_out/bin \\
         -thread ${task.cpus}
+    maxbin_exit=\$?
+    set -e
+    # Exit 255 = "cannot be binned" (too few marker genes) — not an error
+    if [ \$maxbin_exit -ne 0 ] && [ \$maxbin_exit -ne 255 ]; then
+        echo "[ERROR] MaxBin2 failed with exit code \$maxbin_exit" >&2
+        exit \$maxbin_exit
+    fi
 
     # Convert MaxBin2 FASTA bins to contig_bins.tsv format
     # Extract bin number from filename (e.g. bin.042.fasta -> 42) for consistent naming
