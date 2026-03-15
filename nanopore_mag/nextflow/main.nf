@@ -777,7 +777,7 @@ workflow {
     }
 
     // 7c. Phylogenetic classification with GTDB-Tk (optional — requires database path)
-    if (params.gtdbtk_db) {
+    if (params.run_gtdbtk && params.gtdbtk_db) {
         ch_gtdbtk_bins = BIN_METABAT2.out.fastas
         if (params.run_semibin) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_SEMIBIN2.out.fastas)
@@ -880,7 +880,7 @@ workflow {
             ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.summary.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.json.collect())
         }
-        if (params.gtdbtk_db) {
+        if (params.run_gtdbtk && params.gtdbtk_db) {
             ch_viz_stage4 = ch_viz_stage4.mix(GTDBTK_CLASSIFY.out.taxonomy.collect())
         }
         VIZ_STAGE4(ch_viz_stage4.collect(), true, true)

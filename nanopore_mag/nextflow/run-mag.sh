@@ -152,7 +152,9 @@ usage() {
     echo ""
     echo "Shortcuts:"
     echo "  --all            Enable all optional modules (dedupe, bakta_extra, kraken2,"
-    echo "                   sendsketch, rrna, metabolism, eukaryotic, metaeuk, marferret)"
+    echo "                   sendsketch, rrna, metabolism, antismash, eukaryotic, metaeuk,"
+    echo "                   marferret, gtdbtk, kaiju, genomad, checkv, defensefinder,"
+    echo "                   integronfinder, islandpath, macsyfinder, viz)"
     echo "                   Still requires database paths to be provided separately."
     echo "  --db_dir DIR     Base directory of databases installed by download-databases.sh."
     echo "                   Auto-resolves all standard subdirectory paths (bakta, genomad,"
@@ -178,6 +180,15 @@ usage() {
     echo "  --run_vamb_tax BOOL  Run VAMB taxvamb (taxonomy-guided, needs sendsketch_address) [default: false]"
     echo "  --run_binette BOOL   Run Binette consensus refinement (needs checkm2_db) [default: false]"
     echo "  --run_magscot BOOL   Run MAGScoT consensus refinement [default: false]"
+    echo "  --run_gtdbtk BOOL    Run GTDB-Tk phylogenetic classification (needs gtdbtk_db) [default: false]"
+    echo "  --run_kaiju BOOL     Run Kaiju protein-level taxonomy (needs kaiju_db) [default: false]"
+    echo "  --run_genomad BOOL   Run geNomad virus + plasmid detection (needs genomad_db) [default: false]"
+    echo "  --run_checkv BOOL    Run CheckV viral quality assessment (needs checkv_db) [default: false]"
+    echo "  --run_defensefinder BOOL  Run DefenseFinder anti-phage defense detection [default: false]"
+    echo "  --run_integronfinder BOOL Run IntegronFinder integron detection [default: false]"
+    echo "  --run_islandpath BOOL     Run IslandPath-DIMOB genomic island detection [default: false]"
+    echo "  --run_macsyfinder BOOL    Run MacSyFinder secretion/conjugation detection [default: false]"
+    echo "  --run_viz BOOL       Build viz dashboard at end of pipeline [default: false]"
     echo "  --lorbin_min_length N LorBin minimum bin size in bp [default: 80000]"
     echo "  --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 50000]"
     echo "  --assembly_cpus N    CPUs for assembly [default: 24]"
@@ -325,6 +336,15 @@ while (( $# )); do
                 --run_eukaryotic true
                 --run_metaeuk true
                 --run_marferret true
+                --run_gtdbtk true
+                --run_kaiju true
+                --run_genomad true
+                --run_checkv true
+                --run_defensefinder true
+                --run_integronfinder true
+                --run_islandpath true
+                --run_macsyfinder true
+                --run_viz true
             )
             shift ;;
         --resume)
