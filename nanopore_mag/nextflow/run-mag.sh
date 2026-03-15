@@ -397,13 +397,20 @@ fi
 # ============================================================================
 
 if [[ "$DO_RESUME" == true && -z "$RESUME_SESSION" ]]; then
-    # Try to auto-detect session ID from previous run in this outdir
-    if [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.txt" ]]; then
-        RESUME_SESSION=$(grep -oP '(?<=--resume )[0-9a-f-]{36}' \
-            "${OUTDIR_HOST}/pipeline_info/run_command.txt" | tail -1 || true)
-        if [[ -n "$RESUME_SESSION" ]]; then
-            echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"
+    # Try to auto-detect session ID from Nextflow history (authoritative source)
+    # Check cache bind-mount, legacy .nextflow/, and store_dir variants
+    _base="${STORE_DIR_HOST:-$OUTDIR_HOST}"
+    for _hist in "${_base}/.nextflow-cache/dotdir/history" \
+                 "${_base}/.nextflow/history" \
+                 "${OUTDIR_HOST}/.nextflow-cache/dotdir/history" \
+                 "${OUTDIR_HOST}/.nextflow/history"; do
+        if [[ -f "$_hist" ]]; then
+            RESUME_SESSION=$(awk '{print $6}' "$_hist" | tail -1)
+            break
         fi
+    done
+    if [[ -n "$RESUME_SESSION" ]]; then
+        echo "[INFO] Auto-detected session from Nextflow history: $RESUME_SESSION"
     fi
     # If no session found, -resume without ID will resume the last run
 fi
@@ -524,8 +531,10 @@ if [[ "$USE_CONTAINER" == true ]]; then
 
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
-    # Capture session ID from Nextflow log and save self-invocation for reliable resume
-    NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
+    # Capture session ID from Nextflow history (bind-mounted cache dir is authoritative)
+    NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1)
+    # Fallback: try the .nextflow.log in the script directory
+    [[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
     save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
 
     exit $NF_EXIT
@@ -604,8 +613,9 @@ if [[ -n "$WATCHER_PID" ]]; then
     echo "[INFO] Pipeline watcher stopped"
 fi
 
-# Capture session ID from Nextflow log and save self-invocation for reliable resume
-NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
+# Capture session ID from Nextflow history or log
+NF_SESSION=$(awk '{print $6}' .nextflow/history 2>/dev/null | tail -1)
+[[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' .nextflow.log 2>/dev/null | tail -1)
 save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
 
 exit $NF_EXIT
