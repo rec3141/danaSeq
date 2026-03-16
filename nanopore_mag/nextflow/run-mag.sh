@@ -492,6 +492,25 @@ if [[ "$USE_CONTAINER" == true ]]; then
     # Use NXF_HOME to isolate each run's cache (prevents lock collisions between concurrent runs)
     NF_CACHE="${OUTDIR_HOST}/.nextflow-cache"
     mkdir -p "${NF_CACHE}/dotdir" 2>/dev/null || true
+
+    # Migrate legacy shared cache: if per-run NXF_HOME has no history but ~/.nextflow does,
+    # symlink history and the specific session's cache so -resume can find completed tasks
+    # without copying the entire shared cache (which would defeat isolation)
+    if [[ "$DO_RESUME" == true && ! -f "${NF_CACHE}/dotdir/history" && -f "$HOME/.nextflow/history" ]]; then
+        echo "[INFO] Migrating Nextflow cache from ~/.nextflow to per-run NXF_HOME"
+        cp "$HOME/.nextflow/history" "${NF_CACHE}/dotdir/" 2>/dev/null || true
+        # Link the specific session cache dir if we have a session ID
+        if [[ -n "${RESUME_SESSION:-}" && -d "$HOME/.nextflow/cache/$RESUME_SESSION" ]]; then
+            mkdir -p "${NF_CACHE}/dotdir/cache" 2>/dev/null || true
+            ln -sfn "$HOME/.nextflow/cache/$RESUME_SESSION" "${NF_CACHE}/dotdir/cache/$RESUME_SESSION"
+            echo "[INFO] Linked session cache: $RESUME_SESSION"
+        elif [[ -d "$HOME/.nextflow/cache" ]]; then
+            # No specific session — link entire cache dir
+            ln -sfn "$HOME/.nextflow/cache" "${NF_CACHE}/dotdir/cache"
+            echo "[INFO] Linked entire legacy cache"
+        fi
+    fi
+
     BINDS+=("${NF_CACHE}/dotdir:/home/dana/.nextflow")
 
     # Build runtime-specific command
