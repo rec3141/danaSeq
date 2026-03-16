@@ -489,6 +489,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
     BINDS+=("${WORKDIR_HOST}:/data/work")
 
     # Persistent Nextflow .nextflow directory for -resume support
+    # Use NXF_HOME to isolate each run's cache (prevents lock collisions between concurrent runs)
     NF_CACHE="${OUTDIR_HOST}/.nextflow-cache"
     mkdir -p "${NF_CACHE}/dotdir" 2>/dev/null || true
     BINDS+=("${NF_CACHE}/dotdir:/home/dana/.nextflow")
@@ -498,6 +499,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
     case "$CONTAINER_RUNTIME" in
         docker)
             CONTAINER_CMD+=(docker run --user "$(id -u):$(id -g)")
+            CONTAINER_CMD+=("-e" "NXF_HOME=/home/dana/.nextflow")
             for bind in "${BINDS[@]}"; do
                 CONTAINER_CMD+=("-v" "$bind")
             done
@@ -507,6 +509,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             # Override host SSL env vars (RHEL CA paths don't exist in the Debian container)
             container_ca="/etc/ssl/certs/ca-certificates.crt"
             CONTAINER_CMD+=("$CONTAINER_RUNTIME" run)
+            CONTAINER_CMD+=("--env" "NXF_HOME=${NF_CACHE}/dotdir")
             CONTAINER_CMD+=("--env" "REQUESTS_CA_BUNDLE=${container_ca}")
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")
             CONTAINER_CMD+=("--env" "CURL_CA_BUNDLE=${container_ca}")
