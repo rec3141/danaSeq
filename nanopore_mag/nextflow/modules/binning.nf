@@ -679,9 +679,14 @@ process MAGSCOT_CONSENSUS {
     awk 'BEGIN{n=0; f="prodigal_chunks/chunk_000.fa"} /^>/{n++; if(n%1000==1){f=sprintf("prodigal_chunks/chunk_%03d.fa",int(n/1000))}} {print > f}' ${assembly}
     ls prodigal_chunks/*.fa | xargs -P ${task.cpus} -I {} sh -c \
         'prodigal -i "\$1" -a "prodigal_out/\$(basename "\$1" .fa).faa" -o /dev/null -p meta -f gff 2>/dev/null' _ {}
-    cat prodigal_out/*.faa > proteins.faa
+    cat prodigal_out/*.faa > proteins.raw.faa
     rm -rf prodigal_chunks prodigal_out
-    echo "[INFO] Prodigal predicted \$(grep -c "^>" proteins.faa) proteins" >&2
+    # Filter proteins >100K aa (hmmsearch limit; these are assembly artifacts)
+    awk 'BEGIN{RS=">"; FS="\\n"} NR>1 {seq=""; for(i=2;i<=NF;i++) seq=seq\$i; if(length(seq)<=100000) print ">"$0}' \
+        proteins.raw.faa | sed '/^$/d' > proteins.faa
+    FILTERED=\$(( \$(grep -c "^>" proteins.raw.faa) - \$(grep -c "^>" proteins.faa) ))
+    echo "[INFO] Prodigal predicted \$(grep -c "^>" proteins.raw.faa) proteins (\$FILTERED filtered >100K aa)" >&2
+    rm -f proteins.raw.faa
 
     # 2. HMM search against GTDBtk rel207 markers
     MAGSCOT_HMM="${params.magscot_hmm_dir}"

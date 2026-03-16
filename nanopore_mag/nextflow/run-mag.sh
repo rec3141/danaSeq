@@ -553,6 +553,16 @@ if [[ "$USE_CONTAINER" == true ]]; then
 
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
+    # Apptainer's squashfuse_ll cleanup can return non-zero even when Nextflow succeeded
+    # (github.com/apptainer/apptainer/issues/2216). Check the Nextflow trace for the real exit.
+    if [[ $NF_EXIT -ne 0 ]]; then
+        _trace="${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/trace.txt"
+        if [[ -f "$_trace" ]] && ! grep -q 'FAILED' "$_trace" 2>/dev/null; then
+            echo "[WARN] Container exited $NF_EXIT but Nextflow trace shows no failures — likely squashfuse_ll cleanup timeout"
+            NF_EXIT=0
+        fi
+    fi
+
     # Capture session ID from Nextflow history (bind-mounted cache dir is authoritative)
     NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1)
     # Fallback: try the .nextflow.log in the script directory
