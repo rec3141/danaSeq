@@ -505,3 +505,142 @@ for r in rows:
 " > antismash_summary.tsv
     """
 }
+
+// ============================================================================
+// ECOSSDB — Ecosystem Services Profiling
+// ============================================================================
+
+process ECOSSDB_MAP {
+    tag "ecossdb_map"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-classify"
+    publishDir "${params.outdir}/metabolism/ecossdb", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb" : null
+
+    input:
+    path community_annotations
+    path contig2bin
+    path es_mapping
+    path es_ontology
+
+    output:
+    path 'es_gene_catalog.tsv',    emit: catalog
+    path 'es_per_contig.tsv',      emit: contigs
+    path 'es_per_mag.tsv',         emit: mag_profiles
+    path 'es_mapping_stats.tsv',   emit: stats
+
+    script:
+    """
+    set -euo pipefail
+
+    # 1. Normalize annotations (strip ko: prefix, unify columns)
+    normalize_annotations.py \
+        --input ${community_annotations} \
+        --format danaseq \
+        --output normalized.tsv
+
+    # 2. Map annotations to ecosystem services
+    map_to_es.py \
+        --annotations normalized.tsv \
+        --mapping ${es_mapping} \
+        --ontology ${es_ontology} \
+        --output es_gene_hits.tsv \
+        --stats es_mapping_stats.tsv
+
+    # 3. Aggregate to contigs (merge + dedup)
+    aggregate_contigs.py \
+        --gene-hits es_gene_hits.tsv \
+        --output-catalog es_gene_catalog.tsv \
+        --output-contigs es_per_contig.tsv
+
+    # 4. Aggregate to MAGs
+    aggregate_bins.py \
+        --catalog es_gene_catalog.tsv \
+        --contig2bin ${contig2bin} \
+        --output es_per_mag.tsv
+    """
+}
+
+process ECOSSDB_SCORE {
+    tag "ecossdb_score"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-classify"
+    publishDir "${params.outdir}/metabolism/ecossdb", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb_score" : null
+
+    input:
+    path catalog
+    path es_mapping
+    val  role_weights
+
+    output:
+    path 'es_scores.tsv',     emit: scores
+    path 'es_confidence.tsv', emit: confidence
+
+    script:
+    """
+    score_es.py \
+        --catalog ${catalog} \
+        --mapping ${es_mapping} \
+        --role-weights '${role_weights}' \
+        --output es_scores.tsv \
+        --confidence-out es_confidence.tsv
+    """
+}
+
+process ECOSSDB_SDG {
+    tag "ecossdb_sdg"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-classify"
+    publishDir "${params.outdir}/metabolism/ecossdb/sdg", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb_sdg" : null
+
+    input:
+    path scores
+    path crosswalk
+    path sdg_targets
+
+    output:
+    path 'es_sdg_targets.tsv', emit: targets
+    path 'es_sdg_goals.tsv',   emit: goals
+    path 'es_sdg.json',        emit: json
+
+    script:
+    """
+    map_es_to_sdg.py \
+        --scores ${scores} \
+        --crosswalk ${crosswalk} \
+        --sdg-targets ${sdg_targets} \
+        --output-targets es_sdg_targets.tsv \
+        --output-goals es_sdg_goals.tsv \
+        --output-json es_sdg.json
+    """
+}
+
+process ECOSSDB_VIZ {
+    tag "ecossdb_viz"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-classify"
+    publishDir "${params.outdir}/metabolism/ecossdb", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb_viz" : null
+
+    input:
+    path scores
+    path catalog
+    path mag_profiles
+    path hierarchy_json
+
+    output:
+    path 'ecosystem_services.json',    emit: json
+    path 'ecosystem_services.json.gz', emit: json_gz
+
+    script:
+    """
+    es_to_json.py \
+        --scores ${scores} \
+        --catalog ${catalog} \
+        --mag-profiles ${mag_profiles} \
+        --hierarchy ${hierarchy_json} \
+        --output ecosystem_services.json
+    """
+}

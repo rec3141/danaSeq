@@ -88,6 +88,11 @@ def helpMessage() {
       --run_antismash    Run antiSMASH biosynthetic gene cluster detection [default: false]
       --antismash_db PATH  Path to antiSMASH database dir; null = use default
 
+    Ecosystem Services:
+      --run_ecossdb       Map functional annotations to CICES 5.2 ecosystem services [default: true]
+      --ecossdb_dir PATH  Path to ECOSSDB repository [default: /data/ecossdb]
+      --ecossdb_sdg       Also map ES to UN SDG targets [default: true]
+
     Mobile Genetic Elements:
       --run_genomad      Run geNomad virus + plasmid detection [default: true]
       --genomad_db PATH  Path to geNomad database; null = skip geNomad
@@ -237,8 +242,17 @@ def helpMessage() {
       │   │   ├── antismash_summary.tsv    Per-region BGC summary (type, known cluster, similarity)
       │   │   ├── antismash_geneclusters/  Region GenBank files
       │   │   └── antismash_json/          Full antiSMASH JSON output
-      │   └── community/
-      │       └── community_annotations.tsv  All proteins with bin_id column
+      │   ├── community/
+      │   │   └── community_annotations.tsv  All proteins with bin_id column
+      │   └── ecossdb/                     (if --run_ecossdb)
+      │       ├── es_gene_catalog.tsv        Gene-level ES assignments
+      │       ├── es_per_contig.tsv          Per-contig ES profiles
+      │       ├── es_per_mag.tsv             Per-MAG ES profiles
+      │       ├── es_scores.tsv              Confidence-weighted ES scores
+      │       ├── ecosystem_services.json    Viz data for dashboard
+      │       └── sdg/                       (if --ecossdb_sdg)
+      │           ├── es_sdg_targets.tsv     Per-entity SDG target scores
+      │           └── es_sdg_goals.tsv       Aggregated SDG goal scores
       ├── eukaryotic/                   (if --run_eukaryotic)
       │   ├── tiara/
       │   │   └── tiara_output.tsv        Per-contig Tiara classification + probabilities
@@ -363,6 +377,10 @@ include { KEGG_MODULES }        from './modules/metabolism'
 include { MINPATH }             from './modules/metabolism'
 include { KEGG_DECODER }        from './modules/metabolism'
 include { ANTISMASH }           from './modules/metabolism'
+include { ECOSSDB_MAP }         from './modules/metabolism'
+include { ECOSSDB_SCORE }       from './modules/metabolism'
+include { ECOSSDB_SDG }         from './modules/metabolism'
+include { ECOSSDB_VIZ }         from './modules/metabolism'
 include { VIZ_PREPROCESS as VIZ_STAGE1 } from './modules/viz'  // after TNF, computes t-SNE + UMAP
 include { VIZ_PREPROCESS as VIZ_STAGE2 } from './modules/viz'  // after BAKTA_BASIC, skip embeddings
 include { VIZ_PREPROCESS as VIZ_STAGE3 } from './modules/viz'  // after DAS_Tool+CheckM2, skip embeddings
@@ -734,6 +752,45 @@ workflow {
 
         // KEGG-Decoder biogeochemical function scoring + heatmap (parallel)
         KEGG_DECODER(MAP_TO_BINS.out.per_mag)
+
+        // ECOSSDB ecosystem services profiling (parallel with KEGG_MODULES/KEGG_DECODER)
+        if (params.run_ecossdb) {
+            ch_es_mapping  = Channel.fromPath("${params.ecossdb_dir}/db/mappings/es_gene_mapping.tsv")
+            ch_es_ontology = Channel.fromPath("${params.ecossdb_dir}/db/ontology/cices_v5.2.tsv")
+
+            ECOSSDB_MAP(
+                MAP_TO_BINS.out.community,
+                DASTOOL_CONSENSUS.out.contig2bin,
+                ch_es_mapping,
+                ch_es_ontology
+            )
+
+            ECOSSDB_SCORE(
+                ECOSSDB_MAP.out.catalog,
+                ch_es_mapping,
+                params.ecossdb_role_weights
+            )
+
+            // SDG mapping (optional)
+            if (params.ecossdb_sdg) {
+                ch_sdg_crosswalk = Channel.fromPath("${params.ecossdb_dir}/db/ontology/sdg/cices_to_sdg.tsv")
+                ch_sdg_targets   = Channel.fromPath("${params.ecossdb_dir}/db/ontology/sdg/sdg_targets.tsv")
+                ECOSSDB_SDG(
+                    ECOSSDB_SCORE.out.scores,
+                    ch_sdg_crosswalk,
+                    ch_sdg_targets
+                )
+            }
+
+            // Viz JSON for dashboard
+            ch_es_hierarchy = Channel.fromPath("${params.ecossdb_dir}/db/ontology/es_hierarchy.json")
+            ECOSSDB_VIZ(
+                ECOSSDB_SCORE.out.scores,
+                ECOSSDB_MAP.out.catalog,
+                ECOSSDB_MAP.out.mag_profiles,
+                ch_es_hierarchy
+            )
+        }
     }
 
     // 6c. antiSMASH biosynthetic gene cluster detection (independent of KO-based metabolism)
@@ -875,6 +932,9 @@ workflow {
             ch_viz_stage4 = ch_viz_stage4.mix(KEGG_MODULES.out.modules.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(MINPATH.out.pathways.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(KEGG_DECODER.out.output.collect())
+            if (params.run_ecossdb) {
+                ch_viz_stage4 = ch_viz_stage4.mix(ECOSSDB_VIZ.out.json.collect())
+            }
         }
         if (params.run_antismash) {
             ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.summary.collect())
