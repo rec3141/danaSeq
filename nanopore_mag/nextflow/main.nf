@@ -90,7 +90,6 @@ def helpMessage() {
 
     Ecosystem Services:
       --run_ecossdb       Map functional annotations to CICES 5.2 ecosystem services [default: true]
-      --ecossdb_dir PATH  Path to ECOSSDB repository [default: /data/ecossdb]
       --ecossdb_sdg       Also map ES to UN SDG targets [default: true]
 
     Mobile Genetic Elements:
@@ -755,8 +754,9 @@ workflow {
 
         // ECOSSDB ecosystem services profiling (parallel with KEGG_MODULES/KEGG_DECODER)
         if (params.run_ecossdb) {
-            ch_es_mapping  = Channel.fromPath("${params.ecossdb_dir}/db/mappings/es_gene_mapping.tsv")
-            ch_es_ontology = Channel.fromPath("${params.ecossdb_dir}/db/ontology/cices_v5.2.tsv")
+            def ecossdb_db = "${projectDir}/ecossdb/db"
+            ch_es_mapping  = Channel.fromPath("${ecossdb_db}/mappings/es_gene_mapping.tsv")
+            ch_es_ontology = Channel.fromPath("${ecossdb_db}/ontology/cices_v5.2.tsv")
 
             ECOSSDB_MAP(
                 MAP_TO_BINS.out.community,
@@ -773,8 +773,8 @@ workflow {
 
             // SDG mapping (optional)
             if (params.ecossdb_sdg) {
-                ch_sdg_crosswalk = Channel.fromPath("${params.ecossdb_dir}/db/ontology/sdg/cices_to_sdg.tsv")
-                ch_sdg_targets   = Channel.fromPath("${params.ecossdb_dir}/db/ontology/sdg/sdg_targets.tsv")
+                ch_sdg_crosswalk = Channel.fromPath("${ecossdb_db}/ontology/sdg/cices_to_sdg.tsv")
+                ch_sdg_targets   = Channel.fromPath("${ecossdb_db}/ontology/sdg/sdg_targets.tsv")
                 ECOSSDB_SDG(
                     ECOSSDB_SCORE.out.scores,
                     ch_sdg_crosswalk,
@@ -783,7 +783,7 @@ workflow {
             }
 
             // Viz JSON for dashboard
-            ch_es_hierarchy = Channel.fromPath("${params.ecossdb_dir}/db/ontology/es_hierarchy.json")
+            ch_es_hierarchy = Channel.fromPath("${ecossdb_db}/ontology/es_hierarchy.json")
             ECOSSDB_VIZ(
                 ECOSSDB_SCORE.out.scores,
                 ECOSSDB_MAP.out.catalog,

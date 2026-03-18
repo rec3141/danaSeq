@@ -234,6 +234,8 @@ show_databases() {
     echo ""
     echo "  Note: Tiara, Whokaryote, and IslandPath HMM profiles are bundled with"
     echo "  their conda packages (no separate database download needed)."
+    echo "  ECOSSDB gene-ES mappings and ontologies are bundled in the ecossdb/"
+    echo "  submodule (initialized by install.sh, no download needed)."
     echo ""
     echo "Default download directory: ${DB_DIR}"
     echo ""

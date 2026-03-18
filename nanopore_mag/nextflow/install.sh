@@ -461,9 +461,26 @@ install_viz() {
     echo "[SUCCESS] Viz dashboard ready"
 }
 
+# Initialize ECOSSDB submodule (ecosystem services database)
+install_ecossdb() {
+    local ecossdb_dir="${SCRIPT_DIR}/ecossdb"
+    if [[ -f "${ecossdb_dir}/bin/map_to_es.py" ]]; then
+        echo "[OK] ECOSSDB submodule already initialized"
+        return 0
+    fi
+    echo ""
+    echo "Initializing ECOSSDB submodule (ecosystem services database) ..."
+    (cd "${SCRIPT_DIR}" && git submodule update --init --depth 1 ecossdb) || {
+        echo "[WARNING] ECOSSDB submodule init failed — ecosystem services profiling will be unavailable"
+        echo "  To fix: cd ${SCRIPT_DIR} && git submodule update --init ecossdb"
+        return 0
+    }
+    echo "[SUCCESS] ECOSSDB ready ($(wc -l < "${ecossdb_dir}/db/mappings/es_gene_mapping.tsv") gene-ES mappings)"
+}
+
 # Run the requested action
 case "${ACTION}" in
-    install) do_install; install_viz ;;
+    install) do_install; install_viz; install_ecossdb ;;
     check)   do_check ;;
     clean)   do_clean ;;
 esac

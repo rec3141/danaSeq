@@ -1,1 +1,0 @@
-/data/ecossdb/bin/score_es.py

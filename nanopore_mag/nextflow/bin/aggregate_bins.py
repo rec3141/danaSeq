@@ -1,1 +1,0 @@
-/data/ecossdb/bin/aggregate_bins.py

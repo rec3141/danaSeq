@@ -1,1 +1,0 @@
-/data/ecossdb/bin/normalize_annotations.py

@@ -1,0 +1,3 @@
+[submodule "nanopore_mag/nextflow/ecossdb"]
+	path = nanopore_mag/nextflow/ecossdb
+	url = https://github.com/rec3141/ecossdb.git
