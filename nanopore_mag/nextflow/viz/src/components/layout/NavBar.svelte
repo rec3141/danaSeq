@@ -9,6 +9,7 @@
     { id: 'kegg', label: 'Function' },
     { id: 'eukaryotic', label: 'Eukaryotic' },
     { id: 'biosynthetic', label: 'BGCs' },
+    { id: 'ecosystem', label: 'Ecosystem' },
     { id: 'mge', label: 'MGE' },
   ];
 

@@ -16,6 +16,7 @@ export const contigLengths = writable(null);
 export const contigExplorer = writable(null);
 export const phyloTree = writable(null);
 export const biosynthetic = writable(null);
+export const ecosystemServices = writable(null);
 
 export const loading = writable(true);
 export const error = writable(null);
@@ -41,7 +42,7 @@ export function stopStatusPolling() {
 async function refreshPipelineStatus() {
   try {
     // Cache-bust so vite preview doesn't serve stale data
-    const res = await fetch('/data/pipeline_status.json?t=' + Date.now());
+    const res = await fetch('data/pipeline_status.json?t=' + Date.now());
     if (res.ok) {
       const data = await res.json();
       pipelineStatus.set(data);
@@ -101,28 +102,28 @@ export async function loadAllData() {
       eukData,
       contigLenData,
     ] = await Promise.all([
-      fetchJSON('/data/overview.json'),
-      fetchJSON('/data/mags.json'),
-      fetchJSON('/data/taxonomy_sunburst.json'),
-      fetchJSON('/data/kegg_heatmap.json'),
-      fetchJSON('/data/scg_heatmap.json').catch(() => null),
-      fetchJSON('/data/coverage.json'),
-      fetchJSON('/data/mge_summary.json'),
-      fetchJSON('/data/mge_per_bin.json'),
-      fetchJSON('/data/eukaryotic.json'),
-      fetchJSON('/data/contig_lengths.json'),
+      fetchJSON('data/overview.json'),
+      fetchJSON('data/mags.json').catch(() => null),
+      fetchJSON('data/taxonomy_sunburst.json').catch(() => null),
+      fetchJSON('data/kegg_heatmap.json').catch(() => null),
+      fetchJSON('data/scg_heatmap.json').catch(() => null),
+      fetchJSON('data/coverage.json').catch(() => null),
+      fetchJSON('data/mge_summary.json').catch(() => null),
+      fetchJSON('data/mge_per_bin.json').catch(() => null),
+      fetchJSON('data/eukaryotic.json').catch(() => null),
+      fetchJSON('data/contig_lengths.json').catch(() => null),
     ]);
 
     overview.set(overviewData);
-    mags.set(magsData);
-    taxonomySunburst.set(sunburstData);
-    keggHeatmap.set(keggData);
+    if (magsData) mags.set(magsData);
+    if (sunburstData) taxonomySunburst.set(sunburstData);
+    if (keggData) keggHeatmap.set(keggData);
     if (scgData) scgHeatmap.set(scgData);
-    coverage.set(coverageData);
-    mgeSummary.set(mgeSumData);
-    mgePerBin.set(mgePerBinData);
-    eukaryotic.set(eukData);
-    contigLengths.set(contigLenData);
+    if (coverageData) coverage.set(coverageData);
+    if (mgeSumData) mgeSummary.set(mgeSumData);
+    if (mgePerBinData) mgePerBin.set(mgePerBinData);
+    if (eukData) eukaryotic.set(eukData);
+    if (contigLenData) contigLengths.set(contigLenData);
   } catch (e) {
     error.set(e.message);
     console.error('Data loading error:', e);
@@ -137,7 +138,7 @@ export async function loadBinQuality() {
   if (binQualityLoading || get(binQuality) !== null) return;
   binQualityLoading = true;
   try {
-    const data = await fetchJSON('/data/checkm2_all.json');
+    const data = await fetchJSON('data/checkm2_all.json');
     binQuality.set(data);
   } catch (e) {
     console.error('Failed to load checkm2_all:', e);
@@ -153,7 +154,7 @@ export async function loadContigGenes(contigId) {
   if (!genesData && !genesLoading) {
     genesLoading = true;
     try {
-      genesData = await fetchJSON('/data/genes.json');
+      genesData = await fetchJSON('data/genes.json');
     } catch (e) {
       console.warn('Gene data not available:', e.message);
       genesData = {};
@@ -177,7 +178,7 @@ export async function loadAllGenes() {
     if (!genesData && !genesLoading) {
       genesLoading = true;
       try {
-        genesData = await fetchJSON('/data/genes.json');
+        genesData = await fetchJSON('data/genes.json');
       } catch (e) {
         console.warn('Gene data not available:', e.message);
         genesData = {};
@@ -217,7 +218,7 @@ export async function loadSampleDepths() {
   if (sampleDepthsLoading || get(sampleDepths) !== null) return;
   sampleDepthsLoading = true;
   try {
-    const data = await fetchJSON('/data/contig_sample_depths.json');
+    const data = await fetchJSON('data/contig_sample_depths.json');
     sampleDepths.set(data);
   } catch (e) {
     console.warn('Per-sample depth data not available:', e.message);
@@ -233,7 +234,7 @@ export async function loadBiosynthetic() {
   if (biosyntheticLoading || get(biosynthetic) !== null) return;
   biosyntheticLoading = true;
   try {
-    const data = await fetchJSON('/data/biosynthetic.json');
+    const data = await fetchJSON('data/biosynthetic.json');
     biosynthetic.set(data);
   } catch (e) {
     console.warn('Biosynthetic data not available:', e.message);
@@ -243,13 +244,36 @@ export async function loadBiosynthetic() {
   }
 }
 
+// Lazy load ecosystem services (ECOSSDB)
+let esLoading = false;
+export async function loadEcosystemServices() {
+  if (esLoading || get(ecosystemServices) !== null) return;
+  esLoading = true;
+  try {
+    const data = await fetchJSON('data/ecosystem_services.json');
+    // Also try loading SDG data
+    try {
+      const sdg = await fetchJSON('data/es_sdg.json');
+      if (sdg) data.sdg = sdg;
+    } catch (e) {
+      console.warn('SDG data not available');
+    }
+    ecosystemServices.set(data);
+  } catch (e) {
+    console.warn('Ecosystem services data not available:', e.message);
+    ecosystemServices.set(null);
+  } finally {
+    esLoading = false;
+  }
+}
+
 // Lazy load phylotree (GTDB-Tk phylogenetic classification)
 let phyloLoading = false;
 export async function loadPhyloTree() {
   if (phyloLoading || get(phyloTree) !== null) return;
   phyloLoading = true;
   try {
-    const data = await fetchJSON('/data/phylotree.json');
+    const data = await fetchJSON('data/phylotree.json');
     phyloTree.set(data);
   } catch (e) {
     console.warn('Phylotree data not available:', e.message);
@@ -266,9 +290,9 @@ export async function loadContigExplorer() {
   contigLoading = true;
   try {
     const [data, tsneEmb, umapEmb] = await Promise.all([
-      fetchJSON('/data/contig_explorer.json'),
-      fetchJSON('/data/contig_tsne.json').catch(() => null),
-      fetchJSON('/data/contig_umap.json').catch(() => null),
+      fetchJSON('data/contig_explorer.json'),
+      fetchJSON('data/contig_tsne.json').catch(() => null),
+      fetchJSON('data/contig_umap.json').catch(() => null),
     ]);
     // Merge embeddings into contig records (each file is {contig_id: [x, y]})
     if (data?.contigs) {

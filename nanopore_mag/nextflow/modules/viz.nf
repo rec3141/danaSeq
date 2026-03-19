@@ -74,6 +74,16 @@ process VIZ_PREPROCESS {
         echo '{}' | gzip > "\${VIZ_DIR}/data/genes.json.gz"
     fi
 
+    # Copy ECOSSDB ecosystem services data if available
+    ES_JSON=\$(find_first \
+        "\${STORE:+\${STORE}/metabolism/ecossdb/ecosystem_services.json}" \
+        "\${OUT}/metabolism/ecossdb/ecosystem_services.json")
+    ES_SDG=\$(find_first \
+        "\${STORE:+\${STORE}/metabolism/ecossdb_sdg/es_sdg.json}" \
+        "\${OUT}/metabolism/ecossdb/sdg/es_sdg.json")
+    [ -n "\${ES_JSON}" ] && cp "\${ES_JSON}" "\${VIZ_DIR}/data/ecosystem_services.json" && echo "Copied ecosystem_services.json"
+    [ -n "\${ES_SDG}" ] && cp "\${ES_SDG}" "\${VIZ_DIR}/data/es_sdg.json" && echo "Copied es_sdg.json"
+
     # Build static site (node/npm provided by conda env)
     # Copy viz source to a writable location (container filesystem may be read-only)
     VIZ_BUILD="\${VIZ_DIR}/.build"
