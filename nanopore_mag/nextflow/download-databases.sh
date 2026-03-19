@@ -34,7 +34,7 @@ set -euo pipefail
 #   ./download-databases.sh --apptainer         # Use Apptainer/Singularity (auto-pulls SIF)
 #   ./download-databases.sh --container         # Auto-detect: apptainer > singularity > docker
 #   ./download-databases.sh --docker --image IMG # Use a custom Docker/Apptainer image
-#   ./download-databases.sh --dir /custom/path # Custom database directory
+#   ./download-databases.sh --db_dir /custom/path # Custom database directory
 #   ./download-databases.sh --list             # Show available databases
 #
 # Default directory: ./databases/
@@ -125,7 +125,7 @@ while (( $# )); do
         --container) USE_CONTAINER=true; CONTAINER_RUNTIME=auto; shift ;;
         --image)     CONTAINER_IMAGE="$2"; shift 2 ;;
         --sif)       SIF_PATH="$2"; shift 2 ;;
-        --dir)       DB_DIR="$2"; shift 2 ;;
+        --db_dir|--dir) DB_DIR="$2"; shift 2 ;;
         --all)       DOWNLOAD_ALL=true; INTERACTIVE=false; shift ;;
         --genomad)   DOWNLOAD_GENOMAD=true; INTERACTIVE=false; shift ;;
         --checkv)    DOWNLOAD_CHECKV=true; INTERACTIVE=false; shift ;;
