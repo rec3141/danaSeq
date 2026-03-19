@@ -705,7 +705,8 @@ download_eggnog() {
     if $USE_CONTAINER; then
         # Workaround: eggnog-mapper <=2.1.13 has broken download URLs
         # (eggnogdb.embl.de returns 404; eggnog5.embl.de is the working host)
-        container_run sh -c "sed -i 's|eggnogdb.embl.de|eggnog5.embl.de|g' \$(which download_eggnog_data.py); download_eggnog_data.py --data_dir /data/db/eggnog_db -y" || return 1
+        # Must patch all files — URL is in common.py, db_sqlite.py, and the download script
+        container_run sh -c "find /opt/conda/envs/dana-mag-annotate -name '*.py' -exec grep -l 'eggnogdb.embl.de' {} \; | xargs sed -i 's|eggnogdb.embl.de|eggnog5.embl.de|g'; download_eggnog_data.py --data_dir /data/db/eggnog_db -y" || return 1
     else
         local emapper_bin="${ENV_DIR}/dana-mag-annotate/bin/download_eggnog_data.py"
         if [ ! -x "${emapper_bin}" ]; then
