@@ -113,6 +113,13 @@
     return 'LQ';
   }
 
+  // Taxonomy helper: extract short label (genus or lowest available rank)
+  function shortTax(m) {
+    if (!m?.taxonomy) return '-';
+    const t = m.taxonomy.gtdbtk || m.taxonomy.kaiju || m.taxonomy.kraken2 || m.taxonomy.sendsketch || {};
+    return t.genus || t.family || t.order || t.class || t.phylum || t.domain || '-';
+  }
+
   // === Per-sample pathway matrix (relative abundance mode) ===
   // Uses pathway_heatmap if available, otherwise falls back to basic heatmap
   let perSampleES = $derived.by(() => {
@@ -219,42 +226,50 @@
     12: '#BF8B2E', 13: '#3F7E44', 14: '#0A97D9', 15: '#56C02B'
   };
 
-  // === ES color scale (log-scaled cyan gradient) ===
-  let esColorScale = $derived.by(() => {
-    // Find max across the active heatmap data source
-    let maxVal = 1;
+  // === ES color scale (diverging red-dark-blue, log-scaled) ===
+  let esScaleRange = $derived.by(() => {
+    let minVal = 0, maxVal = 1;
     const src = abundanceMode === 'even'
       ? (esData?.pathway_heatmap?.matrix || esData?.heatmap?.matrix)
       : (perSampleES?.rows);
     if (src) {
       for (const row of src) {
-        for (const v of row) if (v > maxVal) maxVal = v;
+        for (const v of row) {
+          if (v < minVal) minVal = v;
+          if (v > maxVal) maxVal = v;
+        }
       }
     }
-    // Log scale for hit counts (large dynamic range)
-    const logMax = Math.log10(maxVal + 1);
+    return { minVal, maxVal };
+  });
+
+  let esColorScale = $derived.by(() => {
+    const { minVal, maxVal } = esScaleRange;
+    // Symmetric log scale for diverging data
+    const logPos = maxVal > 0 ? Math.log10(maxVal + 1) : 1;
+    const logNeg = minVal < 0 ? Math.log10(-minVal + 1) : 0;
     return (val) => {
-      if (val <= 0) return '#0f172a';
-      const t = Math.min(Math.log10(val + 1) / logMax, 1);
-      const r = Math.round(15 + t * (6 - 15));
-      const g = Math.round(23 + t * (182 - 23));
-      const b = Math.round(42 + t * (212 - 42));
-      return `rgb(${r}, ${g}, ${b})`;
+      if (val === 0) return '#0f172a'; // slate-900
+      if (val > 0) {
+        // Blue gradient: slate-900 → cyan-400
+        const t = Math.min(Math.log10(val + 1) / logPos, 1);
+        const r = Math.round(15 + t * (6 - 15));
+        const g = Math.round(23 + t * (182 - 23));
+        const b = Math.round(42 + t * (212 - 42));
+        return `rgb(${r}, ${g}, ${b})`;
+      } else {
+        // Red gradient: slate-900 → rose-500
+        const t = logNeg > 0 ? Math.min(Math.log10(-val + 1) / logNeg, 1) : 0;
+        const r = Math.round(15 + t * (244 - 15));
+        const g = Math.round(23 + t * (63 - 23));
+        const b = Math.round(42 + t * (94 - 42));
+        return `rgb(${r}, ${g}, ${b})`;
+      }
     };
   });
 
-  let esMaxVal = $derived.by(() => {
-    let maxVal = 1;
-    const src = abundanceMode === 'even'
-      ? (esData?.pathway_heatmap?.matrix || esData?.heatmap?.matrix)
-      : (perSampleES?.rows);
-    if (src) {
-      for (const row of src) {
-        for (const v of row) if (v > maxVal) maxVal = v;
-      }
-    }
-    return maxVal;
-  });
+  let esMaxVal = $derived(esScaleRange.maxVal);
+  let esMinVal = $derived(esScaleRange.minVal);
 
   // === ES code filter for pathway heatmap ===
   let activeEsCodes = $state(null); // null = show all
@@ -377,21 +392,14 @@
     if (!magD3Data) return null;
     const ids = magD3Data.mag_ids;
     const qualityColor = (v) => v === 'HQ' ? '#34d399' : v === 'MQ' ? '#fbbf24' : '#64748b';
-    const compColor = (v) => {
-      const n = parseFloat(v);
-      return n >= 90 ? '#34d399' : n >= 50 ? '#fbbf24' : '#64748b';
-    };
-    const contColor = (v) => {
-      const n = parseFloat(v);
-      return n < 5 ? '#34d399' : n < 10 ? '#fbbf24' : '#ef4444';
-    };
     const scoreColor = (v) => {
       const n = parseFloat(v);
-      return n > 0 ? '#22d3ee' : '#64748b';
+      return n > 0 ? '#22d3ee' : n < 0 ? '#f43f5e' : '#64748b';
     };
+    const taxColor = (v) => v === '-' ? '#475569' : '#94a3b8';
     return [
       {
-        label: 'MAG', width: 130, align: 'start',
+        label: 'Bin', width: 130, align: 'start',
         values: ids.map(id => id),
       },
       {
@@ -400,21 +408,35 @@
         colorFn: qualityColor,
       },
       {
-        label: 'Comp%', width: 40,
-        values: ids.map(id => { const m = magMeta[id]; return m ? m.completeness.toFixed(0) : '-'; }),
-        colorFn: compColor,
+        label: 'Taxonomy', width: 90, align: 'start',
+        values: ids.map(id => shortTax(magMeta[id])),
+        colorFn: taxColor,
       },
       {
-        label: 'Cont%', width: 40,
-        values: ids.map(id => { const m = magMeta[id]; return m ? m.contamination.toFixed(1) : '-'; }),
-        colorFn: contColor,
-      },
-      {
-        label: 'Score', width: 40,
+        label: '+', width: 35,
         values: ids.map(id => {
           const idx = magD3Data.mag_ids.indexOf(id);
           if (idx < 0) return '-';
-          return magD3Data.matrix[idx].reduce((s, v) => s + v, 0).toFixed(1);
+          return magD3Data.matrix[idx].filter(v => v > 0).reduce((s, v) => s + v, 0).toFixed(0);
+        }),
+        colorFn: (v) => parseFloat(v) > 0 ? '#22d3ee' : '#64748b',
+      },
+      {
+        label: '−', width: 35,
+        values: ids.map(id => {
+          const idx = magD3Data.mag_ids.indexOf(id);
+          if (idx < 0) return '-';
+          const neg = magD3Data.matrix[idx].filter(v => v < 0).reduce((s, v) => s + v, 0);
+          return neg < 0 ? neg.toFixed(0) : '-';
+        }),
+        colorFn: (v) => parseFloat(v) < 0 ? '#f43f5e' : '#64748b',
+      },
+      {
+        label: 'Net', width: 40,
+        values: ids.map(id => {
+          const idx = magD3Data.mag_ids.indexOf(id);
+          if (idx < 0) return '-';
+          return magD3Data.matrix[idx].reduce((s, v) => s + v, 0).toFixed(0);
         }),
         colorFn: scoreColor,
       },
@@ -424,14 +446,12 @@
   // MAG heatmap tooltip
   function magTooltip(val, magId, colId, colName) {
     const m = magMeta[magId];
-    const qual = m ? qualityTier(m) : '-';
-    const comp = m ? m.completeness.toFixed(1) + '%' : '-';
-    // colId is "es_code pathway" for pathway heatmap, or just es_code
+    const tax = shortTax(m);
     const isPathway = colId.includes(' ');
     const esCode = isPathway ? colId.split(' ')[0] : colId;
     const pathway = isPathway ? colName : '';
-    const valLabel = Number.isInteger(val) || val > 10 ? `${val} hits` : `Score: ${val.toFixed(3)}`;
-    return `<strong>${esCode}</strong>${pathway ? '<br>' + pathway : ''}<br>MAG: ${magId}<br>${valLabel}<br>Quality: ${qual} (${comp} comp)`;
+    const sign = val > 0 ? '+' : '';
+    return `<strong>${esCode}</strong>${pathway ? '<br>' + pathway : ''}<br>Bin: ${magId}${tax !== '-' ? '<br>' + tax : ''}<br>Score: ${sign}${val.toFixed(2)}`;
   }
 
   // === Sample Heatmap D3 data (relative mode, pathway-expanded) ===
@@ -820,7 +840,7 @@
               onRowClick={handleRowClick}
               tooltipFormat={magTooltip}
               colorScale={esColorScale}
-              legendLabel={['0', `${esMaxVal} hits`]}
+              legendLabel={[esMinVal < 0 ? `${esMinVal.toFixed(0)} (inhibitor)` : '0', `${esMaxVal.toFixed(0)} (producer)`]}
               selectedRow={selected}
               rowAnnotations={magRowAnnotations}
             />
@@ -829,7 +849,7 @@
               data={sampleD3Data}
               tooltipFormat={sampleTooltip}
               colorScale={esColorScale}
-              legendLabel={['0', esMaxVal.toFixed(2)]}
+              legendLabel={[esMinVal < 0 ? `${esMinVal.toFixed(1)} (inh)` : '0', `${esMaxVal.toFixed(1)} (prod)`]}
               rowAnnotations={sampleRowAnnotations}
             />
           {/if}
