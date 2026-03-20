@@ -8,6 +8,7 @@ import path from 'path';
 const dataDir = process.env.VIZ_DATA_DIR;
 
 export default defineConfig({
+  base: './',
   plugins: [
     svelte(),
     // Serve /data/* from VIZ_DATA_DIR when set (avoids polluting source tree)

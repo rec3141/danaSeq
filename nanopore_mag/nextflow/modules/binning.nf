@@ -682,8 +682,8 @@ process MAGSCOT_CONSENSUS {
     cat prodigal_out/*.faa > proteins.raw.faa
     rm -rf prodigal_chunks prodigal_out
     # Filter proteins >100K aa (hmmsearch limit; these are assembly artifacts)
-    awk 'BEGIN{RS=">"; FS="\\n"} NR>1 {seq=""; for(i=2;i<=NF;i++) seq=seq\$i; if(length(seq)<=100000) print ">"$0}' \
-        proteins.raw.faa | sed '/^$/d' > proteins.faa
+    awk 'BEGIN{RS=">"; FS="\\n"} NR>1 {seq=""; for(i=2;i<=NF;i++) seq=seq\$i; if(length(seq)<=100000) print ">"\$0}' \
+        proteins.raw.faa | grep -v '^\$' > proteins.faa
     FILTERED=\$(( \$(grep -c "^>" proteins.raw.faa) - \$(grep -c "^>" proteins.faa) ))
     echo "[INFO] Prodigal predicted \$(grep -c "^>" proteins.raw.faa) proteins (\$FILTERED filtered >100K aa)" >&2
     rm -f proteins.raw.faa
