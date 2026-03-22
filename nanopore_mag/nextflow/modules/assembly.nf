@@ -1,19 +1,23 @@
-// Flye assembly split into two stages so the expensive disjointig assembly
-// is cached independently. The flye.yml conda env includes samtools>=1.17
-// to replace Flye's bundled samtools 1.9 which deadlocks on large BAMs
-// (github.com/samtools/htslib/issues/831).
+// Flye metagenomic assembly without polishing (--iterations 0).
+// Polishing is handled by the separate FLYE_POLISH process which can
+// run on any assembler's output. The flye.yml conda env includes
+// samtools>=1.17 to replace Flye's bundled samtools 1.9 which deadlocks
+// on large BAMs (github.com/samtools/htslib/issues/831).
 
 process FLYE_ASSEMBLE {
     tag "flye-assemble"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    storeDir params.store_dir ? "${params.store_dir}/assembly/flye_assemble" : null
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir && !params.polish
+    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
     path(reads)
 
     output:
-    path("flye_out"),            emit: flye_out
+    path("assembly.fasta"),      emit: assembly
+    path("assembly_info.txt"),   emit: info
+    path("assembly_graph.gfa"),  emit: graph
     path("all_reads.fastq.gz"),  emit: reads
 
     script:
@@ -57,27 +61,63 @@ print(int(quals[len(quals)//2]) if quals else 10)
     fi
     echo "[INFO] Flye read type: \$FLYE_READ_TYPE"
 
-    # Run Flye disjointig assembly only (most expensive stage)
+    # Run Flye assembly without polishing (handled by FLYE_POLISH downstream)
     flye \\
         --meta \\
         --min-overlap ${params.min_overlap} \\
-        ${params.polish ? '' : '--iterations 0'} \\
+        --iterations 0 \\
         \$FLYE_READ_TYPE all_reads.fastq.gz \\
         --out-dir flye_out \\
-        --threads ${task.cpus} \\
-        --stop-after assembly
+        --threads ${task.cpus}
+
+    # Validate assembly
+    if [ ! -s flye_out/assembly.fasta ]; then
+        echo "[ERROR] Flye produced no assembly output" >&2
+        exit 1
+    fi
+
+    # Check minimum contig size
+    max_len=\$(awk '/^>/{if(len>0) print len; len=0; next} {len+=length(\$0)} END{print len}' flye_out/assembly.fasta | sort -rn | head -1)
+    if [ "\$max_len" -lt 1000 ]; then
+        echo "[ERROR] Assembly contains no contigs >= 1000bp (max: \${max_len}bp)" >&2
+        exit 1
+    fi
+
+    # Sort contigs by length (longest first) and rename with zero-padded IDs
+    NCONTIGS=\$(grep -c '^>' flye_out/assembly.fasta)
+    PAD=\${#NCONTIGS}
+    TAB=\$(printf '\\t')
+
+    awk '/^>/{if(h) print h "\\t" length(s) "\\t" s; h=substr(\$0,2); s=""; next} {s=s\$0} END{if(h) print h "\\t" length(s) "\\t" s}' flye_out/assembly.fasta \\
+    | sort -t"\$TAB" -k2,2rn \\
+    | awk -F'\\t' -v pad="\$PAD" '{n++; new=sprintf("contig_%0*d",pad,n); printf ">%s\\n",new>"assembly.fasta"; s=\$3; for(i=1;i<=length(s);i+=80) print substr(s,i,80)>"assembly.fasta"; print \$1"\\t"new>"name_map.tsv"}'
+
+    # Update assembly_info.txt
+    head -1 flye_out/assembly_info.txt > assembly_info.txt
+    tail -n+2 flye_out/assembly_info.txt \\
+    | awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} {if(\$1 in map) \$1=map[\$1]; print}' name_map.tsv - \\
+    | sort -t"\$TAB" -k2,2rn >> assembly_info.txt
+
+    # Update GFA
+    awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} \$1=="P"&&(\$2 in map){\$2=map[\$2]} {print}' name_map.tsv flye_out/assembly_graph.gfa > assembly_graph.gfa
+
+    rm -f name_map.tsv
     """
 }
 
-process FLYE_FINISH {
-    tag "flye-finish"
+// Assembler-agnostic polishing using Flye's --polish-target.
+// Runs on any assembly.fasta + reads — not Flye-specific despite using the Flye binary.
+process FLYE_POLISH {
+    tag "flye-polish"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
-    path(prev_flye_out)
+    path(assembly)
+    path(info)
+    path(graph)
     path(reads)
 
     output:
@@ -87,10 +127,7 @@ process FLYE_FINISH {
 
     script:
     """
-    # Copy previous stage output (Flye writes in-place)
-    cp -r ${prev_flye_out} flye_out
-
-    # Determine read type (same logic as assembly stage)
+    # Determine read type
     if [ "${params.read_type}" = "auto" ]; then
         MEDIAN_Q=\$(zcat ${reads} | head -40000 | awk 'NR%4==0' | head -10000 | \
             python3 -c "
@@ -114,50 +151,25 @@ print(int(quals[len(quals)//2]) if quals else 10)
         FLYE_READ_TYPE="--${params.read_type}"
     fi
 
-    # Resume from consensus through polishing
+    # Polish assembly with Flye's standalone polisher
     flye \\
-        --meta \\
-        --min-overlap ${params.min_overlap} \\
-        ${params.polish ? '' : '--iterations 0'} \\
+        --polish-target ${assembly} \\
         \$FLYE_READ_TYPE ${reads} \\
-        --out-dir flye_out \\
-        --threads ${task.cpus} \\
-        --resume-from consensus
+        --out-dir polish_out \\
+        --threads ${task.cpus}
 
-    # Validate assembly
-    if [ ! -s flye_out/assembly.fasta ]; then
-        echo "[ERROR] Flye produced no assembly output" >&2
-        exit 1
+    # Use polished output if it exists, otherwise keep original
+    if [ -s polish_out/polished_1.fasta ]; then
+        mv polish_out/polished_1.fasta assembly.fasta
+        echo "[INFO] Polishing complete"
+    else
+        echo "[WARNING] Polishing produced no output, keeping unpolished assembly"
+        cp ${assembly} assembly.fasta
     fi
 
-    # Check minimum contig size
-    max_len=\$(awk '/^>/{if(len>0) print len; len=0; next} {len+=length(\$0)} END{print len}' flye_out/assembly.fasta | sort -rn | head -1)
-    if [ "\$max_len" -lt 1000 ]; then
-        echo "[ERROR] Assembly contains no contigs >= 1000bp (max: \${max_len}bp)" >&2
-        exit 1
-    fi
-
-    # Sort contigs by length (longest first) and rename with zero-padded IDs
-    NCONTIGS=\$(grep -c '^>' flye_out/assembly.fasta)
-    PAD=\${#NCONTIGS}
-    TAB=\$(printf '\\t')
-
-    # Build sorted FASTA + name map (old_name → new_name)
-    awk '/^>/{if(h) print h "\\t" length(s) "\\t" s; h=substr(\$0,2); s=""; next} {s=s\$0} END{if(h) print h "\\t" length(s) "\\t" s}' flye_out/assembly.fasta \\
-    | sort -t"\$TAB" -k2,2rn \\
-    | awk -F'\\t' -v pad="\$PAD" '{n++; new=sprintf("contig_%0*d",pad,n); printf ">%s\\n",new>"assembly.fasta"; s=\$3; for(i=1;i<=length(s);i+=80) print substr(s,i,80)>"assembly.fasta"; print \$1"\\t"new>"name_map.tsv"}'
-
-    # Update assembly_info.txt: rename first column, sort by length descending
-    head -1 flye_out/assembly_info.txt > assembly_info.txt
-    tail -n+2 flye_out/assembly_info.txt \\
-    | awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} {if(\$1 in map) \$1=map[\$1]; print}' name_map.tsv - \\
-    | sort -t"\$TAB" -k2,2rn >> assembly_info.txt
-
-    # Update GFA: rename contig names in P (path) lines only
-    # S and L lines use edge_N names (graph structure) — unchanged
-    awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} \$1=="P"&&(\$2 in map){\$2=map[\$2]} {print}' name_map.tsv flye_out/assembly_graph.gfa > assembly_graph.gfa
-
-    rm -f name_map.tsv
+    # Pass through info and graph unchanged (polishing doesn't alter these)
+    cp ${info} assembly_info.txt
+    cp ${graph} assembly_graph.gfa
     """
 }
 
@@ -165,7 +177,7 @@ process ASSEMBLY_METAMDBG {
     tag "co-assembly-metamdbg"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir && !params.polish
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
@@ -175,6 +187,7 @@ process ASSEMBLY_METAMDBG {
     path("assembly.fasta"),      emit: assembly
     path("assembly_info.txt"),   emit: info
     path("assembly_graph.gfa"),  emit: graph
+    path("all_reads.fastq.gz"),  emit: reads
 
     script:
     def filtlong_cmd = ""
@@ -262,7 +275,6 @@ process ASSEMBLY_METAMDBG {
     fi
 
     rm -f name_map.tsv metamdbg_raw.fasta
-    rm -f all_reads.fastq.gz
     """
 }
 
@@ -270,7 +282,7 @@ process ASSEMBLY_MYLOASM {
     tag "co-assembly-myloasm"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir && !params.polish
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
@@ -280,6 +292,7 @@ process ASSEMBLY_MYLOASM {
     path("assembly.fasta"),      emit: assembly
     path("assembly_info.txt"),   emit: info
     path("assembly_graph.gfa"),  emit: graph
+    path("all_reads.fastq.gz"),  emit: reads
 
     script:
     def filtlong_cmd = ""
@@ -363,7 +376,6 @@ process ASSEMBLY_MYLOASM {
     fi
 
     rm -f name_map.tsv
-    rm -f all_reads.fastq.gz
     """
 }
 

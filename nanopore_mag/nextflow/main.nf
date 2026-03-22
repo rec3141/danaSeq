@@ -330,7 +330,7 @@ log.info "Assembler: ${params.assembler}"
 // Import modules
 include { CONCAT_READS }        from './modules/preprocess'
 include { FLYE_ASSEMBLE }       from './modules/assembly'
-include { FLYE_FINISH }         from './modules/assembly'
+include { FLYE_POLISH }         from './modules/assembly'
 include { ASSEMBLY_METAMDBG }   from './modules/assembly'
 include { ASSEMBLY_MYLOASM }    from './modules/assembly'
 include { CALCULATE_TNF }       from './modules/assembly'
@@ -451,20 +451,32 @@ workflow {
 
     if (params.assembler == 'flye') {
         FLYE_ASSEMBLE(ch_all_reads)
-        FLYE_FINISH(FLYE_ASSEMBLE.out.flye_out, FLYE_ASSEMBLE.out.reads)
-        ch_assembly = FLYE_FINISH.out.assembly
-        ch_asm_info = FLYE_FINISH.out.info
-        ch_asm_graph = FLYE_FINISH.out.graph
+        ch_raw_assembly = FLYE_ASSEMBLE.out.assembly
+        ch_asm_info     = FLYE_ASSEMBLE.out.info
+        ch_asm_graph    = FLYE_ASSEMBLE.out.graph
+        ch_asm_reads    = FLYE_ASSEMBLE.out.reads
     } else if (params.assembler == 'metamdbg') {
         ASSEMBLY_METAMDBG(ch_all_reads)
-        ch_assembly = ASSEMBLY_METAMDBG.out.assembly
-        ch_asm_info = ASSEMBLY_METAMDBG.out.info
-        ch_asm_graph = ASSEMBLY_METAMDBG.out.graph
+        ch_raw_assembly = ASSEMBLY_METAMDBG.out.assembly
+        ch_asm_info     = ASSEMBLY_METAMDBG.out.info
+        ch_asm_graph    = ASSEMBLY_METAMDBG.out.graph
+        ch_asm_reads    = ASSEMBLY_METAMDBG.out.reads
     } else if (params.assembler == 'myloasm') {
         ASSEMBLY_MYLOASM(ch_all_reads)
-        ch_assembly = ASSEMBLY_MYLOASM.out.assembly
-        ch_asm_info = ASSEMBLY_MYLOASM.out.info
-        ch_asm_graph = ASSEMBLY_MYLOASM.out.graph
+        ch_raw_assembly = ASSEMBLY_MYLOASM.out.assembly
+        ch_asm_info     = ASSEMBLY_MYLOASM.out.info
+        ch_asm_graph    = ASSEMBLY_MYLOASM.out.graph
+        ch_asm_reads    = ASSEMBLY_MYLOASM.out.reads
+    }
+
+    // 2a. Optional polishing (assembler-agnostic, uses Flye --polish-target)
+    if (params.polish) {
+        FLYE_POLISH(ch_raw_assembly, ch_asm_info, ch_asm_graph, ch_asm_reads)
+        ch_assembly  = FLYE_POLISH.out.assembly
+        ch_asm_info  = FLYE_POLISH.out.info
+        ch_asm_graph = FLYE_POLISH.out.graph
+    } else {
+        ch_assembly = ch_raw_assembly
     }
 
     // 2b. Tetranucleotide frequencies from assembly
