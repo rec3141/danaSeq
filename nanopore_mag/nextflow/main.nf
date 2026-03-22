@@ -329,6 +329,7 @@ log.info "Assembler: ${params.assembler}"
 
 // Import modules
 include { CONCAT_READS }        from './modules/preprocess'
+include { PREPARE_READS }        from './modules/preprocess'
 include { FLYE_ASSEMBLE }       from './modules/assembly'
 include { FLYE_POLISH }         from './modules/assembly'
 include { ASSEMBLY_METAMDBG }   from './modules/assembly'
@@ -446,32 +447,31 @@ workflow {
         error "ERROR: No FASTQ files found in ${params.input}. Expected either *.fastq.gz or fastq_pass/barcode*/ structure.\nRun with --help for usage."
     }
 
-    // 2. Co-assembly: fan-in all reads into one assembly
-    ch_all_reads = ch_reads.map { meta, fastq -> fastq }.collect()
+    // 2. Concatenate + dedupe + optional filtlong → single all_reads.fastq.gz
+    ch_per_barcode = ch_reads.map { meta, fastq -> fastq }.collect()
+    PREPARE_READS(ch_per_barcode)
+    ch_asm_input = PREPARE_READS.out.reads
 
     if (params.assembler == 'flye') {
-        FLYE_ASSEMBLE(ch_all_reads)
+        FLYE_ASSEMBLE(ch_asm_input)
         ch_raw_assembly = FLYE_ASSEMBLE.out.assembly
         ch_asm_info     = FLYE_ASSEMBLE.out.info
         ch_asm_graph    = FLYE_ASSEMBLE.out.graph
-        ch_asm_reads    = FLYE_ASSEMBLE.out.reads
     } else if (params.assembler == 'metamdbg') {
-        ASSEMBLY_METAMDBG(ch_all_reads)
+        ASSEMBLY_METAMDBG(ch_asm_input)
         ch_raw_assembly = ASSEMBLY_METAMDBG.out.assembly
         ch_asm_info     = ASSEMBLY_METAMDBG.out.info
         ch_asm_graph    = ASSEMBLY_METAMDBG.out.graph
-        ch_asm_reads    = ASSEMBLY_METAMDBG.out.reads
     } else if (params.assembler == 'myloasm') {
-        ASSEMBLY_MYLOASM(ch_all_reads)
+        ASSEMBLY_MYLOASM(ch_asm_input)
         ch_raw_assembly = ASSEMBLY_MYLOASM.out.assembly
         ch_asm_info     = ASSEMBLY_MYLOASM.out.info
         ch_asm_graph    = ASSEMBLY_MYLOASM.out.graph
-        ch_asm_reads    = ASSEMBLY_MYLOASM.out.reads
     }
 
     // 2a. Optional polishing (assembler-agnostic, uses Flye --polish-target)
     if (params.polish) {
-        FLYE_POLISH(ch_raw_assembly, ch_asm_info, ch_asm_graph, ch_asm_reads)
+        FLYE_POLISH(ch_raw_assembly, ch_asm_info, ch_asm_graph, ch_asm_input)
         ch_assembly  = FLYE_POLISH.out.assembly
         ch_asm_info  = FLYE_POLISH.out.info
         ch_asm_graph = FLYE_POLISH.out.graph

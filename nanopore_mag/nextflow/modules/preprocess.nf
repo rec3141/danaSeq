@@ -89,3 +89,29 @@ process CONCAT_READS {
     fi
     """
 }
+
+// Concatenate all per-barcode reads, deduplicate, and optionally filter by quality/length.
+// Pipes cat directly into fastq_filter (no intermediate file on disk).
+// fastq_filter replaces both BBMap dedupe and filtlong in a single streaming pass.
+process PREPARE_READS {
+    tag "prepare-reads"
+    label 'process_high'
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+
+    input:
+    path(fastqs)
+
+    output:
+    path("all_reads.fastq.gz"), emit: reads
+
+    script:
+    def filter_args = params.dedupe ? "" : "--no_dedupe"
+    if (params.filtlong_size) {
+        filter_args += " --target_bases ${params.filtlong_size}"
+    }
+    """
+    cat ${fastqs} | fastq_filter ${filter_args} -o all_reads.fastq.gz
+    """
+}

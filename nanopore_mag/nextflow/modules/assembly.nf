@@ -12,29 +12,15 @@ process FLYE_ASSEMBLE {
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
-    path(reads)
+    path("all_reads.fastq.gz")
 
     output:
     path("assembly.fasta"),      emit: assembly
     path("assembly_info.txt"),   emit: info
     path("assembly_graph.gfa"),  emit: graph
-    path("all_reads.fastq.gz"),  emit: reads
 
     script:
-    def filtlong_cmd = ""
-    if (params.filtlong_size) {
-        filtlong_cmd = """
-        filtlong -t ${params.filtlong_size} all_reads.fastq.gz | pigz > all_reads_filt.fastq.gz
-        mv all_reads_filt.fastq.gz all_reads.fastq.gz
-        """
-    }
-
     """
-    # Concatenate all input reads
-    cat ${reads} > all_reads.fastq.gz
-
-    ${filtlong_cmd}
-
     # Auto-detect read type from median quality scores
     if [ "${params.read_type}" = "auto" ]; then
         MEDIAN_Q=\$(zcat all_reads.fastq.gz | head -40000 | awk 'NR%4==0' | head -10000 | \
@@ -181,29 +167,15 @@ process ASSEMBLY_METAMDBG {
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
-    path(reads)
+    path("all_reads.fastq.gz")
 
     output:
     path("assembly.fasta"),      emit: assembly
     path("assembly_info.txt"),   emit: info
     path("assembly_graph.gfa"),  emit: graph
-    path("all_reads.fastq.gz"),  emit: reads
 
     script:
-    def filtlong_cmd = ""
-    if (params.filtlong_size) {
-        filtlong_cmd = """
-        filtlong -t ${params.filtlong_size} all_reads.fastq.gz | pigz > all_reads_filt.fastq.gz
-        mv all_reads_filt.fastq.gz all_reads.fastq.gz
-        """
-    }
-
     """
-    # Concatenate all input reads
-    cat ${reads} > all_reads.fastq.gz
-
-    ${filtlong_cmd}
-
     # Run metaMDBG assembly
     metaMDBG asm \\
         --out-dir metamdbg_out \\
@@ -286,29 +258,15 @@ process ASSEMBLY_MYLOASM {
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
-    path(reads)
+    path("all_reads.fastq.gz")
 
     output:
     path("assembly.fasta"),      emit: assembly
     path("assembly_info.txt"),   emit: info
     path("assembly_graph.gfa"),  emit: graph
-    path("all_reads.fastq.gz"),  emit: reads
 
     script:
-    def filtlong_cmd = ""
-    if (params.filtlong_size) {
-        filtlong_cmd = """
-        filtlong -t ${params.filtlong_size} all_reads.fastq.gz | pigz > all_reads_filt.fastq.gz
-        mv all_reads_filt.fastq.gz all_reads.fastq.gz
-        """
-    }
-
     """
-    # Concatenate all input reads
-    cat ${reads} > all_reads.fastq.gz
-
-    ${filtlong_cmd}
-
     # Run myloasm assembly
     myloasm all_reads.fastq.gz \\
         -o myloasm_out \\
