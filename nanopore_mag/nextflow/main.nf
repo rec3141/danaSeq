@@ -390,7 +390,71 @@ include { VIZ_PREPROCESS as VIZ_STAGE4 } from './modules/viz'  // final barrier,
 // Main workflow
 // ============================================================================
 
+process WRITE_PROVENANCE {
+    tag "provenance"
+    label 'process_low'
+    publishDir "${params.store_dir ?: params.outdir}/pipeline_info", mode: 'copy'
+
+    output:
+    path("versions.yml"), emit: versions
+
+    script:
+    """
+    cat > versions.yml <<YAML
+pipeline:
+  name: ${workflow.manifest.name}
+  version: ${workflow.manifest.version}
+  revision: ${workflow.revision ?: 'unknown'}
+  commitId: ${workflow.commitId ?: 'unknown'}
+  scriptId: ${workflow.scriptId ?: 'unknown'}
+  repository: ${workflow.repository ?: 'unknown'}
+
+nextflow:
+  version: ${nextflow.version}
+  build: ${nextflow.build}
+  timestamp: ${nextflow.timestamp}
+
+run:
+  sessionId: ${workflow.sessionId}
+  runName: ${workflow.runName}
+  start: ${workflow.start}
+  profile: ${workflow.profile}
+  container: ${workflow.container ?: 'none'}
+  containerEngine: ${workflow.containerEngine ?: 'none'}
+
+params:
+  assembler: ${params.assembler}
+  polish: ${params.polish ?: 'auto'}
+  dedupe: ${params.dedupe}
+  filtlong_size: ${params.filtlong_size ?: 'none'}
+  min_overlap: ${params.min_overlap}
+  read_type: ${params.read_type}
+  assembly_cpus: ${params.assembly_cpus}
+  assembly_memory: ${params.assembly_memory}
+
+tools:
+YAML
+
+    # Capture tool versions from the container/conda env
+    {
+      echo "  flye: \$(flye --version 2>&1 || echo 'not found')"
+      echo "  minimap2: \$(minimap2 --version 2>&1 || echo 'not found')"
+      echo "  samtools: \$(samtools --version 2>&1 | head -1 | awk '{print \$2}' || echo 'not found')"
+      echo "  metamdbg: \$(metaMDBG --help 2>&1 | head -1 || echo 'not found')"
+      echo "  myloasm: \$(myloasm --version 2>&1 | head -1 || echo 'not found')"
+      echo "  bakta: \$(bakta --version 2>&1 | awk '{print \$2}' || echo 'not found')"
+      echo "  prodigal: \$(prodigal -v 2>&1 | head -1 || echo 'not found')"
+      echo "  hmmer: \$(hmmsearch -h 2>&1 | head -2 | tail -1 || echo 'not found')"
+      echo "  diamond: \$(diamond --version 2>&1 || echo 'not found')"
+      echo "  emapper: \$(emapper.py --version 2>&1 | head -1 || echo 'not found')"
+      echo "  fastq_filter: \$(fastq_filter --help 2>&1 | head -1 || echo 'not found')"
+    } >> versions.yml 2>/dev/null || true
+    """
+}
+
 workflow {
+
+    WRITE_PROVENANCE()
 
     // 1. Discover input reads — auto-detect nanopore barcode vs flat directory
     def input_dir = file(params.input)
