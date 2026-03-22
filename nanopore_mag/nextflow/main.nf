@@ -470,7 +470,9 @@ workflow {
     }
 
     // 2a. Optional polishing (assembler-agnostic, uses Flye --polish-target)
-    if (params.polish) {
+    // Default: polish=true for flye, false for metamdbg/myloasm (they have built-in polishing)
+    def do_polish = (params.polish != null) ? params.polish : (params.assembler == 'flye')
+    if (do_polish) {
         FLYE_POLISH(ch_raw_assembly, ch_asm_info, ch_asm_graph, ch_asm_input)
         ch_assembly  = FLYE_POLISH.out.assembly
         ch_asm_info  = FLYE_POLISH.out.info

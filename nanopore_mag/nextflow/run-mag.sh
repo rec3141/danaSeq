@@ -188,6 +188,7 @@ usage() {
     echo "  --run_integronfinder BOOL Run IntegronFinder integron detection [default: false]"
     echo "  --run_islandpath BOOL     Run IslandPath-DIMOB genomic island detection [default: false]"
     echo "  --run_macsyfinder BOOL    Run MacSyFinder secretion/conjugation detection [default: false]"
+    echo "  --run_flye_polish BOOL  Run Flye polisher on assembly [default: auto (true for flye, false for others)]"
     echo "  --run_viz BOOL       Build viz dashboard at end of pipeline [default: false]"
     echo "  --lorbin_min_length N LorBin minimum bin size in bp [default: 80000]"
     echo "  --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 50000]"
@@ -355,6 +356,9 @@ while (( $# )); do
                 shift
             fi
             shift ;;
+        --run_flye_polish)
+            NF_ARGS+=("--polish" "$2")
+            shift 2 ;;
         *)
             NF_ARGS+=("$1")
             shift ;;
