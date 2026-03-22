@@ -26,13 +26,43 @@ process CONCAT_READS {
     # Always produce output so downstream .collect() never deadlocks
     touch ${meta.id}.fastq.gz
 
-    # Concatenate all FASTQ files for this barcode
-    cat ${fastqs} > ${meta.id}_raw.fastq.gz
+    MIN_SIZE=${params.min_barcode_size ?: 10485760}  # default 10 MB
 
-    # Filter out tiny barcodes (< 1 KB after concat)
+    # Filter input files: skip tiny and corrupt gzips before concatenation
+    GOOD_FILES=""
+    SKIPPED=0
+    for f in ${fastqs}; do
+        fsize=\$(stat -c%s "\$f" 2>/dev/null || echo 0)
+        if [ "\$fsize" -lt "\$MIN_SIZE" ]; then
+            SKIPPED=\$((SKIPPED + 1))
+            continue
+        fi
+        if ! gzip -t "\$f" 2>/dev/null; then
+            echo "[WARNING] ${meta.id}: corrupt gzip \$f (\${fsize} bytes), skipping" >&2
+            SKIPPED=\$((SKIPPED + 1))
+            continue
+        fi
+        GOOD_FILES="\$GOOD_FILES \$f"
+    done
+
+    if [ -z "\$GOOD_FILES" ]; then
+        echo "[WARNING] ${meta.id}: no valid input files (\$SKIPPED skipped)" >&2
+        exit 0
+    fi
+    [ "\$SKIPPED" -gt 0 ] && echo "[INFO] ${meta.id}: skipped \$SKIPPED files (< \${MIN_SIZE} bytes or corrupt)" >&2
+
+    # Concatenate valid files and verify output
+    cat \$GOOD_FILES > ${meta.id}_raw.fastq.gz
+    if ! gzip -t ${meta.id}_raw.fastq.gz 2>/dev/null; then
+        echo "[WARNING] ${meta.id}: concat gzip test failed, recompressing as single stream" >&2
+        zcat \$GOOD_FILES | pigz -p ${task.cpus} > ${meta.id}_recomp.fastq.gz
+        mv ${meta.id}_recomp.fastq.gz ${meta.id}_raw.fastq.gz
+    fi
+
+    # Filter out small barcodes after concat
     filesize=\$(stat -c%s ${meta.id}_raw.fastq.gz)
-    if [ "\$filesize" -lt 1024 ]; then
-        echo "[WARNING] ${meta.id}: concat size \${filesize} bytes < 1 KB, skipping" >&2
+    if [ "\$filesize" -lt "\$MIN_SIZE" ]; then
+        echo "[WARNING] ${meta.id}: concat size \${filesize} bytes < \$MIN_SIZE, skipping" >&2
         exit 0
     fi
 
