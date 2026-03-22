@@ -10,7 +10,6 @@ process CONCAT_READS {
     tag "${meta.id}"
     label 'process_medium'
     maxForks 32
-    time { params.dedupe ? 4.h : 1.h }
     conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/concat", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/concat" : null
