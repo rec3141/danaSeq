@@ -27,17 +27,12 @@ process CONCAT_READS {
 
     MIN_SIZE=${params.min_barcode_size ?: 10485760}  # default 10 MB
 
-    # Filter input files: skip tiny and corrupt gzips before concatenation
+    # Filter input files: skip corrupt gzips before concatenation
     GOOD_FILES=""
     SKIPPED=0
     for f in ${fastqs}; do
-        fsize=\$(stat -c%s "\$f" 2>/dev/null || echo 0)
-        if [ "\$fsize" -lt "\$MIN_SIZE" ]; then
-            SKIPPED=\$((SKIPPED + 1))
-            continue
-        fi
         if ! gzip -t "\$f" 2>/dev/null; then
-            echo "[WARNING] ${meta.id}: corrupt gzip \$f (\${fsize} bytes), skipping" >&2
+            echo "[WARNING] ${meta.id}: corrupt gzip \$f ($(stat -c%s "\$f" 2>/dev/null || echo 0) bytes), skipping" >&2
             SKIPPED=\$((SKIPPED + 1))
             continue
         fi
@@ -48,7 +43,7 @@ process CONCAT_READS {
         echo "[WARNING] ${meta.id}: no valid input files (\$SKIPPED skipped)" >&2
         exit 0
     fi
-    [ "\$SKIPPED" -gt 0 ] && echo "[INFO] ${meta.id}: skipped \$SKIPPED files (< \${MIN_SIZE} bytes or corrupt)" >&2
+    [ "\$SKIPPED" -gt 0 ] && echo "[INFO] ${meta.id}: skipped \$SKIPPED corrupt files" >&2
 
     # Concatenate valid files and verify output
     cat \$GOOD_FILES > ${meta.id}_raw.fastq.gz
