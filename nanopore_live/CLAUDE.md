@@ -19,7 +19,7 @@ dānaSeq/
 │   │   ├── main.nf              # Pipeline entry point
 │   │   ├── modules/             # Process definitions
 │   │   │   ├── validate.nf      #   FASTQ integrity checks
-│   │   │   ├── qc.nf            #   BBDuk, Filtlong, FASTA conversion
+│   │   │   ├── qc.nf            #   BBDuk, fastq_filter, FASTA conversion
 │   │   │   ├── kraken.nf        #   Kraken2 classification
 │   │   │   ├── prokka.nf        #   Prokka gene annotation
 │   │   │   ├── bakta.nf         #   Bakta gene annotation (alternative to Prokka)
@@ -27,7 +27,9 @@ dānaSeq/
 │   │   │   ├── sketch.nf        #   Sendsketch profiling
 │   │   │   ├── tetramer.nf      #   Tetranucleotide frequency
 │   │   │   └── db_integration.nf #  DuckDB loading + cleanup
-│   │   ├── bin/                 # Helper scripts called by processes
+│   │   ├── bin/                 # Helper scripts and compiled tools
+│   │   │   ├── fastq_filter     #   C: streaming QC filter (replaces filtlong)
+│   │   │   ├── tetramer_freqs   #   C: tetranucleotide frequency calculator
 │   │   │   ├── 30_kraken_parse.awk
 │   │   │   ├── 4X_*_db.r       #   DuckDB integration R scripts
 │   │   │   └── 60_edna_mapping_viz.r
@@ -117,20 +119,19 @@ nextflow run nextflow/main.nf --input nextflow/test-data -profile test -resume
 ### Processing Stages
 
 1. **VALIDATE_FASTQ** -- Gzip integrity check, BBMap repair if corrupted
-2. **QC_BBDUK** -- Adapter/quality trimming
-3. **QC_FILTLONG** -- Length filtering (>=1500bp), quality filtering (Q7+, top 80%)
-4. **CONVERT_TO_FASTA** -- FASTQ to FASTA with header cleanup
-5. **KRAKEN2_CLASSIFY** -- Taxonomic classification (maxForks=1, serialized)
-6. **PROKKA_ANNOTATE / BAKTA_ANNOTATE** -- ORF prediction and functional annotation (selectable via `--annotator`)
-7. **HMM_SEARCH** -- HMMER3 search against user-supplied HMM databases
-8. **SENDSKETCH** -- Rapid taxonomic sketching
-9. **TETRAMER_FREQ** -- Tetranucleotide composition for binning
-10. **DB_INTEGRATION / DB_SYNC** -- Load results into DuckDB
-11. **CLEANUP** -- Compress/delete source files after DB import
+2. **QC_FASTQ_FILTER** -- Streaming length + quality filtering (C, replaces filtlong)
+3. **CONVERT_TO_FASTA** -- FASTQ to FASTA with header cleanup
+4. **KRAKEN2_CLASSIFY** -- Taxonomic classification (batched per sample in batch mode, per-file in watch mode)
+5. **PROKKA_ANNOTATE / BAKTA_ANNOTATE** -- ORF prediction and functional annotation (selectable via `--annotator`)
+6. **HMM_SEARCH** -- HMMER3 search against user-supplied HMM databases
+7. **SENDSKETCH** -- Rapid taxonomic sketching
+8. **TETRAMER_FREQ** -- Tetranucleotide composition (C, 31x faster than Python)
+9. **DB_INTEGRATION / DB_SYNC** -- Load results into DuckDB
+10. **CLEANUP** -- Compress/delete source files after DB import
 
 ### Key Design Decisions
 
-**Kraken2 serialization:** The `KRAKEN2_CLASSIFY` process uses `maxForks = 1` in its module definition. Nextflow handles this natively -- no manual semaphores needed. Kraken2 loads 50-100GB into RAM, so only one instance can run at a time.
+**Kraken2 batching:** In batch mode, all FASTAs for a sample (flowcell+barcode) are grouped into a single kraken2 invocation via `groupTuple`, so the DB loads once per barcode instead of once per file (~2000 → ~8 loads per run). In watch mode, files are passed individually for live streaming results. The process uses `maxForks = 1` since kraken2 loads 50-100GB into RAM.
 
 **Resume:** Nextflow's built-in `-resume` uses task hashing. No manual checkpoint logic is needed. If a run is interrupted, rerunning with `-resume` picks up where it left off.
 
@@ -146,7 +147,9 @@ Four isolated environments avoid dependency conflicts:
 - **dana-bbmap** -- BBMap (samtools conflicts with R)
 - **dana-prokka** -- Prokka (BioPerl pins perl 5.26)
 - **dana-bakta** -- Bakta (modern alternative to Prokka, different Python deps)
-- **dana-tools** -- Filtlong, Kraken2, HMMER, R/DuckDB, Nextflow, OpenJDK
+- **dana-tools** -- Kraken2, HMMER, R/DuckDB, Nextflow, OpenJDK
+
+Two processes (`QC_FASTQ_FILTER`, `TETRAMER_FREQ`) use compiled C binaries in `bin/` and need no conda env.
 
 Each env has its own JDK; wrapper scripts prepend the correct `bin/` to PATH so BBMap, Prokka, Bakta, and Nextflow each find their own java.
 

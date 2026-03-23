@@ -83,19 +83,16 @@ MinKNOW FASTQ
 VALIDATE_FASTQ          Gzip integrity + BBMap repair
     │
     ▼
-QC_BBDUK                Adapter/quality trimming
-    │
-    ▼
-QC_FILTLONG             Length filtering (>=1500bp), quality (Q7+, top 80%)
+QC_FASTQ_FILTER         Length + quality filtering (C, streaming)
     │
     ▼
 CONVERT_TO_FASTA        Header cleanup
     │
-    ├──► KRAKEN2_CLASSIFY     Taxonomic classification (maxForks=1)
+    ├──► KRAKEN2_CLASSIFY     Taxonomic classification (batched per sample)
     ├──► PROKKA_ANNOTATE      ORF prediction + annotation
     ├──► HMM_SEARCH           HMMER3 against user-supplied databases
     ├──► SENDSKETCH           Rapid taxonomic sketching
-    └──► TETRAMER_FREQ        Tetranucleotide composition
+    └──► TETRAMER_FREQ        Tetranucleotide composition (C)
               │
               ▼
          DB_INTEGRATION        Load results into DuckDB
@@ -195,14 +192,17 @@ Scripts are idempotent and track imports via `import_log`.
 
 ## Design Notes
 
-**Kraken2 serialization.** Uses `maxForks = 1` in the module definition. Kraken2 loads 50-100 GB into RAM, so only one instance runs at a time.
+**Kraken2 batching.** In batch mode, FASTAs are grouped per sample (`groupTuple`) so the DB loads once per barcode instead of once per file. In watch mode, files stream individually for live results. Uses `maxForks = 1` since kraken2 loads 50-100 GB into RAM.
+
+**Compiled C tools.** `fastq_filter` (QC) and `tetramer_freqs` (TNF) are compiled C binaries in `bin/`, replacing filtlong and a Python script respectively. Both run without conda environments.
 
 **Watch mode.** Uses `Channel.watchPath()` with a flat glob pattern (Java WatchService limitation -- no recursive `**`).
 
-**Conda environments.** Three isolated environments avoid dependency conflicts:
+**Conda environments.** Four isolated environments avoid dependency conflicts:
 - **dana-bbmap** -- BBMap (samtools conflicts with R)
 - **dana-prokka** -- Prokka (BioPerl pins perl 5.26)
-- **dana-tools** -- Filtlong, Kraken2, HMMER, R/DuckDB, Nextflow, OpenJDK
+- **dana-bakta** -- Bakta (modern alternative to Prokka)
+- **dana-tools** -- Kraken2, HMMER, R/DuckDB, Nextflow, OpenJDK
 
 ## Common Issues
 
@@ -217,7 +217,6 @@ Scripts are idempotent and track imports via `import_log`.
 ## References
 
 - BBTools: Bushnell B, [sourceforge.net/projects/bbmap](https://sourceforge.net/projects/bbmap/)
-- Filtlong: Wick R, [github.com/rrwick/Filtlong](https://github.com/rrwick/Filtlong)
 - Kraken2: Wood DE, Lu J, Langmead B, Genome Biology 2019
 - Prokka: Seemann T, Bioinformatics 2014
 - HMMER3: Eddy SR, PLoS Computational Biology 2011
