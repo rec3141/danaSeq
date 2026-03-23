@@ -92,7 +92,8 @@ process PREPARE_READS {
     tag "prepare-reads"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
+    // No publishDir — all_reads.fastq.gz is a large intermediate (100G+), not a result.
+    // storeDir still works for skipping on re-runs with --store_dir.
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 
     input:
