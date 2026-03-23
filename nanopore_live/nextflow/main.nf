@@ -266,8 +266,21 @@ workflow {
     // Stage 3: Optional downstream analyses (controlled by params)
 
     // Kraken2 taxonomic classification (maxForks=1 in process definition)
+    // Batch mode: group all FASTAs per sample so the DB loads once per barcode
+    // Watch mode: pass files individually for live streaming results
     if (params.run_kraken) {
-        KRAKEN2_CLASSIFY(ch_fasta)
+        if (params.watch) {
+            ch_kraken_in = ch_fasta
+        } else {
+            ch_kraken_in = ch_fasta
+                .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+                .groupTuple(by: 0)
+                .map { sample, metas, fastas ->
+                    def meta = metas[0] + [id: sample]
+                    [ meta, fastas ]
+                }
+        }
+        KRAKEN2_CLASSIFY(ch_kraken_in)
     }
 
     // Sendsketch profiling
