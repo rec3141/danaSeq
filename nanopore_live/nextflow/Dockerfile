@@ -9,7 +9,7 @@
 #   dana-bbmap   - BBMap (samtools/libdeflate conflicts with R)
 #   dana-prokka  - Prokka (BioPerl pins perl to 5.26)
 #   dana-bakta   - Bakta (modern alternative to Prokka)
-#   dana-tools   - Everything else (nextflow, openjdk, filtlong, kraken2, hmmer, R/DuckDB, perl)
+#   dana-tools   - Everything else (nextflow, openjdk, kraken2, hmmer, R/DuckDB, perl)
 #
 # Build:
 #   docker build -t danaseq-realtime .
@@ -75,7 +75,7 @@ RUN mkdir -p /usr/local/bin/dana-tools \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
-    && for tool in nextflow filtlong kraken2 gawk hmmsearch perl tetramer_freqs_esom.pl Rscript R; do \
+    && for tool in nextflow kraken2 gawk hmmsearch perl tetramer_freqs_esom.pl Rscript R; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-tools/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
@@ -97,6 +97,11 @@ ENV HOME=/home/dana
 # ============================================================================
 
 COPY . /pipeline/
+
+# Compile C++ tools (fastq_filter)
+RUN apt-get update -qq && apt-get install -y -qq g++ zlib1g-dev > /dev/null \
+    && g++ -O3 -o /pipeline/bin/fastq_filter /pipeline/bin/fastq_filter.cpp -lz \
+    && apt-get purge -y g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # Docker config: disable per-process conda (tools already on PATH via wrappers)
 RUN echo 'conda.enabled = false' > /pipeline/docker.config

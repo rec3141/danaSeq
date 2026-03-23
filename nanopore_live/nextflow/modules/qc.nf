@@ -1,4 +1,4 @@
-// Quality control: BBDuk adapter/quality trimming, Filtlong length filtering, FASTA conversion
+// Quality control: BBDuk adapter/quality trimming, fastq_filter length/quality filtering, FASTA conversion
 
 process QC_BBDUK {
     tag "${meta.id}"
@@ -24,26 +24,27 @@ process QC_BBDUK {
     """
 }
 
-process QC_FILTLONG {
+process QC_FASTQ_FILTER {
     tag "${meta.id}"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-tools"
 
     input:
     tuple val(meta), path(fastq)
 
     output:
-    tuple val(meta), path("${meta.id}.filtlong.fastq"), emit: filtered
+    tuple val(meta), path("${meta.id}.filtered.fastq"), emit: filtered
 
     script:
     """
-    filtlong \
+    fastq_filter \
+        --no_dedupe \
         --min_length ${params.min_readlen} \
         --keep_percent ${params.keep_percent} \
-        "${fastq}" > "${meta.id}.filtlong.fastq"
+        -o "${meta.id}.filtered.fastq" \
+        "${fastq}"
 
     # Fail if output is empty (all reads filtered out)
-    if [ ! -s "${meta.id}.filtlong.fastq" ]; then
+    if [ ! -s "${meta.id}.filtered.fastq" ]; then
         echo "[WARNING] All reads filtered out for ${meta.id}" >&2
         exit 1
     fi

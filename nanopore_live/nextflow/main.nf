@@ -152,7 +152,7 @@ if (effective_annotator == 'bakta' && !params.bakta_db) {
 
 // Import modules
 include { VALIDATE_FASTQ }   from './modules/validate'
-include { QC_FILTLONG }      from './modules/qc'
+include { QC_FASTQ_FILTER }  from './modules/qc'
 include { CONVERT_TO_FASTA } from './modules/qc'
 include { KRAKEN2_CLASSIFY }  from './modules/kraken'
 include { PROKKA_ANNOTATE }   from './modules/prokka'
@@ -257,8 +257,8 @@ workflow {
     // Stage 2: Quality control — Filtlong for nanopore length+quality filtering
     // (BBDuk removed: its Illumina-style Q15 end-trimming is inappropriate for
     // nanopore reads and was discarding ~50% of data)
-    QC_FILTLONG(VALIDATE_FASTQ.out.validated)
-    CONVERT_TO_FASTA(QC_FILTLONG.out.filtered)
+    QC_FASTQ_FILTER(VALIDATE_FASTQ.out.validated)
+    CONVERT_TO_FASTA(QC_FASTQ_FILTER.out.filtered)
 
     // FASTA channel feeds all downstream analyses
     ch_fasta = CONVERT_TO_FASTA.out.fasta
