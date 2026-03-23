@@ -1,10 +1,8 @@
 // Tetranucleotide frequency analysis
-// Uses tetramer_freqs.py (Python replacement for tetramer_freqs_esom.pl)
 
 process TETRAMER_FREQ {
     tag "${meta.id}"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-tools"
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/tetra", mode: 'copy'
 
     input:
@@ -16,7 +14,7 @@ process TETRAMER_FREQ {
 
     script:
     """
-    python3 ${projectDir}/bin/tetramer_freqs.py \
+    tetramer_freqs \
         -f "${fasta}" \
         -min ${params.min_readlen} \
         -max 10000000 \

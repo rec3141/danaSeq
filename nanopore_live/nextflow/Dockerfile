@@ -98,9 +98,10 @@ ENV HOME=/home/dana
 
 COPY . /pipeline/
 
-# Compile C++ tools (fastq_filter)
+# Compile C/C++ tools (fastq_filter, tetramer_freqs)
 RUN apt-get update -qq && apt-get install -y -qq g++ zlib1g-dev > /dev/null \
     && g++ -O3 -o /pipeline/bin/fastq_filter /pipeline/bin/fastq_filter.cpp -lz \
+    && gcc -O3 -o /pipeline/bin/tetramer_freqs /pipeline/bin/tetramer_freqs.c -lm \
     && apt-get purge -y g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # Docker config: disable per-process conda (tools already on PATH via wrappers)
