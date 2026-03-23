@@ -32,6 +32,11 @@ LABEL org.opencontainers.image.description="danaSeq MAG Assembly Pipeline — Me
 # Copy pipeline code
 COPY . /pipeline/
 
+# Compile C++ tools (fastq_filter)
+RUN apt-get update -qq && apt-get install -y -qq g++ zlib1g-dev && \
+    g++ -O3 -o /pipeline/bin/fastq_filter /pipeline/bin/fastq_filter.cpp -lz && \
+    apt-get remove -y g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
 # Docker config: disable per-process conda (tools already on PATH via wrappers)
 RUN echo 'conda.enabled = false' > /pipeline/docker.config
 
