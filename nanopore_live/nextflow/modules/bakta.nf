@@ -1,6 +1,10 @@
 // Bakta CDS-only annotation (fast path — minutes per sample)
 // Skips ncRNA/tRNA/CRISPR/sORF scanning to avoid cmscan bottleneck.
 // Produces .faa + .gff3 for HMM search and DB integration.
+//
+// Accepts one or many FASTA files per invocation. In batch mode, main.nf
+// groups all files for a sample into a single call so DB loading overhead
+// is paid once per barcode. In watch mode, files are passed individually.
 
 process BAKTA_CDS {
     tag "${meta.id}"
@@ -9,7 +13,7 @@ process BAKTA_CDS {
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/bakta", mode: 'copy'
 
     input:
-    tuple val(meta), path(fasta)
+    tuple val(meta), path("fastas/*")
 
     output:
     tuple val(meta), path("${meta.id}/*.faa"),   emit: proteins
@@ -19,6 +23,8 @@ process BAKTA_CDS {
 
     script:
     """
+    cat fastas/* > combined.fa
+
     bakta \
         --db "${params.bakta_db}" \
         --meta \
@@ -30,7 +36,7 @@ process BAKTA_CDS {
         --skip-ncrna --skip-ncrna-region \
         --skip-crispr --skip-sorf \
         --skip-gap --skip-ori --skip-plot \
-        "${fasta}"
+        combined.fa
     """
 }
 

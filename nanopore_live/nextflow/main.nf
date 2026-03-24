@@ -303,7 +303,20 @@ workflow {
         ch_annotation_tsv      = PROKKA_ANNOTATE.out.tsv
     } else if (effective_annotator == 'bakta') {
         // Fast path: CDS-only annotation — feeds HMM search and DB integration
-        BAKTA_CDS(ch_fasta)
+        // Batch mode: group all FASTAs per sample to amortize DB loading overhead
+        // Watch mode: pass files individually for live results
+        if (params.watch) {
+            ch_bakta_in = ch_fasta
+        } else {
+            ch_bakta_in = ch_fasta
+                .map { meta, fasta -> [ meta.sample, meta, fasta ] }
+                .groupTuple(by: 0)
+                .map { sample, metas, fastas ->
+                    def meta = metas[0] + [id: sample]
+                    [ meta, fastas ]
+                }
+        }
+        BAKTA_CDS(ch_bakta_in)
         ch_annotation_proteins = BAKTA_CDS.out.proteins
         ch_annotation_tsv      = BAKTA_CDS.out.tsv
 
