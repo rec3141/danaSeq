@@ -32,7 +32,7 @@ process CONCAT_READS {
     SKIPPED=0
     for f in ${fastqs}; do
         if ! gzip -t "\$f" 2>/dev/null; then
-            echo "[WARNING] ${meta.id}: corrupt gzip \$f ($(stat -c%s "\$f" 2>/dev/null || echo 0) bytes), skipping" >&2
+            echo "[WARNING] ${meta.id}: corrupt gzip \$f (\$(stat -c%s "\$f" 2>/dev/null || echo 0) bytes), skipping" >&2
             SKIPPED=\$((SKIPPED + 1))
             continue
         fi
