@@ -54,7 +54,6 @@ process QC_FASTQ_FILTER {
 process CONVERT_TO_FASTA {
     tag "${meta.id}"
     label 'process_low'
-    conda "${projectDir}/conda-envs/dana-bbmap"
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/fa", mode: 'copy'
 
     input:
@@ -64,14 +63,9 @@ process CONVERT_TO_FASTA {
     tuple val(meta), path("${meta.id}.fa"), emit: fasta
 
     script:
-    def mem_mb = task.memory ? (task.memory.toMega() * 85 / 100).intValue() : 1700
     """
-    reformat.sh \
-        -Xmx${mem_mb}m \
-        in="${fastq}" \
-        out=stdout.fa \
-        fastawrap=0 \
-    | cut -f1 -d' ' > "${meta.id}.fa"
+    awk 'NR%4==1{sub(/^@/,">"); sub(/ .*/,""); print} NR%4==2{print}' \
+        "${fastq}" > "${meta.id}.fa"
 
     if [ ! -s "${meta.id}.fa" ]; then
         echo "[WARNING] Empty FASTA output for ${meta.id}" >&2
