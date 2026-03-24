@@ -25,7 +25,7 @@ process KRAKEN2_CLASSIFY {
     kraken2 \
         --db ${params.kraken_db} \
         --use-names \
-        --threads 1 \
+        --threads ${task.cpus} \
         --report "${meta.id}.report" \
         fastas/* \
     | gawk -f ${params.kraken_parse_awk} > "${meta.id}.tsv"

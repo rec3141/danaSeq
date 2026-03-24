@@ -28,7 +28,7 @@ process BAKTA_CDS {
     bakta \
         --db "${params.bakta_db}" \
         --meta \
-        --threads 1 \
+        --threads ${task.cpus} \
         --output "${meta.id}" \
         --prefix "${meta.id}" \
         --force \
