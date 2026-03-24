@@ -33,6 +33,7 @@ apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest
 ```bash
 cd nextflow
 ./run-mag.sh --input /data/reads --outdir /data/output \
+    --run_remove_human true \
     --dedupe \
     --filtlong_size 40000000000 \
     --min_overlap 1000 \
@@ -346,6 +347,8 @@ load times with no server configuration needed.
 | `--assembler` | `flye` | Assembler: `flye`, `metamdbg`, or `myloasm` |
 | `--min_overlap` | `1000` | Flye `--min-overlap` |
 | `--polish` | `true` | Flye polishing iterations |
+| `--run_remove_human` | `true` | Remove human reads via minimap2 before assembly |
+| `--human_ref` | `databases/human_ref/GRCh38_noalt_as.fa.gz` | Path to human reference FASTA or `.mmi` (run `./download-databases.sh --human`) |
 | `--dedupe` | `false` | BBDuk deduplication before assembly |
 | `--filtlong_size` | (skip) | Filtlong target bases (e.g. `40000000000`) |
 
