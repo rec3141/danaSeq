@@ -2,27 +2,31 @@
 set -euo pipefail
 
 # ============================================================================
-# METTA Assembly Pipeline Launcher
+# Illumina MAG Pipeline Launcher
 # ============================================================================
 #
 # Runs the Nextflow pipeline locally via conda.
 #
 # Usage:
-#   ./run-metta.sh --input /path/to/reads --outdir /path/to/output [options]
+#   ./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output \
+#       --human_ref /path/to/ref [options]
 #
 # Examples:
 #   # Basic per-sample assembly
-#   ./run-metta.sh --input /data/reads --outdir /data/output
+#   ./run-illumina-mag.sh --input /data/reads --outdir /data/output \
+#       --human_ref /data/hg19_index
 #
 #   # Co-assembly mode
-#   ./run-metta.sh --input /data/reads --outdir /data/output --coassembly
+#   ./run-illumina-mag.sh --input /data/reads --outdir /data/output \
+#       --human_ref /data/hg19_index --coassembly
 #
-#   # Skip some assemblers
-#   ./run-metta.sh --input /data/reads --outdir /data/output \
-#       --run_megahit false --run_spades false
+#   # Skip human removal and some assemblers
+#   ./run-illumina-mag.sh --input /data/reads --outdir /data/output \
+#       --run_remove_human false --run_megahit false --run_spades false
 #
 #   # SLURM profile
-#   ./run-metta.sh --input /data/reads --outdir /data/output -profile slurm
+#   ./run-illumina-mag.sh --input /data/reads --outdir /data/output \
+#       --human_ref /data/hg19_index -profile slurm
 #
 # ============================================================================
 
@@ -56,18 +60,21 @@ usage() {
     echo "  --outdir DIR     Output directory (will be created if needed)"
     echo ""
     echo "Pipeline flags (passed to Nextflow):"
-    echo "  --coassembly         Co-assemble all samples (default: per-sample)"
-    echo "  --run_normalize BOOL Enable bbnorm normalization [default: true]"
-    echo "  --run_tadpole BOOL   Run Tadpole assembler [default: true]"
-    echo "  --run_megahit BOOL   Run Megahit assembler [default: true]"
-    echo "  --run_spades BOOL    Run SPAdes assembler [default: true]"
-    echo "  --run_metaspades BOOL Run metaSPAdes assembler [default: true]"
-    echo "  --min_readlen N      Minimum read length [default: 70]"
-    echo "  --dedupe_identity N  Deduplication identity threshold [default: 98]"
-    echo "  --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 2000]"
-    echo "  --assembly_cpus N    CPUs for assembly [default: 24]"
-    echo "  --assembly_memory S  Memory for assembly [default: '250 GB']"
-    echo "  --store_dir DIR      Persistent cache directory (storeDir)"
+    echo "  --coassembly              Co-assemble all samples (default: per-sample)"
+    echo "  --human_ref PATH          Path to BBTools human reference index"
+    echo "  --run_remove_human BOOL   Remove human reads [default: true]"
+    echo "  --run_fastqc BOOL         Run FastQC on preprocessed reads [default: true]"
+    echo "  --run_normalize BOOL      Enable bbnorm normalization [default: true]"
+    echo "  --run_tadpole BOOL        Run Tadpole assembler [default: true]"
+    echo "  --run_megahit BOOL        Run Megahit assembler [default: true]"
+    echo "  --run_spades BOOL         Run SPAdes assembler [default: true]"
+    echo "  --run_metaspades BOOL     Run metaSPAdes assembler [default: true]"
+    echo "  --min_readlen N           Minimum read length [default: 70]"
+    echo "  --dedupe_identity N       Deduplication identity threshold [default: 98]"
+    echo "  --metabat_min_cls N       MetaBAT2 minimum cluster size [default: 2000]"
+    echo "  --assembly_cpus N         CPUs for assembly [default: 24]"
+    echo "  --assembly_memory S       Memory for assembly [default: '250 GB']"
+    echo "  --store_dir DIR           Persistent cache directory (storeDir)"
     echo ""
     echo "SLURM flags:"
     echo "  --slurm_account STR  SLURM --account [default: def-rec3141]"
@@ -92,7 +99,7 @@ while (( $# )); do
         -h|--help)
             usage ;;
         --help-pipeline)
-            mamba run -p "${SCRIPT_DIR}/conda-envs/dana-metta-bbmap" \
+            mamba run -p "${SCRIPT_DIR}/conda-envs/dana-illumina-mag-bbmap" \
                 nextflow run "${SCRIPT_DIR}/main.nf" --help
             exit 0 ;;
         --input)
@@ -167,7 +174,7 @@ export PATH="${CONDA_BASE_BIN}:${PATH}"
 
 # Point Nextflow at the conda env's Java so it never picks up system Java.
 # NXF_JAVA_HOME is the official Nextflow env var for this purpose.
-BBMAP_ENV="${SCRIPT_DIR}/conda-envs/dana-metta-bbmap"
+BBMAP_ENV="${SCRIPT_DIR}/conda-envs/dana-illumina-mag-bbmap"
 if [[ -d "${BBMAP_ENV}/lib/jvm" ]]; then
     export NXF_JAVA_HOME="${BBMAP_ENV}/lib/jvm"
 elif [[ -x "${BBMAP_ENV}/bin/java" ]]; then
@@ -175,7 +182,7 @@ elif [[ -x "${BBMAP_ENV}/bin/java" ]]; then
 fi
 
 LOCAL_CMD=(
-    mamba run -p "${SCRIPT_DIR}/conda-envs/dana-metta-bbmap"
+    mamba run -p "${SCRIPT_DIR}/conda-envs/dana-illumina-mag-bbmap"
     nextflow run "${SCRIPT_DIR}/main.nf"
     --input "$INPUT_HOST"
     --outdir "$OUTDIR_HOST"

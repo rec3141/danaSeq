@@ -3,7 +3,7 @@
 process ASSEMBLE_TADPOLE {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/assembly/${meta.id}", mode: 'copy', pattern: '*.fasta'
     storeDir params.store_dir ? "${params.store_dir}/assembly/${meta.id}" : null
 
@@ -37,7 +37,7 @@ process ASSEMBLE_TADPOLE {
 process ASSEMBLE_MEGAHIT {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-megahit"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-megahit"
     publishDir "${params.outdir}/assembly/${meta.id}", mode: 'copy', pattern: '*.fasta'
     storeDir params.store_dir ? "${params.store_dir}/assembly/${meta.id}" : null
 
@@ -77,7 +77,7 @@ process ASSEMBLE_MEGAHIT {
 process ASSEMBLE_SPADES {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-spades"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-spades"
     publishDir "${params.outdir}/assembly/${meta.id}", mode: 'copy', pattern: '*.fasta'
     storeDir params.store_dir ? "${params.store_dir}/assembly/${meta.id}" : null
 
@@ -118,7 +118,7 @@ process ASSEMBLE_SPADES {
 process ASSEMBLE_METASPADES {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-spades"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-spades"
     publishDir "${params.outdir}/assembly/${meta.id}", mode: 'copy', pattern: '*.fasta'
     storeDir params.store_dir ? "${params.store_dir}/assembly/${meta.id}" : null
 

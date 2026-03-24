@@ -3,7 +3,7 @@
 process ERROR_CORRECT_ECCO {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/error_correct/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/error_correct/${meta.id}" : null
 
@@ -34,7 +34,7 @@ process ERROR_CORRECT_ECCO {
 process ERROR_CORRECT_ECC {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/error_correct/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/error_correct/${meta.id}" : null
 
@@ -64,7 +64,7 @@ process ERROR_CORRECT_ECC {
 process ERROR_CORRECT_TADPOLE {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/error_correct/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/error_correct/${meta.id}" : null
 

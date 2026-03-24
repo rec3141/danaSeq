@@ -1,4 +1,4 @@
-name: dana-metta-spades
+name: dana-illumina-mag-spades
 channels:
   - conda-forge
   - bioconda

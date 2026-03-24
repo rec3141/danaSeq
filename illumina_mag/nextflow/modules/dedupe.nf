@@ -3,7 +3,7 @@
 process DEDUPE_ASSEMBLIES {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/assembly/${meta.id}", mode: 'copy', pattern: '*.{fasta,txt}'
     storeDir params.store_dir ? "${params.store_dir}/assembly/${meta.id}" : null
 

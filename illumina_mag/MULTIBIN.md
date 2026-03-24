@@ -1,6 +1,6 @@
  Mapping Strategies
 
-  1. Cross-mapping to per-sample assemblies (what your original METTA 51_/52_/56_ scripts do) — Map reads from all N samples to each sample's assembly. Produces an N-column depth matrix per assembly. Best bin recovery for individual
+  1. Cross-mapping to per-sample assemblies (what your original illumina_mag 51_/52_/56_ scripts do) — Map reads from all N samples to each sample's assembly. Produces an N-column depth matrix per assembly. Best bin recovery for individual
   assemblies.
   2. Co-assembly + cross-mapping — Pool all reads into one assembly, map all samples back. Simpler DAG but loses rare/sample-specific organisms. The plan already has --coassembly placeholder.
   3. Hybrid — Per-sample assemblies, then cross-map a subset (e.g., samples from the same site/cruise) rather than all-vs-all.
@@ -43,4 +43,4 @@
 
   State-of-the-art: Cross-mapping + VAMB or SemiBin2 (often outperform the 3-binner+DAS Tool approach alone) → CheckM2 → dRep → GTDB-Tk
 
-  The most impactful next step would be implementing the cross-mapping module, since that unlocks multi-sample depth for any binner and matches what your original METTA scripts already do. Which direction interests you?
+  The most impactful next step would be implementing the cross-mapping module, since that unlocks multi-sample depth for any binner and matches what your original illumina_mag scripts already do. Which direction interests you?

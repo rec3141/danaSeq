@@ -1,9 +1,10 @@
-// Preprocessing: optical deduplication, tile filtering, adapter trimming, artifact removal
+// Preprocessing: optical deduplication, tile filtering, adapter trimming, artifact removal,
+// human decontamination, and QC reporting
 
 process CLUMPIFY {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
 
@@ -54,7 +55,7 @@ process CLUMPIFY {
 process FILTER_BY_TILE {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
 
@@ -92,7 +93,7 @@ process FILTER_BY_TILE {
 process BBDUK_TRIM {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
 
@@ -126,7 +127,7 @@ process BBDUK_TRIM {
 process BBDUK_FILTER {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
 
@@ -153,5 +154,65 @@ process BBDUK_FILTER {
         echo "[ERROR] bbduk filter produced empty output for ${meta.id}" >&2
         exit 1
     fi
+    """
+}
+
+process REMOVE_HUMAN {
+    tag "${meta.id}"
+    label 'process_high'
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
+    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
+    storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
+
+    input:
+    tuple val(meta), path(reads)
+
+    output:
+    tuple val(meta), path("${meta.id}.nohuman.fq.gz"), emit: reads
+    path("${meta.id}.human_contam.fq.gz"),             emit: contam, optional: true
+
+    script:
+    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
+    """
+    # removehuman.sh uses bbmap internally against a masked human reference.
+    # Input is interleaved; output keeps interleaved format.
+    removehuman.sh ${xmx} \\
+        in="${reads}" \\
+        outu="${meta.id}.nohuman.fq.gz" \\
+        outm="${meta.id}.human_contam.fq.gz" \\
+        path="${params.human_ref}" \\
+        t=${task.cpus}
+
+    if [ ! -s "${meta.id}.nohuman.fq.gz" ]; then
+        echo "[ERROR] Human removal produced empty output for ${meta.id}" >&2
+        exit 1
+    fi
+    """
+}
+
+process FASTQC {
+    tag "${meta.id}"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
+    publishDir "${params.outdir}/preprocess/${meta.id}/fastqc", mode: 'copy'
+    storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}/fastqc" : null
+
+    input:
+    tuple val(meta), path(reads)
+
+    output:
+    tuple val(meta), path("*.html"), path("*.zip"), emit: reports
+
+    script:
+    """
+    # FastQC expects separate files, not interleaved — deinterleave first
+    reformat.sh in="${reads}" out1=r1.fq.gz out2=r2.fq.gz ow=t
+
+    fastqc -t ${task.cpus} --noextract -o . r1.fq.gz r2.fq.gz
+
+    # Rename outputs with sample ID prefix
+    for f in *.html *.zip; do
+        mv "\$f" "${meta.id}.\$f"
+    done
     """
 }

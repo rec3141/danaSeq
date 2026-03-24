@@ -1,6 +1,6 @@
-# METTA Assembly Pipeline
+# Illumina MAG Pipeline
 
-Illumina paired-end metagenomic assembly pipeline. Processes reads through BBTools quality control (optical deduplication, tile filtering, adapter trimming, artifact removal), three-phase error correction (overlap, clump, k-mer), coverage normalization, read merging, four parallel assemblers (Tadpole, Megahit, SPAdes, metaSPAdes), cascade deduplication, read mapping, depth calculation (jgi_summarize_bam_contig_depths), and MetaBAT2 binning. Supports per-sample (default) and co-assembly modes.
+Illumina paired-end metagenomic assembly and binning pipeline. Processes reads through BBTools quality control (optical deduplication, tile filtering, adapter trimming, artifact/PhiX removal, human decontamination), FastQC reporting, three-phase error correction (overlap, clump, k-mer), coverage normalization, read merging, four parallel assemblers (Tadpole, Megahit, SPAdes, metaSPAdes), cascade deduplication, read mapping, depth calculation (jgi_summarize_bam_contig_depths), and MetaBAT2 binning. Supports per-sample (default) and co-assembly modes.
 
 ## Quick Start
 
@@ -12,27 +12,37 @@ cd nextflow
 ./install.sh --check
 
 # Run (local conda, handles activation automatically)
-./run-metta.sh --input /path/to/reads --outdir /path/to/output
+./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output \
+    --human_ref /path/to/hg19_index
 
 # Co-assembly mode
-./run-metta.sh --input /path/to/reads --outdir /path/to/output --coassembly
+./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output \
+    --human_ref /path/to/hg19_index --coassembly
+
+# Skip human removal (e.g. for non-clinical samples)
+./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output \
+    --run_remove_human false
 
 # SLURM profile
-./run-metta.sh --input /path/to/reads --outdir /path/to/output \
+./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output \
+    --human_ref /path/to/hg19_index \
     -profile slurm --slurm_account def-rec3141 \
     --conda_path ~/scratch/miniforge3/bin
 
 # Show all options
-./run-metta.sh --help
+./run-illumina-mag.sh --help
 ```
 
 ### Kitchen sink -- all options with defaults
 
 ```bash
 cd nextflow
-./run-metta.sh --input /data/reads --outdir /data/output \
+./run-illumina-mag.sh --input /data/reads --outdir /data/output \
     --coassembly \
     --min_readlen 70 \
+    --run_remove_human true \
+    --human_ref /data/hg19_index \
+    --run_fastqc true \
     --run_normalize true \
     --run_tadpole true \
     --run_megahit true \
@@ -40,10 +50,22 @@ cd nextflow
     --run_metaspades true \
     --dedupe_identity 98 \
     --metabat_min_cls 2000 \
-    --store_dir /scratch/metta_store \
+    --store_dir /scratch/illumina_mag_store \
     --assembly_cpus 24 \
     --assembly_memory '250 GB'
 ```
+
+## Human Reference Index
+
+Human decontamination is enabled by default and requires a BBTools human reference index. Build it once:
+
+```bash
+# Download and index (requires ~8 GB disk, ~15 min)
+mkdir -p /path/to/hg19_index
+bbmap.sh ref=/path/to/hg19.fa path=/path/to/hg19_index
+```
+
+Or let `removehuman.sh` auto-download on first run by pointing `--human_ref` to an empty directory. To skip human removal entirely, use `--run_remove_human false`.
 
 ## Pipeline Overview
 
@@ -57,6 +79,10 @@ Paired-end FASTQs (*_R1_*.fastq.gz, N samples)
    BBDUK_TRIM (xN)            Adapter trimming (k=23, mink=11, minlen=70)
          |
    BBDUK_FILTER (xN)          Artifact + PhiX removal (k=31, entropy=0.95)
+         |
+   REMOVE_HUMAN (xN)          Human read removal (removehuman.sh, optional)
+         |
+   FASTQC (xN)                QC report on final preprocessed reads (optional)
          |
    ERROR_CORRECT_ECCO (xN)    Phase 1: overlap-based correction (bbmerge ecco)
          |
@@ -121,7 +147,11 @@ results/
 │   ├── <sample>.clumped.fq.gz           Optically deduplicated reads
 │   ├── <sample>.filtered_by_tile.fq.gz  Tile-filtered reads
 │   ├── <sample>.trimmed.fq.gz           Adapter-trimmed reads
-│   └── <sample>.filtered.fq.gz          Artifact/PhiX-filtered reads
+│   ├── <sample>.filtered.fq.gz          Artifact/PhiX-filtered reads
+│   ├── <sample>.nohuman.fq.gz           Human-decontaminated reads
+│   └── fastqc/
+│       ├── <sample>.r1_fastqc.html      FastQC report (R1)
+│       └── <sample>.r2_fastqc.html      FastQC report (R2)
 ├── error_correct/<sample>/
 │   ├── <sample>.ecco.fq.gz             Overlap-corrected reads
 │   ├── <sample>.eccc.fq.gz             Clump-corrected reads
@@ -171,6 +201,7 @@ In co-assembly mode, `<sample>` is replaced with `coassembly` for the assembly, 
 |-----------|---------|-------------|
 | `--input` | (required) | Directory containing paired-end `*_R1_*.fastq.gz` files |
 | `--outdir` | `results` | Output directory |
+| `--human_ref` | (required) | Path to BBTools human reference index directory |
 
 ### Mode
 
@@ -189,6 +220,9 @@ In co-assembly mode, `<sample>` is replaced with `coassembly` for the assembly, 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--min_readlen` | `70` | Minimum read length after adapter trimming and quality trimming |
+| `--run_remove_human` | `true` | Remove human reads via removehuman.sh; requires `--human_ref` |
+| `--human_ref` | (none) | Path to BBTools human reference index |
+| `--run_fastqc` | `true` | Run FastQC on final preprocessed reads |
 
 ### Normalization
 
@@ -247,7 +281,8 @@ On HPC clusters with SLURM, use `-profile slurm` to submit each pipeline process
 - `--conda_path` must point to the `bin/` directory of your conda or mamba installation. SLURM jobs run in a minimal shell without `.bashrc`, so conda is not on PATH by default. The pipeline injects `export PATH=<conda_path>:$PATH` as a `beforeScript` for every process.
 
 ```bash
-./run-metta.sh --input /project/reads --outdir /scratch/output \
+./run-illumina-mag.sh --input /project/reads --outdir /scratch/output \
+    --human_ref /project/hg19_index \
     -profile slurm \
     --slurm_account def-rec3141 \
     --conda_path ~/scratch/miniforge3/bin
@@ -269,12 +304,12 @@ Four isolated environments avoid dependency conflicts between the assemblers and
 
 | Environment | Tools | Key binaries |
 |-------------|-------|--------------|
-| `dana-metta-bbmap` | BBTools suite + samtools + Nextflow runtime | bbduk.sh, clumpify.sh, filterbytile.sh, bbmerge.sh, bbmerge-auto.sh, tadpole.sh, bbnorm.sh, dedupe.sh, statswrapper.sh, bbmap.sh, samtools, nextflow |
-| `dana-metta-megahit` | Megahit assembler | megahit |
-| `dana-metta-spades` | SPAdes (includes metaSPAdes) | spades.py |
-| `dana-metta-binning` | MetaBAT2 + depth tools + samtools | metabat2, jgi_summarize_bam_contig_depths, samtools |
+| `dana-illumina-mag-bbmap` | BBTools suite + FastQC + samtools + Nextflow runtime | bbduk.sh, clumpify.sh, filterbytile.sh, bbmerge.sh, removehuman.sh, tadpole.sh, bbnorm.sh, dedupe.sh, bbmap.sh, fastqc, samtools, nextflow |
+| `dana-illumina-mag-megahit` | Megahit assembler | megahit |
+| `dana-illumina-mag-spades` | SPAdes (includes metaSPAdes) | spades.py |
+| `dana-illumina-mag-binning` | MetaBAT2 + depth tools + samtools | metabat2, jgi_summarize_bam_contig_depths, samtools |
 
-The `dana-metta-bbmap` environment also hosts the Nextflow runtime, so `run-metta.sh` uses `mamba run -p conda-envs/dana-metta-bbmap` to launch the pipeline.
+The `dana-illumina-mag-bbmap` environment also hosts the Nextflow runtime, so `run-illumina-mag.sh` uses `mamba run -p conda-envs/dana-illumina-mag-bbmap` to launch the pipeline.
 
 ### Installing environments
 
@@ -299,7 +334,7 @@ YAML specs are in `nextflow/envs/` (`bbmap.yml`, `megahit.yml`, `spades.yml`, `b
 
 ## Resuming Runs
 
-`run-metta.sh` automatically records the Nextflow session ID in:
+`run-illumina-mag.sh` automatically records the Nextflow session ID in:
 
 ```
 <outdir>/pipeline_info/run_command.sh
@@ -321,8 +356,9 @@ Session handling works three ways:
 For persistent caching that survives `work/` cleanup, use `--store_dir`:
 
 ```bash
-./run-metta.sh --input /data/reads --outdir /data/output \
-    --store_dir /scratch/metta_store
+./run-illumina-mag.sh --input /data/reads --outdir /data/output \
+    --human_ref /data/hg19_index \
+    --store_dir /scratch/illumina_mag_store
 ```
 
 ## Design Notes
@@ -331,9 +367,11 @@ For persistent caching that survives `work/` cleanup, use `--store_dir`:
 
 **Three-phase error correction.** Reads pass through overlap-based correction (bbmerge ecco), clump-based correction (clumpify ecc, 4 passes), and k-mer-based correction (tadpole ecc k=62). Each phase catches different error types with complementary strategies.
 
+**Human decontamination.** Enabled by default via BBTools' `removehuman.sh`. Uses a masked human genome reference to identify and remove human-derived reads before error correction and assembly. Can be disabled with `--run_remove_human false` for datasets where human contamination is not a concern.
+
 **Interleaved read handling.** BBTools operates on interleaved FASTQ throughout (R1 and R2 in the same file). This simplifies channel plumbing and avoids paired-read synchronization issues across processes.
 
-**metaSPAdes uses normalized reads.** Unlike the other three assemblers which use merged + quality-trimmed reads, metaSPAdes receives the normalized interleaved reads directly. This matches the original METTA pipeline design where metaSPAdes benefits from normalized coverage.
+**metaSPAdes uses normalized reads.** Unlike the other three assemblers which use merged + quality-trimmed reads, metaSPAdes receives the normalized interleaved reads directly. This matches the pipeline design where metaSPAdes benefits from normalized coverage.
 
 **Graceful assembler failure.** All assembler processes use `set +e` to catch failures and produce an empty FASTA on error. The deduplication step skips empty files. This means a single assembler crash does not halt the pipeline.
 
@@ -349,10 +387,10 @@ illumina_mag/
 └── nextflow/                    Pipeline implementation (Nextflow DSL2)
     ├── main.nf                  Pipeline entry point + workflow logic
     ├── nextflow.config          Parameters, profiles, resource labels
-    ├── run-metta.sh             Pipeline launcher (handles conda, session tracking)
+    ├── run-illumina-mag.sh      Pipeline launcher (handles conda, session tracking)
     ├── install.sh               Conda environment builder (install/check/clean)
     ├── modules/
-    │   ├── preprocess.nf        CLUMPIFY, FILTER_BY_TILE, BBDUK_TRIM, BBDUK_FILTER
+    │   ├── preprocess.nf        CLUMPIFY, FILTER_BY_TILE, BBDUK_TRIM, BBDUK_FILTER, REMOVE_HUMAN, FASTQC
     │   ├── error_correct.nf     ERROR_CORRECT_ECCO, ERROR_CORRECT_ECC, ERROR_CORRECT_TADPOLE
     │   ├── normalize.nf         NORMALIZE_READS
     │   ├── merge_reads.nf       MERGE_READS, QUALITY_TRIM
@@ -361,21 +399,22 @@ illumina_mag/
     │   ├── mapping.nf           MAP_READS_BBMAP, CALCULATE_DEPTHS
     │   └── binning.nf           BIN_METABAT2
     ├── envs/                    Conda YAML specs
-    │   ├── bbmap.yml            BBTools, samtools, Nextflow, OpenJDK
+    │   ├── bbmap.yml            BBTools, FastQC, samtools, Nextflow, OpenJDK
     │   ├── megahit.yml          Megahit
     │   ├── spades.yml           SPAdes
     │   └── binning.yml          MetaBAT2, jgi_summarize_bam_contig_depths, samtools
     └── conda-envs/              Pre-built conda environments (created by install.sh)
-        ├── dana-metta-bbmap/
-        ├── dana-metta-megahit/
-        ├── dana-metta-spades/
-        └── dana-metta-binning/
+        ├── dana-illumina-mag-bbmap/
+        ├── dana-illumina-mag-megahit/
+        ├── dana-illumina-mag-spades/
+        └── dana-illumina-mag-binning/
 ```
 
 ## References
 
 **Quality Control & Error Correction:**
 - BBTools: Bushnell, [sourceforge.net/projects/bbmap](https://sourceforge.net/projects/bbmap/)
+- FastQC: Andrews, [bioinformatics.babraham.ac.uk/projects/fastqc](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
 
 **Assemblers:**
 - SPAdes/metaSPAdes: Nurk et al., *Genome Research* 2017

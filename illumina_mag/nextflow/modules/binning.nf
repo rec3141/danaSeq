@@ -3,7 +3,7 @@
 process BIN_METABAT2 {
     tag "${meta.id}"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-metta-binning"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-binning"
     publishDir "${params.outdir}/binning/${meta.id}", mode: 'copy'
     storeDir params.store_dir ? "${params.store_dir}/binning/${meta.id}" : null
 

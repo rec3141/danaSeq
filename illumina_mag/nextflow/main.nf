@@ -2,19 +2,20 @@
 nextflow.enable.dsl = 2
 
 // ============================================================================
-// METTA Assembly Pipeline - Nextflow DSL2
+// Illumina MAG Pipeline - Nextflow DSL2
 // ============================================================================
 //
-// Illumina paired-end metagenomic assembly pipeline.
-// Processes reads through BBTools QC, three-phase error correction,
-// normalization, read merging, four parallel assemblers (Tadpole, Megahit,
-// SPAdes, metaSPAdes), cascade deduplication, mapping, depth calculation,
-// and MetaBAT2 binning.
+// Illumina paired-end metagenomic assembly and binning pipeline.
+// Processes reads through BBTools QC (optical dedup, tile filtering, adapter
+// trimming, artifact/PhiX removal, human decontamination), three-phase error
+// correction, normalization, read merging, four parallel assemblers (Tadpole,
+// Megahit, SPAdes, metaSPAdes), cascade deduplication, mapping, depth
+// calculation, and MetaBAT2 binning.
 //
 // Supports per-sample (default) and co-assembly (--coassembly) modes.
 //
 // Usage:
-//   nextflow run main.nf --input /path/to/reads -resume
+//   nextflow run main.nf --input /path/to/reads --human_ref /path/to/ref -resume
 //
 // ============================================================================
 
@@ -25,12 +26,12 @@ nextflow.enable.dsl = 2
 def helpMessage() {
     log.info """
     =========================================
-     METTA Assembly Pipeline
+     Illumina MAG Pipeline
      https://github.com/rec3141/danaSeq
     =========================================
 
     Usage:
-      nextflow run main.nf --input /path/to/reads [options] -resume
+      nextflow run main.nf --input /path/to/reads --human_ref /path/to/ref [options] -resume
 
     Required:
       --input DIR        Input directory containing paired-end *_R1_*.fastq.gz reads
@@ -45,6 +46,9 @@ def helpMessage() {
 
     Preprocessing:
       --min_readlen N    Minimum read length after trimming [default: 70]
+      --run_remove_human Remove human reads (removehuman.sh) [default: true]
+      --human_ref PATH   Path to BBTools human reference index (required when --run_remove_human)
+      --run_fastqc       Run FastQC on final preprocessed reads [default: true]
 
     Normalization:
       --run_normalize    Enable bbnorm coverage normalization [default: true]
@@ -71,20 +75,20 @@ def helpMessage() {
 
     Examples:
       # Per-sample assembly (default)
-      nextflow run main.nf --input /path/to/reads -resume
+      nextflow run main.nf --input /path/to/reads --human_ref /path/to/ref -resume
 
       # Co-assembly of all samples
-      nextflow run main.nf --input /path/to/reads --coassembly -resume
+      nextflow run main.nf --input /path/to/reads --human_ref /path/to/ref --coassembly -resume
 
-      # Skip Megahit and SPAdes, just Tadpole + metaSPAdes
+      # Skip human removal and some assemblers
       nextflow run main.nf --input /path/to/reads \\
-          --run_megahit false --run_spades false -resume
+          --run_remove_human false --run_megahit false --run_spades false -resume
 
       # Using launcher script
-      ./run-metta.sh --input /path/to/reads --outdir /path/to/output
+      ./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output --human_ref /path/to/ref
 
       # SLURM profile
-      nextflow run main.nf --input /path/to/reads -profile slurm -resume
+      nextflow run main.nf --input /path/to/reads --human_ref /path/to/ref -profile slurm -resume
 
     Input:
       --input must point to a directory containing paired-end Illumina reads
@@ -119,6 +123,11 @@ if (!params.input) {
     System.exit(1)
 }
 
+if (params.run_remove_human && !params.human_ref) {
+    log.error "ERROR: --run_remove_human requires --human_ref (path to BBTools human reference index directory)."
+    System.exit(1)
+}
+
 // ============================================================================
 // Import modules
 // ============================================================================
@@ -127,6 +136,8 @@ include { CLUMPIFY }               from './modules/preprocess'
 include { FILTER_BY_TILE }         from './modules/preprocess'
 include { BBDUK_TRIM }             from './modules/preprocess'
 include { BBDUK_FILTER }           from './modules/preprocess'
+include { REMOVE_HUMAN }           from './modules/preprocess'
+include { FASTQC }                 from './modules/preprocess'
 include { ERROR_CORRECT_ECCO }     from './modules/error_correct'
 include { ERROR_CORRECT_ECC }      from './modules/error_correct'
 include { ERROR_CORRECT_TADPOLE }  from './modules/error_correct'
@@ -179,8 +190,18 @@ workflow {
     BBDUK_TRIM(FILTER_BY_TILE.out.reads)
     BBDUK_FILTER(BBDUK_TRIM.out.reads)
 
-    // Save filtered reads for mapping later
-    ch_filtered = BBDUK_FILTER.out.reads
+    // Optional human decontamination
+    if (params.run_remove_human) {
+        REMOVE_HUMAN(BBDUK_FILTER.out.reads)
+        ch_filtered = REMOVE_HUMAN.out.reads
+    } else {
+        ch_filtered = BBDUK_FILTER.out.reads
+    }
+
+    // QC report on final preprocessed reads
+    if (params.run_fastqc) {
+        FASTQC(ch_filtered)
+    }
 
     // ======================================================================
     // 3. Error correction (per-sample)

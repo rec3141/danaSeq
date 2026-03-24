@@ -1,4 +1,4 @@
-name: dana-metta-megahit
+name: dana-illumina-mag-megahit
 channels:
   - conda-forge
   - bioconda

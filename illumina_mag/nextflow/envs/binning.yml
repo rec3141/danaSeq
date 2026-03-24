@@ -1,4 +1,4 @@
-name: dana-metta-binning
+name: dana-illumina-mag-binning
 channels:
   - conda-forge
   - bioconda

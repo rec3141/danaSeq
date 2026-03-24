@@ -2,18 +2,17 @@
 set -euo pipefail
 
 # ============================================================================
-# METTA Assembly Pipeline - Conda Environment Installer
+# Illumina MAG Pipeline - Conda Environment Installer
 # ============================================================================
 #
-# Creates isolated conda environments for the METTA assembly pipeline.
+# Creates isolated conda environments for the illumina_mag pipeline.
 # All envs are prefix-installed under ./conda-envs/.
 #
 # Four environments are needed:
-#   dana-metta-bbmap   - BBTools suite (clumpify, bbduk, bbmerge, tadpole, bbmap,
-#                        bbnorm, dedupe, statswrapper) + samtools + Nextflow runtime
-#   dana-metta-megahit - Megahit assembler
-#   dana-metta-spades  - SPAdes assembler (includes metaSPAdes)
-#   dana-metta-binning - MetaBAT2 + jgi_summarize_bam_contig_depths + samtools
+#   dana-illumina-mag-bbmap   - BBTools suite + FastQC + samtools + Nextflow runtime
+#   dana-illumina-mag-megahit - Megahit assembler
+#   dana-illumina-mag-spades  - SPAdes assembler (includes metaSPAdes)
+#   dana-illumina-mag-binning - MetaBAT2 + jgi_summarize_bam_contig_depths + samtools
 #
 # Usage:
 #   ./install.sh              # Install all environments
@@ -69,22 +68,22 @@ ENV_YAMLS=(
 
 # Which tool binary to check for each environment
 declare -A ENV_CHECK=(
-    [dana-metta-bbmap]="bbduk.sh"
-    [dana-metta-megahit]="megahit"
-    [dana-metta-spades]="spades.py"
-    [dana-metta-binning]="metabat2"
+    [dana-illumina-mag-bbmap]="bbduk.sh"
+    [dana-illumina-mag-megahit]="megahit"
+    [dana-illumina-mag-spades]="spades.py"
+    [dana-illumina-mag-binning]="metabat2"
 )
 
 # Additional binaries to verify
 declare -A ENV_EXTRAS=(
-    [dana-metta-bbmap]="clumpify.sh bbmerge.sh tadpole.sh bbmap.sh bbnorm.sh dedupe.sh statswrapper.sh samtools"
-    [dana-metta-binning]="jgi_summarize_bam_contig_depths samtools"
+    [dana-illumina-mag-bbmap]="clumpify.sh bbmerge.sh tadpole.sh bbmap.sh bbnorm.sh dedupe.sh statswrapper.sh removehuman.sh fastqc samtools"
+    [dana-illumina-mag-binning]="jgi_summarize_bam_contig_depths samtools"
 )
 
 yaml_to_envname() {
     local yaml="$1"
     local base="${yaml%.yml}"
-    echo "dana-metta-${base}"
+    echo "dana-illumina-mag-${base}"
 }
 
 # ============================================================================
@@ -137,7 +136,7 @@ do_install() {
 
         # Post-install: ensure conda is on PATH for Nextflow env activation.
         # The bbmap env hosts Nextflow and its bin/ is on PATH for all spawned processes.
-        if [[ "${env_name}" == "dana-metta-bbmap" ]]; then
+        if [[ "${env_name}" == "dana-illumina-mag-bbmap" ]]; then
             local conda_bin
             conda_bin=$(which conda 2>/dev/null || echo "")
             if [[ -n "${conda_bin}" && ! -e "${env_path}/bin/conda" ]]; then
@@ -158,7 +157,7 @@ do_install() {
         echo "[SUCCESS] All ${total} environments installed to: ${ENV_DIR}"
         echo ""
         echo "Run the pipeline:"
-        echo "  ./run-metta.sh --input /path/to/reads --outdir /path/to/output"
+        echo "  ./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output --human_ref /path/to/ref"
     fi
 }
 

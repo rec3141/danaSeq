@@ -3,7 +3,7 @@
 process MAP_READS_BBMAP {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/mapping/${meta.id}", mode: 'copy', pattern: '*.{bam,bai,txt}'
     storeDir params.store_dir ? "${params.store_dir}/mapping/${meta.id}" : null
 
@@ -44,7 +44,7 @@ process MAP_READS_BBMAP {
 process CALCULATE_DEPTHS {
     tag "${meta.id}"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-metta-binning"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-binning"
     publishDir "${params.outdir}/mapping/${meta.id}", mode: 'copy'
     storeDir params.store_dir ? "${params.store_dir}/mapping/${meta.id}" : null
 

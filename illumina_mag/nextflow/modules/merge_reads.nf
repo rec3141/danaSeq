@@ -3,7 +3,7 @@
 process MERGE_READS {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/merge/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/merge/${meta.id}" : null
 
@@ -41,7 +41,7 @@ process MERGE_READS {
 process QUALITY_TRIM {
     tag "${meta.id}"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/merge/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/merge/${meta.id}" : null
 

@@ -3,7 +3,7 @@
 process NORMALIZE_READS {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/conda-envs/dana-metta-bbmap"
+    conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir "${params.outdir}/normalize/${meta.id}", mode: 'copy', pattern: '*.{fq.gz,txt}'
     storeDir params.store_dir ? "${params.store_dir}/normalize/${meta.id}" : null
 

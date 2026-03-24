@@ -1,9 +1,10 @@
-name: dana-metta-bbmap
+name: dana-illumina-mag-bbmap
 channels:
   - conda-forge
   - bioconda
 dependencies:
   - bbmap>=39.0
   - samtools>=1.10
+  - fastqc>=0.12
   - nextflow>=23.04
   - openjdk>=17
