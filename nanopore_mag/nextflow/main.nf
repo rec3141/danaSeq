@@ -330,6 +330,7 @@ log.info "Assembler: ${params.assembler}"
 // Import modules
 include { CONCAT_READS }        from './modules/preprocess'
 include { PREPARE_READS }        from './modules/preprocess'
+include { REMOVE_HUMAN }        from './modules/preprocess'
 include { FLYE_ASSEMBLE }       from './modules/assembly'
 include { FLYE_POLISH }         from './modules/assembly'
 include { ASSEMBLY_METAMDBG }   from './modules/assembly'
@@ -514,7 +515,13 @@ workflow {
     // 2. Concatenate + dedupe + optional filtlong → single all_reads.fastq.gz
     ch_per_barcode = ch_reads.map { meta, fastq -> fastq }.collect()
     PREPARE_READS(ch_per_barcode)
-    ch_asm_input = PREPARE_READS.out.reads
+
+    if (params.run_remove_human) {
+        REMOVE_HUMAN(PREPARE_READS.out.reads)
+        ch_asm_input = REMOVE_HUMAN.out.reads
+    } else {
+        ch_asm_input = PREPARE_READS.out.reads
+    }
 
     if (params.assembler == 'flye') {
         FLYE_ASSEMBLE(ch_asm_input)

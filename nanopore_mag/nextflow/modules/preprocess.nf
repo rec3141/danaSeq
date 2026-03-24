@@ -111,3 +111,37 @@ process PREPARE_READS {
     cat ${fastqs} | fastq_filter ${filter_args} -o all_reads.fastq.gz
     """
 }
+
+// Map long reads to human reference with minimap2, keep only unmapped reads.
+// Uses samtools -f 4 (unmapped) to extract non-human reads, then converts back to FASTQ.
+process REMOVE_HUMAN {
+    tag "remove-human"
+    label 'process_high'
+    conda "${projectDir}/conda-envs/dana-mag-assembly"
+    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+
+    input:
+    path(reads)
+
+    output:
+    path("nohuman_reads.fastq.gz"), emit: reads
+
+    script:
+    """
+    minimap2 -a -x map-ont --secondary=no -t ${task.cpus} \\
+        "${params.human_ref}" "${reads}" \\
+        | samtools view -b -f 4 \\
+        | samtools fastq -@ ${task.cpus} - \\
+        | pigz -p ${task.cpus} > nohuman_reads.fastq.gz
+
+    if [ ! -s nohuman_reads.fastq.gz ]; then
+        echo "[ERROR] Human removal produced empty output" >&2
+        exit 1
+    fi
+
+    input_count=\$(zcat "${reads}" | awk 'NR%4==1' | wc -l)
+    output_count=\$(zcat nohuman_reads.fastq.gz | awk 'NR%4==1' | wc -l)
+    removed=\$((input_count - output_count))
+    echo "[INFO] Human removal: \${input_count} reads in, \${output_count} out, \${removed} removed (\$(( removed * 100 / (input_count + 1) ))%)" >&2
+    """
+}

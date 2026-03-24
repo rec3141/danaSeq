@@ -399,15 +399,32 @@ download_human_ref() {
     echo "  This will download and index the masked human genome (hg19)..."
     "${removehuman_bin}" path="${db_path}" build=1 2>&1 | tail -5 || true
 
-    # Verify the index was built
-    if [ -d "${db_path}/ref" ] && [ -f "${db_path}/ref/genome/1/summary.txt" ]; then
-        echo "[SUCCESS] Human reference downloaded to ${db_path}"
-        echo "  Use with: --human_ref ${db_path}"
-    else
+    # Verify the BBTools index was built
+    if ! [ -d "${db_path}/ref" ] || ! [ -f "${db_path}/ref/genome/1/summary.txt" ]; then
         echo "[ERROR] Human reference download/build may have failed" >&2
         echo "  Check ${db_path} for partial files" >&2
         return 1
     fi
+    echo "[SUCCESS] BBTools human reference downloaded to ${db_path}"
+
+    # Also download GRCh38 FASTA for minimap2 (nanopore pipeline).
+    # minimap2 will auto-index from the FASTA on first use.
+    local human_fa="${db_path}/GRCh38_noalt_as.fa.gz"
+    if [ -f "${human_fa}" ]; then
+        echo "[INFO] Human FASTA already exists at ${human_fa}"
+    else
+        echo "  Downloading GRCh38 no-alt FASTA for minimap2 (~900 MB)..."
+        local fasta_url="https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz"
+        if wget -q --show-progress -O "${human_fa}" "${fasta_url}" 2>&1; then
+            echo "[SUCCESS] Human FASTA downloaded to ${human_fa}"
+        else
+            echo "[WARNING] Could not download GRCh38 FASTA — nanopore human removal unavailable" >&2
+            rm -f "${human_fa}"
+        fi
+    fi
+
+    echo "  illumina_mag: --human_ref ${db_path}"
+    echo "  nanopore_mag: --human_ref ${human_fa}"
 }
 
 download_genomad() {
