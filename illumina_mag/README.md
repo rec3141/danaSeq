@@ -57,15 +57,16 @@ cd nextflow
 
 ## Human Reference Index
 
-Human decontamination is enabled by default and requires a BBTools human reference index. Build it once:
+Human decontamination is enabled by default. Download the reference once from the danaSeq root:
 
 ```bash
-# Download and index (requires ~8 GB disk, ~15 min)
-mkdir -p /path/to/hg19_index
-bbmap.sh ref=/path/to/hg19.fa path=/path/to/hg19_index
+# From the danaSeq root directory
+./download-databases.sh --human
 ```
 
-Or let `removehuman.sh` auto-download on first run by pointing `--human_ref` to an empty directory. To skip human removal entirely, use `--run_remove_human false`.
+This creates `databases/human_ref/` with the BBTools masked hg19 index. The pipeline default `--human_ref` already points there, so no extra flags needed.
+
+To skip human removal entirely, use `--run_remove_human false`.
 
 ## Pipeline Overview
 
@@ -201,7 +202,6 @@ In co-assembly mode, `<sample>` is replaced with `coassembly` for the assembly, 
 |-----------|---------|-------------|
 | `--input` | (required) | Directory containing paired-end `*_R1_*.fastq.gz` files |
 | `--outdir` | `results` | Output directory |
-| `--human_ref` | (required) | Path to BBTools human reference index directory |
 
 ### Mode
 
@@ -220,8 +220,8 @@ In co-assembly mode, `<sample>` is replaced with `coassembly` for the assembly, 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--min_readlen` | `70` | Minimum read length after adapter trimming and quality trimming |
-| `--run_remove_human` | `true` | Remove human reads via removehuman.sh; requires `--human_ref` |
-| `--human_ref` | (none) | Path to BBTools human reference index |
+| `--run_remove_human` | `true` | Remove human reads via removehuman.sh |
+| `--human_ref` | `databases/human_ref` | Path to BBTools human reference index (run `./download-databases.sh --human`) |
 | `--run_fastqc` | `true` | Run FastQC on final preprocessed reads |
 
 ### Normalization

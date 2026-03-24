@@ -41,6 +41,10 @@ def helpMessage() {
                          skipped across runs even after work/ cleanup. Off by default.
                          When active, outputs go directly to store_dir (publishDir ignored).
 
+    Preprocessing:
+      --run_remove_human Remove human reads via minimap2 [default: true]
+      --human_ref PATH   Path to human reference FASTA or .mmi [default: databases/human_ref/GRCh38_noalt_as.fa.gz]
+
     Assembly:
       --assembler STR    Assembler to use: 'flye', 'metamdbg', or 'myloasm' [default: flye]
       --min_overlap N    Flye --min-overlap [default: 1000]

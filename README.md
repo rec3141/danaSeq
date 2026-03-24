@@ -4,7 +4,7 @@
 
 Named after the Buddhist concept of *dāna* (selfless giving), this pipeline processes DNA reads as they stream from the sequencer, providing live taxonomic classification, gene annotation, and functional profiling. Post-expedition, a separate pipeline reconstructs metagenome-assembled genomes (MAGs) from the collected data.
 
-A companion Illumina short-read pipeline (METTA) handles metagenomic assembly with multi-assembler consensus and MetaBAT2 binning.
+A companion Illumina short-read pipeline (`illumina_mag`) handles metagenomic assembly with multi-assembler consensus and MetaBAT2 binning.
 
 All pipelines are implemented in Nextflow DSL2 and run via conda, Docker, or Apptainer with no hardcoded paths.
 
@@ -29,18 +29,19 @@ gh release download v0.1.0-alpha --archive=tar.gz
 | **Docker** | Reproducible runs, CI | `docker pull ghcr.io/rec3141/danaseq-mag:latest` |
 | **Apptainer** | HPC clusters (auto-detected) | `apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest` |
 
-### 3. Download databases (MAG pipeline)
+### 3. Download databases
 
-Most MAG pipeline modules require reference databases. Download them before first use:
+Both pipelines require reference databases. Download them before first use:
 
 ```bash
-cd nanopore_mag/nextflow
+# Human reference (required by both pipelines, ~4 GB)
+./download-databases.sh --human
+
+# Nanopore MAG pipeline databases
+./download-databases.sh --genomad --checkv --checkm2 --kaiju
 
 # Interactive menu (shows sizes and descriptions)
 ./download-databases.sh
-
-# Or download specific databases
-./download-databases.sh --genomad --checkv --checkm2 --kaiju
 
 # With Apptainer on HPC (no local conda needed, auto-pulls SIF if --sif omitted)
 ./download-databases.sh --apptainer --sif /path/to/danaseq-mag.sif \
@@ -91,16 +92,16 @@ apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest
     --db_dir /path/to/databases
 ```
 
-### METTA assembly — Illumina short-read ([details](illumina_mag/README.md))
+### Illumina MAG assembly ([details](illumina_mag/README.md))
 
 ```bash
 cd danaSeq/illumina_mag/nextflow
 ./install.sh && ./install.sh --check
 
-./run-metta.sh --input /path/to/reads --outdir /path/to/output
+./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output
 
 # SLURM profile (Compute Canada)
-./run-metta.sh --input /path/to/reads --outdir /path/to/output \
+./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output \
     -profile slurm --slurm_account def-myaccount
 ```
 
@@ -145,13 +146,13 @@ dānaSeq/
 │   │   └── test-data/           Bundled test data
 │   └── archive/                 Replaced bash scripts (reference only)
 │
-├── illumina_mag/                  Illumina metagenomic assembly (METTA)
+├── illumina_mag/                  Illumina metagenomic assembly + binning
 │   └── nextflow/                 Nextflow DSL2 pipeline
-│       ├── main.nf              Entry point (18 processes)
+│       ├── main.nf              Entry point (20 processes)
 │       ├── modules/             8 modules: preprocess, error_correct, normalize,
 │       │                          merge_reads, assembly, dedupe, mapping, binning
 │       ├── envs/                Conda YAML specs (4 environments)
-│       └── run-metta.sh         Pipeline launcher
+│       └── run-illumina-mag.sh  Pipeline launcher
 │
 ├── archive/                      Archived root-level scripts and documentation
 ├── tests/                        Pipeline tests
@@ -232,13 +233,14 @@ Key features:
 - CoverM for depth calculation (avoids MetaBAT2 integer overflow bug)
 - GPU-accelerated ML binners (local), CPU-only in Docker
 
-### [METTA assembly — Illumina short-read](illumina_mag/README.md)
+### [Illumina MAG assembly](illumina_mag/README.md)
 
 Processes Illumina paired-end metagenomic reads through multi-assembler consensus:
 
 ```
 Paired-end FASTQs → BBTools QC (clumpify, filterbytile, bbduk)
-                          → 3-phase error correction (ecco, ecc, tadpole)
+                          → Human decontamination (removehuman.sh)
+                          → FastQC → 3-phase error correction (ecco, ecc, tadpole)
                           → bbnorm normalization → bbmerge read merging
                                │
                     ┌──────────┼──────────┬──────────┐
@@ -253,7 +255,8 @@ Paired-end FASTQs → BBTools QC (clumpify, filterbytile, bbduk)
 
 Key features:
 - **Four-assembler consensus**: Tadpole, Megahit, SPAdes, metaSPAdes with cascade deduplication
-- **BBTools-based QC**: Optical deduplication, tile filtering, adapter/artifact removal
+- **BBTools-based QC**: Optical deduplication, tile filtering, adapter/artifact removal, human decontamination
+- **FastQC reports** on final preprocessed reads
 - **Three-phase error correction**: Overlap, clump, and k-mer-based correction
 - **Per-sample and co-assembly modes**: `--coassembly` pools all samples
 - **SRA-safe**: Automatic fallbacks for SRA-stripped read headers
@@ -277,7 +280,7 @@ input_dir/
 └── ...
 ```
 
-Illumina paired-end reads (METTA pipeline):
+Illumina paired-end reads (illumina_mag pipeline):
 ```
 input_dir/
 ├── sampleA_S1_L001_R1_001.fastq.gz

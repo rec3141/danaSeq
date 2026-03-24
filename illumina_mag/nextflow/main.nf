@@ -47,7 +47,7 @@ def helpMessage() {
     Preprocessing:
       --min_readlen N    Minimum read length after trimming [default: 70]
       --run_remove_human Remove human reads (removehuman.sh) [default: true]
-      --human_ref PATH   Path to BBTools human reference index (required when --run_remove_human)
+      --human_ref PATH   Path to BBTools human reference index [default: databases/human_ref]
       --run_fastqc       Run FastQC on final preprocessed reads [default: true]
 
     Normalization:
