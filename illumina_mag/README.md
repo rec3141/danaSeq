@@ -29,6 +29,12 @@ cd nextflow
     -profile slurm --slurm_account def-rec3141 \
     --conda_path ~/scratch/miniforge3/bin
 
+# Docker mode
+./run-illumina-mag.sh --docker --input /path/to/reads --outdir /path/to/output
+
+# Apptainer (HPC) — auto-pulls SIF on first run
+./run-illumina-mag.sh --apptainer --pull --input /path/to/reads --outdir /path/to/output
+
 # Show all options
 ./run-illumina-mag.sh --help
 ```
@@ -387,8 +393,11 @@ illumina_mag/
 └── nextflow/                    Pipeline implementation (Nextflow DSL2)
     ├── main.nf                  Pipeline entry point + workflow logic
     ├── nextflow.config          Parameters, profiles, resource labels
-    ├── run-illumina-mag.sh      Pipeline launcher (handles conda, session tracking)
+    ├── run-illumina-mag.sh      Pipeline launcher (conda, Docker, Apptainer)
     ├── install.sh               Conda environment builder (install/check/clean)
+    ├── Dockerfile               Container image build (all 4 envs + wrappers)
+    ├── entrypoint.sh            Container entrypoint (outdir validation + Nextflow)
+    ├── .dockerignore            Files excluded from container build
     ├── modules/
     │   ├── preprocess.nf        CLUMPIFY, FILTER_BY_TILE, BBDUK_TRIM, BBDUK_FILTER, REMOVE_HUMAN, FASTQC
     │   ├── error_correct.nf     ERROR_CORRECT_ECCO, ERROR_CORRECT_ECC, ERROR_CORRECT_TADPOLE
