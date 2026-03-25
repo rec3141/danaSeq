@@ -65,6 +65,8 @@ process BAKTA_FULL {
 
     script:
     """
+    export PATH="${projectDir}/bin:\$PATH"
+
     bakta \
         --db "${params.bakta_db}" \
         --meta \
