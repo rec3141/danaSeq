@@ -23,6 +23,8 @@ process BAKTA_CDS {
 
     script:
     """
+    export PATH="${projectDir}/bin:\$PATH"
+
     cat fastas/* > combined.fa
 
     bakta \
