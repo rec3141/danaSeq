@@ -18,6 +18,19 @@ process MAP_READS_BBMAP {
     script:
     def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
+    # Skip mapping if assembly is empty (e.g. all contigs below min_contig_len)
+    if [ ! -s "${assembly}" ] || ! grep -q '>' "${assembly}"; then
+        echo "[WARNING] Empty assembly for ${meta.id} — creating empty BAM" >&2
+        echo -e '@HD\tVN:1.6\tSO:coordinate' | samtools view -b -o "${meta.id}.sorted.bam" -
+        samtools index "${meta.id}.sorted.bam"
+        touch "${meta.id}.covhist.txt" "${meta.id}.covstats.txt"
+        exit 0
+    fi
+
+    # Work around OpenJDK 23 C2 JIT SIGSEGV in TemplateAssertionPredicateExpression::clone
+    # when compiling SamHeader::header1B with large references (163K+ contigs).
+    export JAVA_TOOL_OPTIONS="\${JAVA_TOOL_OPTIONS:-} -XX:-UseLoopPredicate"
+
     bbmap.sh ${xmx} \\
         in="${reads}" \\
         ref="${assembly}" \\
