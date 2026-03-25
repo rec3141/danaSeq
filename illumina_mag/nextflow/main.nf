@@ -61,6 +61,7 @@ def helpMessage() {
 
     Deduplication:
       --dedupe_identity N  Final deduplication identity threshold [default: 98]
+      --min_contig_len N   Minimum contig length after deduplication [default: 500]
 
     Binning:
       --metabat_min_cls N  MetaBAT2 minimum cluster size [default: 2000]

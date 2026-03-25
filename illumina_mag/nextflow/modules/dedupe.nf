@@ -47,9 +47,16 @@ process DEDUPE_ASSEMBLIES {
 
     dedupe.sh ${xmx} \\
         in=d99.fasta.gz \\
-        out="${meta.id}.dedupe.fasta" \\
+        out=dfinal.fasta.gz \\
         sort=length uniquenames=t minidentity=${params.dedupe_identity} \\
         t=${task.cpus} ow=t
+
+    # Filter short contigs (reduces assembly size for mapping/binning)
+    reformat.sh \\
+        in=dfinal.fasta.gz \\
+        out="${meta.id}.dedupe.fasta" \\
+        minlength=${params.min_contig_len} \\
+        ow=t
 
     # Assembly statistics for all individual + deduplicated assemblies
     set +e
