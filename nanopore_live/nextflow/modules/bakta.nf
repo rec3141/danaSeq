@@ -24,12 +24,15 @@ process BAKTA_CDS {
     script:
     """
     export PATH="${projectDir}/bin:\$PATH"
+    export TMPDIR="\$PWD/tmp"
+    mkdir -p "\$TMPDIR"
 
     cat fastas/* > combined.fa
 
     bakta \
         --db "${params.bakta_db}" \
         --meta \
+        --tmp-dir "\$TMPDIR" \
         --threads ${task.cpus} \
         --output "${meta.id}" \
         --prefix "${meta.id}" \
