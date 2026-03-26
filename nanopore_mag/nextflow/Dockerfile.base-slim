@@ -87,10 +87,12 @@ RUN rm -rf /opt/checkm_data_stub
 
 RUN find /opt/conda/envs -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null; \
     rm -rf /opt/conda/envs/*/share/{locale,doc,info,man,cups,icons,gir-1.0,easel} \
-           /opt/conda/envs/*/lib/python*/site-packages/{pip,setuptools} ; \
+           /opt/conda/envs/*/lib/python*/site-packages/pip ; \
     find /opt/conda/envs -name "*.pyc" -delete 2>/dev/null; \
     rm -rf /tmp/envs/ ; \
     true
+# NOTE: setuptools is NOT stripped — tiara imports pkg_resources, and
+# setuptools>=60 provides a distutils shim needed by integron_finder on Python 3.13
 
 # ============================================================================
 # Create wrapper scripts so tools are callable from PATH
