@@ -4,7 +4,8 @@ process PROKKA_ANNOTATE {
     tag "${meta.id}"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-prokka"
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/prokka", mode: 'copy'
+    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/prokka", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/prokka" : null
 
     input:
     tuple val(meta), path(fasta)

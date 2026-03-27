@@ -54,7 +54,8 @@ process QC_FASTQ_FILTER {
 process CONVERT_TO_FASTA {
     tag "${meta.id}"
     label 'process_low'
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/fa", mode: 'copy'
+    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/fa", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/fa" : null
 
     input:
     tuple val(meta), path(fastq)

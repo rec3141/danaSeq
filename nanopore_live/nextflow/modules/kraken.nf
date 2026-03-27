@@ -11,7 +11,8 @@ process KRAKEN2_CLASSIFY {
     label 'process_kraken'
     conda "${projectDir}/conda-envs/dana-tools"
     maxForks 1
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/kraken", mode: 'copy'
+    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/kraken", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/kraken" : null
 
     input:
     tuple val(meta), path("fastas/*")

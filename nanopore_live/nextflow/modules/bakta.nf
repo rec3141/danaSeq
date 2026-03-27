@@ -10,7 +10,8 @@ process BAKTA_CDS {
     tag "${meta.id}"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-bakta"
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/bakta", mode: 'copy'
+    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/bakta", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/bakta" : null
 
     input:
     tuple val(meta), path("fastas/*")
@@ -52,7 +53,8 @@ process BAKTA_FULL {
     tag "${meta.id}"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-bakta"
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/bakta_full", mode: 'copy'
+    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/bakta_full", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/bakta_full" : null
 
     input:
     tuple val(meta), path(fasta)

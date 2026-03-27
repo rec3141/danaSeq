@@ -3,7 +3,8 @@
 process TETRAMER_FREQ {
     tag "${meta.id}"
     label 'process_low'
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/tetra", mode: 'copy'
+    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/tetra", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/tetra" : null
 
     input:
     tuple val(meta), path(fasta)

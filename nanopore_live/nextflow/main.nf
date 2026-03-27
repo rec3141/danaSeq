@@ -354,7 +354,7 @@ workflow {
     // Collects all published output directories and loads into DuckDB
     // Uses string paths since R scripts operate on the host filesystem
     if (params.run_db_integration) {
-        def abs_outdir = file(params.outdir).toAbsolutePath().toString()
+        def abs_outdir = params.store_dir ? file(params.store_dir).toAbsolutePath().toString() : file(params.outdir).toAbsolutePath().toString()
 
         if (params.watch) {
             // Watch mode: channel never closes so .collect() would block forever.

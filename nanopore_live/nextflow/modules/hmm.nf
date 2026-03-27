@@ -5,7 +5,8 @@ process HMM_SEARCH {
     tag "${meta.id}_${dbname}"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-tools"
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/hmm", mode: 'copy'
+    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/hmm", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/hmm" : null
 
     input:
     tuple val(meta), path(faa), val(dbname), path(hmm_db)
