@@ -63,7 +63,7 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 # 6. Genomic: defensefinder, macsyfinder, integron_finder, dbcan
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-genomic   -f /tmp/envs/genomic.yml && \
-    /opt/conda/envs/dana-mag-genomic/bin/pip install --upgrade integron_finder
+    /opt/conda/envs/dana-mag-genomic/bin/pip install --upgrade integron_finder macsyfinder
 
 # 7. Derep: galah, skani, sourmash, skder, drep
 RUN --mount=type=cache,target=/opt/conda/pkgs \
