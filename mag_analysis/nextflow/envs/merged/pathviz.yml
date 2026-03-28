@@ -2,7 +2,7 @@ name: dana-mag-pathviz
 channels:
   - conda-forge
 dependencies:
-  - python>=3.10
+  - python>=3.10,<3.13
   - pandas
   - numpy
   - scipy
