@@ -46,7 +46,9 @@ dānaSeq/
 │   │   └── ...
 │   ├── CLAUDE.md                # This file
 │   └── README.md                # User-facing documentation
-├── nanopore_mag/             # Post-expedition MAG reconstruction (Nextflow)
+├── nanopore_assembly/        # Nanopore assembly + mapping + depth (Nextflow)
+├── illumina_assembly/        # Illumina assembly + mapping + depth (Nextflow)
+├── mag_analysis/             # Tech-agnostic downstream MAG analysis (Nextflow)
 ├── archive/                  # Archived root-level scripts and docs
 ├── tests/                       # Pipeline tests
 ├── README.md                    # Project overview and quick start
@@ -238,15 +240,14 @@ The `archive/` directory contains the original bash pipeline scripts for referen
 
 These are not actively maintained. Use the Nextflow pipeline for all new work.
 
-### MAG Assembly (nanopore_mag/)
+### Assembly & MAG Analysis
 
-The MAG assembly stage is a separate Nextflow DSL2 pipeline in `nanopore_mag/nextflow/`. It runs alongside the real-time pipeline and includes:
-- Flye metagenomic co-assembly
-- CoverM depth calculation (replaces jgi_summarize_bam_contig_depths)
-- Consensus binning (SemiBin2 + MetaBAT2 + MaxBin2 + LorBin + COMEBin + DAS Tool)
-- Dynamic binner architecture for easy extensibility
+Assembly and downstream analysis are in separate pipelines:
+- `nanopore_assembly/` — Flye/metaMDBG/myloasm co-assembly, minimap2 mapping, CoverM depths
+- `illumina_assembly/` — BBTools QC, 4-assembler consensus, mapping, depths
+- `mag_analysis/` — Technology-agnostic: binning, annotation, taxonomy, metabolism, MGEs, viz
 
-See `nanopore_mag/CLAUDE.md` for full details.
+Run assembly first, then feed outputs to mag_analysis via `--assembly` and `--depths` flags.
 
 ## Common Issues
 

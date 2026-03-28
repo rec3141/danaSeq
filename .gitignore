@@ -147,3 +147,16 @@ ENV/
 **/conda-envs/
 **/.nextflow/
 **/.nextflow.log*
+
+# Container images
+*.sif
+**/.danaseq-*.sif
+
+# Convenience symlinks (local only)
+10_realtime_processing
+20_nanopore_assembly
+30_illumina_assembly
+40_mag_analysis
+
+# NCLB (separate repo)
+nclb/
