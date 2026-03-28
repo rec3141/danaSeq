@@ -344,16 +344,23 @@ process MINPATH {
     path("details/"),              emit: details, optional: true
 
     script:
-    def minpath_dir = "${projectDir}/conda-envs/dana-mag-pathviz/share/minpath"
     """
     # MinPath (Ye & Doak, 2009): parsimony pathway reconstruction
     # Finds the minimum set of KEGG pathways consistent with observed KOs,
     # preventing pathway inflation in draft MAGs.
     # Uses GLPK integer programming solver.
 
+    # Resolve MinPath dir (local conda vs container path)
+    MINPATH_DIR=""
+    for d in "${projectDir}/conda-envs/dana-mag-pathviz/share/minpath" \
+             "/opt/conda/envs/dana-mag-pathviz/share/minpath"; do
+        [ -f "\${d}/MinPath.py" ] && MINPATH_DIR="\${d}" && break
+    done
+    [ -z "\${MINPATH_DIR}" ] && echo "[ERROR] MinPath.py not found" >&2 && exit 1
+
     run_minpath_per_mag.py \\
         --input "${per_mag_dir}" \\
-        --minpath_dir "${minpath_dir}" \\
+        --minpath_dir "\${MINPATH_DIR}" \\
         --output minpath_pathways.tsv \\
         --details details
     """
@@ -392,8 +399,16 @@ process KEGG_DECODER {
             echo "[WARNING] Only \$n_genomes genomes — KEGG-Decoder requires >= 3, skipping" >&2
             printf 'Function\\n' > kegg_decoder_output.tsv
         else
+            # Resolve KEGG-decoder (local conda vs container path)
+            KEGG_DEC=""
+            for d in "${projectDir}/conda-envs/dana-mag-pathviz/bin" \
+                     "/opt/conda/envs/dana-mag-pathviz/bin"; do
+                [ -x "\${d}/KEGG-decoder" ] && KEGG_DEC="\${d}/KEGG-decoder" && break
+            done
+            [ -z "\${KEGG_DEC}" ] && KEGG_DEC="KEGG-decoder"  # fallback to PATH
+
             set +e
-            KEGG-decoder -i keggdecoder_input.tsv -o kegg_decoder_output.tsv -v static
+            \${KEGG_DEC} -i keggdecoder_input.tsv -o kegg_decoder_output.tsv -v static
             decoder_exit=\$?
             set -e
 
