@@ -18,4 +18,4 @@ dependencies:
   - biopython
   - skorch
   - pip
-  - setuptools
+  - setuptools<81       # >=81 removed pkg_resources; tiara needs it

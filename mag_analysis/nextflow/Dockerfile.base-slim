@@ -49,7 +49,8 @@ RUN /opt/conda/envs/dana-mag-binning/bin/pip install --no-deps \
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-quality   -f /tmp/envs/quality.yml
 RUN /opt/conda/envs/dana-mag-quality/bin/pip install --no-deps \
-    'whokaryote @ git+https://github.com/LottePronk/whokaryote.git' tiara
+    'whokaryote @ git+https://github.com/LottePronk/whokaryote.git' tiara && \
+    /opt/conda/envs/dana-mag-quality/bin/pip install 'setuptools<81'
 
 # 4. Annotate: bakta, emapper, diamond
 RUN --mount=type=cache,target=/opt/conda/pkgs \
@@ -61,7 +62,8 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 
 # 6. Genomic: defensefinder, macsyfinder, integron_finder, dbcan
 RUN --mount=type=cache,target=/opt/conda/pkgs \
-    mamba env create -y -p /opt/conda/envs/dana-mag-genomic   -f /tmp/envs/genomic.yml
+    mamba env create -y -p /opt/conda/envs/dana-mag-genomic   -f /tmp/envs/genomic.yml && \
+    /opt/conda/envs/dana-mag-genomic/bin/pip install --upgrade integron_finder
 
 # 7. Derep: galah, skani, sourmash, skder, drep
 RUN --mount=type=cache,target=/opt/conda/pkgs \
