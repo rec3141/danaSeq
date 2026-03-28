@@ -50,7 +50,7 @@ process TIARA_CLASSIFY {
 process WHOKARYOTE_CLASSIFY {
     tag "whokaryote"
     label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-quality"
+    conda "${projectDir}/conda-envs/dana-mag-whokaryote"
     publishDir "${params.outdir}/eukaryotic/whokaryote", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/eukaryotic/whokaryote" : null
 
