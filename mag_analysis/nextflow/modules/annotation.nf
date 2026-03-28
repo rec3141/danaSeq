@@ -71,6 +71,9 @@ process BAKTA_BASIC {
 
     script:
     """
+    # Shadow amrfinder with no-op stub — avoids AMRFinderPlus DB version mismatch
+    export PATH="${projectDir}/bin:\$PATH"
+
     bakta \
         --db "${params.bakta_light_db}" \
         --meta \
@@ -120,6 +123,9 @@ process BAKTA_EXTRA {
 
     script:
     """
+    # Shadow amrfinder with no-op stub — avoids AMRFinderPlus DB version mismatch
+    export PATH="${projectDir}/bin:\$PATH"
+
     bakta \
         --db "${params.bakta_db}" \
         --meta \

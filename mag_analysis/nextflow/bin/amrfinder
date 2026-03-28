@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# No-op AMRFinder stub for metagenomic pipelines where AMR detection is not needed.
+# Bakta calls amrfinder unconditionally during CDS annotation; this stub produces
+# a valid empty output file, saving ~27s per invocation.
+#
+# Nextflow's bin/ takes PATH priority over the conda env, so this shadows the
+# real amrfinder without patching bakta.
+
+OUTPUT=""
+prev=""
+for arg in "$@"; do
+    if [ "$prev" = "--output" ]; then
+        OUTPUT="$arg"
+    fi
+    if [ "$arg" = "--version" ] || [ "$arg" = "-V" ]; then
+        # Return a version bakta's regex will accept (>= 4.2.7)
+        echo "Software version: 4.2.7"
+        exit 0
+    fi
+    prev="$arg"
+done
+
+# Write header-only output (what amrfinder produces with 0 hits)
+if [ -n "$OUTPUT" ]; then
+    printf 'Protein identifier\tGene symbol\tSequence name\tScope\tElement type\tElement subtype\tClass\tSubclass\tMethod\tTarget length\tReference sequence length\t%% Coverage of reference sequence\t%% Identity to reference sequence\tAlignment length\tAccession of closest sequence\tName of closest sequence\tHMM id\tHMM description\n' > "$OUTPUT"
+fi
+exit 0
