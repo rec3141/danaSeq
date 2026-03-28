@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ============================================================================
 
 COPY envs/merged/ /tmp/envs/
+COPY envs/whokaryote.yml /tmp/envs/whokaryote.yml
 
 # Pre-create CheckM v1 data sentinel (comebin/drep pull checkm-genome transitively)
 RUN mkdir -p /opt/checkm_data_stub/genome_tree \
@@ -51,6 +52,12 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 RUN /opt/conda/envs/dana-mag-quality/bin/pip install --no-deps \
     'whokaryote @ git+https://github.com/rec3141/whokaryote.git@fix/gff-attribute-parsing' tiara && \
     /opt/conda/envs/dana-mag-quality/bin/pip install 'setuptools<81'
+
+# 3b. Whokaryote standalone (needs sklearn 1.0.x for bundled model compatibility)
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-whokaryote -f /tmp/envs/whokaryote.yml
+RUN /opt/conda/envs/dana-mag-whokaryote/bin/pip install --force-reinstall --no-deps \
+    'whokaryote @ git+https://github.com/rec3141/whokaryote.git@fix/gff-attribute-parsing'
 
 # 4. Annotate: bakta, emapper, diamond
 RUN --mount=type=cache,target=/opt/conda/pkgs \
@@ -117,8 +124,14 @@ RUN mkdir -p /usr/local/bin/dana-tools \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
     # --- quality env ---
-    && for tool in genomad checkm2 checkv whokaryote.py tiara prodigal; do \
+    && for tool in genomad checkm2 checkv tiara prodigal; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-quality/bin:$PATH\nexec /opt/conda/envs/dana-mag-quality/bin/%s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    # --- whokaryote standalone env (sklearn 1.0.x for model compat) ---
+    && for tool in whokaryote.py; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-whokaryote/bin:$PATH\nexec /opt/conda/envs/dana-mag-whokaryote/bin/%s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
