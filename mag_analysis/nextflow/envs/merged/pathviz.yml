@@ -1,6 +1,7 @@
 name: dana-mag-pathviz
 channels:
   - conda-forge
+  - bioconda
 dependencies:
   - python>=3.10,<3.13
   - pandas
@@ -14,3 +15,7 @@ dependencies:
   - glpk
   - umap-learn
   - nodejs>=18
+  - minpath
+  - pip
+  - pip:
+    - KEGGDecoder

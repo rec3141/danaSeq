@@ -85,8 +85,6 @@ RUN /opt/conda/envs/dana-mag-strain/bin/pip install --no-deps \
 # 9. PathViz: pathway tools, viz, nodejs
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-pathviz   -f /tmp/envs/pathviz.yml
-RUN mamba install -y -p /opt/conda/envs/dana-mag-pathviz -c bioconda minpath && \
-    /opt/conda/envs/dana-mag-pathviz/bin/pip install --no-build-isolation KEGGDecoder
 
 # Remove CheckM sentinel stub
 ENV CHECKM_DATA_DIR=
