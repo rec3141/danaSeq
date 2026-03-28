@@ -49,7 +49,7 @@ RUN /opt/conda/envs/dana-mag-binning/bin/pip install --no-deps \
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-quality   -f /tmp/envs/quality.yml
 RUN /opt/conda/envs/dana-mag-quality/bin/pip install --no-deps \
-    'whokaryote @ git+https://github.com/LottePronk/whokaryote.git' tiara && \
+    'whokaryote @ git+https://github.com/rec3141/whokaryote.git@fix/gff-attribute-parsing' tiara && \
     /opt/conda/envs/dana-mag-quality/bin/pip install 'setuptools<81'
 
 # 4. Annotate: bakta, emapper, diamond
