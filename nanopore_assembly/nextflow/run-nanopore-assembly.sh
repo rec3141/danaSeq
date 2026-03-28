@@ -285,7 +285,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
         apptainer|singularity)
             container_ca="/etc/ssl/certs/ca-certificates.crt"
             CONTAINER_CMD+=("$CONTAINER_RUNTIME" run)
-            CONTAINER_CMD+=("--env" "NXF_HOME=${NF_CACHE}/dotdir")
+            CONTAINER_CMD+=("--env" "NXF_HOME=/home/dana/.nextflow")
             CONTAINER_CMD+=("--env" "REQUESTS_CA_BUNDLE=${container_ca}")
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")
             CONTAINER_CMD+=("--env" "CURL_CA_BUNDLE=${container_ca}")

@@ -241,6 +241,11 @@ if [[ "$USE_CONTAINER" == true ]]; then
         done
     fi
 
+    # Work directory (writable inside container)
+    WORKDIR_HOST="${OUTDIR_HOST}/work"
+    mkdir -p "${WORKDIR_HOST}" 2>/dev/null || true
+    BINDS+=("${WORKDIR_HOST}:/data/work")
+
     NF_CACHE="${OUTDIR_HOST}/.nextflow-cache"
     mkdir -p "${NF_CACHE}/dotdir" 2>/dev/null || true
     BINDS+=("${NF_CACHE}/dotdir:/home/dana/.nextflow")
@@ -256,7 +261,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
         apptainer|singularity)
             container_ca="/etc/ssl/certs/ca-certificates.crt"
             CONTAINER_CMD+=("$CONTAINER_RUNTIME" run)
-            CONTAINER_CMD+=("--env" "NXF_HOME=${NF_CACHE}/dotdir")
+            CONTAINER_CMD+=("--env" "NXF_HOME=/home/dana/.nextflow")
             CONTAINER_CMD+=("--env" "REQUESTS_CA_BUNDLE=${container_ca}")
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")
             CONTAINER_CMD+=("--env" "CURL_CA_BUNDLE=${container_ca}")
@@ -264,7 +269,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=("$SIF_PATH" run /pipeline/main.nf)
             ;;
     esac
-    CONTAINER_CMD+=("${NF_ARGS[@]}" -resume ${RESUME_SESSION})
+    CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}" -resume ${RESUME_SESSION})
 
     echo "[INFO] Mode:   Container (${CONTAINER_RUNTIME})"
     echo "[INFO] Input:  $INPUT_HOST"
