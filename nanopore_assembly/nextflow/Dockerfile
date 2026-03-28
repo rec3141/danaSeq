@@ -1,41 +1,35 @@
 # ============================================================================
-# Dana MAG Assembly Pipeline - Pipeline Image
+# Dana Nanopore Assembly Pipeline - Pipeline Image
 # ============================================================================
 #
-# Thin layer on top of the pre-built base image (Dockerfile.base) which
-# contains all 35 conda environments and wrapper scripts.
-#
-# This image only adds the Nextflow pipeline code, so it rebuilds in seconds
-# on every push to main.
+# Thin layer on top of the shared assembly base image (Dockerfile.base)
+# which contains conda envs for both nanopore and illumina assembly.
 #
 # Build:
-#   docker build -t danaseq-mag .
+#   docker build -t danaseq-nanopore-assembly .
 #
-# Run (as current user):
+# Run:
 #   docker run --user $(id -u):$(id -g) \
 #       -v /path/to/reads:/data/input:ro \
 #       -v /path/to/output:/data/output \
-#       danaseq-mag \
+#       danaseq-nanopore-assembly \
 #       run /pipeline/main.nf \
-#           --input /data/input --outdir /data/output \
-#           -resume
+#           --input /data/input --outdir /data/output -resume
 #
 # ============================================================================
 
-FROM ghcr.io/rec3141/danaseq-mag-base-slim:latest
+FROM ghcr.io/rec3141/danaseq-assembly-base:latest
 
 LABEL maintainer="rec3141@gmail.com"
-LABEL description="Dana MAG Assembly Pipeline - Metagenome-assembled genome reconstruction"
+LABEL description="Dana Nanopore Assembly Pipeline — preprocessing, co-assembly, mapping, depth calculation"
 LABEL org.opencontainers.image.source="https://github.com/rec3141/danaSeq"
-LABEL org.opencontainers.image.description="danaSeq MAG Assembly Pipeline — Metagenome-assembled genome reconstruction from Oxford Nanopore long reads"
 
 # Copy pipeline code
 COPY . /pipeline/
 
-# Compile C++ tools (fastq_filter)
-RUN apt-get update -qq && apt-get install -y -qq g++ zlib1g-dev && \
-    g++ -O3 -o /pipeline/bin/fastq_filter /pipeline/bin/fastq_filter.cpp -lz && \
-    apt-get remove -y g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+# Compile C tools (fastq_filter, tetramer_freqs)
+RUN g++ -O3 -o /pipeline/bin/fastq_filter /pipeline/bin/fastq_filter.cpp -lz -lpthread && \
+    gcc -O3 -o /pipeline/bin/tetramer_freqs /pipeline/bin/tetramer_freqs.c -lz -lm
 
 # Docker config: disable per-process conda (tools already on PATH via wrappers)
 RUN echo 'conda.enabled = false' > /pipeline/docker.config

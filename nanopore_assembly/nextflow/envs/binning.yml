@@ -1,0 +1,7 @@
+name: dana-illumina-mag-binning
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - metabat2>=2.15
+  - samtools>=1.10

@@ -1,0 +1,110 @@
+# ============================================================================
+# Dana Assembly Base Image
+# ============================================================================
+#
+# Shared base image for both nanopore_assembly and illumina_assembly.
+# Contains 5 conda environments (1 nanopore + 4 illumina) and wrapper scripts.
+#
+# Build (~15 min):
+#   docker build -f Dockerfile.base -t danaseq-assembly-base .
+#
+# ============================================================================
+
+FROM condaforge/miniforge3:latest
+
+LABEL maintainer="rec3141@gmail.com"
+LABEL description="Dana Assembly Base Image — conda envs for nanopore + illumina assembly"
+LABEL org.opencontainers.image.source="https://github.com/rec3141/danaSeq"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        procps \
+        curl \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================================
+# Install conda environments
+# ============================================================================
+
+COPY envs/ /tmp/envs/
+
+# --- Nanopore assembly env ---
+# Flye, metaMDBG, myloasm, minimap2, samtools, CoverM, BBMap, filtlong, Nextflow
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-mag-assembly -f /tmp/envs/merged/assembly.yml
+
+# --- Illumina assembly envs ---
+# BBTools + FastQC + samtools + Nextflow
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-illumina-mag-bbmap -f /tmp/envs/bbmap.yml
+
+# Megahit
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-illumina-mag-megahit -f /tmp/envs/megahit.yml
+
+# SPAdes
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-illumina-mag-spades -f /tmp/envs/spades.yml
+
+# MetaBAT2 (for jgi_summarize_bam_contig_depths in illumina depth calculation)
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    mamba env create -y -p /opt/conda/envs/dana-illumina-mag-binning -f /tmp/envs/binning.yml
+
+# ============================================================================
+# Strip packaging cruft
+# ============================================================================
+
+RUN find /opt/conda/envs -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null; \
+    rm -rf /opt/conda/envs/*/share/{locale,doc,info,man} ; \
+    find /opt/conda/envs -name "*.pyc" -delete 2>/dev/null; \
+    rm -rf /tmp/envs/ ; \
+    true
+
+# ============================================================================
+# Create wrapper scripts so tools are callable from PATH
+# ============================================================================
+
+RUN mkdir -p /usr/local/bin/dana-tools \
+    # --- nanopore assembly env ---
+    && for tool in flye filtlong nextflow java minimap2 samtools coverm \
+                   bbduk.sh bbmap.sh dedupe.sh reformat.sh statswrapper.sh \
+                   metaMDBG myloasm pigz; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-assembly/bin:$PATH\nexec /opt/conda/envs/dana-mag-assembly/bin/%s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    # --- illumina bbmap env ---
+    && for tool in bbmerge.sh bbmerge-auto.sh bbnorm.sh \
+                   clumpify.sh filterbytile.sh removehuman.sh \
+                   tadpole.sh fastqc sendsketch.sh; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-illumina-mag-bbmap/bin:$PATH\nexec /opt/conda/envs/dana-illumina-mag-bbmap/bin/%s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    # --- megahit env ---
+    && for tool in megahit; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-illumina-mag-megahit/bin:$PATH\nexec /opt/conda/envs/dana-illumina-mag-megahit/bin/%s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    # --- spades env ---
+    && for tool in spades.py metaspades.py; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-illumina-mag-spades/bin:$PATH\nexec /opt/conda/envs/dana-illumina-mag-spades/bin/%s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    # --- illumina binning env (for depth calculation) ---
+    && for tool in metabat2 jgi_summarize_bam_contig_depths; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-illumina-mag-binning/bin:$PATH\nexec /opt/conda/envs/dana-illumina-mag-binning/bin/%s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done
+
+ENV PATH="/usr/local/bin/dana-tools:${PATH}"
+
+# ============================================================================
+# Writable home for non-root users
+# ============================================================================
+
+RUN mkdir -p /home/dana && chmod 777 /home/dana

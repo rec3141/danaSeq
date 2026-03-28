@@ -1,0 +1,6 @@
+name: dana-illumina-mag-megahit
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - megahit>=1.2.9
