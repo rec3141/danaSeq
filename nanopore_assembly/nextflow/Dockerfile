@@ -28,8 +28,10 @@ LABEL org.opencontainers.image.source="https://github.com/rec3141/danaSeq"
 COPY . /pipeline/
 
 # Compile C tools (fastq_filter, tetramer_freqs)
-RUN g++ -O3 -o /pipeline/bin/fastq_filter /pipeline/bin/fastq_filter.cpp -lz -lpthread && \
-    gcc -O3 -o /pipeline/bin/tetramer_freqs /pipeline/bin/tetramer_freqs.c -lz -lm
+RUN apt-get update -qq && apt-get install -y -qq zlib1g-dev && \
+    g++ -O3 -o /pipeline/bin/fastq_filter /pipeline/bin/fastq_filter.cpp -lz -lpthread && \
+    gcc -O3 -o /pipeline/bin/tetramer_freqs /pipeline/bin/tetramer_freqs.c -lz -lm && \
+    apt-get remove -y zlib1g-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # Docker config: disable per-process conda (tools already on PATH via wrappers)
 RUN echo 'conda.enabled = false' > /pipeline/docker.config
