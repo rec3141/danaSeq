@@ -1,37 +1,28 @@
-name: Build slim base image (merged envs)
+name: Build illumina_assembly image
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'illumina_assembly/nextflow/**'
+      - '!illumina_assembly/nextflow/conda-envs/**'
+      - '!illumina_assembly/nextflow/envs/**'
+      - '.github/workflows/build-illumina-assembly.yml'
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/danaseq-mag-base-slim
+  IMAGE_NAME: ${{ github.repository_owner }}/danaseq-illumina-assembly
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Maximize build disk space
-        uses: easimon/maximize-build-space@v10
-        with:
-          build-mount-path: /var/lib/docker
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-
-      - name: Restart Docker daemon
-        run: sudo systemctl restart docker
-
-      - name: Check available disk space
-        run: df -h / /var/lib/docker
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -57,10 +48,10 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: mag_analysis/nextflow
-          file: mag_analysis/nextflow/Dockerfile.base-slim
+          context: illumina_assembly/nextflow
+          file: illumina_assembly/nextflow/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

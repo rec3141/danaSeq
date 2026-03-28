@@ -1,37 +1,29 @@
-name: Build slim base image (merged envs)
+name: Build mag_analysis image
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'mag_analysis/nextflow/**'
+      - '!mag_analysis/nextflow/conda-envs/**'
+      - '!mag_analysis/nextflow/envs/**'
+      - '!mag_analysis/nextflow/Dockerfile.base-slim'
+      - '.github/workflows/build-mag-analysis.yml'
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/danaseq-mag-base-slim
+  IMAGE_NAME: ${{ github.repository_owner }}/danaseq-mag-analysis
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Maximize build disk space
-        uses: easimon/maximize-build-space@v10
-        with:
-          build-mount-path: /var/lib/docker
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-
-      - name: Restart Docker daemon
-        run: sudo systemctl restart docker
-
-      - name: Check available disk space
-        run: df -h / /var/lib/docker
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -58,9 +50,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: mag_analysis/nextflow
-          file: mag_analysis/nextflow/Dockerfile.base-slim
+          file: mag_analysis/nextflow/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max

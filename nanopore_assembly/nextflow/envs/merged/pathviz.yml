@@ -1,0 +1,16 @@
+name: dana-mag-pathviz
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pandas
+  - numpy
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - biopython
+  - plotly
+  - glpk
+  - umap-learn
+  - nodejs>=18

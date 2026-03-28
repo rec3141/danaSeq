@@ -2,11 +2,16 @@
 
 **Real-time metagenomic analysis for Oxford Nanopore sequencing on oceanographic expeditions.**
 
-Named after the Buddhist concept of *dāna* (selfless giving), this pipeline processes DNA reads as they stream from the sequencer, providing live taxonomic classification, gene annotation, and functional profiling. Post-expedition, a separate pipeline reconstructs metagenome-assembled genomes (MAGs) from the collected data.
+Named after the Buddhist concept of *dāna* (selfless giving), this pipeline processes DNA reads as they stream from the sequencer, providing live taxonomic classification, gene annotation, and functional profiling. Post-expedition, separate pipelines handle assembly and downstream MAG analysis.
 
-A companion Illumina short-read pipeline (`illumina_mag`) handles metagenomic assembly with multi-assembler consensus and MetaBAT2 binning.
+The platform consists of four independent Nextflow DSL2 pipelines:
+1. **nanopore_live** — Real-time streaming analysis during sequencing
+2. **nanopore_assembly** — Nanopore assembly + mapping + depth calculation
+3. **illumina_assembly** — Illumina multi-assembler consensus + mapping + depth calculation
+4. **mag_analysis** — Technology-agnostic downstream: binning, annotation, taxonomy, metabolism, MGEs, eukaryotes, ecosystem services, viz
 
-All pipelines are implemented in Nextflow DSL2 and run via conda, Docker, or Apptainer with no hardcoded paths.
+Assembly pipelines produce an assembly FASTA + depth table that feeds into `mag_analysis`.
+All pipelines run via conda, Docker, or Apptainer with no hardcoded paths.
 
 ## Getting Started
 
@@ -54,7 +59,7 @@ Both pipelines require reference databases. Download them before first use:
 ./download-databases.sh --dir /path/to/databases --genomad --checkv
 ```
 
-See [`nanopore_mag/README.md`](nanopore_mag/README.md#databases) for the full database list with sizes.
+See [`mag_analysis/nextflow/download-databases.sh`](mag_analysis/nextflow/download-databases.sh) for the full database list with sizes.
 
 ## Quick Start
 
@@ -69,40 +74,42 @@ cd danaSeq/nanopore_live/nextflow
     --run_prokka --run_sketch --run_tetra
 ```
 
-### MAG assembly ([details](nanopore_mag/README.md))
+### Nanopore assembly
 
 ```bash
-cd danaSeq/nanopore_mag/nextflow
-
-# Local conda
+cd danaSeq/nanopore_assembly/nextflow
 ./install.sh && ./install.sh --check
-./run-mag.sh --input /path/to/reads --outdir /path/to/output
 
-# Docker
-./run-mag.sh --docker --input /path/to/reads --outdir /path/to/output
-
-# Apptainer (HPC) — auto-pulls SIF on first run
-./run-mag.sh --apptainer --input /path/to/reads --outdir /path/to/output \
-    --db_dir /path/to/databases
-
-# Or pre-pull the SIF and pass it explicitly
-apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest
-./run-mag.sh --apptainer --sif ./danaseq-mag.sif \
-    --input /path/to/reads --outdir /path/to/output \
-    --db_dir /path/to/databases
+./run-nanopore-assembly.sh --input /path/to/reads --outdir /path/to/output
 ```
 
-### Illumina MAG assembly ([details](illumina_mag/README.md))
+### Illumina assembly
 
 ```bash
-cd danaSeq/illumina_mag/nextflow
+cd danaSeq/illumina_assembly/nextflow
 ./install.sh && ./install.sh --check
 
-./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output
+./run-illumina-assembly.sh --input /path/to/reads --outdir /path/to/output
 
 # SLURM profile (Compute Canada)
-./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output \
+./run-illumina-assembly.sh --input /path/to/reads --outdir /path/to/output \
     -profile slurm --slurm_account def-myaccount
+```
+
+### MAG analysis (downstream of any assembly)
+
+```bash
+cd danaSeq/mag_analysis/nextflow
+./install.sh && ./install.sh --check
+
+# Using outputs from nanopore_assembly
+./run-mag-analysis.sh \
+    --assembly /path/to/assembly/assembly.fasta \
+    --depths /path/to/mapping/depths.txt \
+    --bam_dir /path/to/mapping/ \
+    --outdir /path/to/output \
+    --db_dir /path/to/databases \
+    --all
 ```
 
 ### Test with bundled data
@@ -111,53 +118,35 @@ cd danaSeq/illumina_mag/nextflow
 # Real-time pipeline
 cd nanopore_live/nextflow
 nextflow run main.nf --input test-data -profile test -resume
-
-# MAG pipeline
-cd nanopore_mag/nextflow
-mamba run -p conda-envs/dana-mag-flye \
-    nextflow run main.nf --input test-data -profile test -resume
 ```
 
 ## Architecture
 
 ```
 dānaSeq/
-├── nanopore_live/       Real-time analysis during sequencing
-│   ├── nextflow/                 Nextflow DSL2 pipeline
-│   │   ├── main.nf              Entry point (11 processing stages)
-│   │   ├── modules/             validate, qc, kraken, prokka, hmm, sketch, tetramer, db
-│   │   ├── bin/                 AWK parsers, R/DuckDB integration scripts
-│   │   ├── envs/                Conda YAML specs (3 environments)
-│   │   ├── Dockerfile           Self-contained Docker image
-│   │   └── test-data/           Bundled test data
-│   └── archive/                 Legacy bash scripts (reference only)
+├── nanopore_live/          Real-time analysis during sequencing
+│   └── nextflow/           11 processing stages → DuckDB
 │
-├── nanopore_mag/              Metagenome-assembled genome reconstruction
-│   ├── nextflow/                 Nextflow DSL2 pipeline
-│   │   ├── main.nf              Entry point (40+ processes)
-│   │   ├── modules/             12 modules: assembly, mapping, binning, annotation,
-│   │   │                          taxonomy, mge, metabolism, eukaryotic, rrna, refinement,
-│   │   │                          preprocess, viz
-│   │   ├── bin/                  Pipeline scripts (merge, map, MinPath, KEGG-Decoder, etc.)
-│   │   ├── viz/                  Interactive dashboard (Svelte + Vite + Plotly)
-│   │   ├── envs/                Conda YAML specs (27 environments)
-│   │   ├── Dockerfile           Pipeline image (thin layer on base)
-│   │   ├── Dockerfile.base      Base image (all conda envs + wrapper scripts)
-│   │   └── test-data/           Bundled test data
-│   └── archive/                 Replaced bash scripts (reference only)
+├── nanopore_assembly/      Nanopore assembly + mapping + depth
+│   └── nextflow/           Flye/metaMDBG/myloasm → minimap2 → CoverM
+│                           Output: assembly.fasta + depths.txt + BAMs
 │
-├── illumina_mag/                  Illumina metagenomic assembly + binning
-│   └── nextflow/                 Nextflow DSL2 pipeline
-│       ├── main.nf              Entry point (20 processes)
-│       ├── modules/             8 modules: preprocess, error_correct, normalize,
-│       │                          merge_reads, assembly, dedupe, mapping, binning
-│       ├── envs/                Conda YAML specs (4 environments)
-│       └── run-illumina-mag.sh  Pipeline launcher
+├── illumina_assembly/      Illumina multi-assembler + mapping + depth
+│   └── nextflow/           4 assemblers → cascade dedupe → BBMap
+│                           Output: assembly.fasta + depths.txt + BAMs
 │
-├── archive/                      Archived root-level scripts and documentation
-├── tests/                        Pipeline tests
-├── CITATION.bib                  References
-└── LICENSE                       MIT
+├── mag_analysis/           Technology-agnostic downstream analysis
+│   └── nextflow/           Input: assembly + depths (from any assembler)
+│       ├── modules/        binning, annotation, taxonomy, mge, eukaryotic,
+│       │                    metabolism, rrna, phylogeny, viz, gene_depths
+│       ├── viz/            Interactive Svelte dashboard
+│       ├── ecossdb/        Ecosystem services (git submodule)
+│       └── bin/            Pipeline scripts
+│
+├── archive/                Archived scripts and documentation
+├── tests/                  Pipeline tests
+├── CITATION.bib            References
+└── LICENSE                 MIT
 ```
 
 ## Pipelines
@@ -184,83 +173,66 @@ Key features:
 - HMM search against functional gene databases (FOAM, CANT-HYD, NCycDB, etc.)
 - Post-DB cleanup to compress/delete source files after import
 
-### [MAG assembly](nanopore_mag/README.md)
+### Nanopore assembly (nanopore_assembly)
 
-Reconstructs metagenome-assembled genomes alongside real-time processing:
+Preprocesses nanopore reads and produces a co-assembly:
 
 ```
-Sample FASTQs → Flye co-assembly → minimap2 mapping → CoverM depths
-                        │                                   │
-                        │                            ┌──────┼──────┬──────┬──────┐
-                        │                         SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin
-                        │                            └──────┼──────┴──────┴──────┘
-                        │                              DAS Tool consensus → CheckM2
-                        │                                   │
-                        │                              NCLB bin refinement (optional)
-                        │                                   │
-                        │                              VIZ_PREPROCESS (dashboard + static site)
-                        │
-                   Parallel annotation & classification:
-                        ├── Prokka/Bakta gene annotation
-                        │     ├── Kaiju protein-level taxonomy
-                        │     ├── KofamScan + eggNOG-mapper + dbCAN → merge → bin mapping
-                        │     │     ├── KEGG module completeness
-                        │     │     ├── MinPath pathway reconstruction
-                        │     │     └── KEGG-Decoder biogeochemical functions
-                        │     ├── IslandPath-DIMOB genomic islands
-                        │     ├── MacSyFinder secretion/conjugation systems
-                        │     └── DefenseFinder anti-phage defense
-                        ├── Kraken2 k-mer taxonomy
-                        ├── sendsketch GTDB MinHash taxonomy
-                        ├── barrnap + vsearch rRNA classification (SILVA)
-                        ├── geNomad virus/plasmid → CheckV quality
-                        ├── IntegronFinder integron detection
-                        ├── Tiara + Whokaryote eukaryotic classification
-                        │     └── MetaEuk eukaryotic gene prediction
-                        │           └── MarFERReT marine eukaryotic taxonomy + Pfam
-                        └── Tetranucleotide frequency profiles
+Sample FASTQs → Concat per barcode → Dedupe + Filtlong → Remove human
+                    → Flye/metaMDBG/myloasm co-assembly → Polish (optional)
+                    → minimap2 mapping → CoverM depths
+                    → Tetranucleotide frequencies
+
+Output: assembly.fasta + depths.txt + BAMs + tnf.tsv
+```
+
+### Illumina assembly (illumina_assembly)
+
+Processes Illumina paired-end reads through multi-assembler consensus:
+
+```
+Paired-end FASTQs → BBTools QC → Human decontamination → FastQC
+                  → 3-phase error correction → bbnorm → bbmerge
+                       │
+            ┌──────────┼──────────┬──────────┐
+         Tadpole    Megahit    SPAdes   metaSPAdes
+            └──────────┼──────────┴──────────┘
+                  Cascade deduplication (100% → 99% → 98%)
+                  → bbmap mapping → jgi_summarize_bam_contig_depths
+
+Output: assembly.fasta + depths.txt + BAMs
+```
+
+### MAG analysis (mag_analysis)
+
+Technology-agnostic downstream analysis — accepts assembly + depths from any source:
+
+```
+assembly.fasta + depths.txt + BAMs (optional)
+         │
+    ┌────┼────┬────┬────┬────┬────┐
+ SemiBin2 MetaBAT2 MaxBin2 LorBin COMEBin VAMB
+    └────┼────┴────┴────┴────┴────┘
+   DAS Tool / Binette / MAGScoT consensus → CheckM2 → GTDB-Tk
+         │
+    Parallel annotation & classification:
+         ├── Prokka/Bakta → KofamScan + eggNOG + dbCAN → KEGG modules
+         ├── Kaiju, Kraken2, sendsketch, rRNA (SILVA)
+         ├── geNomad → CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder
+         ├── Tiara + Whokaryote → MetaEuk → MarFERReT
+         ├── ECOSSDB ecosystem services
+         └── Interactive Svelte dashboard (--run_viz)
 ```
 
 Key features:
-- **Five-binner consensus**: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin → DAS Tool
+- **Seven-binner consensus**: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, VAMB, VAMB-tax → DAS Tool + Binette + MAGScoT
 - **Four taxonomy classifiers**: Kaiju (protein), Kraken2 (k-mer), sendsketch (GTDB MinHash), rRNA (SILVA)
 - **Metabolic profiling**: KofamScan + eggNOG-mapper + dbCAN → KEGG modules, MinPath, KEGG-Decoder
 - **Mobile genetic elements**: geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder
-- **Eukaryotic analysis**: Tiara + Whokaryote classification, MetaEuk gene prediction
-- **NCLB bin refinement**: LLM-guided iterative bin refinement (optional)
-- **Interactive dashboard**: Auto-generated Svelte viz with Plotly charts (`--run_viz`)
-- CheckM2 quality assessment (completeness/contamination per MIMAG standards)
-- CoverM for depth calculation (avoids MetaBAT2 integer overflow bug)
-- GPU-accelerated ML binners (local), CPU-only in Docker
-
-### [Illumina MAG assembly](illumina_mag/README.md)
-
-Processes Illumina paired-end metagenomic reads through multi-assembler consensus:
-
-```
-Paired-end FASTQs → BBTools QC (clumpify, filterbytile, bbduk)
-                          → Human decontamination (removehuman.sh)
-                          → FastQC → 3-phase error correction (ecco, ecc, tadpole)
-                          → bbnorm normalization → bbmerge read merging
-                               │
-                    ┌──────────┼──────────┬──────────┐
-                 Tadpole    Megahit    SPAdes   metaSPAdes
-                    └──────────┼──────────┴──────────┘
-                          Cascade deduplication (100% → 99% → 98%)
-                               │
-                          bbmap read mapping → jgi_summarize_bam_contig_depths
-                               │
-                          MetaBAT2 binning
-```
-
-Key features:
-- **Four-assembler consensus**: Tadpole, Megahit, SPAdes, metaSPAdes with cascade deduplication
-- **BBTools-based QC**: Optical deduplication, tile filtering, adapter/artifact removal, human decontamination
-- **FastQC reports** on final preprocessed reads
-- **Three-phase error correction**: Overlap, clump, and k-mer-based correction
-- **Per-sample and co-assembly modes**: `--coassembly` pools all samples
-- **SRA-safe**: Automatic fallbacks for SRA-stripped read headers
-- **SLURM support**: `-profile slurm` for Compute Canada HPC clusters
+- **Eukaryotic analysis**: Tiara + Whokaryote classification, MetaEuk gene prediction, MarFERReT
+- **Ecosystem services**: ECOSSDB mapping to CICES 5.2 + UN SDG targets
+- **Interactive dashboard**: Svelte + Plotly + Phylocanvas.gl (`--run_viz`)
+- **Works with any assembler**: Nanopore, Illumina, HiFi, or external assemblies
 
 ## Input
 
