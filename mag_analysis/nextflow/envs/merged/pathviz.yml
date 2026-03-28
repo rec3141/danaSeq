@@ -15,7 +15,4 @@ dependencies:
   - glpk
   - umap-learn
   - nodejs>=18
-  - minpath
   - pip
-  - pip:
-    - KEGGDecoder
