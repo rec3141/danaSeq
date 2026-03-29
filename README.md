@@ -23,20 +23,25 @@ git clone https://github.com/rec3141/danaSeq.git
 cd danaSeq
 
 # Or download a specific release
-gh release download v0.1.0-alpha --archive=tar.gz
+gh release download v1.0.0 --archive=tar.gz
 ```
 
 ### 2. Choose a runtime
 
 | Method | Best for | Setup |
 |--------|----------|-------|
-| **Conda** | Local/laptop development | `./install.sh && ./install.sh --check` |
-| **Docker** | Reproducible runs, CI | `docker pull ghcr.io/rec3141/danaseq-mag:latest` |
-| **Apptainer** | HPC clusters (auto-detected) | `apptainer pull danaseq-mag.sif docker://ghcr.io/rec3141/danaseq-mag:latest` |
+| **Conda** | Local/laptop development | `cd <pipeline>/nextflow && ./install.sh` |
+| **Docker** | Reproducible runs, CI | `docker pull ghcr.io/rec3141/danaseq-mag-analysis:latest` |
+| **Apptainer** | HPC clusters | `./run-*.sh --apptainer` (auto-pulls SIF) |
+
+Container images:
+- `ghcr.io/rec3141/danaseq-nanopore-assembly` — Nanopore assembly
+- `ghcr.io/rec3141/danaseq-illumina-assembly` — Illumina assembly
+- `ghcr.io/rec3141/danaseq-mag-analysis` — MAG analysis (downstream)
 
 ### 3. Download databases
 
-Both pipelines require reference databases. Download them before first use:
+The mag_analysis pipeline requires reference databases. Download them before first use:
 
 ```bash
 # Human reference (required by both pipelines, ~4 GB)
@@ -74,7 +79,7 @@ cd danaSeq/nanopore_live/nextflow
     --run_prokka --run_sketch --run_tetra
 ```
 
-### Nanopore assembly
+### Nanopore assembly ([details](nanopore_assembly/README.md))
 
 ```bash
 cd danaSeq/nanopore_assembly/nextflow
@@ -83,7 +88,7 @@ cd danaSeq/nanopore_assembly/nextflow
 ./run-nanopore-assembly.sh --input /path/to/reads --outdir /path/to/output
 ```
 
-### Illumina assembly
+### Illumina assembly ([details](illumina_assembly/README.md))
 
 ```bash
 cd danaSeq/illumina_assembly/nextflow
@@ -96,7 +101,7 @@ cd danaSeq/illumina_assembly/nextflow
     -profile slurm --slurm_account def-myaccount
 ```
 
-### MAG analysis (downstream of any assembly)
+### MAG analysis ([details](mag_analysis/README.md))
 
 ```bash
 cd danaSeq/mag_analysis/nextflow
@@ -244,7 +249,7 @@ input_dir/fastq_pass/
 └── ...
 ```
 
-Directory of FASTQ files (MAG pipeline):
+Directory of FASTQ files (nanopore_assembly):
 ```
 input_dir/
 ├── sample1.fastq.gz
@@ -290,7 +295,10 @@ MAGs are classified per MIMAG (Bowers et al. 2017):
 - MaxBin2: Wu et al., Bioinformatics 2016
 - LorBin: Gao et al., Briefings in Bioinformatics 2024
 - COMEBin: Xie et al., Nature Communications 2024
+- VAMB: Nissen et al., Nature Biotechnology 2021
 - DAS Tool: Sieber et al., Nature Microbiology 2018
+- Binette: Lamurias et al., Bioinformatics 2024
+- MAGScoT: Ribroth et al., Bioinformatics 2023
 - CheckM2: Chklovski et al., Nature Methods 2023
 - CoverM: [github.com/wwood/CoverM](https://github.com/wwood/CoverM)
 
@@ -326,6 +334,10 @@ MAGs are classified per MIMAG (Bowers et al. 2017):
 - Whokaryote: Pronk et al., Microbial Genomics 2022
 - MetaEuk: Levy Karin et al., Microbiome 2020
 - MarFERReT: Carradec et al., Scientific Data 2023
+
+**Phylogenetics & Ecosystem Services:**
+- GTDB-Tk: Chaumeil et al., Bioinformatics 2020
+- antiSMASH: Blin et al., Nucleic Acids Research 2023
 
 **Standards:**
 - MIMAG: Bowers et al., Nature Biotechnology 2017
