@@ -252,7 +252,7 @@ input_dir/
 └── ...
 ```
 
-Illumina paired-end reads (illumina_mag pipeline):
+Illumina paired-end reads (illumina_assembly pipeline):
 ```
 input_dir/
 ├── sampleA_S1_L001_R1_001.fastq.gz
