@@ -34,12 +34,21 @@ process CALCULATE_GENE_DEPTHS {
     # Convert GFF to BED4 (0-based start): contig start-1 end locus_tag
     # GFF columns: seqid source type start end score strand phase attributes
     # Extract locus_tag from attributes field (;locus_tag=XXX or ID=XXX)
+    # Uses split() instead of match() for mawk/gawk portability
     awk -F'\\t' '!/^#/ && \$3 == "CDS" {
-        match(\$9, /locus_tag=([^;]+)/, lt);
-        if (lt[1] == "") { match(\$9, /ID=([^;]+)/, lt); }
-        if (lt[1] != "") {
+        lt = ""
+        n = split(\$9, attrs, ";")
+        for (i = 1; i <= n; i++) {
+            if (attrs[i] ~ /^locus_tag=/) { split(attrs[i], kv, "="); lt = kv[2]; break }
+        }
+        if (lt == "") {
+            for (i = 1; i <= n; i++) {
+                if (attrs[i] ~ /^ID=/) { split(attrs[i], kv, "="); lt = kv[2]; break }
+            }
+        }
+        if (lt != "") {
             start = \$4 - 1; if (start < 0) start = 0;
-            print \$1 "\\t" start "\\t" \$5 "\\t" lt[1]
+            print \$1 "\\t" start "\\t" \$5 "\\t" lt
         }
     }' "\${GFF}" | sort -k1,1 -k2,2n > genes.bed
 
