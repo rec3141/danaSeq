@@ -85,12 +85,7 @@ RUN /opt/conda/envs/dana-mag-strain/bin/pip install --no-deps \
 # 9. PathViz: pathway tools, viz, nodejs
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-pathviz   -f /tmp/envs/pathviz.yml
-RUN /opt/conda/envs/dana-mag-pathviz/bin/pip install flit && \
-    cd /tmp && pip download --no-deps --no-binary :all: KEGGDecoder && \
-    tar xzf KEGGDecoder-*.tar.gz && cd KEGGDecoder-*/ && \
-    sed -i 's/SafeConfigParser/ConfigParser/g' setup.py && \
-    /opt/conda/envs/dana-mag-pathviz/bin/pip install --no-build-isolation . && \
-    cd / && rm -rf /tmp/KEGGDecoder* && \
+RUN /opt/conda/envs/dana-mag-pathviz/bin/pip install KEGGDecoder && \
     git clone --depth 1 https://github.com/mgtools/MinPath.git \
         /opt/conda/envs/dana-mag-pathviz/share/minpath && \
     chmod +x /opt/conda/envs/dana-mag-pathviz/share/minpath/MinPath.py
