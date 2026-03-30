@@ -1,5 +1,5 @@
 site_name: "d\u0101naSeq"
-site_description: Real-time and post-expedition metagenomic analysis for ocean sequencing
+site_description: Metagenomic analysis pipelines for Oxford Nanopore and Illumina sequencing data
 site_url: https://rec3141.github.io/danaSeq/
 repo_url: https://github.com/rec3141/danaSeq
 repo_name: rec3141/danaSeq

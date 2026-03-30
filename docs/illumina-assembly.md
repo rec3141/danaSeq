@@ -1,11 +1,11 @@
 # Illumina Assembly Pipeline
 
-Processes Illumina paired-end metagenomic reads through multi-assembler consensus and produces assemblies with depth tables and BAMs for downstream analysis by [mag_analysis](mag-analysis.md).
+Multi-assembler consensus pipeline for Illumina paired-end metagenomic reads. Produces deduplicated assemblies with depth tables and BAMs for downstream MAG analysis.
 
 ## Quick Start
 
 ```bash
-cd illumina_assembly/nextflow
+cd illumina_assembly
 ./install.sh && ./install.sh --check
 
 # Local (conda)
@@ -14,117 +14,38 @@ cd illumina_assembly/nextflow
 # Co-assembly mode
 ./run-illumina-assembly.sh --input /path/to/reads --outdir /path/to/output --coassembly
 
-# Skip human removal
-./run-illumina-assembly.sh --input /path/to/reads --outdir /path/to/output \
-    --run_remove_human false
-
 # Apptainer (HPC) -- auto-pulls SIF on first run
 ./run-illumina-assembly.sh --apptainer --pull --input /path/to/reads --outdir /path/to/output
 
-# SLURM profile (Compute Canada)
+# SLURM profile
 ./run-illumina-assembly.sh --input /path/to/reads --outdir /path/to/output \
     -profile slurm --slurm_account def-myaccount \
     --conda_path ~/scratch/miniforge3/bin
-
-# Show all options
-./run-illumina-assembly.sh --help
 ```
 
-## Pipeline Overview
+## Pipeline Stages
 
-```
-Paired-end FASTQs (*_R1_*.fastq.gz, N samples)
-         |
-   CLUMPIFY (xN)              Optical deduplication
-         |
-   FILTER_BY_TILE (xN)        Remove low-quality tiles
-         |
-   BBDUK_TRIM (xN)            Adapter trimming (k=23, mink=11, minlen=70)
-         |
-   BBDUK_FILTER (xN)          Artifact + PhiX removal (k=31, entropy=0.95)
-         |
-   REMOVE_HUMAN (xN)          Human read removal (optional)
-         |
-   FASTQC (xN)                QC report on final preprocessed reads (optional)
-         |
-   ERROR_CORRECT_ECCO (xN)    Phase 1: overlap-based correction
-         |
-   ERROR_CORRECT_ECC (xN)     Phase 2: clump-based correction
-         |
-   ERROR_CORRECT_TADPOLE (xN) Phase 3: k-mer correction (k=62)
-         |
-   NORMALIZE_READS (xN)       Coverage normalization (target=100, mindepth=2)
-         |
-   MERGE_READS (xN)           Merge overlapping pairs (bbmerge-auto k=93)
-   |              |
-   merged     QUALITY_TRIM     Quality-trim unmerged reads
-   |              |
-   +---------+---+
-   |         |         |              |
- Tadpole  Megahit   SPAdes      metaSPAdes      Four parallel assemblers
- (k=124)  (k=45-225) (k=25-125) (k=25-77,--meta)
-   |         |         |              |
-   +---------+---------+--------------+
-         |
-   DEDUPE_ASSEMBLIES           Cascade deduplication (100% -> 99% -> 98%)
-         |
-   MAP_READS_BBMAP (xN)       Map QC'd reads to assembly (minid=90)
-         |
-   CALCULATE_DEPTHS            jgi_summarize_bam_contig_depths
-
-Output: assembly.fasta + depths.txt + BAMs
-```
-
-## Key Features
-
-- **Four-assembler consensus**: Tadpole, Megahit, SPAdes, metaSPAdes with cascade deduplication
-- **BBTools-based QC**: Optical deduplication, tile filtering, adapter/artifact removal, human decontamination
-- **FastQC reports** on final preprocessed reads
-- **Three-phase error correction**: Overlap, clump, and k-mer-based correction
-- **Per-sample and co-assembly modes**: `--coassembly` pools all samples
-- **SRA-safe**: Automatic fallbacks for SRA-stripped read headers
-- **SLURM support**: `-profile slurm` for Compute Canada HPC clusters
-- Assembly + depths output feeds directly into `mag_analysis`
-
-## Input
-
-`--input` must point to a directory containing paired-end Illumina reads:
-
-```
-input_dir/
-├── sampleA_S1_L001_R1_001.fastq.gz
-├── sampleA_S1_L001_R2_001.fastq.gz
-├── sampleB_S2_L001_R1_001.fastq.gz
-├── sampleB_S2_L001_R2_001.fastq.gz
-└── ...
-```
-
-R2 files are auto-detected by replacing `_R1_` with `_R2_`. The sample ID is extracted as the first field before `_` in the filename.
-
-## Output
-
-```
-results/
-├── preprocess/<sample>/        QC'd reads + FastQC reports
-├── error_correct/<sample>/     Three-phase error-corrected reads
-├── normalize/<sample>/         Coverage-normalized reads + k-mer histograms
-├── merge/<sample>/             Merged + quality-trimmed reads
-├── assembly/<sample>/
-│   ├── <sample>.dedupe.fasta   Final deduplicated assembly
-│   ├── <sample>.tadpole.fasta  Per-assembler outputs
-│   ├── <sample>.megahit.fasta
-│   ├── <sample>.spades.fasta
-│   ├── <sample>.metaspades.fasta
-│   └── <sample>.assembly_stats.txt
-├── mapping/<sample>/
-│   ├── <sample>.sorted.bam     Alignments
-│   ├── <sample>.sorted.bam.bai BAM index
-│   ├── <sample>.depths.txt     Depth matrix (jgi format)
-│   └── <sample>.covstats.txt   Per-contig coverage
-└── pipeline_info/              Nextflow reports
-```
-
-In co-assembly mode, `<sample>` is replaced with `coassembly` for assembly and mapping directories.
+| Step | Process | Tool | Description |
+|------|---------|------|-------------|
+| 1 | `CLUMPIFY` | BBTools clumpify | Optical deduplication |
+| 2 | `FILTER_BY_TILE` | BBTools filterbytile | Remove low-quality tiles |
+| 3 | `BBDUK_TRIM` | BBDuk | Adapter trimming (k=23, mink=11, minlen=70) |
+| 4 | `BBDUK_FILTER` | BBDuk | Artifact + PhiX removal (k=31, entropy=0.95) |
+| 5 | `REMOVE_HUMAN` | BBTools removehuman | Human read removal (optional) |
+| 6 | `FASTQC` | FastQC | QC report on preprocessed reads (optional) |
+| 7 | `ERROR_CORRECT_ECCO` | BBMerge ecco | Phase 1: overlap-based error correction |
+| 8 | `ERROR_CORRECT_ECC` | BBTools clumpify ecc | Phase 2: clump-based error correction (4 passes) |
+| 9 | `ERROR_CORRECT_TADPOLE` | Tadpole | Phase 3: k-mer-based error correction (k=62) |
+| 10 | `NORMALIZE_READS` | bbnorm | Coverage normalization (target=100, mindepth=2) |
+| 11 | `MERGE_READS` | BBMerge | Merge overlapping pairs (k=93) |
+| 12 | `QUALITY_TRIM` | BBDuk | Quality-trim unmerged reads |
+| 13a | `ASSEMBLE_TADPOLE` | Tadpole | Assembly (k=124) |
+| 13b | `ASSEMBLE_MEGAHIT` | Megahit | Assembly (k=45-225) |
+| 13c | `ASSEMBLE_SPADES` | SPAdes | Assembly (k=25-125) |
+| 13d | `ASSEMBLE_METASPADES` | metaSPAdes | Assembly (k=25-77, --meta) |
+| 14 | `DEDUPE_ASSEMBLIES` | BBTools dedupe | Cascade deduplication (100% -> 99% -> 98%) |
+| 15 | `MAP_READS_BBMAP` | BBMap | Map QC'd reads to assembly (minid=90) |
+| 16 | `CALCULATE_DEPTHS` | jgi_summarize_bam_contig_depths | Depth matrix in MetaBAT2 format |
 
 ## Parameters
 
@@ -160,6 +81,7 @@ In co-assembly mode, `<sample>` is replaced with `coassembly` for assembly and m
 | `--run_spades` | `true` | Run SPAdes assembler |
 | `--run_metaspades` | `true` | Run metaSPAdes assembler |
 | `--dedupe_identity` | `98` | Final deduplication identity threshold |
+| `--min_contig_len` | `500` | Minimum contig length after deduplication |
 
 ### Resources
 
@@ -175,21 +97,76 @@ In co-assembly mode, `<sample>` is replaced with `coassembly` for assembly and m
 | `--slurm_account` | `def-rec3141` | SLURM `--account` for job submission |
 | `--conda_path` | (none) | Path to conda/mamba `bin/` for SLURM jobs |
 
-### Profiles
+## Outputs
+
+```
+results/
+├── preprocess/<sample>/        QC'd reads + FastQC reports
+├── error_correct/<sample>/     Three-phase error-corrected reads
+├── normalize/<sample>/         Coverage-normalized reads + k-mer histograms
+├── merge/<sample>/             Merged + quality-trimmed reads
+├── assembly/<sample>/
+│   ├── <sample>.dedupe.fasta   Final deduplicated assembly
+│   ├── <sample>.tadpole.fasta  Per-assembler outputs
+│   ├── <sample>.megahit.fasta
+│   ├── <sample>.spades.fasta
+│   ├── <sample>.metaspades.fasta
+│   └── <sample>.assembly_stats.txt
+├── mapping/<sample>/
+│   ├── <sample>.sorted.bam     Alignments
+│   ├── <sample>.sorted.bam.bai BAM index
+│   ├── <sample>.depths.txt     Depth matrix (MetaBAT2 format)
+│   └── <sample>.covstats.txt   Per-contig coverage statistics
+└── pipeline_info/              Nextflow reports (timeline, trace, DAG)
+```
+
+In co-assembly mode, `<sample>` is replaced with `coassembly` for assembly and mapping directories.
+
+Feed these outputs into `mag_analysis`:
+
+```bash
+cd ../mag_analysis
+./run-mag-analysis.sh \
+    --assembly results/assembly/<sample>/<sample>.dedupe.fasta \
+    --depths results/mapping/<sample>/<sample>.depths.txt \
+    --bam_dir results/mapping/<sample>/ \
+    --outdir /path/to/analysis --db_dir /path/to/databases
+```
+
+## Profiles
 
 | Profile | Use case |
 |---------|----------|
 | `standard` | Local execution (default) |
-| `test` | Small test data, reduced resources |
+| `test` | Small test data, reduced resources (4 CPUs, 8 GB) |
 | `slurm` | SLURM cluster execution |
 
-## Human Reference
+## Resource Requirements
 
-Download the human reference index from the danaSeq root:
+| Component | CPUs | RAM | Notes |
+|-----------|------|-----|-------|
+| Preprocessing (BBTools) | 8 | 16 GB | Per-sample; parallelized |
+| Error correction | 8 | 16 GB | Three sequential phases per sample |
+| SPAdes / metaSPAdes | 24 | 250 GB | Most memory-intensive step |
+| Megahit | 24 | 250 GB | Lower peak memory than SPAdes |
+| Tadpole | 24 | 250 GB | Fast, single k-mer assembly |
+| BBMap read mapping | 8 | 16 GB | Per-sample mapping |
+| Human decontamination | 8 | 16 GB | BBTools removehuman.sh |
 
-```bash
-./download-databases.sh --human
+## Input
+
+`--input` must point to a directory containing paired-end Illumina reads:
+
 ```
+input_dir/
+├── sampleA_S1_L001_R1_001.fastq.gz
+├── sampleA_S1_L001_R2_001.fastq.gz
+├── sampleB_S2_L001_R1_001.fastq.gz
+├── sampleB_S2_L001_R2_001.fastq.gz
+└── ...
+```
+
+R2 files are matched by replacing `_R1_` with `_R2_`. The sample ID is extracted as the first field before `_` in the filename.
 
 ## Design Notes
 
@@ -198,3 +175,4 @@ Download the human reference index from the danaSeq root:
 - **Human decontamination.** Enabled by default via BBTools' `removehuman.sh`. Disable with `--run_remove_human false`.
 - **Interleaved read handling.** BBTools operates on interleaved FASTQ throughout, simplifying channel plumbing.
 - **Graceful assembler failure.** All assemblers use `set +e` and produce an empty FASTA on error. The deduplication step skips empty files.
+- **SRA-safe.** Automatic fallbacks for SRA-stripped read headers that lack optical duplicate coordinates.

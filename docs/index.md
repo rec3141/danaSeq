@@ -51,7 +51,7 @@ cd danaSeq
 
 | Method | Best for | Setup |
 |--------|----------|-------|
-| **Conda** | Local/laptop development | `cd <pipeline>/nextflow && ./install.sh` |
+| **Conda** | Local/laptop development | `cd <pipeline> && ./install.sh` |
 | **Docker** | Reproducible runs, CI | `docker pull ghcr.io/rec3141/danaseq-mag-analysis:latest` |
 | **Apptainer** | HPC clusters | `./run-*.sh --apptainer` (auto-pulls SIF) |
 

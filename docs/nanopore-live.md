@@ -5,7 +5,7 @@ Real-time metagenomic analysis for Oxford Nanopore sequencing data. Processes re
 ## Quick Start
 
 ```bash
-cd nanopore_live/nextflow
+cd nanopore_live
 ./install.sh && ./install.sh --check
 
 ./run-realtime.sh --input /path/to/nanopore/run --outdir /path/to/output \
@@ -79,7 +79,7 @@ results/
 
 | Profile | Use case |
 |---------|----------|
-| `standard` | Local execution, auto-detect resources |
+| `standard` | Local execution |
 | `test` | Small test files, reduced resources |
 
 ## Resource Requirements
