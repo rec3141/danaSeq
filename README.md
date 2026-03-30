@@ -3,7 +3,7 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://rec3141.github.io/danaSeq/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Metagenomic analysis pipelines for Oxford Nanopore and Illumina sequencing data. Four Nextflow DSL2 pipelines cover real-time read processing, long-read assembly, short-read assembly, and downstream MAG analysis.
+Metagenomic analysis pipelines and data visualization dashboards for Oxford Nanopore and Illumina sequencing data. Four Nextflow DSL2 pipelines cover real-time read processing, long-read assembly, short-read assembly, and downstream MAG analysis.
 
 **[Full documentation](https://rec3141.github.io/danaSeq/)**
 
