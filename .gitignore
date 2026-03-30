@@ -123,8 +123,15 @@ ENV/
 *.swo
 *~
 
-# Claude memory (keep local only)
+# Claude memory and context (keep local only)
 .claude/
+CLAUDE.md
+
+# Archived scripts (removed from tracking)
+archive/
+
+# Bakta source (local build)
+bakta-src/
 
 # Backup files
 *.bak
