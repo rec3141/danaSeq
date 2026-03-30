@@ -76,7 +76,7 @@ def helpMessage() {
       results/mapping/<sample>/<sample>.sorted.bam      Alignments
 
     These outputs can be passed to mag_analysis:
-      mag_analysis/nextflow/run-mag-analysis.sh \\
+      mag_analysis/run-mag-analysis.sh \\
           --assembly results/assembly/<sample>/<sample>.dedupe.fasta \\
           --depths results/mapping/<sample>/<sample>.depths.txt \\
           --bam_dir results/mapping/<sample>/

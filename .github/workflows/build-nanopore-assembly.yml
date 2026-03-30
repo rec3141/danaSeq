@@ -4,10 +4,10 @@ on:
   push:
     branches: [main]
     paths:
-      - 'nanopore_assembly/nextflow/**'
-      - '!nanopore_assembly/nextflow/conda-envs/**'
-      - '!nanopore_assembly/nextflow/envs/**'
-      - '!nanopore_assembly/nextflow/Dockerfile.base-slim'
+      - 'nanopore_assembly/**'
+      - '!nanopore_assembly/conda-envs/**'
+      - '!nanopore_assembly/envs/**'
+      - '!nanopore_assembly/Dockerfile.base-slim'
       - '.github/workflows/build-nanopore-assembly.yml'
   workflow_dispatch:
 
@@ -49,8 +49,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: nanopore_assembly/nextflow
-          file: nanopore_assembly/nextflow/Dockerfile
+          context: nanopore_assembly
+          file: nanopore_assembly/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

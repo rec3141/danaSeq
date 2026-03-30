@@ -1,3 +1,3 @@
 [submodule "mag_analysis/nextflow/ecossdb"]
-	path = mag_analysis/nextflow/ecossdb
+	path = mag_analysis/ecossdb
 	url = https://github.com/rec3141/ecossdb.git

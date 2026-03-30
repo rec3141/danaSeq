@@ -43,9 +43,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_DIR="${SCRIPT_DIR}/databases"
-# Conda envs may live under either pipeline's nextflow/ directory
-NANOPORE_ENV_DIR="${SCRIPT_DIR}/nanopore_mag/nextflow/conda-envs"
-ILLUMINA_ENV_DIR="${SCRIPT_DIR}/illumina_mag/nextflow/conda-envs"
+# Conda envs may live under either pipeline's directory
+NANOPORE_ENV_DIR="${SCRIPT_DIR}/nanopore_mag/conda-envs"
+ILLUMINA_ENV_DIR="${SCRIPT_DIR}/illumina_mag/conda-envs"
 # Legacy default — nanopore_mag envs (used by most download functions)
 ENV_DIR="${NANOPORE_ENV_DIR}"
 USE_CONTAINER=false

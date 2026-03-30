@@ -60,7 +60,7 @@ def helpMessage() {
       results/mapping/*.sorted.bam        Per-sample alignments
 
     These outputs can be passed to mag_analysis:
-      mag_analysis/nextflow/run-mag-analysis.sh \\
+      mag_analysis/run-mag-analysis.sh \\
           --assembly results/assembly/assembly.fasta \\
           --depths results/mapping/depths.txt \\
           --bam_dir results/mapping/

@@ -79,7 +79,7 @@ usage() {
     echo "  --assembly_memory S  Memory for assembly [default: '60 GB']"
     echo ""
     echo "Output feeds into mag_analysis:"
-    echo "  mag_analysis/nextflow/run-mag-analysis.sh \\"
+    echo "  mag_analysis/run-mag-analysis.sh \\"
     echo "      --assembly <outdir>/assembly/assembly.fasta \\"
     echo "      --depths <outdir>/mapping/depths.txt \\"
     echo "      --bam_dir <outdir>/mapping/"

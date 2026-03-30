@@ -1,51 +1,35 @@
 # Real-Time Nanopore Pipeline
 
-Shipboard metagenomic analysis for Oxford Nanopore sequencing data. Processes reads as they stream from MinKNOW, providing live taxonomic classification, gene annotation, and functional profiling.
+Real-time metagenomic analysis for Oxford Nanopore sequencing data. Processes reads as they stream from MinKNOW, providing live taxonomic classification, gene annotation, and functional profiling.
 
 ## Quick Start
 
 ```bash
 cd nanopore_live/nextflow
+./install.sh && ./install.sh --check
 
-# Install conda environments (~15 min first time)
-./install.sh
-./install.sh --check
-
-# Run with all modules
 ./run-realtime.sh --input /path/to/nanopore/run --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
     --run_prokka --run_sketch --run_tetra
-
-# Docker
-docker build -t danaseq-realtime .
-./run-realtime.sh --docker --input /path/to/nanopore/run --outdir /path/to/output \
-    --run_kraken --kraken_db /path/to/krakendb --run_prokka
-
-# Show all options
-./run-realtime.sh --help
 ```
 
-## Pipeline Overview
+## Pipeline Stages
 
-```
-MinKNOW FASTQ
-    |
-VALIDATE_FASTQ          Gzip integrity + BBMap repair
-    |
-QC_FASTQ_FILTER         Length + quality filtering (C, streaming)
-    |
-CONVERT_TO_FASTA        Header cleanup
-    |
-    +---> KRAKEN2_CLASSIFY     Taxonomic classification (batched per sample)
-    +---> PROKKA_ANNOTATE      ORF prediction + annotation
-    +---> HMM_SEARCH           HMMER3 against user-supplied databases
-    +---> SENDSKETCH           Rapid taxonomic sketching
-    +---> TETRAMER_FREQ        Tetranucleotide composition (C)
-              |
-         DB_INTEGRATION        Load results into DuckDB
-              |
-         CLEANUP               Compress/delete source files (optional)
-```
+| Step | Process | Tool | Description |
+|------|---------|------|-------------|
+| 1 | `VALIDATE_FASTQ` | BBMap | Gzip integrity check + read repair |
+| 2 | `QC_BBDUK` | BBDuk | Adapter and quality trimming |
+| 3 | `QC_FASTQ_FILTER` | fastq_filter (C) | Length + quality filtering (streaming) |
+| 4 | `CONVERT_TO_FASTA` | awk | Header cleanup and format conversion |
+| 5a | `KRAKEN2_CLASSIFY` | Kraken2 | Taxonomic classification (batched per sample) |
+| 5b | `PROKKA_ANNOTATE` | Prokka | ORF prediction + functional annotation |
+| 5c | `BAKTA_CDS` / `BAKTA_FULL` | Bakta | CDS-only or full annotation (alternative to Prokka) |
+| 5d | `HMM_SEARCH` | HMMER3 | Profile HMM search against user-supplied databases |
+| 5e | `SENDSKETCH` | BBTools | Rapid taxonomic sketching via MinHash |
+| 5f | `TETRAMER_FREQ` | tetramer_freqs (C) | Tetranucleotide composition profiles |
+| 6 | `DB_INTEGRATION` | R + DuckDB | Load all results into DuckDB |
+| 7 | `DB_SYNC` | R + DuckDB | Periodic sync during watch mode |
+| 8 | `CLEANUP` | bash | Compress/delete source files after DB import |
 
 ## Parameters
 
@@ -56,7 +40,10 @@ CONVERT_TO_FASTA        Header cleanup
 | `--run_kraken` | `false` | Enable Kraken2 classification |
 | `--kraken_db` | (required if kraken) | Path to Kraken2 database |
 | `--run_prokka` | `false` | Enable Prokka annotation |
-| `--hmm_databases` | (skip) | Path to HMM file(s) for functional profiling |
+| `--annotator` | `bakta` | Gene annotator: `prokka`, `bakta`, or `none` |
+| `--bakta_db` | (required if bakta) | Path to Bakta database |
+| `--bakta_full` | `false` | Run full Bakta annotation (ncRNA/tRNA/CRISPR) |
+| `--hmm_databases` | (skip) | Comma-delimited paths to HMM files |
 | `--run_sketch` | `false` | Enable Sendsketch profiling |
 | `--run_tetra` | `false` | Enable tetranucleotide frequency |
 | `--watch` | `false` | Monitor for new files during live sequencing |
@@ -64,29 +51,12 @@ CONVERT_TO_FASTA        Header cleanup
 | `--db_sync_minutes` | `10` | DuckDB sync interval in watch mode |
 | `--run_db_integration` | `false` | Load results into DuckDB |
 | `--cleanup` | `false` | Compress/delete files after DB import |
+| `--min_readlen` | `1500` | Minimum read length after filtering |
+| `--keep_percent` | `80` | Percent of reads to keep (by quality) |
+| `--min_file_size` | `1000000` | Minimum FASTQ file size in bytes (1 MB) |
+| `--store_dir` | (none) | Persistent cache directory (storeDir) |
 
-### Profiles
-
-| Profile | Use case |
-|---------|----------|
-| `standard` | Local execution, auto-detect resources |
-| `test` | Small test files, reduced resources |
-| `shipboard` | Production: 32 CPUs, 256 GB RAM, 100 GB Kraken |
-
-## Watch Mode
-
-Monitor a directory for new FASTQ files during active sequencing:
-
-```bash
-nextflow run main.nf --input /path/to/runs \
-    --watch --db_sync_minutes 10 \
-    --run_kraken --kraken_db /path/to/db \
-    --run_prokka --run_db_integration
-```
-
-`DB_SYNC` runs as a long-lived process that periodically loads new results into DuckDB. R scripts are idempotent and track imports via `import_log`.
-
-## Output
+## Outputs
 
 ```
 results/
@@ -105,9 +75,52 @@ results/
 └── pipeline_info/        Nextflow reports (timeline, trace, DAG)
 ```
 
+## Profiles
+
+| Profile | Use case |
+|---------|----------|
+| `standard` | Local execution, auto-detect resources |
+| `test` | Small test files, reduced resources |
+
+## Resource Requirements
+
+| Component | CPUs | RAM | Notes |
+|-----------|------|-----|-------|
+| Kraken2 | 8 | 50-100 GB | Depends on database size; serialized via `maxForks=1` |
+| Prokka/Bakta | 4 | 8 GB | Per-file annotation |
+| HMMER3 | 4 | 4 GB | Per-file search |
+| DuckDB integration | 2 | 4 GB | R-based import scripts |
+
+## Watch Mode
+
+Monitor a directory for new FASTQ files during active sequencing:
+
+```bash
+./run-realtime.sh --input /path/to/runs --outdir /path/to/output \
+    --watch --db_sync_minutes 10 \
+    --run_kraken --kraken_db /path/to/db \
+    --run_prokka --run_db_integration
+```
+
+`DB_SYNC` runs as a long-lived process that periodically loads new results into DuckDB. R scripts are idempotent and track imports via `import_log`.
+
+## Post-DB Cleanup
+
+The `--cleanup` flag compresses or deletes source files after DuckDB import:
+
+| Directory/Files | Action |
+|----------------|--------|
+| `fa/*.fa` | Gzip in place (kept as compressed backup) |
+| `kraken/`, `sketch/`, `tetra/` | Delete (data lives in DuckDB) |
+| `prokka/*/PROKKA_*.tsv` | Delete (loaded into DuckDB) |
+| `prokka/*/PROKKA_*.gff`, `.faa`, `.ffn` | Gzip in place |
+| `hmm/`, `dana.duckdb`, `log.txt` | Kept (not cleaned) |
+
+Safe for watch mode -- operates per-file and checks `import_log` before deleting.
+
 ## DuckDB Integration
 
-R scripts in `nextflow/bin/` load results into DuckDB:
+R scripts in `bin/` load results into DuckDB:
 
 | Script | Data |
 |--------|------|
@@ -120,13 +133,6 @@ R scripts in `nextflow/bin/` load results into DuckDB:
 | `46_log_db.r` | Processing logs |
 | `47_merge_db.r` | Merge per-run databases |
 
-## Design Notes
-
-- **Kraken2 batching.** In batch mode, FASTAs are grouped per sample so the DB loads once per barcode. In watch mode, files stream individually. Uses `maxForks = 1` since kraken2 loads 50-100 GB into RAM.
-- **Compiled C tools.** `fastq_filter` (QC) and `tetramer_freqs` (TNF) are compiled C binaries, replacing filtlong and a Python script.
-- **Watch mode.** Uses `Channel.watchPath()` with a flat glob pattern (Java WatchService limitation -- no recursive `**`).
-- **Conda environments.** Four isolated environments avoid dependency conflicts: dana-bbmap, dana-prokka, dana-bakta, dana-tools.
-
 ## Input
 
 Oxford Nanopore directory structure with multiplexed barcodes:
@@ -137,3 +143,10 @@ input_dir/fastq_pass/
 ├── barcode02/*.fastq.gz
 └── ...
 ```
+
+## Design Notes
+
+- **Kraken2 batching.** In batch mode, FASTAs are grouped per sample (`groupTuple`) so the DB loads once per barcode. In watch mode, files stream individually. Uses `maxForks = 1` since Kraken2 loads 50-100 GB into RAM.
+- **Compiled C tools.** `fastq_filter` (QC) and `tetramer_freqs` (TNF) are compiled C binaries in `bin/`, replacing filtlong and a Python script.
+- **Watch mode.** Uses `Channel.watchPath()` with a flat glob pattern (Java WatchService limitation -- no recursive `**`).
+- **Conda environments.** Four isolated environments avoid dependency conflicts: dana-bbmap, dana-prokka, dana-bakta, dana-tools.

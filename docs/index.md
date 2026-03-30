@@ -1,44 +1,42 @@
 # danaSeq
 
-**Real-time metagenomic analysis for Oxford Nanopore sequencing on oceanographic expeditions.**
-
-Named after the Buddhist concept of *dana* (selfless giving), danaSeq processes DNA reads as they stream from the sequencer, providing live taxonomic classification, gene annotation, and functional profiling. Post-expedition, separate pipelines handle assembly and downstream MAG analysis.
-
-The platform consists of four independent Nextflow DSL2 pipelines. Assembly pipelines produce an assembly FASTA + depth table that feeds into `mag_analysis`. All pipelines run via conda, Docker, or Apptainer with no hardcoded paths.
-
-## Pipelines
-
-| Pipeline | Purpose | Key tools |
-|----------|---------|-----------|
-| [**nanopore_live**](nanopore-live.md) | Real-time analysis during sequencing | Kraken2, Prokka, HMMER3, DuckDB |
-| [**nanopore_assembly**](nanopore-assembly.md) | Nanopore assembly + mapping + depth | Flye, metaMDBG, minimap2, CoverM |
-| [**illumina_assembly**](illumina-assembly.md) | Illumina multi-assembler consensus | Tadpole, Megahit, SPAdes, metaSPAdes, BBMap |
-| [**mag_analysis**](mag-analysis.md) | Technology-agnostic downstream analysis | 7-binner consensus, DAS Tool, Binette, 50+ processes |
+Metagenomic analysis pipelines for Oxford Nanopore and Illumina sequencing data. Four independent Nextflow DSL2 pipelines cover real-time read classification, long-read and short-read assembly, and downstream MAG analysis including binning, annotation, taxonomy, and metabolic profiling. Assembly pipelines produce a FASTA + depth table that feeds directly into `mag_analysis`.
 
 ## Architecture
 
 ```
 danaSeq/
 ├── nanopore_live/          Real-time analysis during sequencing
-│   └── nextflow/           11 processing stages -> DuckDB
+│   │                       9 modules, 14 processes -> DuckDB
 │
-├── nanopore_assembly/      Nanopore assembly + mapping + depth
-│   └── nextflow/           Flye/metaMDBG/myloasm -> minimap2 -> CoverM
-│                           Output: assembly.fasta + depths.txt + BAMs
+├── nanopore_assembly/      Long-read assembly + mapping + depth
+│   │                       3 modules: preprocess, assembly, mapping
+│   │                       Flye/metaMDBG/myloasm -> minimap2 -> CoverM
+│   │                       Output: assembly.fasta + depths.txt + BAMs
 │
-├── illumina_assembly/      Illumina multi-assembler + mapping + depth
-│   └── nextflow/           4 assemblers -> cascade dedupe -> BBMap
-│                           Output: assembly.fasta + depths.txt + BAMs
+├── illumina_assembly/      Multi-assembler consensus + mapping + depth
+│   │                       7 modules: preprocess, error_correct, normalize,
+│   │                       merge_reads, assembly, dedupe, mapping
+│   │                       Output: assembly.fasta + depths.txt + BAMs
 │
 ├── mag_analysis/           Technology-agnostic downstream analysis
-│   └── nextflow/           Input: assembly + depths (from any assembler)
-│       ├── modules/        binning, annotation, taxonomy, mge, eukaryotic,
-│       │                    metabolism, rrna, phylogeny, viz, gene_depths
-│       ├── viz/            Interactive Svelte dashboard
-│       └── bin/            Pipeline scripts
+│   │                       10 modules: binning, annotation, taxonomy, rrna,
+│   │                       metabolism, mge, eukaryotic, gene_depths,
+│   │                       phylogeny, viz
+│   ├── viz/                Interactive Svelte dashboard
+│   └── bin/                Pipeline scripts
 │
 └── tests/                  Pipeline tests
 ```
+
+## Pipelines
+
+| Pipeline | Purpose | Key tools |
+|----------|---------|-----------|
+| [**nanopore_live**](nanopore-live.md) | Real-time analysis during sequencing | Kraken2, Prokka/Bakta, HMMER3, DuckDB |
+| [**nanopore_assembly**](nanopore-assembly.md) | Long-read assembly + mapping + depth | Flye, metaMDBG, myloasm, minimap2, CoverM |
+| [**illumina_assembly**](illumina-assembly.md) | Multi-assembler consensus assembly | Tadpole, Megahit, SPAdes, metaSPAdes, BBMap |
+| [**mag_analysis**](mag-analysis.md) | Technology-agnostic downstream analysis | 7-binner consensus, DAS Tool, Binette, 50+ processes |
 
 ## Getting Started
 
@@ -70,50 +68,6 @@ cd danaSeq
 ./download-databases.sh --genomad --checkv --checkm2 --kaiju
 ```
 
-## Quick Start
-
-### Real-time processing
-
-```bash
-cd nanopore_live/nextflow
-./install.sh && ./install.sh --check
-
-./run-realtime.sh --input /path/to/nanopore/run --outdir /path/to/output \
-    --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka --run_sketch --run_tetra
-```
-
-### Nanopore assembly
-
-```bash
-cd nanopore_assembly/nextflow
-./install.sh && ./install.sh --check
-
-./run-nanopore-assembly.sh --input /path/to/reads --outdir /path/to/output
-```
-
-### Illumina assembly
-
-```bash
-cd illumina_assembly/nextflow
-./install.sh && ./install.sh --check
-
-./run-illumina-assembly.sh --input /path/to/reads --outdir /path/to/output
-```
-
-### MAG analysis
-
-```bash
-cd mag_analysis/nextflow
-./install.sh && ./install.sh --check
-
-./run-mag-analysis.sh \
-    --assembly /path/to/assembly.fasta \
-    --depths /path/to/depths.txt \
-    --outdir /path/to/output \
-    --db_dir /path/to/databases --all
-```
-
 ## Quality Standards
 
 MAGs are classified per MIMAG (Bowers et al. 2017):
@@ -130,7 +84,7 @@ MAGs are classified per MIMAG (Bowers et al. 2017):
 |--------------|------|-----|---------|
 | Minimum (no Kraken) | 16 | 32 GB | 500 GB |
 | Recommended | 32 | 128 GB | 1 TB |
-| Shipboard production | 32 | 256 GB | 2 TB |
+| Full analysis | 32 | 256 GB | 2 TB |
 
 ## License
 

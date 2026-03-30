@@ -72,7 +72,7 @@ usage() {
     echo "  --store_dir DIR           Persistent cache directory (storeDir)"
     echo ""
     echo "Output feeds into mag_analysis:"
-    echo "  mag_analysis/nextflow/run-mag-analysis.sh \\"
+    echo "  mag_analysis/run-mag-analysis.sh \\"
     echo "      --assembly <outdir>/assembly/<sample>/<sample>.dedupe.fasta \\"
     echo "      --depths <outdir>/mapping/<sample>/<sample>.depths.txt \\"
     echo "      --bam_dir <outdir>/mapping/<sample>/"

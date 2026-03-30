@@ -56,7 +56,7 @@ results/
 
 Feed these into mag_analysis:
 ```bash
-../mag_analysis/nextflow/run-mag-analysis.sh \
+../mag_analysis/run-mag-analysis.sh \
     --assembly results/assembly/assembly.fasta \
     --depths results/mapping/depths.txt \
     --bam_dir results/mapping/ \

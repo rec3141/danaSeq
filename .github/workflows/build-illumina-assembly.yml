@@ -4,9 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'illumina_assembly/nextflow/**'
-      - '!illumina_assembly/nextflow/conda-envs/**'
-      - '!illumina_assembly/nextflow/envs/**'
+      - 'illumina_assembly/**'
+      - '!illumina_assembly/conda-envs/**'
+      - '!illumina_assembly/envs/**'
       - '.github/workflows/build-illumina-assembly.yml'
   workflow_dispatch:
 
@@ -48,8 +48,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: illumina_assembly/nextflow
-          file: illumina_assembly/nextflow/Dockerfile
+          context: illumina_assembly
+          file: illumina_assembly/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -175,7 +175,7 @@ Safe for watch mode -- operates per-file and checks `import_log` before deleting
 
 ## DuckDB Integration
 
-R scripts in `nextflow/bin/` load results into DuckDB:
+R scripts in `bin/` load results into DuckDB:
 
 | Script | Data |
 |--------|------|
