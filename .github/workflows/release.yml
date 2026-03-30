@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | sed -n '2p')
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Changes since $PREV_TAG" > changelog.md
+            git log --oneline "$PREV_TAG"..HEAD | sed 's/^/- /' >> changelog.md
+          else
+            echo "Initial release" > changelog.md
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: changelog.md
+          generate_release_notes: false
+
+  build-containers:
+    needs: release
+    strategy:
+      matrix:
+        include:
+          - name: danaseq-assembly-base
+            context: nanopore_assembly
+            dockerfile: nanopore_assembly/Dockerfile.base
+            timeout: 30
+          - name: danaseq-mag-base-slim
+            context: mag_analysis
+            dockerfile: mag_analysis/Dockerfile.base-slim
+            timeout: 60
+          - name: danaseq-live
+            context: nanopore_live
+            dockerfile: nanopore_live/Dockerfile
+            timeout: 60
+          - name: danaseq-nanopore-assembly
+            context: nanopore_assembly
+            dockerfile: nanopore_assembly/Dockerfile
+            timeout: 15
+          - name: danaseq-illumina-assembly
+            context: illumina_assembly
+            dockerfile: illumina_assembly/Dockerfile
+            timeout: 15
+          - name: danaseq-mag-analysis
+            context: mag_analysis
+            dockerfile: mag_analysis/Dockerfile
+            timeout: 60
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+          remove-codeql: true
+          remove-docker-images: true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          tags: |
+            type=raw,value=latest
+            type=semver,pattern={{version}}
+            type=sha,prefix=
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
