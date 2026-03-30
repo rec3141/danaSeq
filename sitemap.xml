@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://rec3141.github.io/danaSeq/</loc>
+         <lastmod>2026-03-30</lastmod>
+    </url>
+    <url>
+         <loc>https://rec3141.github.io/danaSeq/illumina-assembly/</loc>
+         <lastmod>2026-03-30</lastmod>
+    </url>
+    <url>
+         <loc>https://rec3141.github.io/danaSeq/mag-analysis/</loc>
+         <lastmod>2026-03-30</lastmod>
+    </url>
+    <url>
+         <loc>https://rec3141.github.io/danaSeq/nanopore-assembly/</loc>
+         <lastmod>2026-03-30</lastmod>
+    </url>
+    <url>
+         <loc>https://rec3141.github.io/danaSeq/nanopore-live/</loc>
+         <lastmod>2026-03-30</lastmod>
+    </url>
+</urlset>
