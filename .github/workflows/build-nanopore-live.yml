@@ -32,6 +32,9 @@ jobs:
           remove-codeql: true
           remove-docker-images: true
 
+      - name: Restart Docker daemon
+        run: sudo systemctl restart docker
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
