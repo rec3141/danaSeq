@@ -123,6 +123,30 @@ def extract_reads(db_path, sample_id, max_per_sample, seq_lengths=None):
         has_krakenreport = 'krakenreport' in tables
         lineage_lookup = build_lineage_lookup(con) if has_krakenreport else {}
 
+        # Build read_id → gene annotations lookup via read_contig_map
+        has_rcm = 'read_contig_map' in tables
+        has_annotations = 'prokka_annotations' in tables
+        gene_lookup = {}  # read_id → "gene1; gene2; ..."
+        product_lookup = {}  # read_id → "product1; product2; ..."
+        if has_rcm and has_annotations:
+            try:
+                ann_rows = con.execute("""
+                    SELECT m.read_id,
+                           GROUP_CONCAT(DISTINCT CASE WHEN p.gene != '' THEN p.gene END, '; '),
+                           GROUP_CONCAT(DISTINCT CASE WHEN p.product != '' AND p.product != 'hypothetical protein' THEN p.product END, '; ')
+                    FROM read_contig_map m
+                    JOIN locus_index l ON m.contig_id = l.seqid
+                    JOIN prokka_annotations p ON l.locus_tag = p.locus_tag
+                    GROUP BY m.read_id
+                """).fetchall()
+                for read_id, genes, products in ann_rows:
+                    if genes:
+                        gene_lookup[read_id] = genes
+                    if products:
+                        product_lookup[read_id] = products
+            except Exception:
+                pass  # read_contig_map may be empty
+
         # Check which optional columns exist in stats
         has_stats = 'stats' in tables
         stats_cols = set()
@@ -192,7 +216,7 @@ def extract_reads(db_path, sample_id, max_per_sample, seq_lengths=None):
                 if m:
                     lineage = lineage_lookup.get(int(m.group(1)), {})
 
-            reads.append({
+            read = {
                 'id': seqid,
                 'sample': sample_id,
                 'length': length,
@@ -203,7 +227,14 @@ def extract_reads(db_path, sample_id, max_per_sample, seq_lengths=None):
                 'kraken_order':  lineage.get('order'),
                 'kraken_family': lineage.get('family'),
                 'kraken_genus':  lineage.get('genus'),
-            })
+            }
+            genes = gene_lookup.get(seqid)
+            products = product_lookup.get(seqid)
+            if genes:
+                read['genes'] = genes
+            if products:
+                read['products'] = products
+            reads.append(read)
             tetra_rows.append(tetra_values)
 
         con.close()

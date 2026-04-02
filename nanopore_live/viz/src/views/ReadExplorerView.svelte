@@ -69,6 +69,7 @@
   const SEARCH_FIELDS = [
     'sample', 'kraken_domain', 'kraken_phylum', 'kraken_class',
     'kraken_order', 'kraken_family', 'kraken_genus',
+    'genes', 'products',
   ];
 
   // Combined cart + search highlighting
@@ -105,7 +106,7 @@
   function exportSelection() {
     if (!selectedIds || !$readExplorer?.reads) return;
     const selected = $readExplorer.reads.filter(r => selectedIds.has(r.id));
-    const cols = ['id', 'sample', 'length', 'gc', 'kraken_domain', 'kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_genus'];
+    const cols = ['id', 'sample', 'length', 'gc', 'kraken_domain', 'kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_genus', 'genes', 'products'];
     const header = cols.join('\t');
     const rows = selected.map(r => cols.map(c => r[c] ?? '').join('\t'));
     const tsv = header + '\n' + rows.join('\n') + '\n';
@@ -162,9 +163,10 @@
     if (!reads?.length) return null;
     const n = reads.length;
     const samples = new Set(reads.map(r => r.sample));
-    const avgLen = reads.reduce((s, r) => s + (r.length || 0), 0) / n;
+    const totalBp = reads.reduce((s, r) => s + (r.length || 0), 0);
+    const avgLen = totalBp / n;
     const avgGc = reads.reduce((s, r) => s + (r.gc || 0), 0) / n;
-    return { n, nSamples: samples.size, avgLen, avgGc };
+    return { n, nSamples: samples.size, totalBp, avgLen, avgGc };
   });
 </script>
 
@@ -175,13 +177,16 @@
       <p class="text-slate-400 text-sm mt-4">Loading read data (this may take a moment)...</p>
     </div>
   {:else}
-    <!-- Stats -->
+    <!-- Stats (update to selection when active) -->
     {#if stats}
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Reads Shown" value={stats.n.toLocaleString()} color="cyan" />
-        <StatCard label="Samples" value={stats.nSamples} color="emerald" />
-        <StatCard label="Avg Length" value={`${Math.round(stats.avgLen).toLocaleString()} bp`} color="amber" />
-        <StatCard label="Avg GC" value={`${stats.avgGc.toFixed(1)}%`} color="purple" />
+      {@const s = selectionStats || stats}
+      {@const label = selectionStats ? 'Selected' : 'Reads Shown'}
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <StatCard label={label} value={s.n.toLocaleString()} color="cyan" />
+        <StatCard label="Total bp" value={s.totalBp >= 1e9 ? `${(s.totalBp/1e9).toFixed(1)} Gb` : s.totalBp >= 1e6 ? `${(s.totalBp/1e6).toFixed(1)} Mb` : s.totalBp.toLocaleString()} color="teal" />
+        <StatCard label="Samples" value={s.nSamples} color="emerald" />
+        <StatCard label="Avg Length" value={`${Math.round(s.avgLen).toLocaleString()} bp`} color="amber" />
+        <StatCard label="Avg GC" value={`${s.avgGc.toFixed(1)}%`} color="purple" />
       </div>
     {/if}
 
@@ -236,7 +241,7 @@
         <input
           type="text"
           bind:value={searchQuery}
-          placeholder="taxon, sample..."
+          placeholder="taxon, gene, product..."
           class="w-48 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-slate-200 text-xs placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
         />
         {#if searchQuery}
@@ -289,12 +294,6 @@
               title="Clear selection"
             >&#x2715;</button>
           </div>
-          <div class="grid grid-cols-2 gap-2 text-xs">
-            <div class="text-slate-400">Total bp</div><div class="text-slate-200 font-mono">{selectionStats.totalBp.toLocaleString()}</div>
-            <div class="text-slate-400">Avg Length</div><div class="text-slate-200 font-mono">{Math.round(selectionStats.avgLen).toLocaleString()} bp</div>
-            <div class="text-slate-400">Avg GC</div><div class="text-slate-200 font-mono">{selectionStats.avgGc.toFixed(1)}%</div>
-            <div class="text-slate-400">Samples</div><div class="text-slate-200 font-mono">{selectionStats.nSamples}</div>
-          </div>
           <div class="space-y-1">
             <div class="flex items-center justify-between">
               <button
@@ -345,6 +344,12 @@
             {/if}
             {#if selectedDetail.sketch_hit}
               <div class="text-slate-400">Sketch Hit</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.sketch_hit}</div>
+            {/if}
+            {#if selectedDetail.genes}
+              <div class="text-slate-400">Genes</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.genes}</div>
+            {/if}
+            {#if selectedDetail.products}
+              <div class="text-slate-400">Products</div><div class="text-slate-200 font-mono text-[11px] whitespace-normal">{selectedDetail.products}</div>
             {/if}
           </div>
         </div>
