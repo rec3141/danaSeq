@@ -217,7 +217,7 @@ def main():
     parser = argparse.ArgumentParser(description='Compute read-level t-SNE')
     parser.add_argument('--input', required=True, help='Directory with nanopore_live outputs')
     parser.add_argument('--output', required=True, help='Output directory')
-    parser.add_argument('--max-reads', type=int, default=200000, help='Maximum total reads for t-SNE')
+    parser.add_argument('--max-reads', type=int, default=1000000, help='Maximum total reads for t-SNE')
     args = parser.parse_args()
 
     samples = discover_samples(args.input)
