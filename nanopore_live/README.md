@@ -149,7 +149,7 @@ results/
 │   │   ├── fa/           FASTA (quality-filtered sequences)
 │   │   ├── fq/           Intermediate FASTQ (BBDuk output)
 │   │   ├── kraken/       *.tsv (per-read), *.report (summary)
-│   │   ├── prokka/       SAMPLE/PROKKA_* (GFF, FAA, FFN, TSV)
+│   │   ├── bakta/        Bakta annotations (GFF3, FAA, FFN, TSV)
 │   │   ├── hmm/          *.DBNAME.tsv, *.DBNAME.tbl
 │   │   ├── sketch/       Sendsketch profiles
 │   │   ├── tetra/        Tetranucleotide frequencies
@@ -175,20 +175,18 @@ Safe for watch mode -- operates per-file and checks `import_log` before deleting
 
 ## DuckDB Integration
 
-R scripts in `bin/` load results into DuckDB:
+Python scripts in `bin/` load results into per-sample DuckDB databases:
 
 | Script | Data |
 |--------|------|
-| `40_kraken_db.r` | Kraken2 classifications |
-| `41_krakenreport_db.r` | Kraken2 summary reports |
-| `42_prokka_db.r` | Prokka annotations |
-| `43_sketch_db.r` | Sendsketch profiles |
-| `44_tetra_db.r` | Tetranucleotide frequencies |
-| `45_stats_db.r` | Assembly statistics |
-| `46_log_db.r` | Processing logs |
-| `47_merge_db.r` | Merge per-run databases |
+| `kraken_db.py` | Kraken2 per-read classifications |
+| `krakenreport_db.py` | Kraken2 summary reports with full taxonomy |
+| `annotation_db.py` | Bakta/Prokka gene annotations + read-contig mapping |
+| `sketch_db.py` | Sendsketch similarity profiles |
+| `tetra_db.py` | Tetranucleotide frequencies + sequence index |
+| `db_schema.py` | Shared schema definitions (imported by all scripts) |
 
-Scripts are idempotent and track imports via `import_log`.
+Scripts are idempotent and track imports via `import_log`. Contig names are prefixed with the batch file ID to prevent collisions across batches.
 
 ## Design Notes
 

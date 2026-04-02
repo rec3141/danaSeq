@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Load Kraken2 classification TSVs into DuckDB.
 
-Usage: python3 40_kraken_db.py <barcode_dir>
+Usage: python3 kraken_db.py <barcode_dir>
 
 Reads kraken/*.tsv, parses seqid + taxid + taxa_name, upserts into kraken table.
 """

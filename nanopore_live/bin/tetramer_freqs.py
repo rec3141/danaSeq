@@ -4,7 +4,7 @@
 Drop-in replacement for tetramer_freqs_esom.pl (Dick et al., 2009).
 Outputs a headerless TSV with contig ID and 136 reverse-complement-
 collapsed tetranucleotide frequencies, compatible with the DuckDB
-integration pipeline (44_tetra_db.r).
+integration pipeline (tetra_db.py).
 
 Usage:
     tetramer_freqs.py -f assembly.fasta [-min 1500] [-max 10000000] -o output.lrn

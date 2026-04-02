@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Load Kraken2 report files into DuckDB with reconstructed taxonomy paths.
 
-Usage: python3 41_krakenreport_db.py <barcode_dir>
+Usage: python3 krakenreport_db.py <barcode_dir>
 
 Reads kraken/*.report, builds full taxonomy lineage from indentation,
 inserts into krakenreport table.

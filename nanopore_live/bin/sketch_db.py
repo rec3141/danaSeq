@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Load Sendsketch similarity results into DuckDB.
 
-Usage: python3 43_sketch_db.py <barcode_dir>
+Usage: python3 sketch_db.py <barcode_dir>
 
 Reads sketch/*.txt, inserts into sendsketch table.
 """

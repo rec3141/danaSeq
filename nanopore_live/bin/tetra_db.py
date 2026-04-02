@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Load tetranucleotide frequency data into DuckDB.
 
-Usage: python3 44_tetra_db.py <barcode_dir>
+Usage: python3 tetra_db.py <barcode_dir>
 
 Reads tnfs.txt for column names, creates tetra_data table dynamically,
 loads tetra/*.lrn files, populates tetra_data and sequence_index tables.
