@@ -1,6 +1,6 @@
 // DuckDB integration: load pipeline outputs into dana.duckdb
-// Runs R scripts that expect a specific directory layout with publishDir outputs.
-// Uses val(barcode_dir) since R scripts operate on the published output directory
+// Python scripts take barcode_dir as argv[1], chdir into it, open dana.duckdb.
+// Uses val(barcode_dir) since scripts operate on the published output directory
 // (host filesystem), not the Nextflow work directory.
 // maxForks=1 to prevent concurrent DuckDB access
 
@@ -23,39 +23,24 @@ process DB_INTEGRATION {
 
     script:
     """
-    # R scripts do setwd(args[1]) then open dana.duckdb in that directory
-    # They expect kraken/, prokka/, sketch/, tetra/ subdirectories
-    # Patch hardcoded source("/work/apps/dana/log-db.r") to use danadir
-
-    run_r_script() {
-        local script="\$1"; shift
-        local patched=\$(mktemp)
-        sed -e 's|source("/work/apps/dana/log-db.r")|source("'${params.danadir}'/46_log_db.r")|' \
-            -e 's|library(tidyverse)|library(stringr); library(dplyr); library(tidyr); library(tibble)|' \
-            "\$script" > "\$patched"
-        Rscript "\$patched" "\$@" || true
-        rm -f "\$patched"
-    }
-
     if [ -d "${barcode_dir}/kraken" ] && ls "${barcode_dir}"/kraken/*.tsv >/dev/null 2>&1; then
-        run_r_script ${params.danadir}/40_kraken_db.r "${barcode_dir}"
-        run_r_script ${params.danadir}/41_krakenreport_db.r "${barcode_dir}"
+        python3 ${params.danadir}/kraken_db.py "${barcode_dir}" || true
+        python3 ${params.danadir}/krakenreport_db.py "${barcode_dir}" || true
     fi
 
-    if [ -d "${barcode_dir}/prokka" ]; then
-        run_r_script ${params.danadir}/42_prokka_db.r "${barcode_dir}"
+    if [ -d "${barcode_dir}/prokka" ] || [ -d "${barcode_dir}/bakta" ]; then
+        python3 ${params.danadir}/annotation_db.py "${barcode_dir}" || true
     fi
 
     if [ -d "${barcode_dir}/sketch" ] && ls "${barcode_dir}"/sketch/*.txt >/dev/null 2>&1; then
-        run_r_script ${params.danadir}/43_sketch_db.r "${barcode_dir}"
+        python3 ${params.danadir}/sketch_db.py "${barcode_dir}" || true
     fi
 
     if [ -d "${barcode_dir}/tetra" ] && ls "${barcode_dir}"/tetra/*.lrn >/dev/null 2>&1; then
-        # Generate tnfs.txt header if missing (required by 44_tetra_db.r)
         if [ ! -s "${barcode_dir}/tnfs.txt" ]; then
             printf '${TETRA_COLS}\\n' > "${barcode_dir}/tnfs.txt"
         fi
-        run_r_script ${params.danadir}/44_tetra_db.r "${barcode_dir}"
+        python3 ${params.danadir}/tetra_db.py "${barcode_dir}" || true
     fi
     """
 }
@@ -85,11 +70,11 @@ process CLEANUP {
         exit 0
     fi
 
-    imported_count=\$(Rscript -e "
-        library(DBI); library(duckdb)
-        con <- dbConnect(duckdb(), '\$DB')
-        cat(dbGetQuery(con, 'SELECT count(*) FROM import_log')[[1]])
-        dbDisconnect(con, shutdown=TRUE)
+    imported_count=\$(python3 -c "
+        import duckdb
+        con = duckdb.connect('\$DB', read_only=True)
+        print(con.execute('SELECT count(*) FROM import_log').fetchone()[0])
+        con.close()
     " 2>/dev/null || echo 0)
 
     if [ "\$imported_count" -eq 0 ] 2>/dev/null; then
@@ -142,30 +127,21 @@ process DB_SYNC {
     val danadir          // path to R scripts directory
     val sync_seconds     // sleep interval between sync cycles
     val cleanup_enabled  // "true" or "false"
+    val metadata_file    // path to sample metadata TSV (or "none")
 
     script:
     """
-    run_r_script() {
-        local script="\$1"; shift
-        local patched=\$(mktemp)
-        sed -e 's|source("/work/apps/dana/log-db.r")|source("'${danadir}'/46_log_db.r")|' \
-            -e 's|library(tidyverse)|library(stringr); library(dplyr); library(tidyr); library(tibble)|' \
-            "\$script" > "\$patched"
-        Rscript "\$patched" "\$@" || true
-        rm -f "\$patched"
-    }
-
     run_cleanup() {
         local bdir="\$1"
         local DB="\${bdir}/dana.duckdb"
         [ ! -f "\$DB" ] && return 0
 
         local imported_count
-        imported_count=\$(Rscript -e "
-            library(DBI); library(duckdb)
-            con <- dbConnect(duckdb(), '\$DB')
-            cat(dbGetQuery(con, 'SELECT count(*) FROM import_log')[[1]])
-            dbDisconnect(con, shutdown=TRUE)
+        imported_count=\$(python3 -c "
+            import duckdb
+            con = duckdb.connect('\$DB', read_only=True)
+            print(con.execute('SELECT count(*) FROM import_log').fetchone()[0])
+            con.close()
         " 2>/dev/null || echo 0)
 
         [ "\$imported_count" -eq 0 ] 2>/dev/null && return 0
@@ -201,7 +177,7 @@ process DB_SYNC {
         echo "[INFO] DB_SYNC tick=\${tick}: scanning ${outdir} for barcode directories"
 
         # Count pending data files to detect new data
-        cur_files=\$(find ${outdir} -mindepth 3 -maxdepth 3 \\( -path '*/kraken/*.tsv' -o -path '*/sketch/*.txt' -o -path '*/tetra/*.lrn' -o -path '*/prokka/*' -o -path '*/bakta/*' \\) 2>/dev/null | wc -l)
+        cur_files=\$(find ${outdir} -mindepth 4 -maxdepth 4 \\( -path '*/kraken/*.tsv' -o -path '*/sketch/*.txt' -o -path '*/tetra/*.lrn' -o -path '*/prokka/*' -o -path '*/bakta/*' \\) 2>/dev/null | wc -l)
         has_new_data=false
         if [ \$cur_files -ne \$last_sync_files ]; then
             has_new_data=true
@@ -213,23 +189,23 @@ process DB_SYNC {
                 echo "[INFO] DB_SYNC: processing \${barcode_dir}"
 
                 if [ -d "\${barcode_dir}/kraken" ] && ls "\${barcode_dir}"/kraken/*.tsv >/dev/null 2>&1; then
-                    run_r_script ${danadir}/40_kraken_db.r "\${barcode_dir}"
-                    run_r_script ${danadir}/41_krakenreport_db.r "\${barcode_dir}"
+                    python3 ${danadir}/kraken_db.py "\${barcode_dir}" || true
+                    python3 ${danadir}/krakenreport_db.py "\${barcode_dir}" || true
                 fi
 
                 if [ -d "\${barcode_dir}/prokka" ] || [ -d "\${barcode_dir}/bakta" ]; then
-                    run_r_script ${danadir}/42_prokka_db.r "\${barcode_dir}"
+                    python3 ${danadir}/annotation_db.py "\${barcode_dir}" || true
                 fi
 
                 if [ -d "\${barcode_dir}/sketch" ] && ls "\${barcode_dir}"/sketch/*.txt >/dev/null 2>&1; then
-                    run_r_script ${danadir}/43_sketch_db.r "\${barcode_dir}"
+                    python3 ${danadir}/sketch_db.py "\${barcode_dir}" || true
                 fi
 
                 if [ -d "\${barcode_dir}/tetra" ] && ls "\${barcode_dir}"/tetra/*.lrn >/dev/null 2>&1; then
                     if [ ! -s "\${barcode_dir}/tnfs.txt" ]; then
                         printf '${TETRA_COLS}\\n' > "\${barcode_dir}/tnfs.txt"
                     fi
-                    run_r_script ${danadir}/44_tetra_db.r "\${barcode_dir}"
+                    python3 ${danadir}/tetra_db.py "\${barcode_dir}" || true
                 fi
 
                 # Post-sync cleanup if enabled
@@ -240,13 +216,30 @@ process DB_SYNC {
 
             last_sync_files=\$cur_files
 
+            # Compute sample sketch distances for sample t-SNE
+            sketch_script="${projectDir}/viz/preprocess/compute_sketches.sh"
+            viz_output="${outdir}/viz"
+            sketch_tsv="\${viz_output}/sketch_distances.tsv"
+            if [ -f "\${sketch_script}" ]; then
+                echo "[INFO] DB_SYNC tick=\${tick}: computing sketch distances"
+                mkdir -p "\${viz_output}"
+                bash "\${sketch_script}" --input "${outdir}" --output "\${sketch_tsv}" \
+                    --env "${projectDir}/conda-envs/dana-bbmap" 2>&1 | sed 's/^/  [VIZ] /' || true
+            fi
+
             # Regenerate viz JSON when new data was imported
             viz_preprocess="${projectDir}/viz/preprocess/preprocess.py"
-            viz_output="${outdir}/viz"
+            preprocess_args="--input ${outdir} --output \${viz_output}"
+            if [ -f "\${sketch_tsv}" ]; then
+                preprocess_args="\${preprocess_args} --sketch-distances \${sketch_tsv}"
+            fi
+            if [ "${metadata_file}" != "none" ] && [ -f "${metadata_file}" ]; then
+                preprocess_args="\${preprocess_args} --metadata ${metadata_file}"
+            fi
             if [ -f "\${viz_preprocess}" ]; then
                 echo "[INFO] DB_SYNC tick=\${tick}: running viz preprocess"
                 mkdir -p "\${viz_output}"
-                python3 "\${viz_preprocess}" --input "${outdir}" --output "\${viz_output}" 2>&1 | sed 's/^/  [VIZ] /' || true
+                python3 "\${viz_preprocess}" \${preprocess_args} 2>&1 | sed 's/^/  [VIZ] /' || true
             fi
         else
             echo "[INFO] DB_SYNC tick=\${tick}: no new data files (count=\${cur_files})"

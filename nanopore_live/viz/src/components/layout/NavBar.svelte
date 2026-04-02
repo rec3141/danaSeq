@@ -37,8 +37,8 @@
     for (const id of ids) {
       const m = meta[id];
       if (!m) continue;
-      // Split canonical FLOWCELL_barcodeNN key into separate columns
-      const sepIdx = id.lastIndexOf('_barcode');
+      // Split canonical FLOWCELL:barcodeNN key into separate columns
+      const sepIdx = id.indexOf(':');
       const flowcell = sepIdx >= 0 ? id.slice(0, sepIdx) : id;
       const barcode = sepIdx >= 0 ? id.slice(sepIdx + 1) : '';
       const vals = [flowcell, barcode, ...cols.map(c => m[c] != null ? String(m[c]) : '')];

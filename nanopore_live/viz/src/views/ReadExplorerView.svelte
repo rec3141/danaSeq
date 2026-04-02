@@ -54,15 +54,47 @@
     return { points: reads };
   });
 
-  // Cart-based highlighting (dim non-carted)
+  // ---- Search state ----
+  let searchQuery = $state('');
+  let searchDebounced = $state('');
+  let debounceTimer;
+
+  $effect(() => {
+    const q = searchQuery;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => { searchDebounced = q; }, 300);
+    return () => clearTimeout(debounceTimer);
+  });
+
+  const SEARCH_FIELDS = [
+    'sample', 'kraken_domain', 'kraken_phylum', 'kraken_class',
+    'kraken_order', 'kraken_family', 'kraken_genus',
+  ];
+
+  // Combined cart + search highlighting
   let searchMatchIds = $derived.by(() => {
-    if (!$cartActive || $cartItems.size === 0 || !$readExplorer?.reads) return null;
+    const hasCart = $cartActive && $cartItems.size > 0;
+    const q = searchDebounced.trim().toLowerCase();
+    if (!hasCart && !q) return null;
+    if (!$readExplorer?.reads) return null;
+
     const ids = new Set();
     for (const r of $readExplorer.reads) {
-      if ($cartItems.has(r.sample)) ids.add(r.id);
+      if (hasCart && !$cartItems.has(r.sample)) continue;
+      if (q) {
+        let found = false;
+        for (const f of SEARCH_FIELDS) {
+          const val = r[f];
+          if (val && String(val).toLowerCase().includes(q)) { found = true; break; }
+        }
+        if (!found) continue;
+      }
+      ids.add(r.id);
     }
     return ids;
   });
+
+  let searchMatchCount = $derived(searchMatchIds?.size ?? null);
 
   let selectedIds = $state(null);  // Set of selected read IDs from lasso
 
@@ -90,6 +122,41 @@
     return $readExplorer.reads.find(r => r.id === $selectedRead);
   });
 
+  const selTaxRanks = [
+    { key: 'kraken_domain', label: 'Domain' },
+    { key: 'kraken_phylum', label: 'Phylum' },
+    { key: 'kraken_class',  label: 'Class' },
+    { key: 'kraken_order',  label: 'Order' },
+    { key: 'kraken_family', label: 'Family' },
+    { key: 'kraken_genus',  label: 'Genus' },
+  ];
+  let selTaxIdx = $state(1); // default phylum
+
+  let selectionStats = $derived.by(() => {
+    if (!selectedIds || !$readExplorer?.reads) return null;
+    const selected = $readExplorer.reads.filter(r => selectedIds.has(r.id));
+    if (!selected.length) return null;
+    const n = selected.length;
+    const totalBp = selected.reduce((s, r) => s + (r.length || 0), 0);
+    const avgLen = totalBp / n;
+    const avgGc = selected.reduce((s, r) => s + (r.gc || 0), 0) / n;
+    const samples = new Set(selected.map(r => r.sample));
+
+    // Taxonomy at selected rank
+    const rankKey = selTaxRanks[selTaxIdx].key;
+    const taxCounts = {};
+    for (const r of selected) {
+      const t = r[rankKey] || 'Unclassified';
+      taxCounts[t] = (taxCounts[t] || 0) + 1;
+    }
+    const topTaxa = Object.entries(taxCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([name, count]) => ({ name, count, pct: (100 * count / n).toFixed(1) }));
+
+    return { n, totalBp, avgLen, avgGc, nSamples: samples.size, topTaxa };
+  });
+
   let stats = $derived.by(() => {
     const reads = scatterData?.points;
     if (!reads?.length) return null;
@@ -111,7 +178,7 @@
     <!-- Stats -->
     {#if stats}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Reads" value={stats.n.toLocaleString()} color="cyan" />
+        <StatCard label="Reads Shown" value={stats.n.toLocaleString()} color="cyan" />
         <StatCard label="Samples" value={stats.nSamples} color="emerald" />
         <StatCard label="Avg Length" value={`${Math.round(stats.avgLen).toLocaleString()} bp`} color="amber" />
         <StatCard label="Avg GC" value={`${stats.avgGc.toFixed(1)}%`} color="purple" />
@@ -162,22 +229,32 @@
           {scatterData.points.length.toLocaleString()} reads
         </span>
       {/if}
-    </div>
 
-    <!-- Selection bar -->
-    {#if selectedIds}
-      <div class="flex items-center gap-3 bg-slate-800/80 border border-cyan-900 rounded-lg px-4 py-2">
-        <span class="text-cyan-400 text-sm font-semibold">{selectedIds.size.toLocaleString()} reads selected</span>
-        <button
-          class="px-3 py-1 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded transition-colors"
-          onclick={exportSelection}
-        >Export TSV</button>
-        <button
-          class="px-3 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
-          onclick={() => { selectedIds = null; }}
-        >Clear</button>
+      <span class="text-slate-600 mx-1">|</span>
+
+      <div class="relative flex items-center">
+        <input
+          type="text"
+          bind:value={searchQuery}
+          placeholder="taxon, sample..."
+          class="w-48 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-slate-200 text-xs placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+        />
+        {#if searchQuery}
+          <button
+            class="absolute right-1 text-slate-500 hover:text-slate-300"
+            onclick={() => { searchQuery = ''; }}
+            title="Clear search"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        {/if}
       </div>
-    {/if}
+      {#if searchMatchCount !== null}
+        <span class="text-amber-400 font-medium">{searchMatchCount.toLocaleString()} matches</span>
+      {/if}
+    </div>
 
     <!-- Scatter -->
     <div class="flex gap-6">
@@ -201,9 +278,46 @@
         {/if}
       </div>
 
-      <!-- Read detail -->
-      {#if selectedDetail}
-        <div class="w-64 bg-slate-800 rounded-lg border border-slate-700 p-4 space-y-3 h-fit">
+      <!-- Right panel: selection summary or single-read detail -->
+      {#if selectionStats}
+        <div class="w-96 bg-slate-800 rounded-lg border border-cyan-900 p-4 space-y-3 h-fit flex-shrink-0">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-cyan-400">{selectionStats.n.toLocaleString()} reads selected</h3>
+            <button
+              class="text-slate-500 hover:text-slate-300 text-xs"
+              onclick={() => { selectedIds = null; }}
+              title="Clear selection"
+            >&#x2715;</button>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div class="text-slate-400">Total bp</div><div class="text-slate-200 font-mono">{selectionStats.totalBp.toLocaleString()}</div>
+            <div class="text-slate-400">Avg Length</div><div class="text-slate-200 font-mono">{Math.round(selectionStats.avgLen).toLocaleString()} bp</div>
+            <div class="text-slate-400">Avg GC</div><div class="text-slate-200 font-mono">{selectionStats.avgGc.toFixed(1)}%</div>
+            <div class="text-slate-400">Samples</div><div class="text-slate-200 font-mono">{selectionStats.nSamples}</div>
+          </div>
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              <button
+                class="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+                onclick={() => { selTaxIdx = (selTaxIdx + 1) % selTaxRanks.length; }}
+                title="Click to cycle rank"
+              >{selTaxRanks[selTaxIdx].label} &#x25BE;</button>
+              <span class="text-[10px] text-slate-600">{selectionStats.topTaxa.length} shown</span>
+            </div>
+            {#each selectionStats.topTaxa as t}
+              <div class="flex justify-between text-xs gap-1">
+                <span class="text-slate-300 truncate" title={t.name}>{t.name}</span>
+                <span class="text-slate-500 font-mono flex-shrink-0">{t.count.toLocaleString()} <span class="text-slate-600">({t.pct}%)</span></span>
+              </div>
+            {/each}
+          </div>
+          <button
+            class="w-full px-3 py-1.5 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded transition-colors"
+            onclick={exportSelection}
+          >Export TSV</button>
+        </div>
+      {:else if selectedDetail}
+        <div class="w-96 bg-slate-800 rounded-lg border border-slate-700 p-4 space-y-3 h-fit flex-shrink-0">
           <h3 class="text-sm font-semibold text-cyan-400 font-mono truncate" title={selectedDetail.id}>
             {selectedDetail.id.slice(0, 20)}...
           </h3>

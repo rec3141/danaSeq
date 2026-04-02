@@ -10,7 +10,7 @@ nextflow.enable.dsl = 2
 // scheduling without manual checkpoint logic or semaphores.
 //
 // Usage:
-//   nextflow run main.nf --input /path/to/data --run_kraken --run_prokka -resume
+//   nextflow run main.nf --input /path/to/data --run_kraken --annotator bakta -resume
 //
 // Watch mode for live sequencing (--input = parent of run directory):
 //   nextflow run main.nf --input /path/to/runs --watch --run_db_integration
@@ -40,13 +40,11 @@ def helpMessage() {
 
     Analysis flags:
       --run_kraken       Kraken2 taxonomic classification (requires --kraken_db)
-      --annotator STR    Annotator: 'prokka', 'bakta', or 'none' [default: none]
-      --bakta_db PATH    Path to Bakta database (required when using Bakta)
-      --run_prokka       (deprecated) Prokka annotation — use --annotator prokka
-      --run_bakta        (deprecated) Bakta annotation — use --annotator bakta
+      --annotator STR    Annotator: 'bakta', 'prokka', or 'none' [default: bakta]
+      --bakta_db PATH    Path to Bakta database [default: db-light]
       --run_sketch       Sendsketch taxonomic profiling
       --run_tetra        Tetranucleotide frequency analysis
-      --hmm_databases    Comma-separated HMM file paths (requires --run_prokka)
+      --hmm_databases    Comma-separated HMM file paths (requires annotation)
 
     Database paths:
       --kraken_db DIR    Path to Kraken2 database directory
@@ -72,12 +70,12 @@ def helpMessage() {
       # Full pipeline with Kraken2
       nextflow run main.nf --input /data/run1 \\
           --run_kraken --kraken_db /path/to/krakendb \\
-          --run_prokka --run_sketch --run_tetra -resume
+          --annotator bakta --run_sketch --run_tetra -resume
 
       # Kitchen sink — all modules, all options with defaults
       nextflow run main.nf --input /data/run1 --outdir results \\
           --run_kraken --kraken_db /path/to/krakendb \\
-          --run_prokka \\
+          --annotator bakta \\
           --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \\
           --run_sketch \\
           --run_tetra \\
@@ -92,7 +90,7 @@ def helpMessage() {
       nextflow run main.nf --input /data/runs --outdir results \\
           --watch --db_sync_minutes 10 \\
           --run_kraken --kraken_db /path/to/krakendb \\
-          --run_prokka \\
+          --annotator bakta \\
           --hmm_databases /path/to/CANT-HYD.hmm \\
           --run_sketch \\
           --run_tetra \\
@@ -100,9 +98,9 @@ def helpMessage() {
 
       # Using launcher script (local conda or Docker)
       ./run-realtime.sh --input /data/run1 --outdir /data/output \\
-          --run_kraken --kraken_db /path/to/krakendb --run_prokka
+          --run_kraken --kraken_db /path/to/krakendb --annotator bakta
       ./run-realtime.sh --docker --input /data/run1 --outdir /data/output \\
-          --run_kraken --kraken_db /path/to/krakendb --run_prokka
+          --run_kraken --kraken_db /path/to/krakendb --annotator bakta
 
       # Quick test with bundled test data
       nextflow run main.nf --input test-data -profile test -resume
@@ -141,9 +139,7 @@ if (params.run_db_integration && !params.danadir) {
     System.exit(1)
 }
 
-// Resolve annotator: --annotator overrides legacy --run_prokka/--run_bakta flags
-def effective_annotator = params.annotator ?:
-    (params.run_bakta ? 'bakta' : (params.run_prokka ? 'prokka' : 'none'))
+def effective_annotator = params.annotator ?: 'bakta'
 
 if (effective_annotator == 'bakta' && !params.bakta_db) {
     log.error "ERROR: --bakta_db is required when using Bakta annotation. Provide path to Bakta database."
@@ -173,10 +169,10 @@ include { CLEANUP }           from './modules/db_integration'
 
 def create_fastq_channel() {
     // Batch mode uses ** recursive glob (fromPath handles this natively).
-    // Watch mode uses a flat glob (watch_glob param) because Java's WatchService
-    // cannot recursively monitor subdirectories via **.  Default watch_glob is
-    // '*/fastq_pass/barcode*/*.fastq.gz' — set --input to the parent of the run
-    // directory, or override --watch_glob to match your directory depth.
+    // Watch mode: Java WatchService cannot use ** for recursive watches, so we
+    // auto-detect the directory depth to fastq_pass/ from existing files and
+    // build the correct flat glob.  Falls back to common depths (0-3) if no
+    // files exist yet.
 
     def ch_raw
     if (params.watch) {
@@ -186,7 +182,29 @@ def create_fastq_channel() {
         def skipped = existing ? existing.findAll { it.size() < params.min_file_size } : []
         log.info "Watch mode: ${existing ? existing.size() : 0} existing FASTQ files (${skipped.size()} skipped, < ${params.min_file_size} bytes; adjust with --min_file_size)"
         def ch_existing = existing ? Channel.from(existing) : Channel.empty()
-        def ch_watch = Channel.watchPath("${params.input}/${params.watch_glob}", 'create')
+
+        // Auto-detect watch glob: find depth to fastq_pass/ from existing files,
+        // or watch common depths 0-3 if no files exist yet.
+        def watch_globs = []
+        if (existing) {
+            def sample = existing[0].toAbsolutePath().toString()
+            def base = file(params.input).toAbsolutePath().toString()
+            def rel = sample.replace(base + '/', '')
+            def parts = rel.split('/')
+            def fp_idx = parts.findIndexOf { it == 'fastq_pass' }
+            if (fp_idx >= 0) {
+                watch_globs = [('*/' * fp_idx) + 'fastq_pass/barcode*/*.fastq.gz']
+            }
+        }
+        if (!watch_globs) {
+            // No files yet — watch all common depths so we catch them when they appear
+            watch_globs = (0..3).collect { d -> ('*/' * d) + 'fastq_pass/barcode*/*.fastq.gz' }
+        }
+        watch_globs.each { g -> log.info "Watch glob: ${params.input}/${g}" }
+
+        def ch_watch = watch_globs.collect { g ->
+            Channel.watchPath("${params.input}/${g}", 'create')
+        }.inject { a, b -> a.mix(b) }
         ch_raw = ch_existing.mix(ch_watch)
     } else {
         // Validate input before creating channel
@@ -364,7 +382,8 @@ workflow {
             // Cleanup runs inline after each sync cycle if enabled.
             def sync_secs = params.db_sync_minutes * 60
             def cleanup_flag = params.cleanup ? "true" : "false"
-            DB_SYNC(abs_outdir, params.danadir, sync_secs, cleanup_flag)
+            def metadata_path = params.metadata ? file(params.metadata).toAbsolutePath().toString() : "none"
+            DB_SYNC(abs_outdir, params.danadir, sync_secs, cleanup_flag, metadata_path)
         } else {
             // Batch mode: barrier approach — wait for all processes to finish
             // .collect() blocks until ALL mixed channels are drained

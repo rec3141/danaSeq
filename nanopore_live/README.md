@@ -14,13 +14,13 @@ cd nextflow
 # Run (local conda, handles activation automatically)
 ./run-realtime.sh --input /path/to/nanopore/run --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka --run_sketch --run_tetra
+    --annotator bakta --run_sketch --run_tetra
 
 # Or with Docker
 docker build -t danaseq-realtime .
 ./run-realtime.sh --docker --input /path/to/nanopore/run --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka
+    --annotator bakta
 
 # Show all options
 ./run-realtime.sh --help
@@ -34,7 +34,7 @@ cd nextflow
 # All analysis modules enabled, QC defaults shown explicitly
 ./run-realtime.sh --input /data/run1 --outdir /data/output \
     --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka \
+    --annotator bakta \
     --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \
     --run_sketch \
     --run_tetra \
@@ -48,7 +48,7 @@ cd nextflow
 ./run-realtime.sh --input /data/runs --outdir /data/output \
     --watch --db_sync_minutes 10 \
     --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka \
+    --annotator bakta \
     --hmm_databases /path/to/CANT-HYD.hmm \
     --run_sketch \
     --run_tetra \
@@ -67,7 +67,7 @@ docker run --user $(id -u):$(id -g) \
     run /pipeline/main.nf \
         --input /data/input --outdir /data/output \
         --kraken_db /kraken_db \
-        --run_kraken --run_prokka -resume
+        --run_kraken --annotator bakta -resume
 ```
 
 Always use `--user $(id -u):$(id -g)` so output files are owned by your user.
@@ -89,7 +89,7 @@ QC_FASTQ_FILTER         Length + quality filtering (C, streaming)
 CONVERT_TO_FASTA        Header cleanup
     │
     ├──► KRAKEN2_CLASSIFY     Taxonomic classification (batched per sample)
-    ├──► PROKKA_ANNOTATE      ORF prediction + annotation
+    ├──► BAKTA_CDS / PROKKA   Gene annotation (Bakta default)
     ├──► HMM_SEARCH           HMMER3 against user-supplied databases
     ├──► SENDSKETCH           Rapid taxonomic sketching
     └──► TETRAMER_FREQ        Tetranucleotide composition (C)
@@ -109,7 +109,7 @@ CONVERT_TO_FASTA        Header cleanup
 | `--outdir` | `results` | Output directory |
 | `--run_kraken` | `false` | Enable Kraken2 classification |
 | `--kraken_db` | (required if kraken) | Path to Kraken2 database |
-| `--run_prokka` | `false` | Enable Prokka annotation |
+| `--annotator` | `bakta` | Annotator: `bakta`, `prokka`, or `none` |
 | `--hmm_databases` | (skip) | Path to HMM file(s) for functional profiling |
 | `--run_sketch` | `false` | Enable Sendsketch profiling |
 | `--run_tetra` | `false` | Enable tetranucleotide frequency |
@@ -135,7 +135,7 @@ Monitor a directory for new FASTQ files during active sequencing:
 nextflow run main.nf --input /path/to/runs \
     --watch --db_sync_minutes 10 \
     --run_kraken --kraken_db /path/to/db \
-    --run_prokka --run_db_integration
+    --annotator bakta --run_db_integration
 ```
 
 `DB_SYNC` runs as a long-lived process that periodically loads new results into DuckDB. R scripts are idempotent and track imports via `import_log`.

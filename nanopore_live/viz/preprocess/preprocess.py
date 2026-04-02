@@ -45,7 +45,7 @@ def discover_samples(input_dir):
                 samples.append({
                     'flowcell': flowcell,
                     'barcode': barcode_dir.name,
-                    'id': f"{flowcell}_{barcode_dir.name}",
+                    'id': f"{flowcell}:{barcode_dir.name}",
                     'db_path': str(db_path),
                     'dir': str(barcode_dir),
                 })
@@ -481,7 +481,6 @@ def normalize_barcode(raw):
 
 COLUMN_ALIASES = {
     'latitude': 'lat', 'longitude': 'lon', 'long': 'lon', 'lng': 'lon',
-    'sample_id': 'flowcell',
 }
 
 
@@ -495,9 +494,8 @@ def load_metadata(metadata_file):
     """Load user-provided metadata TSV.
 
     Requires flowcell and barcode columns.
-    Canonical sample key: FLOWCELL_barcodeNN.
-    Column aliases (case-insensitive): latitude->lat, longitude/long/lng->lon,
-    sample_id->flowcell."""
+    Canonical sample key: FLOWCELL:barcodeNN.
+    Column aliases (case-insensitive): latitude->lat, longitude/long/lng->lon."""
     if not metadata_file or not os.path.exists(metadata_file):
         return {}
 
@@ -520,7 +518,7 @@ def load_metadata(metadata_file):
             barcode = normalize_barcode(row.get('barcode', ''))
             if not flowcell or not barcode:
                 continue
-            key = f"{flowcell}_{barcode}"
+            key = f"{flowcell}:{barcode}"
 
             # Parse numeric fields
             parsed = {}

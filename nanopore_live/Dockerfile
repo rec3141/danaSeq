@@ -21,7 +21,7 @@
 #       run /pipeline/main.nf \
 #           --input /data \
 #           --kraken_db /kraken_db \
-#           --run_kraken --run_prokka \
+#           --run_kraken --annotator bakta \
 #           -resume
 #
 # ============================================================================

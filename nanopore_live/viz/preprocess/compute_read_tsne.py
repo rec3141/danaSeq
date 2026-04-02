@@ -42,7 +42,7 @@ def discover_samples(input_dir):
             db_path = barcode_dir / 'dana.duckdb'
             if db_path.exists():
                 samples.append({
-                    'id': f"{flowcell}_{barcode_dir.name}",
+                    'id': f"{flowcell}:{barcode_dir.name}",
                     'db_path': str(db_path),
                     'dir': str(barcode_dir),
                 })

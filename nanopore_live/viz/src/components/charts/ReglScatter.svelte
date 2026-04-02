@@ -87,13 +87,19 @@
 
   function applySearchFilter() {
     if (!scatterplot || !indexMap.length) return;
-    if (searchMatchIds) {
+    if (searchMatchIds && searchMatchIds.size > 0) {
       const indices = [];
       for (let i = 0; i < indexMap.length; i++) {
         if (searchMatchIds.has(indexMap[i][idField] || indexMap[i].id)) indices.push(i);
       }
-      scatterplot.filter(indices, { preventEvent: true });
+      console.log(`[search] ${searchMatchIds.size} match IDs, ${indices.length}/${indexMap.length} indices`);
+      if (indices.length > 0) {
+        scatterplot.filter(indices, { preventEvent: true });
+      } else {
+        scatterplot.unfilter({ preventEvent: true });
+      }
     } else {
+      console.log('[search] clearing filter');
       scatterplot.unfilter({ preventEvent: true });
     }
   }
@@ -209,17 +215,25 @@
     }
 
     const modeChanged = mode !== prevMode;
-    const savedView = (!modeChanged && prevMode !== null) ? scatterplot.get('cameraView') : null;
+    const savedTarget = (!modeChanged && prevMode !== null) ? scatterplot.get('cameraTarget') : null;
+    const savedDistance = (!modeChanged && prevMode !== null) ? scatterplot.get('cameraDistance') : null;
+    const savedRotation = (!modeChanged && prevMode !== null) ? scatterplot.get('cameraRotation') : null;
     prevMode = mode;
 
     scatterplot.set({ ...colorCfg, ...sizeCfg });
+
+    // Hide canvas during redraw to prevent flash of unfiltered points
+    if (searchMatchIds && canvasEl) canvasEl.style.opacity = '0';
 
     scatterplot.draw({ x, y, valueA, valueB }, {
       zDataType: isCont ? 'continuous' : 'categorical',
       wDataType: 'continuous',
     }).then(() => {
-      if (savedView) scatterplot.lookAt(savedView, { preventEvent: true });
+      if (savedTarget) {
+        try { scatterplot.lookAt(savedTarget, savedDistance, savedRotation); } catch (_) {}
+      }
       applySearchFilter();
+      if (canvasEl) canvasEl.style.opacity = '1';
     });
   }
 

@@ -1,6 +1,6 @@
 import { writable, derived } from 'svelte/store';
 
-// Set of sample keys ("flowcell_barcode")
+// Set of sample keys ("flowcell:barcode")
 export const cartItems = writable(new Set());
 
 // When true, all views filter to only cart items

@@ -91,13 +91,12 @@ function normalizeColumn(name) {
   const lower = name.trim().toLowerCase();
   const aliases = {
     'latitude': 'lat', 'longitude': 'lon', 'long': 'lon', 'lng': 'lon',
-    'sample_id': 'flowcell',
   };
   return aliases[lower] || lower;
 }
 
 /** Parse a metadata TSV string and update the metadata store.
- *  Requires flowcell and barcode columns. Canonical sample key: FLOWCELL_barcodeNN.
+ *  Requires flowcell and barcode columns. Canonical sample key: FLOWCELL:barcodeNN.
  *  Validates against known sample IDs before replacing existing data.
  *  Returns { matched, total, error? }. */
 export function loadMetadataTsv(text) {
@@ -121,7 +120,7 @@ export function loadMetadataTsv(text) {
     const flowcell = (row.flowcell || '').trim();
     const barcode = normalizeBarcode(row.barcode);
     if (!flowcell || !barcode) continue;
-    const key = `${flowcell}_${barcode}`;
+    const key = `${flowcell}:${barcode}`;
 
     const parsed = {};
     for (const [k, v] of Object.entries(row)) {

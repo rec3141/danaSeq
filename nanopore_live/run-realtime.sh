@@ -17,26 +17,26 @@ set -euo pipefail
 #   # Full pipeline with Kraken2
 #   ./run-realtime.sh --input /data/run1 --outdir /data/output \
 #       --run_kraken --kraken_db /path/to/krakendb \
-#       --run_prokka --run_sketch --run_tetra
+#       --annotator bakta --run_sketch --run_tetra
 #
 #   # With HMM profiling
 #   ./run-realtime.sh --input /data/run1 --outdir /data/output \
-#       --run_prokka --hmm_databases /path/to/CANT-HYD.hmm
+#       --annotator bakta --hmm_databases /path/to/CANT-HYD.hmm
 #
 #   # Multiple HMM databases
 #   ./run-realtime.sh --input /data/run1 --outdir /data/output \
-#       --run_prokka --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm
+#       --annotator bakta --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm
 #
 #   # With DuckDB integration
 #   ./run-realtime.sh --input /data/run1 --outdir /data/output \
 #       --run_kraken --kraken_db /path/to/krakendb \
-#       --run_prokka --run_sketch --run_tetra \
+#       --annotator bakta --run_sketch --run_tetra \
 #       --run_db_integration
 #
 #   # Kitchen sink — all modules, all options with defaults
 #   ./run-realtime.sh --input /data/run1 --outdir /data/output \
 #       --run_kraken --kraken_db /path/to/krakendb \
-#       --run_prokka \
+#       --annotator bakta \
 #       --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \
 #       --run_sketch \
 #       --run_tetra \
@@ -50,7 +50,7 @@ set -euo pipefail
 #   ./run-realtime.sh --input /data/runs --outdir /data/output \
 #       --watch --db_sync_minutes 10 \
 #       --run_kraken --kraken_db /path/to/krakendb \
-#       --run_prokka \
+#       --annotator bakta \
 #       --hmm_databases /path/to/CANT-HYD.hmm \
 #       --run_sketch \
 #       --run_tetra \
@@ -59,7 +59,7 @@ set -euo pipefail
 #   # Docker mode
 #   ./run-realtime.sh --docker --input /data/run1 --outdir /data/output \
 #       --run_kraken --kraken_db /path/to/krakendb \
-#       --run_prokka
+#       --annotator bakta
 #
 # ============================================================================
 
@@ -86,10 +86,11 @@ usage() {
     echo "Optional:"
     echo "  --kraken_db DIR      Kraken2 database directory"
     echo "  --hmm_databases LIST Comma-separated HMM file paths"
+    echo "  --metadata FILE      Sample metadata TSV (flowcell, barcode, lat, lon, etc.)"
     echo ""
     echo "Pipeline flags (passed to Nextflow):"
     echo "  --run_kraken         Kraken2 taxonomic classification (requires --kraken_db)"
-    echo "  --run_prokka         Prokka gene annotation"
+    echo "  --annotator STR      Annotator: bakta (default), prokka, or none"
     echo "  --run_sketch         Sendsketch taxonomic profiling"
     echo "  --run_tetra          Tetranucleotide frequency analysis"
     echo "  --run_db_integration Load results into DuckDB"
@@ -103,7 +104,7 @@ usage() {
     echo "Kitchen sink example (all modules, all options with defaults):"
     echo "  $0 --input /data/run1 --outdir /data/output \\"
     echo "      --run_kraken --kraken_db /path/to/krakendb \\"
-    echo "      --run_prokka \\"
+    echo "      --annotator bakta \\"
     echo "      --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \\"
     echo "      --run_sketch \\"
     echo "      --run_tetra \\"
