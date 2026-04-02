@@ -299,10 +299,11 @@ def main():
     print(f"[INFO] PCA {tetra_matrix.shape[1]} → {n_pca} dims", file=sys.stderr)
     tetra_matrix = PCA(n_components=n_pca, svd_solver='randomized', random_state=42).fit_transform(tetra_matrix)
 
-    # Compute t-SNE
+    # Compute t-SNE (Barnes-Hut approximation for O(n log n) scaling)
     perplexity = min(30, max(5, len(all_reads) // 10))
     tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42,
-                max_iter=1000, learning_rate='auto', init='pca')
+                max_iter=1000, learning_rate='auto', init='pca',
+                method='barnes_hut', n_jobs=-1)
     coords = tsne.fit_transform(tetra_matrix)
 
     # Add coordinates to reads
