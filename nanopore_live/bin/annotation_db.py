@@ -285,6 +285,55 @@ def import_batch(con, tsv_path, gff_path, fa_dir, is_bakta=True):
         print(f"[WARNING] FA file not found for read_contig_map: {fa_path}", file=sys.stderr)
 
 
+def collect_pending(pattern, gff_ext, imported, is_bakta):
+    """Find pending TSV+GFF pairs, parse them, return accumulated rows."""
+    tsvs = sorted(glob.glob(pattern, recursive=True))
+    if is_bakta:
+        tsvs = [f for f in tsvs
+                if not f.endswith('.hypotheticals.tsv')
+                and not f.endswith('.inference.tsv')]
+
+    all_ann = []
+    all_stats = []
+    all_locus = []
+    all_map = []
+    log_entries = []
+
+    for tsv_path in tsvs:
+        if tsv_path in imported:
+            continue
+        gff_path = tsv_path.replace('.tsv', gff_ext)
+        if not os.path.exists(gff_path):
+            continue
+
+        fileid = os.path.basename(os.path.dirname(tsv_path))
+        try:
+            if is_bakta:
+                ann_rows = read_bakta_tsv(tsv_path)
+                stats_rows, locus_rows, contig_order = read_bakta_gff(gff_path, fileid)
+            else:
+                ann_rows = read_prokka_tsv(tsv_path)
+                stats_rows, locus_rows, contig_order = read_prokka_gff(gff_path, fileid)
+        except Exception as e:
+            print(f"[WARNING] Import failed for {tsv_path}: {e}", file=sys.stderr)
+            continue
+
+        if ann_rows:
+            all_ann.extend(ann_rows)
+        all_stats.extend(stats_rows)
+        all_locus.extend(locus_rows)
+
+        fa_path = os.path.join('fa', f"{fileid}.fa")
+        if os.path.exists(fa_path) and contig_order:
+            map_rows = build_read_contig_map(fa_path, fileid, contig_order)
+            all_map.extend(map_rows)
+
+        log_entries.append(tsv_path)
+        log_entries.append(gff_path)
+
+    return all_ann, all_stats, all_locus, all_map, log_entries
+
+
 def main():
     barcode_dir = sys.argv[1]
     os.chdir(barcode_dir)
@@ -296,41 +345,49 @@ def main():
         "SELECT filename FROM import_log"
     ).fetchall()}
 
-    # --- Prokka ---
-    prokka_tsvs = sorted(glob.glob('prokka/**/*.tsv', recursive=True))
-    for tsv_path in prokka_tsvs:
-        if tsv_path in imported:
-            continue
-        gff_path = tsv_path.replace('.tsv', '.gff')
-        if not os.path.exists(gff_path):
-            continue
-        try:
-            import_batch(con, tsv_path, gff_path, 'fa', is_bakta=False)
-        except Exception as e:
-            print(f"[WARNING] Prokka import failed for {tsv_path}: {e}", file=sys.stderr)
-            continue
-        con.execute("INSERT INTO import_log (filename) VALUES (?) ON CONFLICT DO NOTHING", [tsv_path])
-        con.execute("INSERT INTO import_log (filename) VALUES (?) ON CONFLICT DO NOTHING", [gff_path])
+    # Collect all pending rows from prokka + bakta
+    all_ann, all_stats, all_locus, all_map, log_entries = [], [], [], [], []
 
-    # --- Bakta ---
-    bakta_tsvs = sorted(glob.glob('bakta/**/*.tsv', recursive=True))
-    # Filter out .hypotheticals.tsv and .inference.tsv
-    bakta_tsvs = [f for f in bakta_tsvs
-                  if not f.endswith('.hypotheticals.tsv')
-                  and not f.endswith('.inference.tsv')]
-    for tsv_path in bakta_tsvs:
-        if tsv_path in imported:
-            continue
-        gff_path = tsv_path.replace('.tsv', '.gff3')
-        if not os.path.exists(gff_path):
-            continue
-        try:
-            import_batch(con, tsv_path, gff_path, 'fa', is_bakta=True)
-        except Exception as e:
-            print(f"[WARNING] Bakta import failed for {tsv_path}: {e}", file=sys.stderr)
-            continue
-        con.execute("INSERT INTO import_log (filename) VALUES (?) ON CONFLICT DO NOTHING", [tsv_path])
-        con.execute("INSERT INTO import_log (filename) VALUES (?) ON CONFLICT DO NOTHING", [gff_path])
+    for pattern, gff_ext, is_bakta in [
+        ('prokka/**/*.tsv', '.gff', False),
+        ('bakta/**/*.tsv', '.gff3', True),
+    ]:
+        ann, stats, locus, rcm, logs = collect_pending(
+            pattern, gff_ext, imported, is_bakta
+        )
+        all_ann.extend(ann)
+        all_stats.extend(stats)
+        all_locus.extend(locus)
+        all_map.extend(rcm)
+        log_entries.extend(logs)
+
+    if not log_entries:
+        con.close()
+        return
+
+    n = len(log_entries) // 2
+    print(f"[INFO] annotation_db: importing {n} batches "
+          f"({len(all_ann)} annotations, {len(all_map)} read mappings)",
+          file=sys.stderr)
+
+    # Bulk insert all at once
+    if all_ann:
+        con.executemany(
+            "INSERT INTO prokka_annotations VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (locus_tag) DO NOTHING", all_ann)
+    if all_stats:
+        con.executemany("INSERT INTO stats VALUES (?, ?)", all_stats)
+    if all_locus:
+        con.executemany(
+            "INSERT INTO locus_index VALUES (?, ?) "
+            "ON CONFLICT (locus_tag) DO NOTHING", all_locus)
+    if all_map:
+        con.executemany(
+            "INSERT INTO read_contig_map VALUES (?, ?, ?)", all_map)
+    for entry in log_entries:
+        con.execute(
+            "INSERT INTO import_log (filename) VALUES (?) ON CONFLICT DO NOTHING",
+            [entry])
 
     con.close()
 

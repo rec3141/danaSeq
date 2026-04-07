@@ -135,8 +135,28 @@ if (params.run_kraken && !params.kraken_db) {
     System.exit(1)
 }
 if (params.run_db_integration && !params.danadir) {
-    log.error "ERROR: --danadir is required when using --run_db_integration. Provide path to R scripts directory."
+    log.error "ERROR: --danadir is required when using --run_db_integration. Provide path to DB scripts directory."
     System.exit(1)
+}
+
+// Enforce consistent mode (watch vs batch) per output directory.
+// Switching modes changes task grouping (per-file vs per-sample), which
+// produces different output filenames and would corrupt the DuckDB.
+def mode_label = params.watch ? 'watch' : 'batch'
+def mode_file = file("${params.outdir}/.pipeline_mode")
+if (mode_file.exists()) {
+    def prev_mode = mode_file.text.trim()
+    if (prev_mode != mode_label) {
+        log.error "ERROR: Output directory was created in '${prev_mode}' mode but you are running in '${mode_label}' mode.\n" +
+                  "Switching modes on the same output directory would corrupt the database.\n" +
+                  "Use a different --outdir, or delete ${params.outdir} to start fresh."
+        System.exit(1)
+    }
+} else {
+    // First run — record mode
+    def outdir = file(params.outdir)
+    if (!outdir.exists()) outdir.mkdirs()
+    mode_file.text = mode_label
 }
 
 def effective_annotator = params.annotator ?: 'bakta'
