@@ -23,25 +23,11 @@ process DB_INTEGRATION {
 
     script:
     """
-    if [ -d "${barcode_dir}/kraken" ] && ls "${barcode_dir}"/kraken/*.tsv >/dev/null 2>&1; then
-        python3 ${params.danadir}/kraken_db.py "${barcode_dir}" || true
-        python3 ${params.danadir}/krakenreport_db.py "${barcode_dir}" || true
+    # Generate tnfs.txt header if needed (required by tetra import)
+    if [ -d "${barcode_dir}/tetra" ] && [ ! -s "${barcode_dir}/tnfs.txt" ]; then
+        printf '${TETRA_COLS}\\n' > "${barcode_dir}/tnfs.txt"
     fi
-
-    if [ -d "${barcode_dir}/prokka" ] || [ -d "${barcode_dir}/bakta" ]; then
-        python3 ${params.danadir}/annotation_db.py "${barcode_dir}" || true
-    fi
-
-    if [ -d "${barcode_dir}/sketch" ] && ls "${barcode_dir}"/sketch/*.txt >/dev/null 2>&1; then
-        python3 ${params.danadir}/sketch_db.py "${barcode_dir}" || true
-    fi
-
-    if [ -d "${barcode_dir}/tetra" ] && ls "${barcode_dir}"/tetra/*.lrn >/dev/null 2>&1; then
-        if [ ! -s "${barcode_dir}/tnfs.txt" ]; then
-            printf '${TETRA_COLS}\\n' > "${barcode_dir}/tnfs.txt"
-        fi
-        python3 ${params.danadir}/tetra_db.py "${barcode_dir}" || true
-    fi
+    python3 ${params.danadir}/import_all.py "${barcode_dir}" || true
     """
 }
 
@@ -188,25 +174,10 @@ process DB_SYNC {
             for barcode_dir in \$(find ${outdir} -mindepth 2 -maxdepth 2 -type d -name 'barcode*' 2>/dev/null | sort); do
                 echo "[INFO] DB_SYNC: processing \${barcode_dir}"
 
-                if [ -d "\${barcode_dir}/kraken" ] && ls "\${barcode_dir}"/kraken/*.tsv >/dev/null 2>&1; then
-                    python3 ${danadir}/kraken_db.py "\${barcode_dir}" || true
-                    python3 ${danadir}/krakenreport_db.py "\${barcode_dir}" || true
+                if [ -d "\${barcode_dir}/tetra" ] && [ ! -s "\${barcode_dir}/tnfs.txt" ]; then
+                    printf '${TETRA_COLS}\\n' > "\${barcode_dir}/tnfs.txt"
                 fi
-
-                if [ -d "\${barcode_dir}/prokka" ] || [ -d "\${barcode_dir}/bakta" ]; then
-                    python3 ${danadir}/annotation_db.py "\${barcode_dir}" || true
-                fi
-
-                if [ -d "\${barcode_dir}/sketch" ] && ls "\${barcode_dir}"/sketch/*.txt >/dev/null 2>&1; then
-                    python3 ${danadir}/sketch_db.py "\${barcode_dir}" || true
-                fi
-
-                if [ -d "\${barcode_dir}/tetra" ] && ls "\${barcode_dir}"/tetra/*.lrn >/dev/null 2>&1; then
-                    if [ ! -s "\${barcode_dir}/tnfs.txt" ]; then
-                        printf '${TETRA_COLS}\\n' > "\${barcode_dir}/tnfs.txt"
-                    fi
-                    python3 ${danadir}/tetra_db.py "\${barcode_dir}" || true
-                fi
+                python3 ${danadir}/import_all.py "\${barcode_dir}" || true
 
                 # Post-sync cleanup if enabled
                 if [ "${cleanup_enabled}" = "true" ]; then
