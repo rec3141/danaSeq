@@ -370,20 +370,42 @@ def main():
           f"({len(all_ann)} annotations, {len(all_map)} read mappings)",
           file=sys.stderr)
 
-    # Bulk insert all at once
+    # Bulk insert via appender (much faster than executemany for large batches)
+    def bulk_append(table, rows):
+        appender = con.appender(table)
+        for row in rows:
+            appender.append_row(row)
+        appender.close()
+
+    def bulk_upsert(table, rows, cols, pk):
+        """Insert rows, skipping primary key conflicts via temp table."""
+        tmp = f"_tmp_{table}"
+        col_defs = ', '.join(f"{c} {t}" for c, t in cols)
+        con.execute(f"CREATE TEMP TABLE {tmp} ({col_defs})")
+        appender = con.appender(tmp)
+        for row in rows:
+            appender.append_row(row)
+        appender.close()
+        con.execute(f"INSERT INTO {table} SELECT * FROM {tmp} ON CONFLICT ({pk}) DO NOTHING")
+        con.execute(f"DROP TABLE {tmp}")
+
     if all_ann:
-        con.executemany(
-            "INSERT INTO prokka_annotations VALUES (?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT (locus_tag) DO NOTHING", all_ann)
+        bulk_upsert('prokka_annotations', all_ann, [
+            ('locus_tag', 'TEXT'), ('ftype', 'TEXT'), ('length_bp', 'INTEGER'),
+            ('gene', 'TEXT'), ('ec_number', 'TEXT'), ('cog', 'TEXT'), ('product', 'TEXT'),
+        ], 'locus_tag')
+
     if all_stats:
-        con.executemany("INSERT INTO stats VALUES (?, ?)", all_stats)
+        bulk_append('stats', all_stats)
+
     if all_locus:
-        con.executemany(
-            "INSERT INTO locus_index VALUES (?, ?) "
-            "ON CONFLICT (locus_tag) DO NOTHING", all_locus)
+        bulk_upsert('locus_index', all_locus, [
+            ('seqid', 'TEXT'), ('locus_tag', 'TEXT'),
+        ], 'locus_tag')
+
     if all_map:
-        con.executemany(
-            "INSERT INTO read_contig_map VALUES (?, ?, ?)", all_map)
+        bulk_append('read_contig_map', all_map)
+
     for entry in log_entries:
         con.execute(
             "INSERT INTO import_log (filename) VALUES (?) ON CONFLICT DO NOTHING",
