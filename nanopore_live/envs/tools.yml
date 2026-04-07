@@ -12,12 +12,5 @@ dependencies:
   - curl
   - python-duckdb
   - numpy
+  - pandas
   - scikit-learn
-  - r-base=4.5.2
-  - r-dbi=1.2.3
-  - r-duckdb=1.4.4
-  - r-readr=2.1.6
-  - r-stringr
-  - r-dplyr
-  - r-tidyr
-  - r-tibble
