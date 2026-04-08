@@ -406,11 +406,10 @@ def compute_sample_tsne(sketch_distances_file, sample_ids):
     name_to_sample = {}
 
     # Build mapping from sketch filename to sample ID
+    # Sketch filenames use underscore (FAZ82916_barcode01), sample IDs use colon
     for sid in sample_ids:
-        parts = sid.split('/')
-        if len(parts) == 2:
-            sketch_name = f"{parts[0]}_{parts[1]}"
-            name_to_sample[sketch_name] = sid
+        sketch_name = sid.replace(':', '_')
+        name_to_sample[sketch_name] = sid
 
     with open(sketch_distances_file) as f:
         for line in f:
