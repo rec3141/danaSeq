@@ -21,6 +21,12 @@ function dataMiddleware(req, res, next) {
 }
 
 export default defineConfig({
+  // base: './' makes asset URLs in the built index.html relative
+  // (./assets/...) so the same dist/ can be deployed under any path
+  // — /chesterfield/, /genice_ci/, microscape.app root, etc. — without
+  // a per-run rebuild. Runtime data fetches in src/stores/data.js are
+  // also `./data/...` so everything resolves from the current document URL.
+  base: './',
   plugins: [
     svelte(),
     ...(dataDir ? [{

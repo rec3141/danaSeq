@@ -15,6 +15,13 @@ export const loading = writable(true);
 export const error = writable(null);
 
 async function fetchJSON(url) {
+  // Resolve absolute /data/* paths against Vite's BASE_URL so the SPA works
+  // when hosted under a subdirectory (e.g. /LoganSkylar/) as well as at /.
+  // In dev / single-site builds BASE_URL is '/' so this is a no-op.
+  if (url.startsWith('/data/')) {
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+    url = base + url;
+  }
   // Try pre-compressed .json.gz first (only trust it if content-type is JSON or gzip)
   try {
     const gzRes = await fetch(url + '.gz');
@@ -50,13 +57,13 @@ export async function loadAllData() {
       funcData,
       metaData,
     ] = await Promise.all([
-      fetchJSON('/data/overview.json').catch(() => null),
-      fetchJSON('/data/samples.json').catch(() => null),
-      fetchJSON('/data/sample_tsne.json').catch(() => null),
-      fetchJSON('/data/sample_taxonomy.json').catch(() => null),
-      fetchJSON('/data/taxonomy_sunburst.json').catch(() => null),
-      fetchJSON('/data/sample_function.json').catch(() => null),
-      fetchJSON('/data/metadata.json').catch(() => null),
+      fetchJSON('./data/overview.json').catch(() => null),
+      fetchJSON('./data/samples.json').catch(() => null),
+      fetchJSON('./data/sample_tsne.json').catch(() => null),
+      fetchJSON('./data/sample_taxonomy.json').catch(() => null),
+      fetchJSON('./data/taxonomy_sunburst.json').catch(() => null),
+      fetchJSON('./data/sample_function.json').catch(() => null),
+      fetchJSON('./data/metadata.json').catch(() => null),
     ]);
 
     if (overviewData) overview.set(overviewData);
@@ -154,7 +161,7 @@ export async function loadReadExplorer() {
   if (readLoading || get(readExplorer) !== null) return;
   readLoading = true;
   try {
-    const data = await fetchJSON('/data/read_explorer.json');
+    const data = await fetchJSON('./data/read_explorer.json');
     readExplorer.set(data);
   } catch (e) {
     console.error('Failed to load read explorer:', e);
