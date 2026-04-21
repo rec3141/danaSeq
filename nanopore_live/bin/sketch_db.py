@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Load Sendsketch similarity results into DuckDB.
+"""Load per-read sendsketch GTDB classifications into DuckDB.
 
 Usage: python3 sketch_db.py <barcode_dir>
 
-Reads sketch/*.txt, inserts into sendsketch table.
+Reads sketch/*.sendsketch_reads.tsv (produced by modules/sketch.nf) and
+inserts rows into the sendsketch table.
 """
 
 import sys
@@ -23,36 +24,34 @@ def main():
     con = duckdb.connect('dana.duckdb')
     ensure_schema(con)
 
-    sketch_files = sorted(glob.glob('sketch/*.txt'))
+    tsvs = sorted(glob.glob('sketch/*.sendsketch_reads.tsv'))
     imported = {r[0] for r in con.execute(
         "SELECT filename FROM import_log WHERE filename LIKE 'sketch%'"
     ).fetchall()}
-    pending = [f for f in sketch_files if f not in imported]
+    pending = [f for f in tsvs if f not in imported]
 
     for file in pending:
         rows = []
         try:
             with open(file) as fh:
+                header = fh.readline()  # skip header
                 for line in fh:
-                    if line.startswith('#'):
-                        continue
                     parts = line.rstrip('\n').split('\t')
-                    if len(parts) < 3:
+                    if len(parts) < 5:
                         continue
-                    fileid = parts[0].replace('.fa', '')
-                    ref_name = parts[1]
+                    read_id, status, ani_s, ref_name, lineage = parts[:5]
                     try:
-                        ani = float(parts[2])
+                        ani = float(ani_s)
                     except ValueError:
                         continue
-                    rows.append((fileid, ref_name, ani))
+                    rows.append((read_id, status, ani, ref_name, lineage))
         except Exception as e:
             print(f"[WARNING] Failed to read {file}: {e}", file=sys.stderr)
             continue
 
         if rows:
             con.executemany(
-                "INSERT INTO sendsketch (fileid, ref_name, ani) VALUES (?, ?, ?)",
+                "INSERT INTO sendsketch (read_id, status, ani, ref_name, lineage) VALUES (?, ?, ?, ?, ?)",
                 rows
             )
         con.execute(

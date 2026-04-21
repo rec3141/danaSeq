@@ -241,6 +241,19 @@ process DB_SYNC {
             fi
         fi
 
+        # Optional per-run deploy hook: if \${outdir}/deploy.sh exists and is
+        # executable, invoke it with the outdir as \$1. The shipped generic
+        # orchestrator at viz/deploy.sh handles build + tar + POST to the
+        # microscape.app ingest API; typical per-run deploy.sh is a one-liner
+        # that execs viz/deploy.sh with the run's slug/name.
+        # Failures are logged but never fail the pipeline tick.
+        deploy_hook="${outdir}/deploy.sh"
+        if [ -x "\${deploy_hook}" ]; then
+            echo "[INFO] DB_SYNC tick=\${tick}: running deploy hook \${deploy_hook}"
+            "\${deploy_hook}" "${outdir}" 2>&1 | sed 's/^/  [DEPLOY] /' \\
+                || echo "[WARN] DB_SYNC tick=\${tick}: deploy hook exited non-zero"
+        fi
+
         echo "[INFO] DB_SYNC tick=\${tick}: complete, sleeping ${sync_seconds}s"
         tick=\$((tick + 1))
         sleep ${sync_seconds}

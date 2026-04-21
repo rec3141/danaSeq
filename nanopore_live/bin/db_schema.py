@@ -41,11 +41,15 @@ def ensure_schema(con):
         )
     """)
 
+    # Per-read GTDB classification from sendsketch against the local GTDB server.
+    # Replaces the old per-fasta aggregate schema (fileid, ref_name, ani).
     con.execute("""
         CREATE TABLE IF NOT EXISTS sendsketch (
-            fileid   TEXT,
+            read_id  TEXT,
+            status   TEXT,
+            ani      REAL,
             ref_name TEXT,
-            ani      REAL
+            lineage  TEXT
         )
     """)
 

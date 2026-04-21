@@ -91,7 +91,7 @@ CONVERT_TO_FASTA        Header cleanup
     ├──► KRAKEN2_CLASSIFY     Taxonomic classification (batched per sample)
     ├──► BAKTA_CDS / PROKKA   Gene annotation (Bakta default)
     ├──► HMM_SEARCH           HMMER3 against user-supplied databases
-    ├──► SENDSKETCH           Rapid taxonomic sketching
+    ├──► SENDSKETCH           Per-read GTDB classification (local sendsketch server)
     └──► TETRAMER_FREQ        Tetranucleotide composition (C)
               │
               ▼
@@ -111,7 +111,8 @@ CONVERT_TO_FASTA        Header cleanup
 | `--kraken_db` | (required if kraken) | Path to Kraken2 database |
 | `--annotator` | `bakta` | Annotator: `bakta`, `prokka`, or `none` |
 | `--hmm_databases` | (skip) | Path to HMM file(s) for functional profiling |
-| `--run_sketch` | `false` | Enable Sendsketch profiling |
+| `--run_sketch` | `false` | Enable per-read GTDB sendsketch classification |
+| `--sendsketch_address` | `http://10.151.50.41:3068/sketch` | Local GTDB sendsketch server URL |
 | `--run_tetra` | `false` | Enable tetranucleotide frequency |
 | `--watch` | `false` | Monitor for new files during live sequencing |
 | `--watch_glob` | `*/fastq_pass/barcode*/*.fastq.gz` | Glob pattern for watch mode |
@@ -151,7 +152,7 @@ results/
 │   │   ├── kraken/       *.tsv (per-read), *.report (summary)
 │   │   ├── bakta/        Bakta annotations (GFF3, FAA, FFN, TSV)
 │   │   ├── hmm/          *.DBNAME.tsv, *.DBNAME.tbl
-│   │   ├── sketch/       Sendsketch profiles
+│   │   ├── sketch/       sendsketch_reads.tsv (per-read GTDB classification)
 │   │   ├── tetra/        Tetranucleotide frequencies
 │   │   └── log.txt
 │   └── ...
@@ -182,11 +183,37 @@ Python scripts in `bin/` load results into per-sample DuckDB databases:
 | `kraken_db.py` | Kraken2 per-read classifications |
 | `krakenreport_db.py` | Kraken2 summary reports with full taxonomy |
 | `annotation_db.py` | Bakta/Prokka gene annotations + read-contig mapping |
-| `sketch_db.py` | Sendsketch similarity profiles |
+| `sketch_db.py` | Sendsketch per-read GTDB classifications |
 | `tetra_db.py` | Tetranucleotide frequencies + sequence index |
 | `db_schema.py` | Shared schema definitions (imported by all scripts) |
 
 Scripts are idempotent and track imports via `import_log`. Contig names are prefixed with the batch file ID to prevent collisions across batches.
+
+## Deploy to microscape.app
+
+The viz SPA + preprocessed JSONs are published to the portal via the ingest API. In watch mode, DB_SYNC fires a per-run deploy hook each tick (after preprocess regenerates `<outdir>/viz/*.json*`).
+
+**One-off manual push:**
+
+```bash
+viz/deploy.sh --preprocess-dir <outdir>/viz \
+              --slug genice_ci --name "GenIce CI"
+```
+
+`deploy.sh` runs `npm install` (first time only), `vite build`, stages `dist/data/`, tarballs the flat tree, and POSTs to `https://microscape.app/api/v1/deploy`.
+
+**Auto-deploy per sync tick:** drop a one-line hook at `<outdir>/deploy.sh`:
+
+```bash
+#!/usr/bin/env bash
+exec /data/danav2/nanopore_live/viz/deploy.sh \
+    --preprocess-dir "$1/viz" \
+    --slug genice_ci --name "GenIce CI"
+```
+
+DB_SYNC detects and invokes any executable `<outdir>/deploy.sh` at the end of each sync tick, so every live-sequencing refresh rebuilds + re-pushes.
+
+**API key:** read from `$MICROSCAPE_API_KEY` if set, else `~/.config/microscape/api-key`.
 
 ## Design Notes
 

@@ -153,7 +153,7 @@ def import_krakenreport(con, imported):
 # ---- Sketch ----
 
 def import_sketch(con, imported):
-    files = sorted(glob.glob('sketch/*.txt'))
+    files = sorted(glob.glob('sketch/*.sendsketch_reads.tsv'))
     pending = [f for f in files if f not in imported]
     if not pending:
         return
@@ -163,25 +163,24 @@ def import_sketch(con, imported):
     for file in pending:
         try:
             with open(file) as fh:
+                fh.readline()  # skip header
                 for line in fh:
-                    if line.startswith('#'):
-                        continue
                     parts = line.rstrip('\n').split('\t')
-                    if len(parts) < 3:
+                    if len(parts) < 5:
                         continue
-                    fileid = parts[0].replace('.fa', '')
+                    read_id, status, ani_s, ref_name, lineage = parts[:5]
                     try:
-                        ani = float(parts[2])
+                        ani = float(ani_s)
                     except ValueError:
                         continue
-                    all_rows.append((fileid, parts[1], ani))
+                    all_rows.append((read_id, status, ani, ref_name, lineage))
         except Exception as e:
             print(f"[WARNING] sketch read failed {file}: {e}", file=sys.stderr)
             continue
         log.append(file)
 
     if all_rows:
-        df = pd.DataFrame(all_rows, columns=['fileid', 'ref_name', 'ani'])
+        df = pd.DataFrame(all_rows, columns=['read_id', 'status', 'ani', 'ref_name', 'lineage'])
         con.append('sendsketch', df)
 
     for f in log:

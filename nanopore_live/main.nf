@@ -42,7 +42,8 @@ def helpMessage() {
       --run_kraken       Kraken2 taxonomic classification (requires --kraken_db)
       --annotator STR    Annotator: 'bakta', 'prokka', or 'none' [default: bakta]
       --bakta_db PATH    Path to Bakta database [default: db-light]
-      --run_sketch       Sendsketch taxonomic profiling
+      --run_sketch       Sendsketch per-read GTDB classification
+      --sendsketch_address URL  Sendsketch server URL [default: local GTDB]
       --run_tetra        Tetranucleotide frequency analysis
       --hmm_databases    Comma-separated HMM file paths (requires annotation)
 

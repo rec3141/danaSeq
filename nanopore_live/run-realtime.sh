@@ -91,7 +91,7 @@ usage() {
     echo "Pipeline flags (passed to Nextflow):"
     echo "  --run_kraken         Kraken2 taxonomic classification (requires --kraken_db)"
     echo "  --annotator STR      Annotator: bakta (default), prokka, or none"
-    echo "  --run_sketch         Sendsketch taxonomic profiling"
+    echo "  --run_sketch         Sendsketch per-read GTDB classification"
     echo "  --run_tetra          Tetranucleotide frequency analysis"
     echo "  --run_db_integration Load results into DuckDB"
     echo "  --cleanup            Compress/delete source files after DuckDB import"
