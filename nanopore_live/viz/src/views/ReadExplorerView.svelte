@@ -36,8 +36,8 @@
 
   const BW = { sample: '4.5rem', taxonomy: '4.5rem', metric: '4.5rem' };
 
-  let colorMode = $state('sample'); // 'sample' | 'taxonomy' | 'metric'
-  let metric = $state('gc');
+  let colorMode = $state('metric');  // 'sample' | 'taxonomy' | 'metric'
+  let metric = $state('gc');         // default metric → GC%
 
   // The per-read field used for coloring: looks up the active drill level in
   // RANK_FIELD. Missing entries (e.g. a rank with no per-read data) fall back
