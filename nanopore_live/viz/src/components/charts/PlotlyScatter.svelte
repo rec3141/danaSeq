@@ -23,6 +23,13 @@
                    '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8',
                    '#94a3b8','#d4d4d8','#78716c'];
 
+  // Upper bound on rendered marker size. Plotly's scattergl rasterizer
+  // wraps marker sizes back to specks above ~256 px — clamp a bit under
+  // that so the biggest points max out at MAX_MARKER_PX while smaller
+  // ones keep growing with sizeScale. Applied at the two call sites
+  // below so markerSize itself stays a pure computation.
+  const MAX_MARKER_PX = 200;
+
   // Precomputed sizing normalization (set in getTraces)
   let sizeNorm = null;
 
@@ -84,7 +91,7 @@
         text: sorted.map(c => hoverText(c)),
         customdata: sorted.map(c => c[idField] || c.id),
         marker: {
-          size: sorted.map(c => markerSize(c, sizeBy, sizeScale)),
+          size: sorted.map(c => Math.min(MAX_MARKER_PX, markerSize(c, sizeBy, sizeScale))),
           color: sorted.map(fn), opacity: 0.75,
           colorscale: 'Viridis', showscale: true,
           colorbar: {
@@ -107,7 +114,7 @@
       groups[key].x.push(c[xKey]);
       groups[key].y.push(c[yKey]);
       groups[key].text.push(hoverText(c));
-      groups[key].sizes.push(markerSize(c, sizeBy, sizeScale));
+      groups[key].sizes.push(Math.min(MAX_MARKER_PX, markerSize(c, sizeBy, sizeScale)));
       groups[key].ids.push(c[idField] || c.id);
     }
 
