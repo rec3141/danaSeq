@@ -5,9 +5,14 @@
   import { samples, sampleTsne, sampleTaxonomy, metadata, overview } from '../stores/data.js';
   import { cartItems, cartActive, addToCart, toggleCart } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
+  import { taxNav, activeSubTaxa, RANK_LABELS } from '../stores/taxonomy.js';
+  import TaxonomyDrillNav from '../components/layout/TaxonomyDrillNav.svelte';
 
-  let colorBy = $state('dominant_phylum');
-  let sizeBy = $state('total_bases');
+  // Taxonomy-overlay view: one disc per (sample, sub-taxon) at the current
+  // drill level. Size = sqrt(fraction_of_sample_reads) × scale, so abundances
+  // are cross-sample comparable (a 10% class in Sample A looks √10 bigger
+  // than a 1% class in Sample B). Replaces the prior `colorBy = dominant_*`
+  // hack which could only show a single lineage's dominant taxon per sample.
   let sizeScale = $state(1.0);
   let lassoIds = $state(null);
 
@@ -98,53 +103,83 @@
     embedIdx++;
   }
 
-  // Detect metadata columns: classify as continuous (>80% numeric) or categorical
-  let metaColumns = $derived.by(() => {
-    if (!$metadata) return [];
-    const stats = new Map();
+  // ------------------------------------------------------------------
+  // Search + color-mode cycling.
+  //
+  // Search: free-text substring match across id / flowcell / barcode /
+  // dominant_phylum / dominant_class / any uploaded metadata value.
+  // Result is a Set<sampleId> passed to PlotlyScatter via searchMatchIds
+  // (dims non-matches there) and also filters the sample table below.
+  //
+  // Color mode: cycles between the default taxonomy overlay (colorBy
+  // 'taxon', using the shared drill-down palette) and coloring every disc
+  // of a sample by a sample-level field — a cycled metadata column, or a
+  // cycled numeric metric (reads / bases / avg length / Shannon H).
+  // ------------------------------------------------------------------
+
+  let searchQuery = $state('');
+  let searchMatchIds = $derived.by(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q || !$samples) return null;
+    const out = new Set();
+    for (const s of $samples) {
+      const meta = $metadata?.[s.id];
+      const parts = [
+        s.id, s.flowcell, s.barcode, s.dominant_phylum, s.dominant_class,
+        ...(meta ? Object.values(meta) : []),
+      ];
+      const blob = parts.filter(v => v != null).map(String).join(' ').toLowerCase();
+      if (blob.includes(q)) out.add(s.id);
+    }
+    return out;
+  });
+
+  let colorMode = $state('taxonomy');  // 'taxonomy' | 'metric' | 'metadata'
+  let metaField = $state('');
+  let metricField = $state('read_count');
+
+  const METRIC_VALUES = ['read_count', 'total_bases', 'avg_length', 'diversity'];
+  const METRIC_LABELS = {
+    read_count: 'Reads', total_bases: 'Bases',
+    avg_length: 'Avg Length', diversity: 'Shannon H',
+  };
+
+  // Discover uploaded metadata columns. lat/lon are excluded because
+  // coloring by a lat/lon gradient on a t-SNE is meaningless; users who
+  // want geographic coloring use the /map view.
+  let metaGroup = $derived.by(() => {
+    if (!$metadata) return { values: [], labels: [] };
+    const cols = new Set();
     for (const m of Object.values($metadata)) {
-      for (const [k, v] of Object.entries(m)) {
+      for (const k of Object.keys(m)) {
         if (k === 'lat' || k === 'lon') continue;
-        if (!stats.has(k)) stats.set(k, { num: 0, total: 0 });
-        const s = stats.get(k);
-        s.total++;
-        if (typeof v === 'number') s.num++;
+        cols.add(k);
       }
     }
-    return [...stats.entries()].map(([k, s]) => ({ key: k, continuous: s.num > s.total * 0.8 })).sort((a, b) => a.key.localeCompare(b.key));
+    const values = [...cols].sort();
+    return { values, labels: values.map(k => k.replace(/_/g, ' ')) };
   });
 
-  let colorOptions = $derived.by(() => {
-    const opts = [
-      { value: 'dominant_phylum', label: 'Phylum' },
-      { value: 'dominant_class', label: 'Class' },
-      { value: 'flowcell', label: 'Flowcell' },
-      { value: 'read_count', label: 'Read Count' },
-      { value: 'total_bases', label: 'Total Bases' },
-      { value: 'diversity', label: 'Diversity' },
-    ];
-    const existing = new Set(opts.map(o => o.value));
-    for (const col of metaColumns) {
-      if (existing.has(col.key)) continue;
-      opts.push({ value: col.key, label: col.key });
-    }
-    return opts;
+  // Initialize metaField to first discovered column once metadata arrives.
+  $effect(() => {
+    if (!metaField && metaGroup.values.length > 0) metaField = metaGroup.values[0];
   });
 
-  let sizeOptions = $derived.by(() => {
-    const opts = [
-      { value: 'fixed', label: 'Fixed' },
-      { value: 'read_count', label: 'Reads' },
-      { value: 'total_bases', label: 'Bases' },
-      { value: 'diversity', label: 'Diversity' },
-    ];
-    const existing = new Set(opts.map(o => o.value));
-    for (const col of metaColumns) {
-      if (!col.continuous || existing.has(col.key)) continue;
-      opts.push({ value: col.key, label: col.key });
-    }
-    return opts;
-  });
+  // Next-in-list helper used by the cycling buttons. Wraps to the start.
+  function cycle(list, current) {
+    if (!list || list.length === 0) return current;
+    const i = list.indexOf(current);
+    return list[(i + 1) % list.length];
+  }
+
+  // Active colorBy passed to PlotlyScatter. 'taxon' defers to the
+  // shared drill-down palette via colorMap; metric/metadata modes let
+  // PlotlyScatter auto-assign (continuous for numeric, categorical otherwise).
+  let activeColorBy = $derived(
+    colorMode === 'metric' ? metricField :
+    colorMode === 'metadata' ? (metaField || metaGroup.values[0] || 'taxon') :
+    'taxon'
+  );
 
   // Get coordinates for current embedding mode
   function getCoords(sampleId) {
@@ -169,43 +204,87 @@
     return { xMin, xMax, yMin, yMax };
   });
 
-  // Build scatter data from samples + embedding coordinates
+  // Taxonomy-overlay scatter: one disc per (sample × sub-taxon) at the
+  // current drill level. perSample[sid][subTaxon] holds the read count at
+  // that sub-taxon; we normalize against sample.read_count so disc areas
+  // are proportional to "% of this sample's reads" — same semantics as the
+  // /map rings — making sizes directly comparable across samples.
+  //
+  // Samples with zero discs (none of their reads fell under the drilled
+  // filter) disappear entirely, per spec.
   let scatterData = $derived.by(() => {
-    if (!$samples || !$sampleTsne) return null;
-    const points = $samples.filter(passesFilters).map(s => ({
-      ...s,
-      tsne_x: getCoords(s.id)[0],
-      tsne_y: getCoords(s.id)[1],
-    }));
+    if (!$samples || !$sampleTsne || !$activeSubTaxa) return null;
+    const perSample = $activeSubTaxa.perSample;
+    const colorMap = $activeSubTaxa.colorMap;
+    const basePass = $samples.filter(passesFilters);
+    const cartOn = $cartActive && $cartItems.size > 0;
 
-    // Merge metadata if available
-    if ($metadata) {
-      for (const p of points) {
-        const m = $metadata[p.id];
-        if (m) Object.assign(p, m);
+    const out = [];
+    const isolatedTaxon = $taxNav.isolated;
+    for (const s of basePass) {
+      if (cartOn && !$cartItems.has(s.id)) continue;
+      const [x, y] = getCoords(s.id);
+      const subCounts = perSample[s.id];
+      if (!subCounts) continue;
+      const denom = s.read_count > 0 ? s.read_count : null;
+      if (!denom) continue;
+      // Per-sample fields available as color-by targets — the disc for
+      // each (sample, taxon) gets the sample-level fields copied on so
+      // colorBy='read_count' / 'station' / 'depth_m' etc. all work without
+      // the chart component needing to know about the sample→taxon fan-out.
+      const m = $metadata?.[s.id];
+      const sampleFields = {
+        flowcell: s.flowcell,
+        barcode: s.barcode,
+        read_count: s.read_count,
+        total_bases: s.total_bases,
+        avg_length: s.avg_length,
+        diversity: s.diversity,
+        dominant_phylum: s.dominant_phylum,
+        dominant_class: s.dominant_class,
+        start_time: s.start_time,
+        ...(m || {}),
+      };
+      for (const taxon in subCounts) {
+        if (isolatedTaxon && taxon !== isolatedTaxon) continue;
+        const cnt = subCounts[taxon];
+        if (!cnt) continue;
+        const fraction = cnt / denom;
+        out.push({
+          id: s.id,
+          taxon,
+          ...sampleFields,
+          tsne_x: x,
+          tsne_y: y,
+          size: Math.sqrt(fraction) * 28,   // tuned to match map marker footprint
+          fraction,
+          hover_text:
+            `<b>${s.id}</b><br>` +
+            `${taxon}: ${(fraction * 100).toFixed(1)}% ` +
+            `(${cnt.toLocaleString()} / ${s.read_count.toLocaleString()} reads)`,
+        });
       }
     }
-
-    // Filter by cart if active
-    const filtered = $cartActive && $cartItems.size > 0
-      ? points.filter(p => $cartItems.has(p.id))
-      : points;
-
-    return { points: filtered };
+    // Largest first — big discs render underneath so smaller overlays stay
+    // visible. Plotly paints traces in iteration order; groups share a trace
+    // per taxon but within a trace sizes vary, so this ordering also controls
+    // within-trace paint order.
+    out.sort((a, b) => b.fraction - a.fraction);
+    if (typeof window !== 'undefined') {
+      const taxa = new Set(out.map(p => p.taxon));
+      window.__sampleScatterDiag = {
+        level: $taxNav.level, filter: $taxNav.filter, isolated: $taxNav.isolated,
+        discs: out.length, uniqueTaxa: taxa.size,
+        colorMapSize: Object.keys(colorMap).length,
+        sampleTaxa: [...taxa].slice(0, 5),
+        sampleColors: [...taxa].slice(0, 5).map(t => [t, colorMap[t]]),
+      };
+    }
+    return { points: out };
   });
 
-  // Stable color map
-  let colorMap = $derived.by(() => {
-    if (!$samples) return {};
-    const palette = ['#22d3ee','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c',
-                     '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8',
-                     '#94a3b8','#d4d4d8','#78716c','#fb7185','#facc15','#4ade80',
-                     '#60a5fa','#c084fc','#f97316','#14b8a6','#e879f9','#a3e635'];
-    const map = {};
-    const values = [...new Set($samples.map(s => s[colorBy] || 'Unknown'))].filter(v => v !== 'Unknown').sort();
-    values.forEach((v, i) => { map[v] = palette[i % palette.length]; });
-    return map;
-  });
+  // Shared color map with the drill-down sidebar and the /map view.
+  let taxColorMap = $derived($activeSubTaxa?.colorMap ?? {});
 
   // Selected sample detail
   let selectedDetail = $derived.by(() => {
@@ -266,23 +345,65 @@
     >
       {EMBED_LABELS[embedMode] || embedMode} &#x25BE;
     </button>
-    <select bind:value={colorBy}
-      class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
-      {#each colorOptions as opt}
-        <option value={opt.value}>{opt.label}</option>
-      {/each}
-    </select>
-    <select bind:value={sizeBy}
-      class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer">
-      {#each sizeOptions as opt}
-        <option value={opt.value}>Size: {opt.label}</option>
-      {/each}
-    </select>
+
+    <!-- Color-mode cycle: Taxonomy (default) / Metric / Metadata.
+         Each button is a toggle+cycle: first click switches the mode;
+         subsequent clicks while in that mode cycle the inner field. -->
+    <div class="flex items-center gap-1">
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center min-w-[5rem]
+          {colorMode === 'taxonomy' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        onclick={() => { colorMode = 'taxonomy'; }}
+        title="Color by active taxonomy level (shared palette with /map)"
+      >Taxonomy</button>
+      <button
+        class="px-3 py-1 rounded-md border transition-colors text-center min-w-[5rem]
+          {colorMode === 'metric' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+        onclick={() => {
+          if (colorMode === 'metric') metricField = cycle(METRIC_VALUES, metricField);
+          else colorMode = 'metric';
+        }}
+        title={`Click to cycle: ${METRIC_VALUES.map(v => METRIC_LABELS[v]).join(' → ')}`}
+      >{colorMode === 'metric' ? METRIC_LABELS[metricField] : 'Metric'} &#x25BE;</button>
+      {#if metaGroup.values.length > 0}
+        <button
+          class="px-3 py-1 rounded-md border transition-colors text-center min-w-[6rem]
+            {colorMode === 'metadata' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+          onclick={() => {
+            if (colorMode === 'metadata') metaField = cycle(metaGroup.values, metaField || metaGroup.values[0]);
+            else colorMode = 'metadata';
+          }}
+          title={`Click to cycle: ${metaGroup.labels.join(' → ')}`}
+        >{colorMode === 'metadata' ? (metaField || metaGroup.values[0]).replace(/_/g, ' ') : 'Metadata'} &#x25BE;</button>
+      {/if}
+    </div>
+
+    <!-- Search: free-text match across id/flowcell/barcode/taxonomy/metadata.
+         Matches stay colored; non-matches are dimmed by PlotlyScatter. -->
+    <div class="flex items-center gap-1">
+      <input
+        type="search"
+        bind:value={searchQuery}
+        placeholder="Search id / flowcell / metadata…"
+        class="bg-slate-800 border border-slate-600 rounded-md px-2 py-1 text-xs text-slate-200 w-[220px] focus:border-cyan-400 focus:outline-none"
+      />
+      {#if searchMatchIds}
+        <span class="text-[10px] text-slate-500 font-mono">
+          {searchMatchIds.size}/{$samples?.length ?? 0}
+        </span>
+        <button class="text-slate-500 hover:text-slate-200 text-xs" onclick={() => (searchQuery = '')} title="Clear search">✕</button>
+      {/if}
+    </div>
+
+    <span class="text-slate-500 text-[11px] uppercase tracking-wide">
+      {RANK_LABELS[$taxNav.level] ?? $taxNav.level}
+      {#if $taxNav.filter} <span class="text-cyan-400 normal-case tracking-normal">· {$taxNav.filter}</span>{/if}
+    </span>
     <div class="text-slate-400 flex items-center gap-1">
       Size
       <div class="single-range relative w-20 h-5 flex items-center">
         <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
-        <input type="range" min="0.2" max="3" step="0.1" bind:value={sizeScale} />
+        <input type="range" min="0.2" max="20" step="0.1" bind:value={sizeScale} />
       </div>
       <span class="text-slate-500 w-8 font-mono">{sizeScale.toFixed(1)}x</span>
     </div>
@@ -323,24 +444,28 @@
     {/if}
   </div>
 
-  <!-- Main layout: scatter + detail -->
+  <!-- Main layout: drill-down nav + scatter + detail -->
   <div class="flex gap-6">
+    <TaxonomyDrillNav heightClass="h-[600px]" />
     <div class="flex-1 h-[600px] flex flex-col">
-      {#if scatterData}
+      {#if scatterData && scatterData.points.length > 0}
         <PlotlyScatter
           data={scatterData}
-          {colorBy}
-          {sizeBy}
+          colorBy={activeColorBy}
+          sizeBy="raw"
           {sizeScale}
           mode="tsne"
-          {colorMap}
+          colorMap={colorMode === 'taxonomy' ? taxColorMap : {}}
           {coordExtents}
+          {searchMatchIds}
           onselect={handleSelect}
           onclick={handleClick}
-          exportName={`danaseq_sample_tsne_color-${colorBy}`}
+          exportName={`danaseq_sample_tsne_${$taxNav.level}${$taxNav.filter ? '_' + $taxNav.filter : ''}${colorMode !== 'taxonomy' ? '_' + activeColorBy : ''}`}
         />
+      {:else if !$activeSubTaxa}
+        <div class="flex items-center justify-center h-full text-slate-500">Loading taxonomy…</div>
       {:else}
-        <div class="flex items-center justify-center h-full text-slate-500">No sample data available</div>
+        <div class="flex items-center justify-center h-full text-slate-500">No samples under the current drill-down filter.</div>
       {/if}
     </div>
 
@@ -396,10 +521,15 @@
       ? filteredSamples.filter(s => lassoIds.includes(s.id))
       : $cartActive && $cartItems.size > 0
         ? filteredSamples.filter(s => $cartItems.has(s.id))
-        : filteredSamples}
+        : searchMatchIds
+          ? filteredSamples.filter(s => searchMatchIds.has(s.id))
+          : filteredSamples}
     <div>
       <h3 class="text-sm font-semibold text-slate-300 mb-2">
-        {lassoIds ? `Selected (${lassoIds.length})` : $cartActive && $cartItems.size > 0 ? `Cart (${$cartItems.size})` : `Barcodes (${filteredSamples.length}/${$samples.length})`}
+        {lassoIds ? `Selected (${lassoIds.length})`
+          : $cartActive && $cartItems.size > 0 ? `Cart (${$cartItems.size})`
+          : searchMatchIds ? `Matches (${tableRows.length}/${filteredSamples.length})`
+          : `Barcodes (${filteredSamples.length}/${$samples.length})`}
       </h3>
       <DataTable
         columns={tableColumns}
