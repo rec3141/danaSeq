@@ -11,10 +11,10 @@
 
   // Map rank code → the per-read field suffix emitted by compute_read_tsne.py.
   // R2 (Kraken superkingdom) and D (GTDB domain) both surface as *_domain
-  // on reads. Species (S) is absent on reads, so S drills are aliased to G
-  // for coloring/filtering (nav still shows species in the sidebar list).
+  // on reads; S surfaces as *_species. Reads now carry the full chain so
+  // drilling down to species colors/filters without a fallback.
   const RANK_FIELD = { D: 'domain', R2: 'domain', P: 'phylum', C: 'class',
-                       O: 'order', F: 'family', G: 'genus', S: 'genus' };
+                       O: 'order', F: 'family', G: 'genus', S: 'species' };
 
   let loading = $state(true);
 
@@ -39,9 +39,10 @@
   let colorMode = $state('metric');  // 'sample' | 'taxonomy' | 'metric'
   let metric = $state('gc');         // default metric → GC%
 
-  // The per-read field used for coloring: looks up the active drill level in
-  // RANK_FIELD. Missing entries (e.g. a rank with no per-read data) fall back
-  // to phylum so the scatter still has something to color by.
+  // Scatter color field = `${source}_${rank_suffix}` from the active drill
+  // level. Missing entries (shouldn't happen now that RANK_FIELD covers all
+  // drillable ranks) fall back to phylum so the scatter still has something
+  // to color by.
   let taxField = $derived(
     `${$taxonomySource}_${RANK_FIELD[$taxNav.level] ?? 'phylum'}`
   );
@@ -54,8 +55,7 @@
     metric
   );
 
-  // Color map at the current drill rank — lets ReglScatter reuse the same
-  // palette that TaxonomyDrillNav shows in the sidebar list.
+  // Color map at the current drill rank — shared with the sidebar.
   let taxColorMap = $derived(
     colorMode === 'taxonomy' && $activeSubTaxa ? $activeSubTaxa.colorMap : {}
   );
@@ -89,6 +89,9 @@
 
     if (colorMode === 'taxonomy' && $sampleTaxonomy?.ranks) {
       const tax = $sampleTaxonomy;
+      // Isolation takes precedence when set (species click at S → isolate
+      // that species); otherwise filter by the drill breadcrumb. Both use
+      // the taxon's rank to pick which per-read field to match against.
       const scope = $taxNav.isolated || $taxNav.filter;
       if (scope) {
         const scopeRank = tax.ranks[scope];
@@ -120,9 +123,9 @@
   const SEARCH_FIELDS = [
     'sample',
     'kraken_domain', 'kraken_phylum', 'kraken_class',
-    'kraken_order', 'kraken_family', 'kraken_genus',
+    'kraken_order', 'kraken_family', 'kraken_genus', 'kraken_species',
     'gtdb_domain', 'gtdb_phylum', 'gtdb_class',
-    'gtdb_order', 'gtdb_family', 'gtdb_genus',
+    'gtdb_order', 'gtdb_family', 'gtdb_genus', 'gtdb_species',
     'genes', 'products',
   ];
 
@@ -162,8 +165,8 @@
     const selected = $readExplorer.reads.filter(r => selectedIds.has(r.id));
     const cols = [
       'id', 'sample', 'length', 'gc',
-      'kraken_domain', 'kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_genus',
-      'gtdb_domain', 'gtdb_phylum', 'gtdb_class', 'gtdb_order', 'gtdb_family', 'gtdb_genus',
+      'kraken_domain', 'kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_genus', 'kraken_species',
+      'gtdb_domain', 'gtdb_phylum', 'gtdb_class', 'gtdb_order', 'gtdb_family', 'gtdb_genus', 'gtdb_species',
       'genes', 'products',
     ];
     const header = cols.join('\t');
@@ -183,11 +186,11 @@
   });
 
   // Selection-panel rank picker. Tracks the active classifier's rank order
-  // (minus species, which reads don't carry) so the cycle walks the same
-  // levels as the main Taxonomy button and the drill-down sidebar.
+  // so the cycle walks the same levels as the main Taxonomy button and
+  // the drill-down sidebar.
   let selTaxRanks = $derived(
     $rankOrder
-      .filter(r => RANK_FIELD[r] && r !== 'S')
+      .filter(r => RANK_FIELD[r])
       .map(r => ({ key: `${$taxonomySource}_${RANK_FIELD[r]}`, label: RANK_LABELS[r] ?? r }))
   );
   let selTaxIdx = $state(1); // default phylum (index 1 in both orderings)
@@ -359,9 +362,14 @@
         {/if}
       </div>
 
-      <!-- Right panel: selection summary or single-read detail -->
-      {#if selectionStats}
-        <div class="w-96 bg-slate-800 rounded-lg border border-cyan-900 p-4 space-y-3 h-fit flex-shrink-0">
+      <!-- Right panel: lasso-selection summary AND single-read detail
+           stack together so clicking a read inside an active selection
+           doesn't hide either view. Both panels share the same w-96
+           column; the wrapper handles width/flex-shrink. -->
+      {#if selectionStats || selectedDetail}
+        <div class="w-96 flex-shrink-0 space-y-3 h-fit">
+          {#if selectionStats}
+            <div class="bg-slate-800 rounded-lg border border-cyan-900 p-4 space-y-3">
           <div class="flex items-center justify-between">
             <h3 class="text-sm font-semibold text-cyan-400">{selectionStats.n.toLocaleString()} reads selected</h3>
             <button
@@ -402,8 +410,9 @@
             onclick={exportSelection}
           >Export TSV</button>
         </div>
-      {:else if selectedDetail}
-        <div class="w-96 bg-slate-800 rounded-lg border border-slate-700 p-4 space-y-3 h-fit flex-shrink-0">
+      {/if}
+      {#if selectedDetail}
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 space-y-3">
           <h3 class="text-sm font-semibold text-cyan-400 font-mono truncate" title={selectedDetail.id}>
             {selectedDetail.id.slice(0, 20)}...
           </h3>
@@ -439,6 +448,8 @@
               <div class="text-slate-400">Products</div><div class="text-slate-200 font-mono text-[11px] whitespace-normal">{selectedDetail.products}</div>
             {/if}
           </div>
+        </div>
+      {/if}
         </div>
       {/if}
     </div>
