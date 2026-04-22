@@ -2,9 +2,19 @@
   import { onMount } from 'svelte';
   import ReglScatter from '../components/charts/ReglScatter.svelte';
   import StatCard from '../components/layout/StatCard.svelte';
-  import { readExplorer, loadReadExplorer } from '../stores/data.js';
+  import { readExplorer, loadReadExplorer, sampleTaxonomy } from '../stores/data.js';
   import { cartItems, cartActive } from '../stores/cart.js';
   import { selectedRead } from '../stores/selection.js';
+  import { taxonomySource } from '../stores/taxonomySource.js';
+  import { taxNav, activeSubTaxa, rankOrder, RANK_LABELS } from '../stores/taxonomy.js';
+  import TaxonomyDrillNav from '../components/layout/TaxonomyDrillNav.svelte';
+
+  // Map rank code → the per-read field suffix emitted by compute_read_tsne.py.
+  // R2 (Kraken superkingdom) and D (GTDB domain) both surface as *_domain
+  // on reads. Species (S) is absent on reads, so S drills are aliased to G
+  // for coloring/filtering (nav still shows species in the sidebar list).
+  const RANK_FIELD = { D: 'domain', R2: 'domain', P: 'phylum', C: 'class',
+                       O: 'order', F: 'family', G: 'genus', S: 'genus' };
 
   let loading = $state(true);
 
@@ -18,37 +28,76 @@
     return idx >= 0 ? labels[idx] : labels[0];
   }
 
-  // Color-by groups
-  const taxGroup =    { values: ['kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_genus', 'kraken_domain'],
-                        labels: ['Phylum', 'Class', 'Order', 'Family', 'Genus', 'Domain'] };
+  // Taxonomy label/cycle state. The cycle button walks the active rank order
+  // via taxNav.setLevel() — this shares the single source of truth with the
+  // drill-down sidebar, so both cycling and drilling move the same cursor
+  // and stay in sync.
   const metricGroup = { values: ['gc', 'length'], labels: ['GC%', 'Length'] };
 
   const BW = { sample: '4.5rem', taxonomy: '4.5rem', metric: '4.5rem' };
 
   let colorMode = $state('sample'); // 'sample' | 'taxonomy' | 'metric'
-  let taxRank = $state('kraken_phylum');
   let metric = $state('gc');
+
+  // The per-read field used for coloring: looks up the active drill level in
+  // RANK_FIELD. Missing entries (e.g. a rank with no per-read data) fall back
+  // to phylum so the scatter still has something to color by.
+  let taxField = $derived(
+    `${$taxonomySource}_${RANK_FIELD[$taxNav.level] ?? 'phylum'}`
+  );
 
   let sizeScale = $state(0.6);
 
   let colorBy = $derived(
     colorMode === 'sample' ? 'sample' :
-    colorMode === 'taxonomy' ? taxRank :
+    colorMode === 'taxonomy' ? taxField :
     metric
   );
+
+  // Color map at the current drill rank — lets ReglScatter reuse the same
+  // palette that TaxonomyDrillNav shows in the sidebar list.
+  let taxColorMap = $derived(
+    colorMode === 'taxonomy' && $activeSubTaxa ? $activeSubTaxa.colorMap : {}
+  );
+
+  // Cycle forward through the active rank order (R2→P→C→O→F→G→S→R2 for Kraken,
+  // D→…→S→D for GTDB). Overrides the drill state without wiping the filter.
+  function cycleTaxRank() {
+    const order = $rankOrder;
+    const i = order.indexOf($taxNav.level);
+    const next = order[(i + 1) % order.length];
+    taxNav.setLevel(next);
+  }
 
   onMount(async () => {
     await loadReadExplorer();
     loading = false;
   });
 
-  // Filter reads by cart
+  // Filter reads by cart + (in taxonomy mode) by the drill-down filter.
+  // The drill filter scopes to the filter taxon's rank: when drilled to a
+  // Phylum, we keep reads whose `${source}_phylum` matches; at Class, we
+  // keep reads whose class matches; etc. Isolation (leaf-rank) also filters
+  // to that taxon at its own rank.
   let scatterData = $derived.by(() => {
     if (!$readExplorer?.reads) return null;
     let reads = $readExplorer.reads;
 
     if ($cartActive && $cartItems.size > 0) {
       reads = reads.filter(r => $cartItems.has(r.sample));
+    }
+
+    if (colorMode === 'taxonomy' && $sampleTaxonomy?.ranks) {
+      const tax = $sampleTaxonomy;
+      const scope = $taxNav.isolated || $taxNav.filter;
+      if (scope) {
+        const scopeRank = tax.ranks[scope];
+        const field = scopeRank ? RANK_FIELD[scopeRank] : null;
+        if (field) {
+          const readField = `${$taxonomySource}_${field}`;
+          reads = reads.filter(r => r[readField] === scope);
+        }
+      }
     }
 
     return { points: reads };
@@ -66,9 +115,14 @@
     return () => clearTimeout(debounceTimer);
   });
 
+  // Search across both taxonomies so a user can find reads by either
+  // Kraken or GTDB names regardless of the current toggle.
   const SEARCH_FIELDS = [
-    'sample', 'kraken_domain', 'kraken_phylum', 'kraken_class',
+    'sample',
+    'kraken_domain', 'kraken_phylum', 'kraken_class',
     'kraken_order', 'kraken_family', 'kraken_genus',
+    'gtdb_domain', 'gtdb_phylum', 'gtdb_class',
+    'gtdb_order', 'gtdb_family', 'gtdb_genus',
     'genes', 'products',
   ];
 
@@ -106,7 +160,12 @@
   function exportSelection() {
     if (!selectedIds || !$readExplorer?.reads) return;
     const selected = $readExplorer.reads.filter(r => selectedIds.has(r.id));
-    const cols = ['id', 'sample', 'length', 'gc', 'kraken_domain', 'kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_genus', 'genes', 'products'];
+    const cols = [
+      'id', 'sample', 'length', 'gc',
+      'kraken_domain', 'kraken_phylum', 'kraken_class', 'kraken_order', 'kraken_family', 'kraken_genus',
+      'gtdb_domain', 'gtdb_phylum', 'gtdb_class', 'gtdb_order', 'gtdb_family', 'gtdb_genus',
+      'genes', 'products',
+    ];
     const header = cols.join('\t');
     const rows = selected.map(r => cols.map(c => r[c] ?? '').join('\t'));
     const tsv = header + '\n' + rows.join('\n') + '\n';
@@ -123,15 +182,15 @@
     return $readExplorer.reads.find(r => r.id === $selectedRead);
   });
 
-  const selTaxRanks = [
-    { key: 'kraken_domain', label: 'Domain' },
-    { key: 'kraken_phylum', label: 'Phylum' },
-    { key: 'kraken_class',  label: 'Class' },
-    { key: 'kraken_order',  label: 'Order' },
-    { key: 'kraken_family', label: 'Family' },
-    { key: 'kraken_genus',  label: 'Genus' },
-  ];
-  let selTaxIdx = $state(1); // default phylum
+  // Selection-panel rank picker. Tracks the active classifier's rank order
+  // (minus species, which reads don't carry) so the cycle walks the same
+  // levels as the main Taxonomy button and the drill-down sidebar.
+  let selTaxRanks = $derived(
+    $rankOrder
+      .filter(r => RANK_FIELD[r] && r !== 'S')
+      .map(r => ({ key: `${$taxonomySource}_${RANK_FIELD[r]}`, label: RANK_LABELS[r] ?? r }))
+  );
+  let selTaxIdx = $state(1); // default phylum (index 1 in both orderings)
 
   let selectionStats = $derived.by(() => {
     if (!selectedIds || !$readExplorer?.reads) return null;
@@ -155,7 +214,20 @@
       .slice(0, 12)
       .map(([name, count]) => ({ name, count, pct: (100 * count / n).toFixed(1) }));
 
-    return { n, totalBp, avgLen, avgGc, nSamples: samples.size, topTaxa };
+    // Top gene products
+    const prodCounts = {};
+    for (const r of selected) {
+      if (!r.products) continue;
+      for (const p of r.products.split('; ')) {
+        if (p) prodCounts[p] = (prodCounts[p] || 0) + 1;
+      }
+    }
+    const topProducts = Object.entries(prodCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([name, count]) => ({ name, count }));
+
+    return { n, totalBp, avgLen, avgGc, nSamples: samples.size, topTaxa, topProducts };
   });
 
   let stats = $derived.by(() => {
@@ -204,10 +276,10 @@
         class="px-3 py-1 rounded-md border transition-colors text-center
           {colorMode === 'taxonomy' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
         style="min-width: {BW.taxonomy}"
-        onclick={() => { if (colorMode === 'taxonomy') taxRank = cycle(taxGroup.values, taxRank); else colorMode = 'taxonomy'; }}
-        title={`Click to cycle: ${taxGroup.labels.join(' → ')}`}
+        onclick={() => { if (colorMode === 'taxonomy') cycleTaxRank(); else colorMode = 'taxonomy'; }}
+        title={`Click to cycle rank (${$taxonomySource.toUpperCase()}): ${$rankOrder.map(r => RANK_LABELS[r] ?? r).join(' → ')}`}
       >
-        {colorMode === 'taxonomy' ? getLabel(taxGroup.values, taxGroup.labels, taxRank) : 'Taxonomy'} &#x25BE;
+        {colorMode === 'taxonomy' ? (RANK_LABELS[$taxNav.level] ?? $taxNav.level) : 'Taxonomy'} &#x25BE;
       </button>
       <button
         class="px-3 py-1 rounded-md border transition-colors text-center
@@ -224,7 +296,7 @@
         Size
         <div class="single-range relative w-16 h-5 flex items-center">
           <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
-          <input type="range" min="0.2" max="3" step="0.1" bind:value={sizeScale} />
+          <input type="range" min="0.2" max="20" step="0.1" bind:value={sizeScale} />
         </div>
         <span class="text-slate-500 w-8 font-mono">{sizeScale.toFixed(1)}x</span>
       </div>
@@ -263,11 +335,15 @@
 
     <!-- Scatter -->
     <div class="flex gap-6">
+      {#if colorMode === 'taxonomy'}
+        <TaxonomyDrillNav heightClass="h-[700px]" />
+      {/if}
       <div class="flex-1 h-[700px] flex flex-col">
         {#if scatterData}
           <ReglScatter
             data={scatterData}
             {colorBy}
+            colorMap={taxColorMap}
             sizeBy="fixed"
             {sizeScale}
             mode="tsne"
@@ -310,6 +386,17 @@
               </div>
             {/each}
           </div>
+          {#if selectionStats.topProducts.length > 0}
+            <div class="space-y-1">
+              <div class="text-xs text-slate-400">Functions</div>
+              {#each selectionStats.topProducts as p}
+                <div class="flex justify-between text-xs gap-1">
+                  <span class="text-slate-300 truncate" title={p.name}>{p.name}</span>
+                  <span class="text-slate-500 font-mono flex-shrink-0">{p.count.toLocaleString()}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
           <button
             class="w-full px-3 py-1.5 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded transition-colors"
             onclick={exportSelection}
