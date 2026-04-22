@@ -26,18 +26,15 @@
 
   // Color-by groups
   const runInfoGroup = { values: ['station', 'flowcell'], labels: ['Station', 'Flowcell'] };
-  const taxGroup     = { values: ['dominant_phylum', 'dominant_class'], labels: ['Phylum', 'Class'] };
 
-  const BW = { runInfo: '5rem', taxonomy: '4.5rem', metadata: '5rem', size: '4.5rem' };
+  const BW = { runInfo: '5rem', metadata: '5rem', size: '4.5rem' };
 
-  let colorMode = $state('runInfo');  // 'runInfo' | 'taxonomy' | 'metadata'
+  let colorMode = $state('runInfo');  // 'runInfo' | 'metadata'
   let runInfoField = $state('station');
-  let taxField = $state('dominant_phylum');
   let metaField = $state(null);  // set from dynamic metadata
 
   let colorBy = $derived(
     colorMode === 'runInfo' ? runInfoField :
-    colorMode === 'taxonomy' ? taxField :
     metaField || 'station'
   );
 
@@ -72,11 +69,11 @@
   let continuousCols = $derived([...allColumns.numeric, 'read_count', 'total_bases', 'gc', 'diversity'].filter((v, i, a) => a.indexOf(v) === i));
 
   // Categorical columns for color-by and boxplot x-axis
-  let categoricalCols = $derived([...allColumns.categorical, 'station', 'dominant_phylum', 'dominant_class', 'flowcell'].filter((v, i, a) => a.indexOf(v) === i));
+  let categoricalCols = $derived([...allColumns.categorical, 'station', 'flowcell'].filter((v, i, a) => a.indexOf(v) === i));
 
-  // Dynamic metadata group (categorical cols not covered by runInfo/taxonomy)
+  // Dynamic metadata group (categorical cols not covered by runInfo)
   let metaGroup = $derived.by(() => {
-    const covered = new Set(['station', 'flowcell', 'dominant_phylum', 'dominant_class']);
+    const covered = new Set(['station', 'flowcell']);
     const vals = [], labs = [];
     for (const col of categoricalCols) {
       if (covered.has(col)) continue;
@@ -323,8 +320,6 @@
       { key: 'total_bases', label: 'Bases', render: v => v != null ? `${(v / 1e6).toFixed(1)}M` : '-' },
       { key: 'gc', label: 'GC%', render: v => typeof v === 'number' ? v.toFixed(1) : '-' },
       { key: 'diversity', label: 'Shannon H', render: v => typeof v === 'number' ? v.toFixed(2) : '-' },
-      { key: 'dominant_phylum', label: 'Phylum' },
-      { key: 'dominant_class', label: 'Class' },
     ];
     for (const f of sampleFields) cols.push(f);
     // All metadata columns (categorical + numeric)
@@ -377,15 +372,6 @@
         title={`Click to cycle: ${runInfoGroup.labels.join(' → ')}`}
       >
         {colorMode === 'runInfo' ? getLabel(runInfoGroup.values, runInfoGroup.labels, runInfoField) : 'Run Info'} &#x25BE;
-      </button>
-      <button
-        class="px-3 py-1 rounded-md border transition-colors text-center
-          {colorMode === 'taxonomy' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
-        style="min-width: {BW.taxonomy}"
-        onclick={() => { if (colorMode === 'taxonomy') taxField = cycle(taxGroup.values, taxField); else colorMode = 'taxonomy'; }}
-        title={`Click to cycle: ${taxGroup.labels.join(' → ')}`}
-      >
-        {colorMode === 'taxonomy' ? getLabel(taxGroup.values, taxGroup.labels, taxField) : 'Taxonomy'} &#x25BE;
       </button>
       {#if metaGroup.values.length > 0}
         <button
@@ -467,8 +453,6 @@
             <div class="text-slate-400">Reads</div><div class="text-slate-200 font-mono">{selectedDetail.read_count?.toLocaleString() ?? '-'}</div>
             <div class="text-slate-400">Bases</div><div class="text-slate-200 font-mono">{selectedDetail.total_bases ? `${(selectedDetail.total_bases/1e6).toFixed(1)}M` : '-'}</div>
             <div class="text-slate-400">Diversity</div><div class="text-slate-200 font-mono">{selectedDetail.diversity?.toFixed(2) ?? '-'}</div>
-            <div class="text-slate-400">Phylum</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.dominant_phylum ?? '-'}</div>
-            <div class="text-slate-400">Class</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.dominant_class ?? '-'}</div>
           </div>
           {#if allColumns.numeric.length > 0}
             <div class="border-t border-slate-700 pt-2">

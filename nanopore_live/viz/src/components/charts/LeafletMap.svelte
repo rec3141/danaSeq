@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
 
-  let { markers = [], colorMap = {}, colorBy = 'dominant_phylum', sizeBy = 'fixed', sizeScale = 1.0, nudgeMeters = 100, onMarkerClick = null, onSelect = null, highlightIds = null, exportName = 'danaseq_map' } = $props();
+  let { markers = [], colorMap = {}, colorBy = 'flowcell', sizeBy = 'fixed', sizeScale = 1.0, nudgeMeters = 100, onMarkerClick = null, onSelect = null, highlightIds = null, exportName = 'danaseq_map' } = $props();
   let mapContainer;
   let map = null;
   let markerLayer = null;
@@ -17,7 +17,7 @@
 
   function getColor(marker) {
     // Check color map by the active colorBy field value
-    const key = marker[colorBy] || marker.dominant_phylum || marker.station || marker.id;
+    const key = marker[colorBy] || marker.station || marker.id;
     if (colorMap[key]) return colorMap[key];
     if (colorMap[marker.id]) return colorMap[marker.id];
     if (marker.color) return marker.color;

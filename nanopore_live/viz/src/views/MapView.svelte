@@ -17,7 +17,6 @@
 
   // Color-by groups
   const infoGroup =   { values: ['flowcell', 'station'], labels: ['Flowcell', 'Station'] };
-  const taxGroup =    { values: ['dominant_phylum', 'dominant_class'], labels: ['Phylum', 'Class'] };
   const metricGroup = { values: ['read_count', 'diversity'], labels: ['Reads', 'Diversity'] };
   const sizeGroup =   { values: ['fixed', 'read_count', 'total_bases', 'diversity'], labels: ['Fixed', 'Reads', 'Bases', 'Diversity'] };
 
@@ -25,7 +24,6 @@
 
   let colorMode = $state('taxonomy'); // 'info' | 'taxonomy' | 'metric' | 'metadata'
   let infoField = $state('flowcell');
-  let taxField = $state('dominant_phylum');
   let metricField = $state('read_count');
   let metaField = $state('');
 
@@ -65,7 +63,7 @@
 
   // Dynamic metadata group (columns not already covered by built-in groups)
   let metaGroup = $derived.by(() => {
-    const covered = new Set(['dominant_phylum', 'dominant_class', 'flowcell', 'station', 'read_count', 'diversity', 'date', 'total_bases']);
+    const covered = new Set(['flowcell', 'station', 'read_count', 'diversity', 'date', 'total_bases']);
     const vals = [], labs = [];
     for (const col of metaColumns) {
       if (covered.has(col.key)) continue;
@@ -78,10 +76,13 @@
   // Derived colorBy from cycling state
   let colorBy = $derived(
     colorMode === 'info' ? infoField :
-    colorMode === 'taxonomy' ? taxField :
+    // Taxonomy mode: marker RINGS are driven by the drill-down store; the
+    // base marker fill falls back to flowcell for a legible categorical
+    // palette while the rings convey the taxonomy breakdown.
+    colorMode === 'taxonomy' ? 'flowcell' :
     colorMode === 'metric' ? metricField :
     colorMode === 'metadata' ? (metaField || metaGroup.values[0] || 'station') :
-    'dominant_phylum'
+    'flowcell'
   );
 
   // Is current colorBy continuous?
@@ -128,8 +129,6 @@
         read_count: s.read_count,
         total_bases: s.total_bases,
         flowcell: s.flowcell,
-        dominant_phylum: s.dominant_phylum,
-        dominant_class: s.dominant_class,
         diversity: s.diversity,
         ...m,
       };
@@ -216,7 +215,6 @@
     { key: 'depth_m', label: 'Depth (m)' },
     { key: 'date', label: 'Date' },
     { key: 'read_count', label: 'Reads', render: v => v?.toLocaleString() ?? '-' },
-    { key: 'dominant_phylum', label: 'Dominant' },
   ];
 
   let lassoIds = $state(null);
@@ -419,8 +417,6 @@
             <div class="text-slate-400">Bases</div><div class="text-slate-200 font-mono">{selectedDetail.total_bases ? `${(selectedDetail.total_bases/1e6).toFixed(1)}M` : '-'}</div>
             <div class="text-slate-400">Avg Length</div><div class="text-slate-200 font-mono">{selectedDetail.avg_length ? Math.round(selectedDetail.avg_length).toLocaleString() : '-'}</div>
             <div class="text-slate-400">Diversity</div><div class="text-slate-200 font-mono">{selectedDetail.diversity?.toFixed(2) ?? '-'}</div>
-            <div class="text-slate-400">Phylum</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.dominant_phylum ?? '-'}</div>
-            <div class="text-slate-400">Class</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.dominant_class ?? '-'}</div>
           </div>
           {#if selectedDetail.lat != null}
             <div class="border-t border-slate-700 pt-2">

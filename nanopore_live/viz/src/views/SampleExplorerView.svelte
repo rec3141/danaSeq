@@ -113,7 +113,7 @@
   // Search + color-mode cycling.
   //
   // Search: free-text substring match across id / flowcell / barcode /
-  // dominant_phylum / dominant_class / any uploaded metadata value.
+  // any uploaded metadata value.
   // Result is a Set<sampleId> passed to PlotlyScatter via searchMatchIds
   // (dims non-matches there) and also filters the sample table below.
   //
@@ -131,7 +131,7 @@
     for (const s of $samples) {
       const meta = $metadata?.[s.id];
       const parts = [
-        s.id, s.flowcell, s.barcode, s.dominant_phylum, s.dominant_class,
+        s.id, s.flowcell, s.barcode,
         ...(meta ? Object.values(meta) : []),
       ];
       const blob = parts.filter(v => v != null).map(String).join(' ').toLowerCase();
@@ -293,8 +293,6 @@
         total_bases: s.total_bases,
         avg_length: s.avg_length,
         diversity: s.diversity,
-        dominant_phylum: s.dominant_phylum,
-        dominant_class: s.dominant_class,
         start_time: s.start_time,
         ...(m || {}),
       };
@@ -397,7 +395,6 @@
     { key: 'total_bases', label: 'Bases', render: v => typeof v === 'number' ? `${(v/1e6).toFixed(1)}M` : '-' },
     { key: 'avg_length', label: 'Avg Len', render: v => typeof v === 'number' ? Math.round(v).toLocaleString() : '-' },
     { key: 'n_classified', label: 'Classified', render: v => typeof v === 'number' ? v.toLocaleString() : '-' },
-    { key: 'dominant_class', label: 'Dominant Class' },
     { key: 'diversity', label: 'Shannon H', render: v => typeof v === 'number' ? v.toFixed(2) : '-' },
   ];
 
@@ -636,8 +633,6 @@
           <div class="text-slate-400">Bases</div><div class="text-slate-200 font-mono">{selectedDetail.total_bases ? `${(selectedDetail.total_bases/1e6).toFixed(1)}M` : '-'}</div>
           <div class="text-slate-400">Avg Length</div><div class="text-slate-200 font-mono">{selectedDetail.avg_length ? Math.round(selectedDetail.avg_length).toLocaleString() : '-'}</div>
           <div class="text-slate-400">Diversity</div><div class="text-slate-200 font-mono">{selectedDetail.diversity?.toFixed(2) ?? '-'}</div>
-          <div class="text-slate-400">Phylum</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.dominant_phylum ?? '-'}</div>
-          <div class="text-slate-400">Class</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.dominant_class ?? '-'}</div>
           {#if selectedDetail.start_time}
             <div class="text-slate-400">Run Date</div><div class="text-slate-200 font-mono text-[11px]">{selectedDetail.start_time.slice(0, 10)}</div>
           {/if}
