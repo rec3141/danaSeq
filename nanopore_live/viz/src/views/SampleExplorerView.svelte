@@ -58,6 +58,12 @@
       if (dateMin && d < dateMin) return false;
       if (dateMax && d > dateMax) return false;
     }
+    // Metadata-filter-sidebar selection (only applies in non-taxonomy
+    // modes where the sidebar is visible).
+    if (colorMode !== 'taxonomy' && filterVal !== null && filterCol) {
+      const v = $metadata?.[s.id]?.[filterCol];
+      if (v === undefined || v === null || String(v) !== filterVal) return false;
+    }
     return true;
   }
 
@@ -160,6 +166,63 @@
     return { values, labels: values.map(k => k.replace(/_/g, ' ')) };
   });
 
+  // Categorical subset of the metadata columns — any column whose values
+  // aren't uniformly numeric. Used as the left-sidebar filter's column
+  // cycle in non-taxonomy modes; a numeric column (e.g. depth_m) doesn't
+  // make sense as a "pick a value" filter.
+  let categoricalMetaCols = $derived.by(() => {
+    if (!$metadata) return [];
+    return metaGroup.values.filter(k => {
+      const vals = Object.values($metadata)
+        .map(m => m[k])
+        .filter(v => v !== undefined && v !== null && v !== '');
+      if (vals.length === 0) return false;
+      return !vals.every(v => typeof v === 'number');
+    });
+  });
+
+  // Filter sidebar state: which categorical column are we listing values
+  // from, and (optionally) which value is selected as an active filter.
+  let filterCol = $state('');
+  let filterVal = $state(null);
+
+  $effect(() => {
+    // Initialize / re-initialize when the available categorical set changes.
+    if (!filterCol && categoricalMetaCols.length > 0) filterCol = categoricalMetaCols[0];
+    if (filterCol && !categoricalMetaCols.includes(filterCol)) {
+      filterCol = categoricalMetaCols[0] || '';
+      filterVal = null;
+    }
+  });
+
+  function cycleFilterCol() {
+    if (categoricalMetaCols.length === 0) return;
+    filterCol = cycle(categoricalMetaCols, filterCol || categoricalMetaCols[0]);
+    filterVal = null;  // clear the selected value when switching columns
+  }
+
+  // Unique values of the active filter column, sorted by descending
+  // frequency across the currently-loaded samples (ignoring all other
+  // filters — this panel shows the full universe so an operator can see
+  // "what's in my data" even when the current filter/drill hides most).
+  let filterValueList = $derived.by(() => {
+    if (!$samples || !$metadata || !filterCol) return [];
+    const counts = new Map();
+    for (const s of $samples) {
+      const v = $metadata[s.id]?.[filterCol];
+      if (v === undefined || v === null || v === '') continue;
+      const key = String(v);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([val, count]) => ({ val, count }));
+  });
+
+  function toggleFilterValue(val) {
+    filterVal = filterVal === val ? null : val;
+  }
+
   // Initialize metaField to first discovered column once metadata arrives.
   $effect(() => {
     if (!metaField && metaGroup.values.length > 0) metaField = metaGroup.values[0];
@@ -213,27 +276,17 @@
   // Samples with zero discs (none of their reads fell under the drilled
   // filter) disappear entirely, per spec.
   let scatterData = $derived.by(() => {
-    if (!$samples || !$sampleTsne || !$activeSubTaxa) return null;
-    const perSample = $activeSubTaxa.perSample;
-    const colorMap = $activeSubTaxa.colorMap;
+    if (!$samples || !$sampleTsne) return null;
     const basePass = $samples.filter(passesFilters);
     const cartOn = $cartActive && $cartItems.size > 0;
 
-    const out = [];
-    const isolatedTaxon = $taxNav.isolated;
-    for (const s of basePass) {
-      if (cartOn && !$cartItems.has(s.id)) continue;
-      const [x, y] = getCoords(s.id);
-      const subCounts = perSample[s.id];
-      if (!subCounts) continue;
-      const denom = s.read_count > 0 ? s.read_count : null;
-      if (!denom) continue;
-      // Per-sample fields available as color-by targets — the disc for
-      // each (sample, taxon) gets the sample-level fields copied on so
-      // colorBy='read_count' / 'station' / 'depth_m' etc. all work without
-      // the chart component needing to know about the sample→taxon fan-out.
+    // Per-sample fields available as color-by targets — every disc gets
+    // the sample-level fields copied on so colorBy='read_count' /
+    // 'station' / 'depth_m' etc. all work without the chart component
+    // needing to know about the sample→taxon fan-out.
+    const fieldsFor = (s) => {
       const m = $metadata?.[s.id];
-      const sampleFields = {
+      return {
         flowcell: s.flowcell,
         barcode: s.barcode,
         read_count: s.read_count,
@@ -245,39 +298,80 @@
         start_time: s.start_time,
         ...(m || {}),
       };
-      for (const taxon in subCounts) {
-        if (isolatedTaxon && taxon !== isolatedTaxon) continue;
-        const cnt = subCounts[taxon];
-        if (!cnt) continue;
-        const fraction = cnt / denom;
+    };
+
+    const out = [];
+
+    if (colorMode === 'taxonomy') {
+      // Taxonomy mode: one disc per (sample × sub-taxon) at the current
+      // drill level. Samples with no taxa at this level are hidden.
+      if (!$activeSubTaxa) return null;
+      const perSample = $activeSubTaxa.perSample;
+      const isolatedTaxon = $taxNav.isolated;
+      for (const s of basePass) {
+        if (cartOn && !$cartItems.has(s.id)) continue;
+        const [x, y] = getCoords(s.id);
+        const subCounts = perSample[s.id];
+        if (!subCounts) continue;
+        const denom = s.read_count > 0 ? s.read_count : null;
+        if (!denom) continue;
+        const sampleFields = fieldsFor(s);
+        for (const taxon in subCounts) {
+          if (isolatedTaxon && taxon !== isolatedTaxon) continue;
+          const cnt = subCounts[taxon];
+          if (!cnt) continue;
+          const fraction = cnt / denom;
+          out.push({
+            id: s.id,
+            taxon,
+            ...sampleFields,
+            tsne_x: x,
+            tsne_y: y,
+            size: Math.sqrt(fraction) * 28,
+            fraction,
+            hover_text:
+              `<b>${s.id}</b><br>` +
+              `${taxon}: ${(fraction * 100).toFixed(1)}% ` +
+              `(${cnt.toLocaleString()} / ${s.read_count.toLocaleString()} reads)`,
+          });
+        }
+      }
+    } else {
+      // Metric / Metadata mode: one disc per sample. Every sample shows
+      // regardless of whether taxonomy data is present for it — that
+      // fixes the "missing dots" for samples where GTDB hasn't landed.
+      // PlotlyScatter's default "Unknown" bucket handles samples with no
+      // value for the current colorBy field.
+      for (const s of basePass) {
+        if (cartOn && !$cartItems.has(s.id)) continue;
+        const [x, y] = getCoords(s.id);
         out.push({
           id: s.id,
-          taxon,
-          ...sampleFields,
+          taxon: null,
+          ...fieldsFor(s),
           tsne_x: x,
           tsne_y: y,
-          size: Math.sqrt(fraction) * 28,   // tuned to match map marker footprint
-          fraction,
+          size: 14,           // fixed; sizeScale still applies downstream
+          fraction: 1,
           hover_text:
             `<b>${s.id}</b><br>` +
-            `${taxon}: ${(fraction * 100).toFixed(1)}% ` +
-            `(${cnt.toLocaleString()} / ${s.read_count.toLocaleString()} reads)`,
+            `${(s.read_count ?? 0).toLocaleString()} reads`,
         });
       }
     }
+
     // Largest first — big discs render underneath so smaller overlays stay
-    // visible. Plotly paints traces in iteration order; groups share a trace
-    // per taxon but within a trace sizes vary, so this ordering also controls
-    // within-trace paint order.
+    // visible. (In non-taxonomy mode all discs are equal; the sort is a
+    // no-op but harmless.)
     out.sort((a, b) => b.fraction - a.fraction);
     if (typeof window !== 'undefined') {
-      const taxa = new Set(out.map(p => p.taxon));
+      const taxa = new Set(out.map(p => p.taxon).filter(t => t));
+      const palette = colorMode === 'taxonomy' ? ($activeSubTaxa?.colorMap ?? {}) : {};
       window.__sampleScatterDiag = {
+        mode: colorMode,
         level: $taxNav.level, filter: $taxNav.filter, isolated: $taxNav.isolated,
         discs: out.length, uniqueTaxa: taxa.size,
-        colorMapSize: Object.keys(colorMap).length,
-        sampleTaxa: [...taxa].slice(0, 5),
-        sampleColors: [...taxa].slice(0, 5).map(t => [t, colorMap[t]]),
+        colorMapSize: Object.keys(palette).length,
       };
     }
     return { points: out };
@@ -444,9 +538,60 @@
     {/if}
   </div>
 
-  <!-- Main layout: drill-down nav + scatter + detail -->
+  <!-- Main layout: sidebar (taxonomy drill-down in taxonomy mode, metadata
+       filter otherwise) + scatter + detail panel. -->
   <div class="flex gap-6">
-    <TaxonomyDrillNav heightClass="h-[600px]" />
+    {#if colorMode === 'taxonomy'}
+      <TaxonomyDrillNav heightClass="h-[600px]" />
+    {:else}
+      <!-- Metadata filter sidebar: cycle header picks a categorical
+           column, list below shows unique values sorted by descending
+           frequency. Click a value to filter the scatter to matching
+           samples; click the active value again to clear. -->
+      <div class="w-56 shrink-0 h-[600px] flex flex-col bg-slate-800 rounded-lg border border-slate-700 p-3 text-xs">
+        {#if categoricalMetaCols.length === 0}
+          <p class="text-slate-500 italic text-center mt-4">
+            Upload a metadata TSV with categorical columns to filter here.
+          </p>
+        {:else}
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <button
+              class="flex-1 px-2 py-1 rounded border border-slate-600 text-slate-200 hover:border-slate-500 transition-colors text-left font-semibold truncate"
+              onclick={cycleFilterCol}
+              title={`Cycle: ${categoricalMetaCols.join(' → ')}`}
+            >{(filterCol || '').replace(/_/g, ' ') || '—'} &#x25BE;</button>
+            {#if filterVal !== null}
+              <button
+                class="px-2 py-1 rounded border border-slate-600 text-slate-400 hover:text-rose-400 hover:border-rose-400/40 transition-colors"
+                onclick={() => (filterVal = null)}
+                title="Clear active filter"
+              >✕</button>
+            {/if}
+          </div>
+          {#if filterValueList.length === 0}
+            <p class="text-slate-500 italic text-center mt-4">No values for this column.</p>
+          {:else}
+            <div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+              {filterValueList.length} value{filterValueList.length === 1 ? '' : 's'}
+            </div>
+            <ul class="flex-1 overflow-y-auto divide-y divide-slate-700/50 -mx-1">
+              {#each filterValueList as { val, count }}
+                <li>
+                  <button
+                    class="w-full text-left px-2 py-1 rounded transition-colors flex items-baseline justify-between gap-2
+                      {filterVal === val ? 'bg-cyan-400/15 text-cyan-300' : 'text-slate-300 hover:bg-slate-700/50'}"
+                    onclick={() => toggleFilterValue(val)}
+                  >
+                    <span class="truncate" title={val}>{val}</span>
+                    <span class="text-[10px] text-slate-500 font-mono shrink-0">{count}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
+      </div>
+    {/if}
     <div class="flex-1 h-[600px] flex flex-col">
       {#if scatterData && scatterData.points.length > 0}
         <PlotlyScatter
