@@ -497,7 +497,12 @@
       Size
       <div class="single-range relative w-20 h-5 flex items-center">
         <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
-        <input type="range" min="0.2" max="20" step="0.1" bind:value={sizeScale} />
+        <!-- Max is clamped at 6 because raw disc size reaches 28 (sqrt(1)*28
+             for a 100%-dominant taxon) and Plotly's scattergl marker
+             rasterization wraps around above ~256 px — sizeScale*28 above
+             that point visually collapses the biggest discs back to tiny.
+             6*28 = 168 stays well clear of the wrap threshold. -->
+        <input type="range" min="0.2" max="6" step="0.1" bind:value={sizeScale} />
       </div>
       <span class="text-slate-500 w-8 font-mono">{sizeScale.toFixed(1)}x</span>
     </div>
