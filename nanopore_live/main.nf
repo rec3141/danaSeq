@@ -42,22 +42,29 @@ def helpMessage() {
       --run_kraken       Kraken2 taxonomic classification (requires --kraken_db)
       --annotator STR    Annotator: 'bakta', 'prokka', or 'none' [default: bakta]
       --bakta_db PATH    Path to Bakta database [default: db-light]
-      --run_sketch       Sendsketch per-read GTDB classification
+      --bakta_full       Also run full Bakta annotation (ncRNA/tRNA/CRISPR — slow)
+      --run_sketch       Sendsketch per-read GTDB classification (local server)
       --sendsketch_address URL  Sendsketch server URL [default: local GTDB]
       --run_tetra        Tetranucleotide frequency analysis
       --hmm_databases    Comma-separated HMM file paths (requires annotation)
+      --metadata FILE    Sample metadata TSV (flowcell, barcode, lat, lon, etc.)
 
     Database paths:
       --kraken_db DIR    Path to Kraken2 database directory
-      --danadir DIR      Path to R scripts for DuckDB integration
+      --danadir DIR      Path to Python scripts in bin/ for DuckDB integration
 
     Integration:
       --run_db_integration  Load results into DuckDB after processing
       --cleanup             Compress/delete source files after DuckDB import
+      --store_dir DIR       Persistent process output cache (skips completed tasks)
 
     Watch mode (live sequencing):
       --watch               Monitor for new FASTQ files continuously
       --db_sync_minutes N   DB sync interval in minutes [default: 10]
+      --watch_glob GLOB     Override auto-detected watch glob pattern
+      Note: --watch vs batch mode is locked per --outdir via a .pipeline_mode
+      file. Switching modes on the same outdir would corrupt the DuckDB and
+      is rejected at startup.
 
     QC parameters:
       --min_readlen N    Minimum read length in bp [default: 1500]
@@ -105,6 +112,11 @@ def helpMessage() {
 
       # Quick test with bundled test data
       nextflow run main.nf --input test-data -profile test -resume
+
+    Live deploy to microscape.app:
+      In watch mode, dropping an executable <outdir>/deploy.sh hook causes
+      DB_SYNC to invoke it after every sync tick. See viz/deploy.sh and the
+      project README "Deploy to microscape.app" section for the one-line hook.
 
     Input structure:
       --input must point to a directory CONTAINING fastq_pass/:
@@ -391,7 +403,7 @@ workflow {
 
     // Stage 4: DuckDB integration (post-pipeline)
     // Collects all published output directories and loads into DuckDB
-    // Uses string paths since R scripts operate on the host filesystem
+    // Uses string paths since the loader scripts operate on the host filesystem
     if (params.run_db_integration) {
         def abs_outdir = params.store_dir ? file(params.store_dir).toAbsolutePath().toString() : file(params.outdir).toAbsolutePath().toString()
 
@@ -399,7 +411,7 @@ workflow {
             // Watch mode: channel never closes so .collect() would block forever.
             // Instead, DB_SYNC runs as a long-lived process with an internal
             // sleep loop that periodically scans output dirs and syncs DB.
-            // R scripts are idempotent (import_log tracks what's loaded).
+            // Loader scripts are idempotent (import_log tracks what's loaded).
             // Cleanup runs inline after each sync cycle if enabled.
             def sync_secs = params.db_sync_minutes * 60
             def cleanup_flag = params.cleanup ? "true" : "false"

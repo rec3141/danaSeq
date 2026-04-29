@@ -5,8 +5,6 @@ Real-time metagenomic analysis for Oxford Nanopore sequencing data. Processes re
 ## Quick Start
 
 ```bash
-cd nextflow
-
 # Install conda environments (~15 min first time)
 ./install.sh
 ./install.sh --check
@@ -29,8 +27,6 @@ docker build -t danaseq-realtime .
 ### Kitchen sink — all modules, all options with defaults
 
 ```bash
-cd nextflow
-
 # All analysis modules enabled, QC defaults shown explicitly
 ./run-realtime.sh --input /data/run1 --outdir /data/output \
     --run_kraken --kraken_db /path/to/krakendb \
@@ -139,7 +135,7 @@ nextflow run main.nf --input /path/to/runs \
     --annotator bakta --run_db_integration
 ```
 
-`DB_SYNC` runs as a long-lived process that periodically loads new results into DuckDB. R scripts are idempotent and track imports via `import_log`.
+`DB_SYNC` runs as a long-lived process that periodically loads new results into DuckDB. The Python loaders in `bin/` are idempotent and track imports via `import_log`. Watch vs batch mode is locked per `--outdir` (recorded in `<outdir>/.pipeline_mode`) since switching modes changes per-file vs per-sample grouping and would corrupt the database.
 
 ## Output
 
@@ -202,7 +198,15 @@ viz/deploy.sh --preprocess-dir <outdir>/viz \
 
 `deploy.sh` runs `npm install` (first time only), `vite build`, stages `dist/data/`, tarballs the flat tree, and POSTs to `https://microscape.app/api/v1/deploy`.
 
-**Auto-deploy per sync tick:** drop a one-line hook at `<outdir>/deploy.sh`:
+**Auto-deploy per sync tick:** pass `--deploy_slug` and `--deploy_name` to `run-realtime.sh` and it writes the hook for you:
+
+```bash
+./run-realtime.sh --input /data/run1 --outdir /data/output \
+    --watch --run_db_integration ... \
+    --deploy_slug genice_ci --deploy_name "GenIce CI"
+```
+
+Or drop the hook by hand at `<outdir>/deploy.sh`:
 
 ```bash
 #!/usr/bin/env bash
@@ -227,7 +231,7 @@ DB_SYNC detects and invokes any executable `<outdir>/deploy.sh` at the end of ea
 - **dana-bbmap** -- BBMap (samtools conflicts with R)
 - **dana-prokka** -- Prokka (BioPerl pins perl 5.26)
 - **dana-bakta** -- Bakta (modern alternative to Prokka)
-- **dana-tools** -- Kraken2, HMMER, R/DuckDB, Nextflow, OpenJDK
+- **dana-tools** -- Kraken2, HMMER, Python+pandas+DuckDB, Nextflow, OpenJDK
 
 ## Common Issues
 

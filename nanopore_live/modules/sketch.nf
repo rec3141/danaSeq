@@ -77,6 +77,10 @@ process SENDSKETCH {
         exit 0
     fi
 
+    # NOTE: \\t / \\n are doubled below because this heredoc lives inside a
+    # Groovy GString. Single-quoted PYEOF blocks bash interpolation but not
+    # Groovy's, so single-backslash escapes get rendered into literal tabs/
+    # newlines in the .command.sh and break the Python string literals.
     python3 - sendsketch_raw.txt "${meta.id}.sendsketch_reads.tsv" <<'PYEOF'
 import sys
 
@@ -106,17 +110,17 @@ current_read = None
 header_seen = False
 
 with open(raw_path) as fin, open(out_path, 'w') as fout:
-    fout.write('read_id\tstatus\tANI\tref_name\tlineage\n')
+    fout.write('read_id\\tstatus\\tANI\\tref_name\\tlineage\\n')
     for line in fin:
-        line = line.rstrip('\n')
+        line = line.rstrip('\\n')
 
         if line.startswith('Query:'):
             # previous read had no hit data line
             if current_read is not None and not header_seen:
-                fout.write(f'{current_read}\tU\t0\tUnclassified\tUnclassified\n')
+                fout.write(f'{current_read}\\tU\\t0\\tUnclassified\\tUnclassified\\n')
                 n_total += 1
 
-            parts = line.split('\t')
+            parts = line.split('\\t')
             current_read = parts[0].replace('Query: ', '').strip()
             header_seen = False
             continue
@@ -127,15 +131,15 @@ with open(raw_path) as fin, open(out_path, 'w') as fout:
 
         if line.strip() == 'No hits.':
             if current_read:
-                fout.write(f'{current_read}\tU\t0\tUnclassified\tUnclassified\n')
+                fout.write(f'{current_read}\\tU\\t0\\tUnclassified\\tUnclassified\\n')
                 n_total += 1
                 current_read = None
             continue
 
         # Data line (format=2): WKID KID ANI SSU Complt Contam Matches Unique TaxID gSize gSeqs taxName [seqName] taxonomy
         # 13 cols without seqName, 14 with. Taxonomy always last.
-        if header_seen and current_read and '\t' in line:
-            cols = line.split('\t')
+        if header_seen and current_read and '\\t' in line:
+            cols = line.split('\\t')
             if len(cols) >= 12:
                 ani_str = cols[2].rstrip('%')
                 try:
@@ -145,14 +149,14 @@ with open(raw_path) as fin, open(out_path, 'w') as fout:
                 ref_name = cols[11]
                 taxonomy = cols[-1] if len(cols) >= 13 else ''
                 lineage = convert_lineage(taxonomy) if taxonomy else 'Unclassified'
-                fout.write(f'{current_read}\tC\t{ani:.2f}\t{ref_name}\t{lineage}\n')
+                fout.write(f'{current_read}\\tC\\t{ani:.2f}\\t{ref_name}\\t{lineage}\\n')
                 n_total += 1
                 n_classified += 1
                 current_read = None
             continue
 
     if current_read is not None:
-        fout.write(f'{current_read}\tU\t0\tUnclassified\tUnclassified\n')
+        fout.write(f'{current_read}\\tU\\t0\\tUnclassified\\tUnclassified\\n')
         n_total += 1
 
 print(f'[INFO] SendSketch: {n_classified}/{n_total} reads classified', file=sys.stderr)

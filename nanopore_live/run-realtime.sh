@@ -82,24 +82,41 @@ usage() {
     echo ""
     echo "Mode:"
     echo "  --docker             Run in Docker instead of local conda"
+    echo "  --session UUID       Resume a specific Nextflow session ID (otherwise"
+    echo "                       auto-detected from <outdir>/pipeline_info/run_command.sh)"
     echo ""
-    echo "Optional:"
+    echo "Optional paths:"
     echo "  --kraken_db DIR      Kraken2 database directory"
+    echo "  --bakta_db PATH      Bakta database [default: db-light from config]"
     echo "  --hmm_databases LIST Comma-separated HMM file paths"
     echo "  --metadata FILE      Sample metadata TSV (flowcell, barcode, lat, lon, etc.)"
     echo ""
     echo "Pipeline flags (passed to Nextflow):"
     echo "  --run_kraken         Kraken2 taxonomic classification (requires --kraken_db)"
     echo "  --annotator STR      Annotator: bakta (default), prokka, or none"
-    echo "  --run_sketch         Sendsketch per-read GTDB classification"
+    echo "  --bakta_full         Also run full Bakta annotation (ncRNA/tRNA/CRISPR — slow)"
+    echo "  --run_sketch         Sendsketch per-read GTDB classification (local server)"
+    echo "  --sendsketch_address URL  Override sendsketch server URL"
     echo "  --run_tetra          Tetranucleotide frequency analysis"
-    echo "  --run_db_integration Load results into DuckDB"
+    echo "  --run_db_integration Load results into DuckDB (Python loaders in bin/)"
     echo "  --cleanup            Compress/delete source files after DuckDB import"
     echo "  --watch              Monitor for new FASTQ files (live sequencing)"
     echo "  --db_sync_minutes N  DB sync interval in watch mode [default: 10]"
+    echo "  --store_dir DIR      Persistent process output cache (skips completed tasks)"
     echo "  --min_readlen N      Minimum read length in bp [default: 1500]"
     echo "  --keep_percent N     Filtlong keep percent [default: 80]"
     echo "  --min_file_size N    Minimum FASTQ size in bytes [default: 1000000]"
+    echo ""
+    echo "microscape.app live deploy (watch mode + DB_SYNC):"
+    echo "  --deploy_slug SLUG   URL slug for the run on microscape.app"
+    echo "  --deploy_name NAME   Display name (quote if it contains spaces)"
+    echo "  Setting both writes <outdir>/deploy.sh that DB_SYNC fires every"
+    echo "  sync tick. Existing hook is overwritten. Requires \$MICROSCAPE_API_KEY"
+    echo "  or ~/.config/microscape/api-key."
+    echo ""
+    echo "Notes:"
+    echo "  - watch vs batch mode is locked per --outdir (recorded in"
+    echo "    <outdir>/.pipeline_mode); switching modes on the same outdir is rejected."
     echo ""
     echo "Kitchen sink example (all modules, all options with defaults):"
     echo "  $0 --input /data/run1 --outdir /data/output \\"
@@ -128,6 +145,8 @@ KRAKEN_DB_HOST=""
 HMM_HOST=""
 RESUME_SESSION=""
 AUTO_SESSION=true
+DEPLOY_SLUG=""
+DEPLOY_NAME=""
 
 while (( $# )); do
     case "$1" in
@@ -170,11 +189,24 @@ while (( $# )); do
             RESUME_SESSION="$2"
             AUTO_SESSION=false
             shift 2 ;;
+        --deploy_slug)
+            [[ -z "${2:-}" ]] && die "--deploy_slug requires a value"
+            DEPLOY_SLUG="$2"
+            shift 2 ;;
+        --deploy_name)
+            [[ -z "${2:-}" ]] && die "--deploy_name requires a value"
+            DEPLOY_NAME="$2"
+            shift 2 ;;
         *)
             NF_ARGS+=("$1")
             shift ;;
     esac
 done
+
+# --deploy_slug and --deploy_name are paired
+if [[ -n "$DEPLOY_SLUG" && -z "$DEPLOY_NAME" ]] || [[ -z "$DEPLOY_SLUG" && -n "$DEPLOY_NAME" ]]; then
+    die "--deploy_slug and --deploy_name must be provided together"
+fi
 
 # ============================================================================
 # Validate required paths
@@ -192,6 +224,28 @@ if [[ ! -d "$OUTDIR_HOST" ]]; then
     mkdir -p "$OUTDIR_HOST" || die "Cannot create output directory: $OUTDIR_HOST"
 fi
 [[ -w "$OUTDIR_HOST" ]] || die "Output directory is not writable: $OUTDIR_HOST"
+
+# ============================================================================
+# microscape.app deploy hook — DB_SYNC invokes <outdir>/deploy.sh each tick
+# ============================================================================
+
+if [[ -n "$DEPLOY_SLUG" ]]; then
+    DEPLOY_HOOK="${OUTDIR_HOST}/deploy.sh"
+    # Quote slug/name through printf %q so spaces and special chars survive
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        "exec ${SCRIPT_DIR}/viz/deploy.sh \\" \
+        '    --preprocess-dir "$1/viz" \' \
+        "    --slug $(printf '%q' "$DEPLOY_SLUG") --name $(printf '%q' "$DEPLOY_NAME")" \
+        > "$DEPLOY_HOOK"
+    chmod +x "$DEPLOY_HOOK"
+    echo "[INFO] Wrote deploy hook: $DEPLOY_HOOK (slug=$DEPLOY_SLUG)"
+
+    # Soft check for credentials — deploy will still run, just warn early
+    if [[ -z "${MICROSCAPE_API_KEY:-}" && ! -f "${HOME}/.config/microscape/api-key" ]]; then
+        warn "No \$MICROSCAPE_API_KEY and no ~/.config/microscape/api-key — deploy will fail until one is set."
+    fi
+fi
 
 # ============================================================================
 # Auto-detect session ID from previous runs in this outdir
