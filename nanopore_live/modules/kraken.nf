@@ -1,5 +1,11 @@
 // Kraken2 taxonomic classification
-// maxForks=1 ensures only one instance runs at a time (database is loaded into RAM)
+// maxForks=1 ensures only one instance runs at a time within a pipeline.
+// --memory-mapping makes kraken2 mmap() the *.k2d files instead of slurping
+// them into its own heap; concurrent kraken invocations (e.g. multiple
+// nanopore_live pipelines on the same host) then share the DB via the OS
+// page cache, so RAM use is ~16 GB total regardless of how many run side by
+// side. Cold-cache: the first task pays the disk read; subsequent tasks
+// (this pipeline OR another) start near-instant.
 //
 // Accepts one or many FASTA files per invocation. In batch mode, main.nf
 // groups all files for a sample (flowcell+barcode) into a single call so the
@@ -25,6 +31,7 @@ process KRAKEN2_CLASSIFY {
     """
     kraken2 \
         --db ${params.kraken_db} \
+        --memory-mapping \
         --use-names \
         --threads ${task.cpus} \
         --report "${meta.id}.report" \
