@@ -115,17 +115,125 @@ function normalizeBarcode(raw) {
 
 /** Normalize a column header to its canonical name.
  *  Case-insensitive aliases: latitude→lat, longitude/long/lng→lon,
- *  sample_id→flowcell. */
+ *  samp_name/flowcell_barcode/id→sample_id (combined-column path),
+ *  lat_lon kept as-is for split handling in row parser. */
 function normalizeColumn(name) {
   const lower = name.trim().toLowerCase();
   const aliases = {
     'latitude': 'lat', 'longitude': 'lon', 'long': 'lon', 'lng': 'lon',
+    'samp_name': 'sample_id', 'flowcell_barcode': 'sample_id', 'id': 'sample_id',
   };
   return aliases[lower] || lower;
 }
 
+/** Split a combined sample identifier into [flowcell, barcode].
+ *  Accepts FLOWCELL:barcodeNN, FLOWCELL_barcodeNN, FLOWCELL-barcodeNN.
+ *  Last separator wins so flowcells containing underscores still parse. */
+function splitCombinedId(raw) {
+  if (!raw) return ['', ''];
+  const s = String(raw).trim();
+  if (!s) return ['', ''];
+  // Find the last occurrence of any separator: ':', '_', '-'.
+  let lastIdx = -1;
+  for (let i = s.length - 1; i >= 0; i--) {
+    const c = s[i];
+    if (c === ':' || c === '_' || c === '-') { lastIdx = i; break; }
+  }
+  if (lastIdx < 0) return [s, ''];
+  return [s.slice(0, lastIdx), s.slice(lastIdx + 1)];
+}
+
+/** Try to parse a single value as a date and return ISO YYYY-MM-DD, or null. */
+function tryParseDate(raw, mode) {
+  const s = String(raw).trim();
+  if (!s) return null;
+  let m;
+  if (mode === 'yyyymmdd') {
+    m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  } else if (mode === 'iso') {
+    m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  } else if (mode === 'slashed-iso') {
+    m = s.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  } else if (mode === 'mdy') {
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      const mo = m[1].padStart(2, '0'), d = m[2].padStart(2, '0');
+      if (+mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31) return `${m[3]}-${mo}-${d}`;
+    }
+  } else if (mode === 'dmy') {
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      const d = m[1].padStart(2, '0'), mo = m[2].padStart(2, '0');
+      if (+mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31) return `${m[3]}-${mo}-${d}`;
+    }
+  }
+  return null;
+}
+
+/** Detect whether a column is dominantly a single date format and, if so,
+ *  return a function (raw → ISO) to apply across the whole column. ≥80% of
+ *  non-empty values must match. Conservative: returns null on mixed/ambiguous. */
+function detectDateFormat(values) {
+  const nonEmpty = values.filter(v => v != null && String(v).trim() !== '');
+  if (nonEmpty.length === 0) return null;
+  const modes = ['iso', 'yyyymmdd', 'slashed-iso', 'mdy', 'dmy'];
+  const stats = {};
+  for (const mode of modes) {
+    let hits = 0;
+    for (const v of nonEmpty) if (tryParseDate(v, mode)) hits++;
+    stats[mode] = hits;
+  }
+  // Disambiguate MDY vs DMY: prefer DMY only if it disambiguates (any value
+  // with month > 12 in MDY interpretation forces DMY).
+  const slashCount = nonEmpty.filter(v => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(v).trim())).length;
+  if (slashCount > 0) {
+    let needsDmy = false;
+    for (const v of nonEmpty) {
+      const m = String(v).trim().match(/^(\d{1,2})\/(\d{1,2})\/\d{4}$/);
+      if (m && +m[1] > 12 && +m[2] <= 12) { needsDmy = true; break; }
+    }
+    const slashMode = needsDmy ? 'dmy' : 'mdy';
+    if (stats[slashMode] / nonEmpty.length >= 0.8) {
+      return (v) => tryParseDate(v, slashMode) ?? v;
+    }
+  }
+  // Try unambiguous formats.
+  for (const mode of ['iso', 'yyyymmdd', 'slashed-iso']) {
+    if (stats[mode] / nonEmpty.length >= 0.8) {
+      return (v) => tryParseDate(v, mode) ?? v;
+    }
+  }
+  return null;
+}
+
+/** Build a downloadable metadata template TSV string.
+ *  Header: flowcell, barcode, samp_name, collection_date, lat, lon, env_medium, depth_m.
+ *  One row per known sample (from the samples store), with flowcell/barcode/samp_name
+ *  pre-filled from the canonical FLOWCELL:barcodeNN id. Other columns left empty. */
+export function downloadMetadataTemplate() {
+  const cols = ['flowcell', 'barcode', 'samp_name', 'collection_date', 'lat', 'lon', 'env_medium', 'depth_m'];
+  const rows = [cols.join('\t')];
+  const samps = get(samples);
+  if (samps) {
+    for (const s of samps) {
+      const id = s.id || '';
+      const sepIdx = id.indexOf(':');
+      const flowcell = sepIdx >= 0 ? id.slice(0, sepIdx) : id;
+      const barcode = sepIdx >= 0 ? id.slice(sepIdx + 1) : '';
+      rows.push([flowcell, barcode, id, '', '', '', '', ''].join('\t'));
+    }
+  }
+  return rows.join('\n') + '\n';
+}
+
 /** Parse a metadata TSV string and update the metadata store.
- *  Requires flowcell and barcode columns. Canonical sample key: FLOWCELL:barcodeNN.
+ *  Accepts either flowcell + barcode columns, or a single combined column
+ *  (sample_id / samp_name / flowcell_barcode / id) with values like
+ *  FAR84275:barcode00, FAR84275_barcode00, or FAR84275-barcode00.
+ *  Canonical sample key: FLOWCELL:barcodeNN.
  *  Validates against known sample IDs before replacing existing data.
  *  Returns { matched, total, error? }. */
 export function loadMetadataTsv(text) {
@@ -136,27 +244,83 @@ export function loadMetadataTsv(text) {
   const header = rawHeader.map(normalizeColumn);
   const hasFlowcell = header.includes('flowcell');
   const hasBarcode = header.includes('barcode');
-  if (!hasFlowcell || !hasBarcode) {
-    return { matched: 0, total: 0, error: 'Requires both flowcell (or sample_id) and barcode columns' };
+  const hasCombined = header.includes('sample_id');
+  const hasLatLon = header.includes('lat_lon');
+  const useCombined = !(hasFlowcell && hasBarcode) && hasCombined;
+  if (!useCombined && !(hasFlowcell && hasBarcode)) {
+    return {
+      matched: 0, total: 0,
+      error: 'Requires either flowcell + barcode columns, or a combined sample_id/samp_name/flowcell_barcode/id column',
+    };
   }
 
-  const result = {};
+  // First pass: parse rows into a list (preserving column values as raw strings)
+  // so we can run a column-wide date-format autodetect before final coercion.
+  const rawRows = [];
   for (let i = 1; i < lines.length; i++) {
     const fields = lines[i].split('\t');
     const row = {};
     header.forEach((h, j) => { row[h] = fields[j] ?? ''; });
 
-    const flowcell = (row.flowcell || '').trim();
-    const barcode = normalizeBarcode(row.barcode);
+    let flowcell, barcode;
+    if (useCombined) {
+      const [fc, bc] = splitCombinedId(row.sample_id);
+      flowcell = fc.trim();
+      barcode = normalizeBarcode(bc);
+    } else {
+      flowcell = (row.flowcell || '').trim();
+      barcode = normalizeBarcode(row.barcode);
+    }
     if (!flowcell || !barcode) continue;
     const key = `${flowcell}:${barcode}`;
 
-    const parsed = {};
+    // Strip identifier columns from the data payload.
+    const data = {};
     for (const [k, v] of Object.entries(row)) {
-      if (k === 'flowcell' || k === 'barcode') continue;
+      if (k === 'flowcell' || k === 'barcode' || k === 'sample_id') continue;
+      // Split lat_lon into lat / lon (MIxS spec: "lat lon" or "lat,lon").
+      if (k === 'lat_lon') {
+        const sv = String(v).trim();
+        if (sv) {
+          const parts = sv.split(/[\s,]+/).filter(Boolean);
+          if (parts.length >= 2) {
+            data.lat = parts[0];
+            data.lon = parts[1];
+          }
+        }
+        continue;
+      }
+      data[k] = v;
+    }
+    rawRows.push({ key, data });
+  }
+
+  if (rawRows.length === 0) return { matched: 0, total: 0, error: 'No rows parsed' };
+
+  // Column-wide date autodetect: collect all column names, then for each
+  // non-identifier column, sniff for a single dominant date format.
+  const allCols = new Set();
+  for (const r of rawRows) for (const k of Object.keys(r.data)) allCols.add(k);
+  const dateFormatters = {};
+  for (const col of allCols) {
+    const colValues = rawRows.map(r => r.data[col]).filter(v => v !== undefined);
+    const fmt = detectDateFormat(colValues);
+    if (fmt) dateFormatters[col] = fmt;
+  }
+
+  // Final pass: coerce values (numbers stay numbers; date columns get ISO strings).
+  const result = {};
+  for (const { key, data } of rawRows) {
+    const parsed = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (v === '' || v == null) continue;
+      if (dateFormatters[k]) {
+        parsed[k] = dateFormatters[k](v);
+        continue;
+      }
       const num = Number(v);
-      if (v !== '' && !isNaN(num)) parsed[k] = num;
-      else if (v) parsed[k] = v;
+      if (!isNaN(num)) parsed[k] = num;
+      else parsed[k] = v;
     }
     result[key] = parsed;
   }

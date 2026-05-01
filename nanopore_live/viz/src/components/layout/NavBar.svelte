@@ -1,6 +1,6 @@
 <script>
   import { cartCount, cartActive } from '../../stores/cart.js';
-  import { loadMetadataTsv, metadata, samples } from '../../stores/data.js';
+  import { loadMetadataTsv, downloadMetadataTemplate, metadata, samples } from '../../stores/data.js';
   import { taxonomySource } from '../../stores/taxonomySource.js';
   import { get } from 'svelte/store';
   import FeedbackForm from '../ui/FeedbackForm.svelte';
@@ -60,6 +60,17 @@
     const date = new Date().toISOString().slice(0, 10);
     a.href = url;
     a.download = `metadata_${date}.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadTemplate() {
+    const tsv = downloadMetadataTemplate();
+    const blob = new Blob([tsv], { type: 'text/tab-separated-values' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'metadata_template.tsv';
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -152,12 +163,22 @@
         <button
           class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
           onclick={() => metaInput.click()}
-          title="Upload metadata TSV (requires flowcell + barcode columns)"
+          title="Upload metadata TSV (flowcell + barcode columns, OR a combined sample_id / samp_name / flowcell_barcode / id column)"
         >
           <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
           </svg>
           Metadata
+        </button>
+        <button
+          class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+          onclick={downloadTemplate}
+          title="Download a metadata template TSV pre-filled with known samples"
+        >
+          <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          Template
         </button>
         {#if $metadata && Object.keys($metadata).length > 0}
           <button
