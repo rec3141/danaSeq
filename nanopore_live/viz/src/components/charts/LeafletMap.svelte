@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
 
-  let { markers = [], colorMap = {}, colorBy = 'flowcell', sizeBy = 'fixed', sizeScale = 1.0, nudgeMeters = 100, onMarkerClick = null, onSelect = null, highlightIds = null, exportName = 'danaseq_map' } = $props();
+  let { markers = [], colorMap = {}, colorBy = 'flowcell', sizeBy = 'fixed', sizeScale = 1.0, nudgeMeters = 100, onMarkerClick = null, onSelect = null, highlightIds = null, dimIds = null, exportName = 'danaseq_map' } = $props();
   let mapContainer;
   let map = null;
   let markerLayer = null;
@@ -253,6 +253,8 @@
     for (const m of validMarkers) {
       const color = getColor(m);
       const isHighlighted = highlightIds ? highlightIds.has(m.id) : false;
+      const isDimmed = dimIds ? dimIds.has(m.id) : false;
+      const dimMul = isDimmed ? 0.18 : 1;
       const radius = markerRadius(m);
       const weight = isHighlighted ? 1.5 : 1;
       const borderColor = isHighlighted ? '#22d3ee' : '#0f172a';
@@ -281,7 +283,7 @@
           fillColor: 'transparent',
           color: '#64748b',   // slate-500
           weight: 1,
-          opacity: 0.7,
+          opacity: 0.7 * dimMul,
           fillOpacity: 0,
           interactive: true,
           dashArray: '2 2',
@@ -316,8 +318,8 @@
             fillColor: r.color || '#64748b',
             color: i === 0 ? borderColor : 'transparent',  // only outer stroke on biggest
             weight: i === 0 ? weight : 0,
-            opacity: 1,
-            fillOpacity: 0.9,
+            opacity: 1 * dimMul,
+            fillOpacity: 0.9 * dimMul,
             interactive: i === sorted.length - 1,  // innermost catches clicks/tooltip
           });
           if (i === sorted.length - 1) {
@@ -339,7 +341,7 @@
 
       const circle = L.circleMarker([lat, lon], {
         radius, fillColor: color, color: borderColor,
-        weight, opacity: 1, fillOpacity: 0.8,
+        weight, opacity: 1 * dimMul, fillOpacity: 0.8 * dimMul,
       });
 
       // Tooltip on hover
@@ -372,7 +374,7 @@
   });
 
   $effect(() => {
-    const _deps = [markers, colorMap, colorBy, sizeBy, sizeScale, nudgeMeters, highlightIds];
+    const _deps = [markers, colorMap, colorBy, sizeBy, sizeScale, nudgeMeters, highlightIds, dimIds];
     if (map) {
       import('leaflet').then(L => updateMarkers(L));
     }

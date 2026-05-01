@@ -1,7 +1,7 @@
 <script>
   import LeafletMap from '../components/charts/LeafletMap.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
-  import { samples, metadata, sampleTaxonomy } from '../stores/data.js';
+  import { samples, metadata, sampleTaxonomy, readExplorer, loadReadExplorer } from '../stores/data.js';
   import { cartItems, cartActive, toggleCart, addToCart } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
   import { taxNav, activeSubTaxa, ancestorInfo, nextRank, prevRank, rankOrder } from '../stores/taxonomy.js';
@@ -256,6 +256,88 @@
   let noGeoData = $derived(!$metadata || allMarkers.length === 0);
   let hasDepthData = $derived(allMarkers.some(m => m.depth_m != null));
 
+  // ---- Search state (taxon/gene/product, plus sample fields) ----
+  let searchQuery = $state('');
+  let searchDebounced = $state('');
+  let searchTimer;
+  $effect(() => {
+    const q = searchQuery;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { searchDebounced = q; }, 300);
+    return () => clearTimeout(searchTimer);
+  });
+
+  // Lazy-load read_explorer on first non-empty query so /map opens fast.
+  let readsLoadRequested = $state(false);
+  $effect(() => {
+    if (searchDebounced.trim() && !readsLoadRequested) {
+      readsLoadRequested = true;
+      loadReadExplorer();
+    }
+  });
+
+  const READ_SEARCH_FIELDS = [
+    'sample',
+    'kraken_domain', 'kraken_phylum', 'kraken_class',
+    'kraken_order', 'kraken_family', 'kraken_genus', 'kraken_species',
+    'gtdb_domain', 'gtdb_phylum', 'gtdb_class',
+    'gtdb_order', 'gtdb_family', 'gtdb_genus', 'gtdb_species',
+    'genes', 'products',
+  ];
+
+  // For each non-empty query, compute (matchingSampleIds, matchingReadCount).
+  // Matches against:
+  //   - sample id, flowcell, barcode, station, any metadata value
+  //   - any read in the sample carrying a matching tax/genes/products field
+  let searchResult = $derived.by(() => {
+    const q = searchDebounced.trim().toLowerCase();
+    if (!q) return null;
+    const matchedSamples = new Set();
+    let readMatches = 0;
+
+    // (1) Sample-level match (sample object + metadata).
+    if ($samples) {
+      for (const s of $samples) {
+        const m = $metadata?.[s.id] || {};
+        const fields = [s.id, s.flowcell, s.barcode, ...Object.values(m)];
+        for (const v of fields) {
+          if (v != null && String(v).toLowerCase().includes(q)) {
+            matchedSamples.add(s.id);
+            break;
+          }
+        }
+      }
+    }
+
+    // (2) Read-level match — only when read_explorer is loaded.
+    const reads = $readExplorer?.reads;
+    if (reads) {
+      for (const r of reads) {
+        let hit = false;
+        for (const f of READ_SEARCH_FIELDS) {
+          const v = r[f];
+          if (v != null && String(v).toLowerCase().includes(q)) { hit = true; break; }
+        }
+        if (hit) {
+          readMatches++;
+          if (r.sample) matchedSamples.add(r.sample);
+        }
+      }
+    }
+
+    return { matchedSamples, readMatches, readsLoaded: !!reads };
+  });
+
+  // Sample IDs to dim on the map (= visible markers minus matched samples).
+  let dimIds = $derived.by(() => {
+    if (!searchResult) return null;
+    const dim = new Set();
+    for (const m of allMarkers) {
+      if (!searchResult.matchedSamples.has(m.id)) dim.add(m.id);
+    }
+    return dim;
+  });
+
   let selectedDetail = $derived.by(() => {
     if (!$selectedSample || !$samples) return null;
     const s = $samples.find(s => s.id === $selectedSample);
@@ -294,11 +376,10 @@
 
 <div class="space-y-6">
   {#if noGeoData}
-    <div class="bg-amber-900/30 border border-amber-700 rounded-lg p-4 text-amber-300">
-      <h3 class="font-semibold mb-1">No geographic metadata</h3>
-      <p class="text-sm">Upload a metadata TSV with <code class="bg-slate-800 px-1 rounded">lat</code> and <code class="bg-slate-800 px-1 rounded">lon</code> columns using the Metadata button above.</p>
+    <div class="bg-slate-800/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-400">
+      Upload metadata with <code class="bg-slate-900 px-1 rounded text-slate-300">lat</code> + <code class="bg-slate-900 px-1 rounded text-slate-300">lon</code> columns to plot samples — or click <span class="text-cyan-400">Template</span> in the NavBar for a starter file.
     </div>
-  {:else}
+  {/if}
     <!-- Controls -->
     <div class="flex items-center gap-2 flex-wrap text-xs">
       <!-- Color cycling buttons -->
@@ -418,6 +499,38 @@
         {/if}
         <span class="text-slate-600 ml-1">shift-drag to select</span>
       </span>
+
+      <span class="text-slate-600 mx-1">|</span>
+
+      <!-- Search bar (taxon, gene, product, metadata, sample) -->
+      <div class="relative flex items-center">
+        <input
+          type="text"
+          bind:value={searchQuery}
+          placeholder="taxon, gene, product..."
+          class="w-48 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-slate-200 text-xs placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+        />
+        {#if searchQuery}
+          <button
+            class="absolute right-1 text-slate-500 hover:text-slate-300"
+            onclick={() => { searchQuery = ''; }}
+            title="Clear search"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        {/if}
+      </div>
+      {#if searchResult}
+        <span class="text-amber-400 font-medium">
+          {searchResult.matchedSamples.size} samples / {searchResult.readMatches.toLocaleString()} reads matching
+          {#if !searchResult.readsLoaded}
+            <span class="text-slate-500 italic ml-1">(loading reads…)</span>
+          {/if}
+        </span>
+      {/if}
+
       {#if lassoIds}
         <button
           class="px-3 py-1 rounded-md border border-cyan-400 bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20 transition-colors"
@@ -451,6 +564,7 @@
           onMarkerClick={handleMarkerClick}
           onSelect={handleSelect}
           {highlightIds}
+          {dimIds}
           exportName={`danaseq_map_color-${colorBy}`}
         />
       </div>
@@ -522,7 +636,6 @@
         ? 'text-[10px] px-2 py-0.5 rounded border bg-cyan-400/20 text-cyan-400 border-cyan-400/40 transition-colors'
         : 'text-[10px] px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-cyan-400 hover:border-cyan-400/40 transition-colors'}
     />
-  {/if}
 </div>
 
 <style>

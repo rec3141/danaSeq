@@ -1,7 +1,8 @@
 <script>
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
-  import { samples, metadata } from '../stores/data.js';
+  import { samples, metadata, sampleTaxonomy, readExplorer, loadReadExplorer } from '../stores/data.js';
+  import { taxSearchCandidates } from '../stores/taxonomy.js';
   import { cartItems, cartActive, toggleCart, addToCart } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
 
@@ -282,6 +283,166 @@
 
   let corrLayout = $derived({ height: 350, margin: { l: 100, b: 80 } });
 
+  // ---- Taxon / function / feature search ----
+  let pickQuery = $state('');
+  let pickFocus = $state(false);
+  let pickedItem = $state(null);   // { kind: 'taxon'|'function'|'feature', name, ... }
+
+  // Lazy-load read_explorer on first focus so the env page opens fast.
+  let readsLoadRequested = $state(false);
+  function ensureReadsLoaded() {
+    if (readsLoadRequested) return;
+    readsLoadRequested = true;
+    loadReadExplorer();
+  }
+
+  // Aggregate distinct gene/product strings across all reads. Each read's
+  // `genes` / `products` field is a "; "-joined string. Done lazily after
+  // read_explorer loads.
+  let funcCandidates = $derived.by(() => {
+    const reads = $readExplorer?.reads;
+    if (!reads) return [];
+    const counts = new Map();
+    for (const r of reads) {
+      for (const f of ['products', 'genes']) {
+        const v = r[f];
+        if (!v) continue;
+        for (const part of String(v).split('; ')) {
+          const k = part.trim();
+          if (!k) continue;
+          const tag = `${f}::${k}`;
+          counts.set(tag, (counts.get(tag) || 0) + 1);
+        }
+      }
+    }
+    const out = [];
+    for (const [tag, count] of counts) {
+      const [field, name] = tag.split('::');
+      out.push({ kind: 'function', field, name, count });
+    }
+    out.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    return out;
+  });
+
+  // Numeric metadata columns are "features".
+  let featureCandidates = $derived(
+    allColumns.numeric.map(c => ({ kind: 'feature', name: c }))
+  );
+
+  // Combined typeahead suggestions (taxa + functions + features), prefix-then-substring.
+  let pickSuggestions = $derived.by(() => {
+    const q = pickQuery.trim().toLowerCase();
+    if (!q) return [];
+    const taxa = $taxSearchCandidates.map(c => ({ kind: 'taxon', name: c.name, rank: c.rank, lineage: c.lineage, count: c.count }));
+    const all = [...taxa, ...funcCandidates, ...featureCandidates];
+    const matches = all.filter(c => c.name.toLowerCase().includes(q));
+    matches.sort((a, b) => {
+      const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+      const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return (b.count || 0) - (a.count || 0) || a.name.localeCompare(b.name);
+    });
+    return matches.slice(0, 25);
+  });
+
+  function pickItem(item) {
+    pickedItem = item;
+    pickQuery = item.name;
+    pickFocus = false;
+  }
+
+  // Build per-sample value vector for the picked item, then a sorted bar trace.
+  let pickTraces = $derived.by(() => {
+    if (!pickedItem || !$samples) return [];
+    const rows = [];
+    if (pickedItem.kind === 'feature') {
+      for (const s of $samples) {
+        const m = $metadata?.[s.id] || {};
+        const v = m[pickedItem.name] ?? s[pickedItem.name];
+        if (typeof v !== 'number') continue;
+        rows.push({ id: s.id, value: v });
+      }
+    } else if (pickedItem.kind === 'taxon') {
+      const tax = $sampleTaxonomy;
+      const parents = tax?.parents || {};
+      const samplesData = tax?.samples || {};
+      // Match leaves whose lineage contains the picked taxon name.
+      const matchLeaf = (leaf) => {
+        let cur = leaf;
+        const seen = new Set();
+        while (cur && !seen.has(cur)) {
+          if (cur === pickedItem.name) return true;
+          seen.add(cur);
+          cur = parents[cur];
+        }
+        return false;
+      };
+      const leafCache = new Map();
+      for (const s of $samples) {
+        const direct = samplesData[s.id]?.direct || {};
+        let count = 0;
+        for (const [leaf, n] of Object.entries(direct)) {
+          let m = leafCache.get(leaf);
+          if (m === undefined) { m = matchLeaf(leaf); leafCache.set(leaf, m); }
+          if (m) count += n;
+        }
+        const denom = s.read_count || 1;
+        rows.push({ id: s.id, value: count / denom * 100 });
+      }
+    } else if (pickedItem.kind === 'function') {
+      const reads = $readExplorer?.reads;
+      if (!reads) return [];
+      const counts = new Map();
+      const target = pickedItem.name;
+      const field = pickedItem.field;
+      for (const r of reads) {
+        const v = r[field];
+        if (!v) continue;
+        const parts = String(v).split('; ');
+        let hit = false;
+        for (const p of parts) if (p.trim() === target) { hit = true; break; }
+        if (!hit) continue;
+        const sid = r.sample;
+        if (!sid) continue;
+        counts.set(sid, (counts.get(sid) || 0) + 1);
+      }
+      for (const s of $samples) {
+        rows.push({ id: s.id, value: counts.get(s.id) || 0 });
+      }
+    }
+    if (!rows.length) return [];
+    rows.sort((a, b) => b.value - a.value);
+    return [{
+      type: 'bar',
+      orientation: 'h',
+      x: rows.map(r => r.value),
+      y: rows.map(r => r.id),
+      marker: { color: '#22d3ee' },
+      hovertemplate: '%{y}: %{x}<extra></extra>',
+    }];
+  });
+
+  let pickLayout = $derived.by(() => {
+    if (!pickedItem) return { height: 300 };
+    let xTitle = pickedItem.name;
+    if (pickedItem.kind === 'taxon') xTitle = `${pickedItem.name} (% of reads)`;
+    else if (pickedItem.kind === 'function') xTitle = `${pickedItem.name} (read count)`;
+    const n = pickTraces[0]?.y?.length || 0;
+    return {
+      xaxis: { title: { text: xTitle, font: { color: '#94a3b8' } } },
+      yaxis: { autorange: 'reversed', tickfont: { color: '#94a3b8', size: 10 } },
+      margin: { l: 140, r: 20, t: 10, b: 50 },
+      height: Math.max(220, Math.min(600, 28 + n * 14)),
+      showlegend: false,
+    };
+  });
+
+  function pickKindBadge(kind) {
+    if (kind === 'taxon')    return { label: 'taxon',    color: 'text-cyan-400' };
+    if (kind === 'function') return { label: 'function', color: 'text-amber-400' };
+    return { label: 'feature', color: 'text-emerald-400' };
+  }
+
   function pearson(x, y) {
     const n = x.length;
     const mx = x.reduce((s, v) => s + v, 0) / n;
@@ -339,12 +500,20 @@
 </script>
 
 <div class="space-y-6">
-  {#if allColumns.numeric.length === 0}
-    <div class="bg-amber-900/30 border border-amber-700 rounded-lg p-4 text-amber-300">
-      <h3 class="font-semibold mb-1">No environmental metadata</h3>
-      <p class="text-sm">Provide a metadata TSV with numeric columns (temperature_c, salinity_psu, depth_m, etc.) to enable environmental plots.</p>
+  {#if allColumns.all.length === 0}
+    <div class="bg-slate-800/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-400">
+      Most plots need an external metadata column on the X axis. The taxon/function search below works without metadata —
+      use <span class="text-cyan-400">Template</span> in the NavBar for a starter file.
     </div>
-  {:else}
+  {:else if allColumns.numeric.length === 0}
+    <div class="bg-slate-800/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-400">
+      No numeric metadata columns detected — scatter and correlation plots are limited. Add columns like
+      <code class="bg-slate-900 px-1 rounded text-slate-300">temperature_c</code>,
+      <code class="bg-slate-900 px-1 rounded text-slate-300">salinity_psu</code>, or
+      <code class="bg-slate-900 px-1 rounded text-slate-300">depth_m</code>.
+    </div>
+  {/if}
+
     <!-- Controls -->
     <div class="flex items-center gap-2 flex-wrap text-xs">
       <!-- Axis selectors (dropdowns — many options) -->
@@ -512,6 +681,70 @@
         : 'text-[10px] px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-cyan-400 hover:border-cyan-400/40 transition-colors'}
     />
 
+    <!-- Taxon / function / feature search + per-sample bar chart -->
+    <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 overflow-visible">
+      <div class="flex items-center gap-3 flex-wrap mb-3">
+        <h3 class="text-sm font-semibold text-slate-300">Per-sample distribution</h3>
+        <div class="relative">
+          <input
+            type="text"
+            bind:value={pickQuery}
+            onfocus={() => { pickFocus = true; ensureReadsLoaded(); }}
+            onblur={() => setTimeout(() => { pickFocus = false; }, 150)}
+            placeholder="taxon, gene/product, or numeric metadata column..."
+            class="w-72 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-slate-200 text-xs placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+          />
+          {#if pickQuery}
+            <button
+              class="absolute right-1 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+              onclick={() => { pickQuery = ''; pickedItem = null; }}
+              title="Clear"
+            >
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          {/if}
+          {#if pickFocus && pickSuggestions.length > 0}
+            <div class="absolute z-50 mt-1 w-96 max-h-72 overflow-y-auto bg-slate-900 border border-slate-600 rounded shadow-lg text-xs">
+              {#each pickSuggestions as item (`${item.kind}:${item.field || ''}:${item.name}`)}
+                {@const badge = pickKindBadge(item.kind)}
+                <button
+                  class="w-full text-left px-2 py-1 hover:bg-slate-700 flex items-center gap-2 border-b border-slate-800 last:border-0"
+                  onmousedown={(e) => { e.preventDefault(); pickItem(item); }}
+                >
+                  <span class={`${badge.color} font-mono w-16 shrink-0`}>{badge.label}</span>
+                  <span class="text-slate-200 truncate">{item.name}</span>
+                  {#if item.kind === 'taxon' && item.rank}
+                    <span class="text-slate-500 ml-auto">{item.rank}</span>
+                  {:else if item.kind === 'function'}
+                    <span class="text-slate-500 ml-auto">{item.field} · {item.count}</span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {:else if pickFocus && pickQuery.trim() && !$readExplorer}
+            <div class="absolute z-50 mt-1 w-96 bg-slate-900 border border-slate-600 rounded shadow-lg text-xs px-2 py-2 text-slate-400">
+              Loading read annotations…
+            </div>
+          {/if}
+        </div>
+        {#if pickedItem}
+          {@const badge = pickKindBadge(pickedItem.kind)}
+          <span class="text-xs"><span class={badge.color}>{badge.label}</span> <span class="text-slate-300 font-mono">{pickedItem.name}</span></span>
+        {/if}
+      </div>
+      {#if pickedItem && pickTraces.length}
+        <PlotlyChart traces={pickTraces} layout={pickLayout} exportName={`danaseq_env_pick_${pickedItem.kind}_${pickedItem.name}`} />
+      {:else if pickedItem}
+        <div class="h-[200px] flex items-center justify-center text-slate-500 text-sm">No data for "{pickedItem.name}"</div>
+      {:else}
+        <div class="h-[120px] flex items-center justify-center text-slate-500 text-xs">
+          Search for a taxon, gene/product, or metadata column to plot a sorted per-sample bar chart.
+        </div>
+      {/if}
+    </div>
+
     <!-- Correlation heatmap (full width, bottom) -->
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 overflow-hidden">
       <h3 class="text-sm font-semibold text-slate-300 mb-2">Correlation Matrix</h3>
@@ -521,7 +754,6 @@
         <div class="h-[300px] flex items-center justify-center text-slate-500 text-sm">Not enough numeric columns for correlation</div>
       {/if}
     </div>
-  {/if}
 </div>
 
 <style>
