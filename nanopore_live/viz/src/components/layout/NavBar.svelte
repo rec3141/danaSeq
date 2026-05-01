@@ -1,6 +1,7 @@
 <script>
   import { cartCount, cartActive } from '../../stores/cart.js';
   import { loadMetadataTsv, metadata, samples } from '../../stores/data.js';
+  import { taxonomySource } from '../../stores/taxonomySource.js';
   import { get } from 'svelte/store';
 
   const tabs = [
@@ -9,6 +10,7 @@
     { id: 'map', label: 'Map' },
     { id: 'environmental', label: 'Environmental' },
     { id: 'taxonomy', label: 'Taxonomy' },
+    { id: 'heatmap', label: 'Heatmap' },
     { id: 'function', label: 'Function' },
   ];
 
@@ -109,6 +111,27 @@
           </a>
         {/each}
       </div>
+      <!-- Taxonomy source toggle (GTDB / Kraken) -->
+      <div class="ml-4 flex items-center shrink-0" title="Taxonomy source — applies to Map / Reads / Heatmap / Taxonomy views">
+        <span class="text-[10px] uppercase tracking-wide text-slate-500 mr-2">Tax</span>
+        <div class="inline-flex rounded border border-slate-600 overflow-hidden">
+          <button
+            class="text-xs px-2 py-1 transition-colors
+              {$taxonomySource === 'gtdb'
+                ? 'bg-cyan-400/20 text-cyan-400'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}"
+            onclick={() => taxonomySource.set('gtdb')}
+          >GTDB</button>
+          <button
+            class="text-xs px-2 py-1 transition-colors border-l border-slate-600
+              {$taxonomySource === 'kraken'
+                ? 'bg-cyan-400/20 text-cyan-400'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}"
+            onclick={() => taxonomySource.set('kraken')}
+          >Kraken</button>
+        </div>
+      </div>
+
       <!-- Metadata upload -->
       <div class="ml-4 flex items-center gap-2 shrink-0">
         <input type="file" accept=".tsv,.txt,.csv" class="hidden" bind:this={metaInput} onchange={handleMetaUpload} />

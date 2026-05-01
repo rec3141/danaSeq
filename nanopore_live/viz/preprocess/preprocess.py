@@ -191,6 +191,112 @@ def query_taxonomy(db_path):
     return phylum_tax, class_tax, class_to_phylum
 
 
+# GTDB lineage prefix → rank code. No 'K' (kingdom) — GTDB starts at Domain.
+GTDB_PREFIX_RANK = {'d': 'D', 'p': 'P', 'c': 'C', 'o': 'O', 'f': 'F', 'g': 'G', 's': 'S'}
+
+
+def parse_gtdb_lineage(lineage):
+    """Parse 'd__Bacteria;p__Foo;...;s__Bar' → list of (rank_code, name).
+
+    Empty tokens (e.g. 'g__' with no name) are skipped; the lineage still
+    threads through so deeper ranks reach their real ancestors.
+    """
+    out = []
+    for tok in lineage.split(';'):
+        tok = tok.strip()
+        if len(tok) < 4 or tok[1:3] != '__':
+            continue
+        rank = GTDB_PREFIX_RANK.get(tok[0])
+        if not rank:
+            continue
+        name = tok[3:].strip()
+        if name:
+            out.append((rank, name))
+    return out
+
+
+def query_taxonomy_gtdb(db_path):
+    """Per-sample phylum/class counts from sendsketch GTDB classifications.
+
+    Mirrors query_taxonomy() shape: (phylum_tax, class_tax, class_to_phylum).
+    Sources from the sendsketch table's classified rows; empty if the table
+    is missing or holds no classified reads.
+    """
+    phylum_tax = {}
+    class_tax = {}
+    class_to_phylum = {}
+    try:
+        con = duckdb.connect(db_path, read_only=True)
+        try:
+            rows = con.execute("""
+                SELECT lineage, COUNT(*) AS count
+                FROM sendsketch
+                WHERE status = 'C'
+                GROUP BY lineage
+            """).fetchall()
+            for lineage, count in rows:
+                if not lineage or count <= 0:
+                    continue
+                phylum = None
+                for rank, name in parse_gtdb_lineage(lineage):
+                    if rank == 'P':
+                        phylum_tax[name] = phylum_tax.get(name, 0) + count
+                        phylum = name
+                    elif rank == 'C':
+                        class_tax[name] = class_tax.get(name, 0) + count
+                        if phylum:
+                            class_to_phylum[name] = phylum
+        except Exception:
+            pass  # No sendsketch table — leave empty
+        con.close()
+    except Exception as e:
+        print(f"  [WARNING] Failed to query GTDB taxonomy from {db_path}: {e}", file=sys.stderr)
+    return phylum_tax, class_tax, class_to_phylum
+
+
+def query_sunburst_data_gtdb(db_path):
+    """Full-lineage counts from sendsketch, in (path_counts, name_rank) shape
+    compatible with build_taxonomy_sunburst() / build_taxonomy_parent_map().
+
+    Leaf = deepest non-empty rank in the lineage. Taxonomy string = remaining
+    ancestor names joined by ';', matching the Kraken path format.
+    """
+    path_counts = {}
+    name_rank = {}
+    try:
+        con = duckdb.connect(db_path, read_only=True)
+        try:
+            rows = con.execute("""
+                SELECT lineage, COUNT(*) AS cnt
+                FROM sendsketch
+                WHERE status = 'C'
+                GROUP BY lineage
+            """).fetchall()
+            for lineage, cnt in rows:
+                if not lineage or cnt <= 0:
+                    continue
+                parsed = parse_gtdb_lineage(lineage)
+                if not parsed:
+                    continue
+                for rank, name in parsed:
+                    name_rank[name] = rank
+                leaf_name = parsed[-1][1]
+                # Match Kraken's convention: `taxonomy` includes the leaf name
+                # at the end. build_taxonomy_sunburst puts counts on
+                # filtered[-1] and build_taxonomy_parent_map derives parent
+                # edges from adjacent pairs in the filtered chain — both
+                # require the leaf in the string to work past the genus.
+                taxonomy = ';'.join(n for _, n in parsed)
+                path_counts[(taxonomy, leaf_name)] = \
+                    path_counts.get((taxonomy, leaf_name), 0) + cnt
+        except Exception:
+            pass
+        con.close()
+    except Exception as e:
+        print(f"  [WARNING] Failed to query GTDB sunburst from {db_path}: {e}", file=sys.stderr)
+    return path_counts, name_rank
+
+
 def query_function(db_path):
     """Get per-sample functional annotation summary."""
     func = {
@@ -440,6 +546,15 @@ def compute_sample_tsne(sketch_distances_file, sample_ids):
     # Build distance matrix
     id_list = sorted(sample_ids)
     n = len(id_list)
+
+    # sklearn t-SNE requires perplexity < n_samples and n_samples >= 3 in
+    # practice (perplexity floor of 2 ⇒ need ≥3 points). Skip cleanly while
+    # the run is still ramping up — preprocess.py downstream of this must
+    # not crash, otherwise samples.json never gets rewritten.
+    if n < 3:
+        print(f"[INFO] Only {n} sample(s) with sketches — skipping sample t-SNE", file=sys.stderr)
+        return None
+
     id_to_idx = {sid: i for i, sid in enumerate(id_list)}
     dist_matrix = np.full((n, n), 100.0)  # max distance for unrelated pairs (no ANI hit)
     np.fill_diagonal(dist_matrix, 0)
@@ -571,14 +686,24 @@ def main():
     # Load metadata
     metadata = load_metadata(args.metadata)
 
-    # Query each sample
+    # Query each sample — collect Kraken and GTDB taxonomy payloads in parallel.
+    # Each source produces its own phylum/class/sunburst dicts; they're emitted
+    # side-by-side in the final JSON under {kraken: ..., gtdb: ...} so the viz
+    # can flip between taxonomies without a re-fetch.
     all_stats = {}
+    all_function = {}
+    # Kraken payloads
     all_phylum_tax = {}
     all_class_tax = {}
-    all_function = {}
     all_sunburst_paths = {}   # (taxonomy, leaf_name) -> total proportional count
     all_sunburst_names = {}   # name -> rank
     all_sample_sunburst = {}  # sample_id -> {taxon: direct_count} (filtered >0.1%)
+    # GTDB payloads (same shape, sourced from sendsketch)
+    all_phylum_tax_gtdb = {}
+    all_class_tax_gtdb = {}
+    all_sunburst_paths_gtdb = {}
+    all_sunburst_names_gtdb = {}
+    all_sample_sunburst_gtdb = {}
 
     for i, s in enumerate(samples):
         sid = s['id']
@@ -586,40 +711,52 @@ def main():
 
         stats = query_sample_stats(s['db_path'])
         phylum_tax, class_tax, class_to_phylum = query_taxonomy(s['db_path'])
+        phylum_tax_g, class_tax_g, class_to_phylum_g = query_taxonomy_gtdb(s['db_path'])
         func = query_function(s['db_path'])
 
-        # Collect full taxonomy lineage for sunburst
+        # Collect full taxonomy lineage for sunburst (Kraken + GTDB)
         sb_paths, sb_names = query_sunburst_data(s['db_path'])
         all_sunburst_names.update(sb_names)
         # Normalize per-sample counts to proportions (equal weight per sample)
         sb_total = sum(sb_paths.values()) or 1
         for key, cnt in sb_paths.items():
             all_sunburst_paths[key] = all_sunburst_paths.get(key, 0) + cnt / sb_total
-
-        # Per-sample filtered sunburst counts for cart filtering
         all_sample_sunburst[sid] = filter_sample_sunburst(sb_paths)
+
+        sb_paths_g, sb_names_g = query_sunburst_data_gtdb(s['db_path'])
+        all_sunburst_names_gtdb.update(sb_names_g)
+        sb_total_g = sum(sb_paths_g.values()) or 1
+        for key, cnt in sb_paths_g.items():
+            all_sunburst_paths_gtdb[key] = all_sunburst_paths_gtdb.get(key, 0) + cnt / sb_total_g
+        all_sample_sunburst_gtdb[sid] = filter_sample_sunburst(sb_paths_g)
 
         # Extract start time from first fastq
         start_time = extract_start_time(s['dir'])
         if start_time:
             stats['start_time'] = start_time
 
-        # Compute derived fields
-        stats['diversity'] = shannon_diversity(phylum_tax)
-        if class_tax:
-            dominant_class = max(class_tax, key=class_tax.get)
+        # Derived summary fields on samples.json — prefer Kraken when present
+        # (back-compat), else fall back to GTDB so samples with only the new
+        # sendsketch data still show a dominant phylum/class.
+        primary_phylum = phylum_tax or phylum_tax_g
+        primary_class = class_tax or class_tax_g
+        primary_c2p = class_to_phylum if phylum_tax else class_to_phylum_g
+        stats['diversity'] = shannon_diversity(primary_phylum)
+        if primary_class:
+            dominant_class = max(primary_class, key=primary_class.get)
             stats['dominant_class'] = dominant_class
-            # Derive phylum from dominant class's lineage for consistency
-            if dominant_class in class_to_phylum:
-                stats['dominant_phylum'] = class_to_phylum[dominant_class]
-            elif phylum_tax:
-                stats['dominant_phylum'] = max(phylum_tax, key=phylum_tax.get)
-        elif phylum_tax:
-            stats['dominant_phylum'] = max(phylum_tax, key=phylum_tax.get)
+            if dominant_class in primary_c2p:
+                stats['dominant_phylum'] = primary_c2p[dominant_class]
+            elif primary_phylum:
+                stats['dominant_phylum'] = max(primary_phylum, key=primary_phylum.get)
+        elif primary_phylum:
+            stats['dominant_phylum'] = max(primary_phylum, key=primary_phylum.get)
 
         all_stats[sid] = stats
         all_phylum_tax[sid] = phylum_tax
         all_class_tax[sid] = class_tax
+        all_phylum_tax_gtdb[sid] = phylum_tax_g
+        all_class_tax_gtdb[sid] = class_tax_g
         all_function[sid] = func
 
         ts_str = f" [{start_time[:10]}]" if start_time else ""
@@ -653,12 +790,12 @@ def main():
         'total_bases': sum(s.get('total_bases', 0) for s in samples_list),
     }
 
-    # Build taxonomy sunburst (full hierarchy from all standard ranks)
-    print("[INFO] Building taxonomy sunburst...", file=sys.stderr)
-    sunburst = build_taxonomy_sunburst(all_sunburst_paths, all_sunburst_names)
-
-    # Build parent map for client-side cart-filtered sunburst
-    parent_map = build_taxonomy_parent_map(all_sunburst_paths, all_sunburst_names)
+    # Build per-source taxonomy sunburst trees + parent maps
+    print("[INFO] Building taxonomy sunbursts (kraken + gtdb)...", file=sys.stderr)
+    sunburst_kraken = build_taxonomy_sunburst(all_sunburst_paths, all_sunburst_names)
+    sunburst_gtdb   = build_taxonomy_sunburst(all_sunburst_paths_gtdb, all_sunburst_names_gtdb)
+    parent_map_kraken = build_taxonomy_parent_map(all_sunburst_paths, all_sunburst_names)
+    parent_map_gtdb   = build_taxonomy_parent_map(all_sunburst_paths_gtdb, all_sunburst_names_gtdb)
 
     # Write outputs
     def write_json(filename, data):
@@ -674,21 +811,32 @@ def main():
     if sample_tsne:
         embeddings['tsne'] = sample_tsne
     write_json('sample_tsne.json', embeddings)
-    # Include rank map for client-side rank-level aggregation
-    rank_map = {k: v for k, v in all_sunburst_names.items()}
 
+    def build_tax_payload(parents, names_rank, phylum, cls, sample_sunburst):
+        """Shape one taxonomy source into the viz-consumed {parents,ranks,samples}."""
+        return {
+            'parents': parents,
+            'ranks': dict(names_rank),
+            'samples': {
+                sid: {
+                    'phylum': phylum.get(sid, {}),
+                    'class':  cls.get(sid, {}),
+                    'direct': sample_sunburst.get(sid, {}),
+                }
+                for sid in sample_ids
+            },
+        }
+
+    # Taxonomy payloads — {kraken: ..., gtdb: ...}. Viz flips between the two
+    # via a global source toggle; old flat-shape consumers should fall back to
+    # the `kraken` branch.
     tax_data = {
-        'parents': parent_map,
-        'ranks': rank_map,
-        'samples': {
-            k: {
-                'phylum': all_phylum_tax.get(k, {}),
-                'class': all_class_tax.get(k, {}),
-                'direct': all_sample_sunburst.get(k, {}),
-            }
-            for k in sample_ids
-        },
+        'kraken': build_tax_payload(parent_map_kraken, all_sunburst_names,
+                                    all_phylum_tax, all_class_tax, all_sample_sunburst),
+        'gtdb':   build_tax_payload(parent_map_gtdb, all_sunburst_names_gtdb,
+                                    all_phylum_tax_gtdb, all_class_tax_gtdb, all_sample_sunburst_gtdb),
     }
+    sunburst = {'kraken': sunburst_kraken, 'gtdb': sunburst_gtdb}
     write_json('sample_taxonomy.json', tax_data)
     write_json('taxonomy_sunburst.json', sunburst)
     write_json('sample_function.json', {k: v for k, v in all_function.items() if k in sample_ids})

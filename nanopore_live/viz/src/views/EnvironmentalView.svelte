@@ -399,7 +399,7 @@
       <div class="text-slate-400 flex items-center gap-1">
         <div class="single-range relative w-16 h-5 flex items-center">
           <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
-          <input type="range" min="0.3" max="3" step="0.1" bind:value={sizeScale} />
+          <input type="range" min="0.3" max="20" step="0.1" bind:value={sizeScale} />
         </div>
         <span class="text-slate-500 w-8 font-mono">{sizeScale.toFixed(1)}x</span>
       </div>

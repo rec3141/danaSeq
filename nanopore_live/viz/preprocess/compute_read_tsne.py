@@ -64,6 +64,53 @@ def load_lengths(sample_dir):
     return lengths
 
 
+# GTDB lineage prefix → field name on each read record
+_GTDB_RANK_FIELD = {'d': 'gtdb_domain', 'p': 'gtdb_phylum', 'c': 'gtdb_class',
+                    'o': 'gtdb_order', 'f': 'gtdb_family', 'g': 'gtdb_genus',
+                    's': 'gtdb_species'}
+
+
+def parse_gtdb_lineage_fields(lineage):
+    """Parse a GTDB 'd__X;p__Y;...;s__Z' string into a flat dict keyed by
+    gtdb_domain / gtdb_phylum / ... Empty rank tokens are skipped so the SPA
+    shows '?' rather than a phantom 'g__' blank.
+    """
+    out = {}
+    if not lineage:
+        return out
+    for tok in lineage.split(';'):
+        tok = tok.strip()
+        if len(tok) < 4 or tok[1:3] != '__':
+            continue
+        field = _GTDB_RANK_FIELD.get(tok[0])
+        if not field:
+            continue
+        name = tok[3:].strip()
+        if name:
+            out[field] = name
+    return out
+
+
+def build_gtdb_read_lookup(con):
+    """read_id → {gtdb_domain, gtdb_phylum, ...} from the sendsketch table.
+
+    Only classified rows (status='C') contribute; unclassified reads simply
+    lack gtdb_* fields on their scatter record and show as 'Unclassified'.
+    """
+    lookup = {}
+    try:
+        rows = con.execute(
+            "SELECT read_id, lineage FROM sendsketch WHERE status = 'C' AND lineage IS NOT NULL"
+        ).fetchall()
+        for read_id, lineage in rows:
+            fields = parse_gtdb_lineage_fields(lineage)
+            if fields:
+                lookup[read_id] = fields
+    except Exception:
+        pass  # sendsketch may not exist / be empty
+    return lookup
+
+
 def build_lineage_lookup(con):
     """Build taxid → {domain, phylum, class, order, family, genus} from krakenreport.
 
@@ -90,6 +137,7 @@ def build_lineage_lookup(con):
                 'order':   lineage.get('O'),
                 'family':  lineage.get('F'),
                 'genus':   lineage.get('G'),
+                'species': lineage.get('S'),
             }
     except Exception:
         pass  # krakenreport may not exist
@@ -122,6 +170,10 @@ def extract_reads(db_path, sample_id, max_per_sample, seq_lengths=None):
         has_kraken = 'kraken' in tables
         has_krakenreport = 'krakenreport' in tables
         lineage_lookup = build_lineage_lookup(con) if has_krakenreport else {}
+
+        # Build read_id → GTDB lineage fields from sendsketch (optional)
+        has_sendsketch = 'sendsketch' in tables
+        gtdb_lookup = build_gtdb_read_lookup(con) if has_sendsketch else {}
 
         # Build read_id → gene annotations lookup via read_contig_map
         has_rcm = 'read_contig_map' in tables
@@ -221,13 +273,18 @@ def extract_reads(db_path, sample_id, max_per_sample, seq_lengths=None):
                 'sample': sample_id,
                 'length': length,
                 'gc': gc,
-                'kraken_domain': lineage.get('domain'),
-                'kraken_phylum': lineage.get('phylum'),
-                'kraken_class':  lineage.get('class'),
-                'kraken_order':  lineage.get('order'),
-                'kraken_family': lineage.get('family'),
-                'kraken_genus':  lineage.get('genus'),
+                'kraken_domain':  lineage.get('domain'),
+                'kraken_phylum':  lineage.get('phylum'),
+                'kraken_class':   lineage.get('class'),
+                'kraken_order':   lineage.get('order'),
+                'kraken_family':  lineage.get('family'),
+                'kraken_genus':   lineage.get('genus'),
+                'kraken_species': lineage.get('species'),
             }
+            # Overlay GTDB fields keyed by read_id (sendsketch was per-read)
+            g = gtdb_lookup.get(seqid)
+            if g:
+                read.update(g)
             genes = gene_lookup.get(seqid)
             products = product_lookup.get(seqid)
             if genes:

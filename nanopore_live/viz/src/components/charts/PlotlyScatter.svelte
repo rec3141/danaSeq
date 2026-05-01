@@ -35,6 +35,9 @@
 
   function markerSize(c, sizeBy, scale) {
     if (sizeBy === 'fixed') return 8 * scale;
+    // Raw mode: read the size straight off the point. Used for taxonomy
+    // disc overlays where each disc's size is already sqrt(fraction) * K.
+    if (sizeBy === 'raw') return Math.max(1, (typeof c.size === 'number' ? c.size : 0) * scale);
     const val = typeof c[sizeBy] === 'number' ? c[sizeBy] : 0;
     if (val <= 0 || !sizeNorm) return 4 * scale;
     const t = (Math.log1p(val) - sizeNorm.logMin) / sizeNorm.range;
@@ -42,6 +45,9 @@
   }
 
   function hoverText(c) {
+    // Allow callers to supply a pre-built tooltip (used by taxonomy disc
+    // overlays where each disc describes a (sample, taxon) pair).
+    if (typeof c.hover_text === 'string') return c.hover_text;
     const parts = [`<b>${c[idField] || c.id}</b>`];
     if (c.flowcell) parts.push(`Flowcell: ${c.flowcell}`);
     if (c.barcode) parts.push(`Barcode: ${c.barcode}`);

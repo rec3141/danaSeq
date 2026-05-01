@@ -1,9 +1,11 @@
 <script>
   import LeafletMap from '../components/charts/LeafletMap.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
-  import { samples, metadata } from '../stores/data.js';
+  import { samples, metadata, sampleTaxonomy } from '../stores/data.js';
   import { cartItems, cartActive, toggleCart, addToCart } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
+  import { taxNav, activeSubTaxa, ancestorInfo, nextRank, prevRank, rankOrder } from '../stores/taxonomy.js';
+  import TaxonomyDrillNav from '../components/layout/TaxonomyDrillNav.svelte';
 
   // Cycling button helpers
   function cycle(values, current) {
@@ -116,13 +118,32 @@
     return limits.min + (limits.max - limits.min) * pct / 100;
   }
 
-  // All markers (before filters)
+  // Taxonomy drill-down: shared state in taxNav + activeSubTaxa stores.
+  // Only use the sub-taxa index when the map is coloring by taxonomy.
+  let taxSubTaxa = $derived(colorMode === 'taxonomy' ? $activeSubTaxa : null);
+
+  // All markers (before filters). In taxonomy drill-down mode, each marker
+  // carries a `rings` array describing its per-sub-taxon breakdown at the
+  // current (level, filter); LeafletMap renders these as nested concentric
+  // circles largest-first so every layer is visible.
+  //
+  // Ring sizing (cross-sample comparable): each ring's `fraction` is the
+  // sub-taxon's count divided by the SAMPLE'S TOTAL reads (s.read_count),
+  // not the within-filter sum. This keeps denominators the same across
+  // samples so 1% S. enterica in Sample A and 10% S. enterica in Sample B
+  // produce visibly different rings (~3.2× radius difference). `radiusScale`
+  // is sqrt(fraction / globalMaxFraction) — the single largest (sample,
+  // taxon) fraction in the current view fills the marker, everything else
+  // scales proportionally by area.
   let allMarkers = $derived.by(() => {
     if (!$samples || !$metadata) return [];
-    return $samples.map(s => {
+
+    // First pass: build per-sample fractions, using the sample's own total
+    // read count as the denominator for cross-sample comparability.
+    const markers = $samples.map(s => {
       const m = $metadata[s.id];
       if (!m || m.lat == null || m.lon == null) return null;
-      return {
+      const marker = {
         id: s.id,
         lat: m.lat,
         lon: m.lon,
@@ -132,7 +153,43 @@
         diversity: s.diversity,
         ...m,
       };
+      if (taxSubTaxa) {
+        // ALWAYS set `rings` when drill-down is active — even to an empty array.
+        // Empty means "sample has zero of the current filter/isolated taxon";
+        // LeafletMap renders that as a small hollow placeholder so you can see
+        // which samples are truly zero (vs. falling through to the default
+        // single-color marker, which would look identical to non-zero samples).
+        const agg = taxSubTaxa.perSample[s.id] || {};
+        const denom = Math.max(1, s.read_count || 0);
+        const entries = Object.entries(agg).sort((a, b) => b[1] - a[1]);
+        let rings = entries.map(([name, count]) => ({
+          name,
+          color: taxSubTaxa.colorMap[name],
+          count,
+          fraction: count / denom,
+        }));
+        if ($taxNav.isolated) {
+          rings = rings.filter(r => r.name === $taxNav.isolated);
+        }
+        marker.rings = rings;   // may be empty — that's intentional
+      }
+      return marker;
     }).filter(Boolean);
+
+    // Second pass: cross-sample size normalization. Find the max fraction of
+    // any (sample, sub-taxon) so we can scale ring radii against it.
+    let maxFrac = 0;
+    for (const m of markers) {
+      if (!m.rings) continue;
+      for (const r of m.rings) if (r.fraction > maxFrac) maxFrac = r.fraction;
+    }
+    if (maxFrac > 0) {
+      for (const m of markers) {
+        if (!m.rings) continue;
+        for (const r of m.rings) r.radiusScale = Math.sqrt(r.fraction / maxFrac);
+      }
+    }
+    return markers;
   });
 
   // Filtered markers
@@ -258,10 +315,10 @@
         class="px-3 py-1 rounded-md border transition-colors text-center
           {colorMode === 'taxonomy' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
         style="min-width: {BW.taxonomy}"
-        onclick={() => { if (colorMode === 'taxonomy') taxField = cycle(taxGroup.values, taxField); else colorMode = 'taxonomy'; }}
-        title={`Click to cycle: ${taxGroup.labels.join(' → ')}`}
+        onclick={() => colorMode = 'taxonomy'}
+        title="Color markers by taxonomy — drill down using the panel at left"
       >
-        {colorMode === 'taxonomy' ? getLabel(taxGroup.values, taxGroup.labels, taxField) : 'Taxonomy'} &#x25BE;
+        Taxonomy
       </button>
       <button
         class="px-3 py-1 rounded-md border transition-colors text-center
@@ -305,7 +362,7 @@
       <div class="text-slate-400 flex items-center gap-1">
         <div class="single-range relative w-16 h-5 flex items-center">
           <div class="absolute h-1 w-full bg-slate-700 rounded"></div>
-          <input type="range" min="0.3" max="3" step="0.1" bind:value={sizeScale} />
+          <input type="range" min="0.3" max="20" step="0.1" bind:value={sizeScale} />
         </div>
         <span class="text-slate-500 w-8 font-mono">{sizeScale.toFixed(1)}x</span>
       </div>
@@ -378,8 +435,11 @@
       {/if}
     </div>
 
-    <!-- Map + Detail panel -->
+    <!-- Taxonomy drill-down nav + Map + Detail panel -->
     <div class="flex gap-6">
+      {#if colorMode === 'taxonomy'}
+        <TaxonomyDrillNav heightClass="h-[500px]" />
+      {/if}
       <div class="flex-1 h-[500px] rounded-lg overflow-hidden border border-slate-700">
         <LeafletMap
           {markers}

@@ -261,6 +261,82 @@
 
       renderedMarkers.push({ id: m.id, lat, lon });
 
+      // Breakdown mode: marker.rings = [{ color, fraction, radiusScale?, name? }].
+      // Each ring is drawn as a solid circle with radius = markerRadius *
+      // radiusScale (or sqrt(fraction) as a fallback). Drawn largest-first so
+      // smaller rings sit on top and every layer is visible. Because radiusScale
+      // is computed against a GLOBAL max fraction in MapView, the same fraction
+      // always produces the same ring radius across samples — direct visual
+      // comparison.
+      //
+      // Empty rings array ≠ absent: it means "drill-down is active but this
+      // sample has zero of the current filter/isolation". Render a small
+      // hollow placeholder so zero samples are visibly distinct from non-zero.
+      const hasRingsField = Array.isArray(m.rings);
+      const rings = hasRingsField && m.rings.length > 0 ? m.rings : null;
+
+      if (hasRingsField && !rings) {
+        const zeroDot = L.circleMarker([lat, lon], {
+          radius: 3,
+          fillColor: 'transparent',
+          color: '#64748b',   // slate-500
+          weight: 1,
+          opacity: 0.7,
+          fillOpacity: 0,
+          interactive: true,
+          dashArray: '2 2',
+        });
+        zeroDot.bindTooltip(tooltipContent(m) + '<div style="color:#94a3b8;margin-top:4px">(zero reads at current drill-down)</div>', {
+          className: 'dark-tooltip', direction: 'top', offset: [0, -4],
+        });
+        if (onMarkerClick) {
+          zeroDot.on('click', (e) => {
+            L.DomEvent.stopPropagation(e);
+            onMarkerClick(m.id);
+          });
+        }
+        zeroDot.addTo(markerLayer);
+        continue;
+      }
+
+      if (rings) {
+        const sorted = [...rings]
+          .map(r => ({
+            ...r,
+            _scale: r.radiusScale != null ? r.radiusScale : Math.sqrt(r.fraction || 0),
+          }))
+          .filter(r => r._scale > 0)
+          .sort((a, b) => b._scale - a._scale);
+        if (sorted.length === 0) continue;
+        for (let i = 0; i < sorted.length; i++) {
+          const r = sorted[i];
+          const ringRadius = Math.max(1, radius * r._scale);
+          const ring = L.circleMarker([lat, lon], {
+            radius: ringRadius,
+            fillColor: r.color || '#64748b',
+            color: i === 0 ? borderColor : 'transparent',  // only outer stroke on biggest
+            weight: i === 0 ? weight : 0,
+            opacity: 1,
+            fillOpacity: 0.9,
+            interactive: i === sorted.length - 1,  // innermost catches clicks/tooltip
+          });
+          if (i === sorted.length - 1) {
+            ring.bindTooltip(tooltipContent(m), {
+              className: 'dark-tooltip',
+              direction: 'top', offset: [0, -radius],
+            });
+            if (onMarkerClick) {
+              ring.on('click', (e) => {
+                L.DomEvent.stopPropagation(e);
+                onMarkerClick(m.id);
+              });
+            }
+          }
+          ring.addTo(markerLayer);
+        }
+        continue;
+      }
+
       const circle = L.circleMarker([lat, lon], {
         radius, fillColor: color, color: borderColor,
         weight, opacity: 1, fillOpacity: 0.8,

@@ -1,12 +1,34 @@
-import { writable, get } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
+import { taxonomySource } from './taxonomySource.js';
 
 export const overview = writable(null);
 export const samples = writable(null);
 export const sampleTsne = writable(null);
-export const sampleTaxonomy = writable(null);
-export const taxonomySunburst = writable(null);
+// Raw taxonomy payloads from JSON, each a {kraken, gtdb} envelope. Old flat
+// builds (no source key) are treated as kraken for back-compat.
+export const sampleTaxonomyRaw = writable(null);
+export const taxonomySunburstRaw = writable(null);
 export const sampleFunction = writable(null);
 export const metadata = writable(null);
+
+// Derived views that track the active taxonomy source. Consumers across the
+// SPA import these and stay source-agnostic.
+function pickSource(raw, source) {
+  if (!raw) return null;
+  if (raw.kraken || raw.gtdb) return raw[source] ?? raw.kraken ?? raw.gtdb ?? null;
+  // Back-compat: pre-GTDB flat-shape JSON — treat as Kraken regardless of source.
+  return raw;
+}
+
+export const sampleTaxonomy = derived(
+  [sampleTaxonomyRaw, taxonomySource],
+  ([$raw, $src]) => pickSource($raw, $src),
+);
+
+export const taxonomySunburst = derived(
+  [taxonomySunburstRaw, taxonomySource],
+  ([$raw, $src]) => pickSource($raw, $src),
+);
 
 // Lazy-loaded (large)
 export const readExplorer = writable(null);
@@ -69,8 +91,8 @@ export async function loadAllData() {
     if (overviewData) overview.set(overviewData);
     if (samplesData) samples.set(samplesData);
     if (tsneData) sampleTsne.set(tsneData);
-    if (taxData) sampleTaxonomy.set(taxData);
-    if (sunburstData) taxonomySunburst.set(sunburstData);
+    if (taxData) sampleTaxonomyRaw.set(taxData);
+    if (sunburstData) taxonomySunburstRaw.set(sunburstData);
     if (funcData) sampleFunction.set(funcData);
     if (metaData) metadata.set(metaData);
   } catch (e) {

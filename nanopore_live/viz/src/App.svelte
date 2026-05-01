@@ -10,6 +10,7 @@
   import MapView from './views/MapView.svelte';
   import EnvironmentalView from './views/EnvironmentalView.svelte';
   import TaxonomyView from './views/TaxonomyView.svelte';
+  import HeatmapView from './views/HeatmapView.svelte';
   import FunctionView from './views/FunctionView.svelte';
 
   let activeTab = $state('samples');
@@ -52,6 +53,8 @@
         <EnvironmentalView />
       {:else if activeTab === 'taxonomy'}
         <TaxonomyView />
+      {:else if activeTab === 'heatmap'}
+        <HeatmapView />
       {:else if activeTab === 'function'}
         <FunctionView />
       {/if}
