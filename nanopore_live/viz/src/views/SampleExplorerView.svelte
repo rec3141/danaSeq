@@ -6,6 +6,7 @@
   import { cartItems, cartActive, addToCart, toggleCart } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
   import { taxNav, activeSubTaxa, visibleSampleIds, RANK_LABELS } from '../stores/taxonomy.js';
+  import { sampleClusters } from '../stores/clusters.js';
   import TaxonomyDrillNav from '../components/layout/TaxonomyDrillNav.svelte';
 
   // Taxonomy-overlay view: one disc per (sample, sub-taxon) at the current
@@ -155,10 +156,14 @@
   let metaField = $state('');
   let metricField = $state('read_count');
 
-  const METRIC_VALUES = ['read_count', 'total_bases', 'avg_length', 'diversity'];
+  // 'cluster' is populated by HeatmapView's k-cut and surfaced here as a
+  // categorical color so users can flip /samples between Ward groups
+  // they just identified on the /heatmap. Empty until the heatmap has
+  // been visited at least once.
+  const METRIC_VALUES = ['read_count', 'total_bases', 'avg_length', 'diversity', 'cluster'];
   const METRIC_LABELS = {
     read_count: 'Reads', total_bases: 'Bases',
-    avg_length: 'Avg Length', diversity: 'Shannon H',
+    avg_length: 'Avg Length', diversity: 'Shannon H', cluster: 'Heatmap Cluster',
   };
 
   // Discover uploaded metadata columns. lat/lon are excluded because
@@ -305,6 +310,7 @@
         avg_length: s.avg_length,
         diversity: s.diversity,
         start_time: s.start_time,
+        cluster: $sampleClusters?.[s.id] ?? null,
         ...(m || {}),
       };
     };
