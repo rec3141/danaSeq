@@ -371,23 +371,29 @@
       {valueMode === 'pct' ? '% classified' : 'log10(reads)'} &#x25BE;
     </button>
 
-    <button
-      class="px-3 py-1 rounded-md border border-cyan-400 bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20 transition-colors"
-      style="min-width: 7rem"
-      onclick={cycleOrder}
-      title={`Click to cycle column order: ${orderModes.map(m => m.label).join(' → ')}`}
-    >
-      Order: {currentOrder.label} &#x25BE;
-    </button>
+    <label class="flex items-center gap-2 text-slate-400">
+      <span>Order:</span>
+      <select
+        bind:value={orderIdx}
+        class="px-2 py-1 rounded-md border border-cyan-400 bg-slate-900 text-cyan-400 hover:bg-cyan-400/10 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400"
+      >
+        {#each orderModes as m, i}
+          <option value={i}>{m.label}</option>
+        {/each}
+      </select>
+    </label>
 
-    <button
-      class="px-3 py-1 rounded-md border border-cyan-400 bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20 transition-colors"
-      style="min-width: 7rem"
-      onclick={cycleLabel}
-      title={`Click to cycle column label: ${labelModes.map(m => m.label).join(' → ')}`}
-    >
-      Label: {currentLabel.label} &#x25BE;
-    </button>
+    <label class="flex items-center gap-2 text-slate-400">
+      <span>Label:</span>
+      <select
+        bind:value={labelIdx}
+        class="px-2 py-1 rounded-md border border-cyan-400 bg-slate-900 text-cyan-400 hover:bg-cyan-400/10 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400"
+      >
+        {#each labelModes as m, i}
+          <option value={i}>{m.label}</option>
+        {/each}
+      </select>
+    </label>
 
     <div class="flex items-center gap-2 text-slate-400">
       <span>Top N</span>
