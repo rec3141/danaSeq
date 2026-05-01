@@ -358,10 +358,12 @@
       }
     }
 
-    // Largest first — big discs render underneath so smaller overlays stay
-    // visible. (In non-taxonomy mode all discs are equal; the sort is a
-    // no-op but harmless.)
-    out.sort((a, b) => b.fraction - a.fraction);
+    // Largest first — big discs render underneath so smaller overlays paint
+    // on top and stay visible. Sorting by `size` directly (rather than
+    // `fraction`) makes the intent explicit and is also robust if a future
+    // mode ever decouples size from fraction. (In non-taxonomy mode all
+    // sizes are equal; the sort is a no-op but harmless.)
+    out.sort((a, b) => (b.size || 0) - (a.size || 0));
     if (typeof window !== 'undefined') {
       const taxa = new Set(out.map(p => p.taxon).filter(t => t));
       const palette = colorMode === 'taxonomy' ? ($activeSubTaxa?.colorMap ?? {}) : {};
