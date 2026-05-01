@@ -3,7 +3,7 @@
   import ReglScatter from '../components/charts/ReglScatter.svelte';
   import StatCard from '../components/layout/StatCard.svelte';
   import { readExplorer, loadReadExplorer, sampleTaxonomy } from '../stores/data.js';
-  import { cartItems, cartActive } from '../stores/cart.js';
+  import { cartItems, cartActive, addReadSelection } from '../stores/cart.js';
   import { selectedRead } from '../stores/selection.js';
   import { taxonomySource } from '../stores/taxonomySource.js';
   import { taxNav, activeSubTaxa, rankOrder, RANK_LABELS } from '../stores/taxonomy.js';
@@ -158,6 +158,19 @@
 
   function handleSelect(ids) {
     selectedIds = ids ? new Set(ids) : null;
+  }
+
+  // Toast state for "Added Selection N (X reads)" feedback.
+  let cartAddToast = $state('');
+  let cartAddTimer;
+
+  function addSelectionToCart() {
+    if (!selectedIds || !$readExplorer?.reads) return;
+    const name = addReadSelection(selectedIds, $readExplorer.reads);
+    if (!name) return;
+    cartAddToast = `Added ${name} (${selectedIds.size.toLocaleString()} reads)`;
+    clearTimeout(cartAddTimer);
+    cartAddTimer = setTimeout(() => { cartAddToast = ''; }, 3000);
   }
 
   function exportSelection() {
@@ -405,10 +418,22 @@
               {/each}
             </div>
           {/if}
-          <button
-            class="w-full px-3 py-1.5 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded transition-colors"
-            onclick={exportSelection}
-          >Export TSV</button>
+          <div class="flex gap-2">
+            <button
+              class="flex-1 px-3 py-1.5 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded transition-colors"
+              onclick={exportSelection}
+            >Export TSV</button>
+            <button
+              class="flex-1 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white rounded transition-colors"
+              onclick={addSelectionToCart}
+              title="Save this lasso as a named selection in the cart for use on the Map"
+            >+ Cart</button>
+          </div>
+          {#if cartAddToast}
+            <div class="text-xs text-amber-300 bg-amber-900/30 border border-amber-700/40 rounded px-2 py-1 text-center">
+              {cartAddToast}
+            </div>
+          {/if}
         </div>
       {/if}
       {#if selectedDetail}

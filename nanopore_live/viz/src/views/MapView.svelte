@@ -2,7 +2,7 @@
   import LeafletMap from '../components/charts/LeafletMap.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
   import { samples, metadata, sampleTaxonomy, readExplorer, loadReadExplorer } from '../stores/data.js';
-  import { cartItems, cartActive, toggleCart, addToCart } from '../stores/cart.js';
+  import { cartItems, cartActive, toggleCart, addToCart, readSelections, activeReadSelection } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
   import { taxNav, activeSubTaxa, ancestorInfo, nextRank, prevRank, rankOrder } from '../stores/taxonomy.js';
   import TaxonomyDrillNav from '../components/layout/TaxonomyDrillNav.svelte';
@@ -192,6 +192,36 @@
     return markers;
   });
 
+  // ---- Read-selection overlay ----
+  // When the cart filter is on AND a selection is active, attach a
+  // `selectionRing` to each marker describing its share of that selection's
+  // reads. Sized as sqrt(count / globalMaxCount) so the busiest sample's ring
+  // hits a fixed outer radius and others shrink proportionally by area.
+  let activeSelection = $derived.by(() => {
+    if (!$cartActive || !$activeReadSelection) return null;
+    return $readSelections.get($activeReadSelection) || null;
+  });
+
+  let selectionStats = $derived.by(() => {
+    if (!activeSelection) return null;
+    return {
+      name: $activeReadSelection,
+      reads: activeSelection.readIds.size,
+      samples: activeSelection.samples.size,
+    };
+  });
+
+  let selectionMaxCount = $derived.by(() => {
+    if (!activeSelection) return 0;
+    let mx = 0;
+    for (const c of activeSelection.samples.values()) if (c > mx) mx = c;
+    return mx;
+  });
+
+  function clearActiveSelection() {
+    activeReadSelection.set(null);
+  }
+
   // Filtered markers
   let markers = $derived.by(() => {
     let filtered = allMarkers;
@@ -210,6 +240,22 @@
       filtered = filtered.filter(m => {
         if (m.depth_m == null) return true;
         return m.depth_m >= dMin && m.depth_m <= dMax;
+      });
+    }
+
+    // Attach the active read-selection ring (if any) to each marker. Done
+    // here (not in allMarkers) so it survives the cartActive sample filter
+    // — markers that aren't in the active selection still pass through with
+    // selectionRing absent, which LeafletMap interprets as "no ring".
+    if (activeSelection && selectionMaxCount > 0) {
+      filtered = filtered.map(m => {
+        const count = activeSelection.samples.get(m.id) || 0;
+        if (count === 0) return m;
+        const scale = Math.sqrt(count / selectionMaxCount);
+        return {
+          ...m,
+          selectionRing: { count, scale, color: '#fbbf24' /* amber-400 */ },
+        };
       });
     }
     return filtered;
@@ -528,6 +574,17 @@
           {#if !searchResult.readsLoaded}
             <span class="text-slate-500 italic ml-1">(loading reads…)</span>
           {/if}
+        </span>
+      {/if}
+
+      {#if selectionStats}
+        <span class="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-400/10 border border-amber-400/40 text-amber-300 text-[11px]">
+          Showing: {selectionStats.name} ({selectionStats.reads.toLocaleString()} reads across {selectionStats.samples} samples)
+          <button
+            class="ml-1 text-amber-300/70 hover:text-amber-200"
+            onclick={clearActiveSelection}
+            title="Clear active selection"
+          >&#x2715;</button>
         </span>
       {/if}
 

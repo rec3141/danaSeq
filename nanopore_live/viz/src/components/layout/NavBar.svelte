@@ -1,5 +1,5 @@
 <script>
-  import { cartCount, cartActive } from '../../stores/cart.js';
+  import { cartCount, cartActive, readSelectionCount } from '../../stores/cart.js';
   import { loadMetadataTsv, downloadMetadataTemplate, metadata, samples } from '../../stores/data.js';
   import { taxonomySource } from '../../stores/taxonomySource.js';
   import { get } from 'svelte/store';
@@ -216,7 +216,7 @@
 
       <!-- Cart controls -->
       <div class="ml-4 flex items-center gap-1">
-        {#if $cartCount > 0}
+        {#if $cartCount > 0 || $readSelectionCount > 0}
           <button
             class="flex items-center gap-1 px-2 py-1.5 rounded-l-md text-xs font-medium transition-colors border
               {$cartActive
@@ -234,7 +234,7 @@
         {/if}
         <button
           class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors border
-            {$cartCount > 0
+            {$cartCount > 0 || $readSelectionCount > 0
               ? ($cartActive ? 'rounded-r-md bg-cyan-400/10 text-cyan-400 border-cyan-400/40' : 'rounded-r-md text-slate-400 hover:text-slate-200 border-slate-600 hover:border-slate-500')
               : 'rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'}"
           onclick={() => { if (onCartToggle) onCartToggle(); }}
@@ -244,9 +244,9 @@
               d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z"/>
           </svg>
           Cart
-          {#if $cartCount > 0}
-            <span class="bg-cyan-400 text-slate-900 text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
-              {$cartCount}
+          {#if $cartCount > 0 || $readSelectionCount > 0}
+            <span class="bg-cyan-400 text-slate-900 text-xs font-bold px-1.5 py-0.5 rounded-full text-center whitespace-nowrap">
+              {$cartCount}{#if $readSelectionCount > 0} + {$readSelectionCount} selection{$readSelectionCount === 1 ? '' : 's'}{/if}
             </span>
           {/if}
         </button>

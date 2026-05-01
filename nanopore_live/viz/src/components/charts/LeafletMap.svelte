@@ -263,6 +263,26 @@
 
       renderedMarkers.push({ id: m.id, lat, lon });
 
+      // Outer accent ring for the active read-selection. Drawn FIRST so the
+      // taxonomy rings / flow-cell circle sit on top — visually it reads as
+      // a "halo" around the marker. Hollow stroke so it doesn't obscure the
+      // existing color encoding.
+      if (m.selectionRing && m.selectionRing.scale > 0) {
+        const sr = m.selectionRing;
+        // Halo radius: 1.4x marker radius at scale=1, scaled by sqrt of share.
+        const haloRadius = Math.max(radius + 3, radius * 1.4 * sr.scale + radius);
+        const halo = L.circleMarker([lat, lon], {
+          radius: haloRadius,
+          fillColor: sr.color,
+          color: sr.color,
+          weight: 2,
+          opacity: 0.9 * dimMul,
+          fillOpacity: 0.0,
+          interactive: false,
+        });
+        halo.addTo(markerLayer);
+      }
+
       // Breakdown mode: marker.rings = [{ color, fraction, radiusScale?, name? }].
       // Each ring is drawn as a solid circle with radius = markerRadius *
       // radiusScale (or sqrt(fraction) as a fallback). Drawn largest-first so
