@@ -43,6 +43,14 @@ def ensure_schema(con):
 
     # Per-read GTDB classification from sendsketch against the local GTDB server.
     # Replaces the old per-fasta aggregate schema (fileid, ref_name, ani).
+    # Drop legacy 3-col tables so the new schema applies; old aggregate data is unused.
+    legacy = con.execute("""
+        SELECT COUNT(*) FROM information_schema.columns
+        WHERE table_name = 'sendsketch'
+    """).fetchone()[0]
+    if legacy and legacy != 5:
+        con.execute("DROP TABLE sendsketch")
+        con.execute("DELETE FROM import_log WHERE filename LIKE 'sketch/%'")
     con.execute("""
         CREATE TABLE IF NOT EXISTS sendsketch (
             read_id  TEXT,
