@@ -15,6 +15,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { taxonomySource } from './taxonomySource.js';
 import { sampleTaxonomy } from './data.js';
+import { cartItems, cartActive } from './cart.js';
 
 // Rank codes in top-down order.
 //
@@ -178,10 +179,11 @@ export function aggregateAtRank(sampleDirect, parents, ranks, targetRank, filter
  * shows a small rank tag and clicks fall through to jumpToTaxon so the user
  * navigates to the actual depth.
  */
-export function buildSubTaxaIndex(samples, parents, ranks, targetRank, filterTaxon, order = get(rankOrder)) {
+export function buildSubTaxaIndex(samples, parents, ranks, targetRank, filterTaxon, order = get(rankOrder), visibleSampleIds = null) {
   const globalCounts = {};
   const perSample = {};
   for (const sid in samples) {
+    if (visibleSampleIds && !visibleSampleIds.has(sid)) continue;
     const direct = samples[sid]?.direct;
     const agg = aggregateAtRank(direct, parents, ranks, targetRank, filterTaxon, order);
     perSample[sid] = agg;
@@ -300,14 +302,28 @@ function makeTaxNav() {
 
 export const taxNav = makeTaxNav();
 
+// Per-view override for "currently visible sample IDs" used to scope
+// drilldown counts. Set by SampleExplorerView when its metadata sidebar
+// narrows the visible set; other views leave it null so only the cart
+// (when active) constrains. Intersected with cart inside activeSubTaxa.
+export const visibleSampleIds = writable(null);
+
 // Shared derived state consumed by TaxonomyDrillNav.svelte and every view that
 // colors/sizes by sub-taxon (Map, Reads, Samples). Both views read the same
-// index so their colors stay consistent.
+// index so their colors stay consistent. Counts reflect the cart filter (when
+// active) and the per-view visible-sample override (when set).
 export const activeSubTaxa = derived(
-  [sampleTaxonomy, taxNav, rankOrder],
-  ([$tax, $nav, $order]) => {
+  [sampleTaxonomy, taxNav, rankOrder, cartActive, cartItems, visibleSampleIds],
+  ([$tax, $nav, $order, $cartActive, $cartItems, $visible]) => {
     if (!$tax?.samples || !$tax?.parents || !$tax?.ranks) return null;
-    return buildSubTaxaIndex($tax.samples, $tax.parents, $tax.ranks, $nav.level, $nav.filter, $order);
+    let visible = null;
+    if ($cartActive && $cartItems.size > 0) visible = new Set($cartItems);
+    if ($visible) {
+      visible = visible
+        ? new Set([...visible].filter(id => $visible.has(id)))
+        : new Set($visible);
+    }
+    return buildSubTaxaIndex($tax.samples, $tax.parents, $tax.ranks, $nav.level, $nav.filter, $order, visible);
   },
 );
 

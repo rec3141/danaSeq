@@ -5,7 +5,7 @@
   import { samples, sampleTsne, sampleTaxonomy, metadata, overview } from '../stores/data.js';
   import { cartItems, cartActive, addToCart, toggleCart } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
-  import { taxNav, activeSubTaxa, RANK_LABELS } from '../stores/taxonomy.js';
+  import { taxNav, activeSubTaxa, visibleSampleIds, RANK_LABELS } from '../stores/taxonomy.js';
   import TaxonomyDrillNav from '../components/layout/TaxonomyDrillNav.svelte';
 
   // Taxonomy-overlay view: one disc per (sample, sub-taxon) at the current
@@ -66,6 +66,17 @@
     }
     return true;
   }
+
+  // Publish the set of samples passing this view's filters so the shared
+  // taxonomy drilldown counts only the currently-visible samples while
+  // /samples is mounted. Reset to null on unmount so other views aren't
+  // accidentally scoped to /samples' filter.
+  $effect(() => {
+    if (!$samples) { visibleSampleIds.set(null); return; }
+    const passing = $samples.filter(passesFilters);
+    visibleSampleIds.set(passing.length === $samples.length ? null : new Set(passing.map(s => s.id)));
+    return () => visibleSampleIds.set(null);
+  });
 
   // Stats for the currently filtered (and optionally cart-filtered) dataset
   let filteredStats = $derived.by(() => {
