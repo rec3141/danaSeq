@@ -3,6 +3,7 @@
   import { loadMetadataTsv, metadata, samples } from '../../stores/data.js';
   import { taxonomySource } from '../../stores/taxonomySource.js';
   import { get } from 'svelte/store';
+  import FeedbackForm from '../ui/FeedbackForm.svelte';
 
   const tabs = [
     { id: 'samples', label: 'Samples' },
@@ -19,6 +20,12 @@
   let metaStatus = $state('');
 
   let metaError = $state(false);
+  let feedbackOpen = $state(false);
+
+  // Show "← microscape.app" link only when served from microscape.app, so
+  // standalone deployments are unaffected.
+  const onMicroscape =
+    typeof window !== 'undefined' && window.location.hostname === 'microscape.app';
 
   function downloadMetadata() {
     const meta = get(metadata);
@@ -81,6 +88,13 @@
 <nav class="bg-slate-900 border-b border-slate-700 sticky top-0 z-50">
   <div class="max-w-screen-2xl mx-auto px-4">
     <div class="flex items-center h-14">
+      {#if onMicroscape}
+        <a
+          href="https://microscape.app/"
+          class="flex items-center text-xs text-slate-400 hover:text-cyan-400 transition-colors mr-4 shrink-0"
+          title="Back to microscape.app"
+        >← microscape.app</a>
+      {/if}
       <div class="flex items-center gap-2 mr-8 shrink-0">
         <a href="https://github.com/rec3141/danaSeq" target="_blank" rel="noopener noreferrer"
            class="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 transition-colors">
@@ -164,6 +178,21 @@
         {/if}
       </div>
 
+      <!-- Feedback trigger -->
+      <div class="ml-4 flex items-center shrink-0">
+        <button
+          class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+          onclick={() => feedbackOpen = true}
+          title="Report an issue or suggestion"
+        >
+          <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+          </svg>
+          Feedback
+        </button>
+      </div>
+
       <!-- Cart controls -->
       <div class="ml-4 flex items-center gap-1">
         {#if $cartCount > 0}
@@ -204,3 +233,5 @@
     </div>
   </div>
 </nav>
+
+<FeedbackForm open={feedbackOpen} onClose={() => feedbackOpen = false} />
