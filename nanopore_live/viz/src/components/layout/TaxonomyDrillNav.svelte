@@ -144,16 +144,24 @@
     {/if}
     {#each $activeSubTaxa.ranked as item}
       {@const isIsolated = $taxNav.isolated === item.name}
+      {@const offRank = item.rank && item.rank !== $taxNav.level}
       <button
         class="flex items-center gap-1.5 w-full text-left text-xs rounded px-2 py-1 group transition-colors
           {isIsolated ? 'bg-amber-400/10 text-amber-300 hover:bg-amber-400/20' : 'hover:bg-slate-800 text-slate-200'}"
-        onclick={() => taxNav.drillInto(item.name)}
-        title={isLeaf
-          ? (isIsolated ? `Clear isolation of ${item.name}` : `Isolate ${item.name}`)
-          : `Drill into ${item.name}`}
+        onclick={() => offRank
+          ? jumpToTaxon({ name: item.name, rank: item.rank })
+          : taxNav.drillInto(item.name)}
+        title={offRank
+          ? `Jump to ${item.name} (${RANK_LABELS[item.rank] ?? item.rank}) — lineage skips ${RANK_LABELS[$taxNav.level] ?? $taxNav.level}`
+          : (isLeaf
+            ? (isIsolated ? `Clear isolation of ${item.name}` : `Isolate ${item.name}`)
+            : `Drill into ${item.name}`)}
       >
         <span class="inline-block h-2.5 w-2.5 rounded-full shrink-0 border border-slate-900" style="background:{item.color}"></span>
         <span class="truncate group-hover:text-slate-100">{item.name}</span>
+        {#if offRank}
+          <span class="shrink-0 text-[9px] uppercase tracking-wider text-amber-500/70" title="Lineage non-contiguous; this is a {RANK_LABELS[item.rank] ?? item.rank}">{RANK_LABELS[item.rank] ?? item.rank}</span>
+        {/if}
         <span class="ml-auto shrink-0 font-mono text-[10px] text-slate-500">{item.count.toLocaleString()}</span>
       </button>
     {/each}

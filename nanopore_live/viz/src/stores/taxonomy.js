@@ -132,20 +132,38 @@ export function isAncestorOf(ancestor, descendant, parents) {
  * Aggregate a sample's `direct` counts to the given `targetRank`, keeping only
  * lineages that pass through `filterTaxon` (if provided).
  *
- * Returns: { taxonAtTargetRank: count, ... } — omits taxa with zero count.
+ * Lineages are non-contiguous in GTDB (and sometimes Kraken) — a leaf may have
+ * a Genus but skip Family/Order, etc. To keep those deeper classifications
+ * visible at every drill level, leaves that lack an ancestor at `targetRank`
+ * fall through to the shallowest existing ancestor strictly below `targetRank`
+ * (e.g. drilling for Order on a [P,C,G,S] lineage attributes its count to G).
+ *
+ * Returns: { taxonName: count, ... } — entries may carry actual ranks
+ * different from `targetRank`; callers can read each name's rank via the
+ * `ranks` dict.
  */
-export function aggregateAtRank(sampleDirect, parents, ranks, targetRank, filterTaxon) {
+export function aggregateAtRank(sampleDirect, parents, ranks, targetRank, filterTaxon, order = get(rankOrder)) {
   const out = {};
   if (!sampleDirect) return out;
+  const targetIdx = order.indexOf(targetRank);
   for (const leaf in sampleDirect) {
     const cnt = sampleDirect[leaf];
     if (!cnt) continue;
     // If a filter is active, leaf must descend from it.
     if (filterTaxon && !isAncestorOf(filterTaxon, leaf, parents)) continue;
     const info = ancestorInfo(leaf, parents, ranks);
-    const atTarget = info[targetRank];
-    if (!atTarget) continue;  // leaf isn't classified deep enough
-    out[atTarget] = (out[atTarget] || 0) + cnt;
+    let attr = info[targetRank];
+    if (!attr && targetIdx >= 0) {
+      // Non-contiguous lineage — walk down from targetRank looking for the
+      // shallowest ancestor that does exist; drilldown surfaces it under its
+      // actual rank instead of dropping the count.
+      for (let i = targetIdx + 1; i < order.length; i++) {
+        const a = info[order[i]];
+        if (a) { attr = a; break; }
+      }
+    }
+    if (!attr) continue;  // leaf is shallower than target — not a descendant we can show
+    out[attr] = (out[attr] || 0) + cnt;
   }
   return out;
 }
@@ -154,18 +172,23 @@ export function aggregateAtRank(sampleDirect, parents, ranks, targetRank, filter
  * Build { colorMap, ranked } for the union of sub-taxa across all samples at
  * (targetRank, filterTaxon). Deterministic ordering by global count descending
  * so the same taxon gets the same color across re-renders.
+ *
+ * Each entry carries `rank` — the taxon's true rank from `ranks`. For
+ * non-contiguous lineages, this can differ from `targetRank`; the drill nav
+ * shows a small rank tag and clicks fall through to jumpToTaxon so the user
+ * navigates to the actual depth.
  */
-export function buildSubTaxaIndex(samples, parents, ranks, targetRank, filterTaxon) {
+export function buildSubTaxaIndex(samples, parents, ranks, targetRank, filterTaxon, order = get(rankOrder)) {
   const globalCounts = {};
   const perSample = {};
   for (const sid in samples) {
     const direct = samples[sid]?.direct;
-    const agg = aggregateAtRank(direct, parents, ranks, targetRank, filterTaxon);
+    const agg = aggregateAtRank(direct, parents, ranks, targetRank, filterTaxon, order);
     perSample[sid] = agg;
     for (const t in agg) globalCounts[t] = (globalCounts[t] || 0) + agg[t];
   }
   const ranked = Object.entries(globalCounts)
-    .map(([name, count]) => ({ name, count }))
+    .map(([name, count]) => ({ name, count, rank: ranks?.[name] }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   const colorMap = {};
   ranked.forEach((r, i) => {
@@ -281,10 +304,10 @@ export const taxNav = makeTaxNav();
 // colors/sizes by sub-taxon (Map, Reads, Samples). Both views read the same
 // index so their colors stay consistent.
 export const activeSubTaxa = derived(
-  [sampleTaxonomy, taxNav],
-  ([$tax, $nav]) => {
+  [sampleTaxonomy, taxNav, rankOrder],
+  ([$tax, $nav, $order]) => {
     if (!$tax?.samples || !$tax?.parents || !$tax?.ranks) return null;
-    return buildSubTaxaIndex($tax.samples, $tax.parents, $tax.ranks, $nav.level, $nav.filter);
+    return buildSubTaxaIndex($tax.samples, $tax.parents, $tax.ranks, $nav.level, $nav.filter, $order);
   },
 );
 
