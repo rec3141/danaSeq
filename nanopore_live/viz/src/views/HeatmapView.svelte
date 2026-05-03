@@ -4,6 +4,7 @@
   import { cartItems, cartActive } from '../stores/cart.js';
   import { sampleClusters, sampleClusterK } from '../stores/clusters.js';
   import { paletteColor } from '../stores/taxonomy.js';
+  import { heatmapSettings } from '../stores/heatmapSettings.js';
 
   const RANK_LEVELS = [
     { code: 'P', label: 'Phylum' },
@@ -14,18 +15,22 @@
     { code: 'S', label: 'Species' },
   ];
 
-  // Start at Genus (index 4) — most interpretable granularity for site comparison.
-  let rankIdx = $state(4);
-  let topN = $state(30);
-  let valueMode = $state('pct');  // 'pct' | 'log'
-  // Number of clusters cut from the Ward dendrogram. Slider range adapts to
-  // the active sample count; the actual k used is min(kClusters, N).
-  let kClusters = $state(4);
+  // All settings persisted to localStorage so they survive tab switches and
+  // reloads. Each control reads $heatmapSettings.X and writes via
+  // heatmapSettings.patch({ X }).
+  let rankIdx = $derived($heatmapSettings.rankIdx);
+  let topN = $derived($heatmapSettings.topN);
+  let valueMode = $derived($heatmapSettings.valueMode);
+  let kClusters = $derived($heatmapSettings.kClusters);
 
   let currentRank = $derived(RANK_LEVELS[rankIdx]);
 
-  function cycleRank() { rankIdx = (rankIdx + 1) % RANK_LEVELS.length; }
-  function cycleValue() { valueMode = valueMode === 'pct' ? 'log' : 'pct'; }
+  function cycleRank() {
+    heatmapSettings.patch({ rankIdx: (rankIdx + 1) % RANK_LEVELS.length });
+  }
+  function cycleValue() {
+    heatmapSettings.patch({ valueMode: valueMode === 'pct' ? 'log' : 'pct' });
+  }
 
   let activeSamples = $derived.by(() => {
     if (!$samples) return [];
@@ -144,10 +149,12 @@
     ...metaColumns.map(c => ({ id: `meta:${c}`, label: c })),
     { id: 'cluster', label: 'Ward' },
   ]);
-  let orderIdx = $state(0);
+  let orderIdx = $derived($heatmapSettings.orderIdx);
   let currentOrder = $derived(orderModes[orderIdx % Math.max(1, orderModes.length)]);
 
-  function cycleOrder() { orderIdx = (orderIdx + 1) % orderModes.length; }
+  function cycleOrder() {
+    heatmapSettings.patch({ orderIdx: (orderIdx + 1) % orderModes.length });
+  }
 
   // Label modes are independent from Order so sorting by a metadata column
   // doesn't force that column onto the x-axis tick (and vice versa). Default
@@ -156,10 +163,12 @@
     { id: 'default', label: 'FC:bc' },
     ...metaColumns.map(c => ({ id: `meta:${c}`, label: c })),
   ]);
-  let labelIdx = $state(0);
+  let labelIdx = $derived($heatmapSettings.labelIdx);
   let currentLabel = $derived(labelModes[labelIdx % Math.max(1, labelModes.length)]);
 
-  function cycleLabel() { labelIdx = (labelIdx + 1) % labelModes.length; }
+  function cycleLabel() {
+    heatmapSettings.patch({ labelIdx: (labelIdx + 1) % labelModes.length });
+  }
 
   // Ward linkage on 4th-root-transformed relative abundances. The 4th-root
   // transform (x^¼) compresses the contribution of dominant taxa so rare
@@ -714,7 +723,8 @@
     <label class="flex items-center gap-2 text-slate-400">
       <span>Order:</span>
       <select
-        bind:value={orderIdx}
+        value={orderIdx}
+        onchange={(e) => heatmapSettings.patch({ orderIdx: +e.currentTarget.value })}
         class="px-2 py-1 rounded-md border border-cyan-400 bg-slate-900 text-cyan-400 hover:bg-cyan-400/10 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400"
       >
         {#each orderModes as m, i}
@@ -726,7 +736,8 @@
     <label class="flex items-center gap-2 text-slate-400">
       <span>Label:</span>
       <select
-        bind:value={labelIdx}
+        value={labelIdx}
+        onchange={(e) => heatmapSettings.patch({ labelIdx: +e.currentTarget.value })}
         class="px-2 py-1 rounded-md border border-cyan-400 bg-slate-900 text-cyan-400 hover:bg-cyan-400/10 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400"
       >
         {#each labelModes as m, i}
@@ -737,7 +748,8 @@
 
     <div class="flex items-center gap-2 text-slate-400">
       <span>Top N</span>
-      <input type="range" min="5" max="100" step="1" bind:value={topN}
+      <input type="range" min="5" max="100" step="1" value={topN}
+        oninput={(e) => heatmapSettings.patch({ topN: +e.currentTarget.value })}
         class="w-28 accent-cyan-400" />
       <span class="text-slate-500 w-10 font-mono tabular-nums">{topN}</span>
     </div>
@@ -748,7 +760,8 @@
          /samples can color-by-cluster. -->
     <div class="flex items-center gap-2 text-slate-400">
       <span>k=</span>
-      <input type="range" min="2" max={kMax} step="1" bind:value={kClusters}
+      <input type="range" min="2" max={kMax} step="1" value={kClusters}
+        oninput={(e) => heatmapSettings.patch({ kClusters: +e.currentTarget.value })}
         class="w-24 accent-cyan-400"
         title="Cut Ward dendrogram into k clusters" />
       <span class="text-slate-500 w-6 font-mono tabular-nums">{effectiveK}</span>
