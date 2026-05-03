@@ -10,8 +10,9 @@ const KEY = 'microscape.heatmapSettings';
 
 const DEFAULTS = {
   rankIdx: 4,        // 0..5 — Phylum/Class/Order/Family/Genus/Species, default Genus
-  orderIdx: 0,       // 0..(orderModes-1), 0 = default sort, last = Ward
+  orderIdx: 0,       // 0..(orderModes-1), 0 = default sort
   labelIdx: 0,       // 0..(labelModes-1)
+  rowOrderIdx: 0,    // 0=relabund, 1=taxonomic, 2=ward
   valueMode: 'pct',  // 'pct' | 'log'
   topN: 30,          // top-N taxa shown
   kClusters: 4,      // Ward k-cut

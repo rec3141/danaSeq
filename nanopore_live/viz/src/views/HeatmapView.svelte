@@ -95,7 +95,9 @@
     return out;
   });
 
-  // Top-N taxa across active samples, ranked by summed counts.
+  // Top-N taxa across active samples, ranked by summed counts. This is the
+  // *candidate pool* — the row Order cycler below decides the final
+  // visual order without changing membership.
   let topTaxa = $derived.by(() => {
     const totals = {};
     for (const s of activeSamples) {
@@ -106,6 +108,93 @@
       .sort((a, b) => b[1] - a[1])
       .slice(0, topN)
       .map(([name, count]) => ({ name, count }));
+  });
+
+  // Row order modes. relabund = total-count descending (the candidate
+  // pool's natural order); taxonomic = lineage DFS so siblings cluster
+  // together; ward = Ward clustering on the row-vectors.
+  const rowOrderModes = [
+    { id: 'relabund', label: 'Rel.Abund' },
+    { id: 'tax',      label: 'Taxonomic' },
+    { id: 'ward',     label: 'Ward' },
+  ];
+  let rowOrderIdx = $derived($heatmapSettings.rowOrderIdx ?? 0);
+  let currentRowOrder = $derived(rowOrderModes[rowOrderIdx % rowOrderModes.length]);
+  function cycleRowOrder() {
+    heatmapSettings.patch({ rowOrderIdx: (rowOrderIdx + 1) % rowOrderModes.length });
+  }
+
+  // Build the row-vector matrix for Ward-on-rows: each row is a taxon's
+  // 4th-root relative abundance across activeSamples (cross-sample
+  // comparable, same transform as the column-Ward).
+  function wardRowOrder(taxonNames) {
+    if (taxonNames.length < 2) return taxonNames.slice();
+    const sids = activeSamples.map(s => s.id);
+    const denoms = sids.map(sid => sampleDenom(sid));
+    const vecs = taxonNames.map(t => sids.map((sid, i) => {
+      const v = (perSampleRankCounts[sid] || {})[t] || 0;
+      return Math.pow(v / denoms[i], 0.25);
+    }));
+    const sqEuc = (a, b) => {
+      let s = 0;
+      for (let k = 0; k < a.length; k++) { const d = a[k] - b[k]; s += d * d; }
+      return s;
+    };
+    const n = taxonNames.length;
+    const clusters = taxonNames.map(t => ({ size: 1, leaves: [t] }));
+    const D = new Map();
+    const key = (i, j) => i < j ? `${i},${j}` : `${j},${i}`;
+    for (let i = 0; i < n; i++)
+      for (let j = i + 1; j < n; j++) D.set(key(i, j), sqEuc(vecs[i], vecs[j]));
+    const live = new Set([...Array(n).keys()]);
+    while (live.size > 1) {
+      let minD = Infinity, pi = -1, pj = -1;
+      const arr = [...live];
+      for (let a = 0; a < arr.length; a++)
+        for (let b = a + 1; b < arr.length; b++) {
+          const d = D.get(key(arr[a], arr[b])) ?? Infinity;
+          if (d < minD) { minD = d; pi = arr[a]; pj = arr[b]; }
+        }
+      const ni = clusters[pi].size, nj = clusters[pj].size;
+      const dij = D.get(key(pi, pj)) ?? 0;
+      for (const k of live) {
+        if (k === pi || k === pj) continue;
+        const nk = clusters[k].size;
+        const dik = D.get(key(pi, k)) ?? 0;
+        const djk = D.get(key(pj, k)) ?? 0;
+        D.set(key(pi, k), ((ni + nk) * dik + (nj + nk) * djk - nk * dij) / (ni + nj + nk));
+      }
+      clusters[pi] = { size: ni + nj, leaves: [...clusters[pi].leaves, ...clusters[pj].leaves] };
+      live.delete(pj);
+    }
+    return clusters[[...live][0]].leaves;
+  }
+
+  // Final ordered row list (objects from topTaxa, reordered).
+  let orderedTaxa = $derived.by(() => {
+    if (!topTaxa.length) return [];
+    const names = topTaxa.map(t => t.name);
+    const byName = new Map(topTaxa.map(t => [t.name, t]));
+    let order;
+    if (currentRowOrder.id === 'tax') {
+      // DFS the parent map. Build a lineage string per leaf and sort by it
+      // — equivalent to a DFS in lexicographic child order, gives a
+      // taxonomically coherent traversal.
+      const parents = $sampleTaxonomy?.parents || {};
+      const lineageOf = (t) => {
+        const chain = [t];
+        let cur = t;
+        const seen = new Set();
+        while (parents[cur] && !seen.has(cur)) { seen.add(cur); cur = parents[cur]; chain.unshift(cur); }
+        return chain.join(';');
+      };
+      order = [...names].sort((a, b) => lineageOf(a).localeCompare(lineageOf(b)));
+    } else if (currentRowOrder.id === 'ward') {
+      order = wardRowOrder(names);
+    } else {
+      order = names;  // relabund — already sorted by total count desc
+    }
+    return order.map(n => byName.get(n)).filter(Boolean);
   });
 
   // Per-sample denominator: sum of classified reads at current rank (so the
@@ -143,11 +232,15 @@
     return [...keys].sort();
   });
 
-  // Order modes: 'default' (sample id) | 'meta:<col>' | 'cluster'
+  // Order modes: 'default' (sample id) | 'meta:<col>' | 'cluster' (Ward) |
+  // 'color' (sort by cluster id so the cluster color bar above the
+  // heatmap renders in palette order — useful when paired with a row
+  // Ward order for a "blocked" composition view).
   let orderModes = $derived([
     { id: 'default', label: 'Default' },
     ...metaColumns.map(c => ({ id: `meta:${c}`, label: c })),
     { id: 'cluster', label: 'Ward' },
+    { id: 'color',   label: 'Color' },
   ]);
   let orderIdx = $derived($heatmapSettings.orderIdx);
   let currentOrder = $derived(orderModes[orderIdx % Math.max(1, orderModes.length)]);
@@ -385,6 +478,20 @@
       const byId = new Map(activeSamples.map(s => [s.id, s]));
       return order.map(id => byId.get(id)).filter(Boolean);
     }
+    if (mode === 'color') {
+      // Sort by cluster ID (C1<C2<…) so the cluster color bar paints
+      // palette-order strips even when columns aren't in Ward leaf order.
+      // Tiebreak by Ward leaf position so within a cluster, similar
+      // samples stay adjacent.
+      const wardPos = new Map();
+      wardResult.order.forEach((sid, i) => wardPos.set(sid, i));
+      const labelOf = (s) => clusterAssign?.[s.id] || 'C0';
+      return [...activeSamples].sort((a, b) => {
+        const la = labelOf(a), lb = labelOf(b);
+        if (la !== lb) return la.localeCompare(lb, undefined, { numeric: true });
+        return (wardPos.get(a.id) ?? 0) - (wardPos.get(b.id) ?? 0);
+      });
+    }
     // meta:<col> — alphanumeric sort with stable (id) tiebreak; numeric
     // values compared as numbers so temperature/depth sort naturally.
     const col = mode.slice(5);
@@ -499,7 +606,7 @@
   }
 
   let heatmapTrace = $derived.by(() => {
-    if (!topTaxa.length || !orderedSamples.length) return null;
+    if (!orderedTaxa.length || !orderedSamples.length) return null;
     // Numeric indices for x — avoids Plotly's category-axis quirk where
     // both the auto category label AND our tickmode-array ticktext render
     // as overlapping (white + grey) labels. Ticks get their display name
@@ -507,8 +614,8 @@
     const xVals = orderedSamples.map((_, i) => i);
     const xDisplay = orderedSamples.map(xDisplayLabel);
     const xHoverText = orderedSamples.map(s => xDisplayLabel(s).replace(/<[^>]*>/g, ''));
-    const yLabels = topTaxa.map(t => t.name);
-    const z = topTaxa.map(taxon =>
+    const yLabels = orderedTaxa.map(t => t.name);
+    const z = orderedTaxa.map(taxon =>
       orderedSamples.map(s => {
         const count = (perSampleRankCounts[s.id] || {})[taxon.name] ?? 0;
         if (valueMode === 'log') return count > 0 ? Math.log10(count) : null;
@@ -516,7 +623,7 @@
       })
     );
     // customdata: one value per column, broadcast per row by Plotly.
-    const customdata = topTaxa.map(() => xHoverText);
+    const customdata = orderedTaxa.map(() => xHoverText);
 
     const traces = [{
       type: 'heatmap',
@@ -731,13 +838,27 @@
     </button>
 
     <label class="flex items-center gap-2 text-slate-400">
-      <span>Order:</span>
+      <span>Col order:</span>
       <select
         value={orderIdx}
         onchange={(e) => heatmapSettings.patch({ orderIdx: +e.currentTarget.value })}
         class="px-2 py-1 rounded-md border border-cyan-400 bg-slate-900 text-cyan-400 hover:bg-cyan-400/10 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400"
       >
         {#each orderModes as m, i}
+          <option value={i}>{m.label}</option>
+        {/each}
+      </select>
+    </label>
+
+    <label class="flex items-center gap-2 text-slate-400">
+      <span>Row order:</span>
+      <select
+        value={rowOrderIdx}
+        onchange={(e) => heatmapSettings.patch({ rowOrderIdx: +e.currentTarget.value })}
+        class="px-2 py-1 rounded-md border border-cyan-400 bg-slate-900 text-cyan-400 hover:bg-cyan-400/10 transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400"
+        title="How rows (taxa) are ordered: by relative abundance, by taxonomic lineage, or by Ward clustering on the row vectors"
+      >
+        {#each rowOrderModes as m, i}
           <option value={i}>{m.label}</option>
         {/each}
       </select>
