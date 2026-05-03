@@ -355,9 +355,13 @@
   // ordering branch — so the heavy O(n^3) merge runs once per rank/sample
   // change rather than once per consumer.
   let wardResult = $derived.by(() => {
-    if (!activeSamples.length) return { order: [], linkage: [] };
+    if (!activeSamples.length) return { order: [], linkage: [], sampleIds: [] };
     const ids = activeSamples.map(s => s.id);
-    return wardClustering(ids);
+    const r = wardClustering(ids);
+    // Surface the input id array so dendrogram drawing can resolve a
+    // leaf node id (which is an INPUT-order index, not a dendrogram-order
+    // position) back to its sample id.
+    return { ...r, sampleIds: ids };
   });
 
   let orderedSamples = $derived.by(() => {
@@ -577,22 +581,24 @@
       orderedSamples.forEach((s, i) => colByDisplay.set(s.id, i));
       const xs = [];
       const ys = [];
-      const { linkage, order } = wardResult;
-      const n = order.length;
-      // nodeCol[i] = display-column center for node i (i<n → leaf, else merge i-n).
-      // Each merge's center is the midpoint of its children's centers, so the
-      // U-bar lines up with the merge tree recursively (not with the
-      // centroid of all underlying leaves, which would be wrong for
-      // unbalanced merges).
+      const { linkage, sampleIds } = wardResult;
+      const n = sampleIds.length;
+      // nodeCol[i] = display-column center for node i (i<n → leaf in
+      // wardClustering's INPUT order, else merge i-n). Each merge's
+      // center is the midpoint of its children's centers, so the U-bar
+      // lines up with the merge tree recursively (not with the centroid
+      // of all underlying leaves, which would be wrong for unbalanced
+      // merges). Leaf node ids are INPUT-order indices — look the sid up
+      // via sampleIds, not via the dendrogram-order `order` array.
       const nodeCol = new Map();
-      order.forEach((sid, i) => nodeCol.set(i, colByDisplay.get(sid) ?? i));
+      sampleIds.forEach((sid, i) => nodeCol.set(i, colByDisplay.get(sid) ?? i));
       for (let m = 0; m < linkage.length; m++) {
         const merge = linkage[m];
         const lc = merge.left < n
-          ? (colByDisplay.get(order[merge.left]) ?? merge.left)
+          ? (colByDisplay.get(sampleIds[merge.left]) ?? merge.left)
           : nodeCol.get(merge.left);
         const rc = merge.right < n
-          ? (colByDisplay.get(order[merge.right]) ?? merge.right)
+          ? (colByDisplay.get(sampleIds[merge.right]) ?? merge.right)
           : nodeCol.get(merge.right);
         const lh = merge.left < n ? 0 : linkage[merge.left - n].distance;
         const rh = merge.right < n ? 0 : linkage[merge.right - n].distance;

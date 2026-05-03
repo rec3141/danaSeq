@@ -24,12 +24,11 @@
                    '#94a3b8','#d4d4d8','#78716c'];
 
   // Upper bound on rendered marker size. Plotly's scattergl rasterizer
-  // wraps marker sizes back to specks above ~128 px on most GPUs (the
-  // exact wrap threshold depends on browser/GL impl). 120 is a
-  // conservative cap that still lets smaller bubbles grow with sizeScale.
-  // Applied at the two call sites below so markerSize itself stays a
-  // pure computation.
-  const MAX_MARKER_PX = 120;
+  // wraps marker sizes back to specks once the GL impl exceeds its
+  // gl.aliasedPointSizeRange max — frequently 64 px on integrated GPUs,
+  // sometimes lower. 64 is the universally safe ceiling. Smaller bubbles
+  // keep scaling with sizeScale; only the largest cap out.
+  const MAX_MARKER_PX = 64;
 
   // Precomputed sizing normalization (set in getTraces)
   let sizeNorm = null;
