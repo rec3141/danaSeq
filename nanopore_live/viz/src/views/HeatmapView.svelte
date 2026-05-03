@@ -637,17 +637,27 @@
   let heatmapLayout = $derived.by(() => {
     if (!heatmapTrace) return {};
     const { xVals, xDisplay, yLabels } = heatmapTrace;
-    // Layout: in Ward-order mode, top 28% dendrogram → 4% cluster color
-    // bar → 65% heatmap. In any other order, the dendrogram is hidden,
-    // so we recover that vertical real estate for the heatmap and keep
-    // only the cluster color bar (still informative — Ward groups can
-    // be spotted regardless of the column sort).
+    // Constant-pixel allocations for the dendrogram + cluster bar so
+    // they stop scaling vertically when the user bumps Top N — the
+    // heatmap absorbs all the extra height instead. Domains are
+    // recomputed each render against the current totalH.
     const showDendro = currentOrder.id === 'cluster';
-    const heatmapDomain = showDendro ? [0, 0.65] : [0, 0.93];
-    const clusterDomain = showDendro ? [0.66, 0.70] : [0.94, 0.98];
-    const dendroDomain = showDendro ? [0.72, 1.0] : [0.99, 1.0];
+    const dendroPx = showDendro ? 140 : 0;
+    const clusterPx = 22;
+    const gapPx = 8;
+    const minH = 520;
+    const reservedPx = dendroPx + clusterPx + (showDendro ? 2 : 1) * gapPx;
+    const totalH = Math.max(minH, reservedPx + 80 + yLabels.length * 18);
+    const heatmapEnd = (totalH - reservedPx) / totalH;
+    const clusterStart = heatmapEnd + gapPx / totalH;
+    const clusterEnd = clusterStart + clusterPx / totalH;
+    const heatmapDomain = [0, heatmapEnd];
+    const clusterDomain = [clusterStart, clusterEnd];
+    const dendroDomain = showDendro
+      ? [clusterEnd + gapPx / totalH, 1.0]
+      : [0.99, 1.0];
     return {
-      height: Math.max(520, 160 + yLabels.length * 18),
+      height: totalH,
       margin: { t: 110, r: 20, b: 30, l: 220 },
       xaxis: {
         side: 'top',
