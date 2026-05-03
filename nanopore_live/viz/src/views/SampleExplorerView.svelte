@@ -545,11 +545,12 @@
       </div>
     {/if}
     {#if lassoIds}
+      {@const lassoSampleCount = new Set(lassoIds).size}
       <button
         class="px-3 py-1 rounded-md border border-cyan-400 bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20 transition-colors"
         onclick={addLassoToCart}
       >
-        Add {lassoIds.length} to Cart
+        Add {lassoSampleCount} to Cart
       </button>
     {/if}
   </div>

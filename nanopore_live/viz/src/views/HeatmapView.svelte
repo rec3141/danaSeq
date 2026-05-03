@@ -568,34 +568,32 @@
       hovertemplate: '%{customdata}<extra></extra>',
     });
 
-    // Dendrogram traces. We project Ward-leaf positions onto the
-    // displayed (orderedSamples) column index so the U-bars line up with
-    // the heatmap cells regardless of the user's chosen Order mode. If
-    // the displayed order doesn't match Ward's natural leaf order
-    // (because the user picked a metadata sort), the dendrogram becomes
-    // crossed — which is the honest visual signal that "your sort
-    // disagrees with what Ward thinks is similar".
-    if (wardResult.order.length >= 2) {
+    // Dendrogram traces. Only drawn when the column order is actually
+    // 'cluster' (Ward) — under any other ordering the U-bars would have
+    // to project across non-adjacent leaves and the visual stops being
+    // a real dendrogram, so we hide it instead of showing a crossed mess.
+    if (currentOrder.id === 'cluster' && wardResult.order.length >= 2) {
       const colByDisplay = new Map();
       orderedSamples.forEach((s, i) => colByDisplay.set(s.id, i));
-      const wardLeafToCol = wardResult.order.map(sid => colByDisplay.get(sid) ?? -1);
       const xs = [];
       const ys = [];
-      // For each merge, project both child positions through the ordered-
-      // column mapping. dendroSegments uses Ward's leaf positions
-      // directly; we need to remap each x value to its displayed column.
       const { linkage, order } = wardResult;
       const n = order.length;
-      const nodeCol = new Map();  // merge node id → mean column of its leaves in displayed order
+      // nodeCol[i] = display-column center for node i (i<n → leaf, else merge i-n).
+      // Each merge's center is the midpoint of its children's centers, so the
+      // U-bar lines up with the merge tree recursively (not with the
+      // centroid of all underlying leaves, which would be wrong for
+      // unbalanced merges).
+      const nodeCol = new Map();
       order.forEach((sid, i) => nodeCol.set(i, colByDisplay.get(sid) ?? i));
       for (let m = 0; m < linkage.length; m++) {
         const merge = linkage[m];
-        const leftLeaves = merge.left < n ? [order[merge.left]] : linkage[merge.left - n].leaves;
-        const rightLeaves = merge.right < n ? [order[merge.right]] : linkage[merge.right - n].leaves;
-        const lCols = leftLeaves.map(sid => colByDisplay.get(sid) ?? 0);
-        const rCols = rightLeaves.map(sid => colByDisplay.get(sid) ?? 0);
-        const lc = lCols.reduce((a, b) => a + b, 0) / lCols.length;
-        const rc = rCols.reduce((a, b) => a + b, 0) / rCols.length;
+        const lc = merge.left < n
+          ? (colByDisplay.get(order[merge.left]) ?? merge.left)
+          : nodeCol.get(merge.left);
+        const rc = merge.right < n
+          ? (colByDisplay.get(order[merge.right]) ?? merge.right)
+          : nodeCol.get(merge.right);
         const lh = merge.left < n ? 0 : linkage[merge.left - n].distance;
         const rh = merge.right < n ? 0 : linkage[merge.right - n].distance;
         const h = merge.distance;
@@ -624,12 +622,15 @@
   let heatmapLayout = $derived.by(() => {
     if (!heatmapTrace) return {};
     const { xVals, xDisplay, yLabels } = heatmapTrace;
-    // Layout: top 30% dendrogram → 4% cluster color bar → 65% heatmap,
-    // separated by a 1% gap each. Sample labels live above the dendrogram
-    // (xaxis with side: 'top' and matches: 'x'-driven).
-    const heatmapDomain = [0, 0.65];
-    const clusterDomain = [0.66, 0.70];
-    const dendroDomain = [0.72, 1.0];
+    // Layout: in Ward-order mode, top 28% dendrogram → 4% cluster color
+    // bar → 65% heatmap. In any other order, the dendrogram is hidden,
+    // so we recover that vertical real estate for the heatmap and keep
+    // only the cluster color bar (still informative — Ward groups can
+    // be spotted regardless of the column sort).
+    const showDendro = currentOrder.id === 'cluster';
+    const heatmapDomain = showDendro ? [0, 0.65] : [0, 0.93];
+    const clusterDomain = showDendro ? [0.66, 0.70] : [0.94, 0.98];
+    const dendroDomain = showDendro ? [0.72, 1.0] : [0.99, 1.0];
     return {
       height: Math.max(520, 160 + yLabels.length * 18),
       margin: { t: 110, r: 20, b: 30, l: 220 },
@@ -644,7 +645,10 @@
         showgrid: false,
         zeroline: false,
         range: [-0.5, xVals.length - 0.5],
-        anchor: 'y3',  // labels sit at the top of the dendrogram subplot
+        // When the dendrogram is shown, labels sit above it (yaxis3);
+        // otherwise anchor to the cluster bar so they stay above the
+        // heatmap proper.
+        anchor: showDendro ? 'y3' : 'y2',
       },
       yaxis: {
         type: 'category',
@@ -775,7 +779,11 @@
     Cells show each sample's {currentRank.label}-level composition
     {#if valueMode === 'log'}(log10 raw read counts){:else}(% of classified reads){/if}.
     Columns ordered by <code class="bg-slate-800 px-1 rounded">{currentOrder.label}</code>; taxa ranked by total count across the current sample set.
-    Ward dendrogram cut at <code class="bg-slate-800 px-1 rounded">k={effectiveK}</code> clusters
-    (color bar above heatmap; assignments shared with other views).
+    Ward k=<code class="bg-slate-800 px-1 rounded">{effectiveK}</code> cluster colors are shown in the bar above the heatmap and shared with other views;
+    {#if currentOrder.id === 'cluster'}
+      the dendrogram appears above the cluster bar in this Ward column order.
+    {:else}
+      the dendrogram is hidden under non-Ward column orders to avoid drawing crossed U-bars over a non-Ward layout.
+    {/if}
   </p>
 </div>

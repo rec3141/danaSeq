@@ -24,11 +24,12 @@
                    '#94a3b8','#d4d4d8','#78716c'];
 
   // Upper bound on rendered marker size. Plotly's scattergl rasterizer
-  // wraps marker sizes back to specks above ~256 px — clamp a bit under
-  // that so the biggest points max out at MAX_MARKER_PX while smaller
-  // ones keep growing with sizeScale. Applied at the two call sites
-  // below so markerSize itself stays a pure computation.
-  const MAX_MARKER_PX = 200;
+  // wraps marker sizes back to specks above ~128 px on most GPUs (the
+  // exact wrap threshold depends on browser/GL impl). 120 is a
+  // conservative cap that still lets smaller bubbles grow with sizeScale.
+  // Applied at the two call sites below so markerSize itself stays a
+  // pure computation.
+  const MAX_MARKER_PX = 120;
 
   // Precomputed sizing normalization (set in getTraces)
   let sizeNorm = null;
@@ -132,9 +133,18 @@
       return m;
     })();
 
+    // Plotly draws traces in array order — last trace ends up on top.
+    // Sort by each trace's max disc size DESCENDING so traces with the
+    // biggest discs paint first (bottom layer) and traces of smaller
+    // discs paint over them. Keeps small bubbles visible inside larger
+    // ones in the taxonomy disc overlay on /samples. Unknown stays at
+    // the very back since it's the dimmed background bucket.
+    const traceMaxSize = (g) => g.sizes.length ? Math.max(...g.sizes) : 0;
     const entries = Object.entries(groups).sort((a, b) => {
       if (a[0] === 'Unknown') return -1;
       if (b[0] === 'Unknown') return 1;
+      const sd = traceMaxSize(b[1]) - traceMaxSize(a[1]);
+      if (sd !== 0) return sd;
       return a[0].localeCompare(b[0]);
     });
 
