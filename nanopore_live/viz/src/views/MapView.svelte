@@ -63,6 +63,58 @@
     })).sort((a, b) => a.key.localeCompare(b.key));
   });
 
+  // Metadata-filter sidebar: same behavior as /samples — categorical-only
+  // columns, value list sorted by descending frequency, click to filter the
+  // map markers, click again to clear. Only visible (and only applied) in
+  // non-taxonomy modes, where the sidebar slot is otherwise empty.
+  let categoricalMetaCols = $derived.by(() => {
+    if (!$metadata) return [];
+    return metaColumns.map(c => c.key).filter(k => {
+      const vals = Object.values($metadata)
+        .map(m => m[k])
+        .filter(v => v !== undefined && v !== null && v !== '');
+      if (vals.length === 0) return false;
+      return !vals.every(v => typeof v === 'number');
+    });
+  });
+
+  let filterCol = $state('');
+  let filterVal = $state(null);
+
+  $effect(() => {
+    if (!filterCol && categoricalMetaCols.length > 0) filterCol = categoricalMetaCols[0];
+    if (filterCol && !categoricalMetaCols.includes(filterCol)) {
+      filterCol = categoricalMetaCols[0] || '';
+      filterVal = null;
+    }
+  });
+
+  function cycleFilterCol() {
+    if (categoricalMetaCols.length === 0) return;
+    filterCol = cycle(categoricalMetaCols, filterCol || categoricalMetaCols[0]);
+    filterVal = null;
+  }
+
+  let filterValueList = $derived.by(() => {
+    if (!$samples || !$metadata || !filterCol) return [];
+    const counts = new Map();
+    for (const s of $samples) {
+      const v = $metadata[s.id]?.[filterCol];
+      if (v === undefined || v === null || v === '') continue;
+      const key = String(v);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([val, count]) => ({ val, count }));
+  });
+
+  function toggleFilterValue(val) {
+    filterVal = filterVal === val ? null : val;
+  }
+
+  let metaFilterActive = $derived(colorMode !== 'taxonomy' && filterVal !== null && !!filterCol);
+
   // Dynamic metadata group (columns not already covered by built-in groups)
   let metaGroup = $derived.by(() => {
     const covered = new Set(['flowcell', 'station', 'read_count', 'diversity', 'date', 'total_bases']);
@@ -242,6 +294,12 @@
         return m.depth_m >= dMin && m.depth_m <= dMax;
       });
     }
+    if (metaFilterActive) {
+      filtered = filtered.filter(m => {
+        const v = $metadata?.[m.id]?.[filterCol];
+        return v !== undefined && v !== null && String(v) === filterVal;
+      });
+    }
 
     // Attach the active read-selection ring (if any) to each marker. Done
     // here (not in allMarkers) so it survives the cartActive sample filter
@@ -391,6 +449,32 @@
     const m = $metadata?.[s.id];
     return { ...s, ...(m || {}) };
   });
+
+  // Metadata fields explicitly rendered above; everything else falls through
+  // into the generic "Metadata" catch-all section.
+  const SHOWN_META_KEYS = new Set([
+    'lat', 'lon', 'station', 'date', 'depth_m',
+    'temperature_c', 'salinity_psu', 'chl_ug_l', 'do_mg_l',
+  ]);
+
+  let extraMeta = $derived.by(() => {
+    if (!$selectedSample) return [];
+    const m = $metadata?.[$selectedSample];
+    if (!m) return [];
+    return Object.entries(m)
+      .filter(([k, v]) => !SHOWN_META_KEYS.has(k) && v != null && v !== '')
+      .sort((a, b) => a[0].localeCompare(b[0]));
+  });
+
+  function formatMetaValue(v) {
+    if (v == null) return '-';
+    if (typeof v === 'number') {
+      if (Number.isInteger(v)) return v.toLocaleString();
+      if (Math.abs(v) >= 1) return v.toLocaleString(undefined, { maximumFractionDigits: 4 });
+      return String(v);
+    }
+    return String(v);
+  }
 
   const tableColumns = [
     { key: 'id', label: 'Sample' },
@@ -605,10 +689,59 @@
       {/if}
     </div>
 
-    <!-- Taxonomy drill-down nav + Map + Detail panel -->
+    <!-- Taxonomy drill-down nav (taxonomy mode) OR metadata filter sidebar
+         (other modes) + Map + Detail panel. -->
     <div class="flex gap-6">
       {#if colorMode === 'taxonomy'}
         <TaxonomyDrillNav heightClass="h-[500px]" />
+      {:else}
+        <!-- Mirrors the /samples sidebar: cycle header picks a categorical
+             metadata column, list shows unique values sorted by descending
+             frequency. Click a value to filter map markers; click again to
+             clear. -->
+        <div class="w-56 shrink-0 h-[500px] flex flex-col bg-slate-800 rounded-lg border border-slate-700 p-3 text-xs">
+          {#if categoricalMetaCols.length === 0}
+            <p class="text-slate-500 italic text-center mt-4">
+              Upload metadata with categorical columns to filter here.
+            </p>
+          {:else}
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <button
+                class="flex-1 px-2 py-1 rounded border border-slate-600 text-slate-200 hover:border-slate-500 transition-colors text-left font-semibold truncate"
+                onclick={cycleFilterCol}
+                title={`Cycle: ${categoricalMetaCols.join(' → ')}`}
+              >{(filterCol || '').replace(/_/g, ' ') || '—'} &#x25BE;</button>
+              {#if filterVal !== null}
+                <button
+                  class="px-2 py-1 rounded border border-slate-600 text-slate-400 hover:text-rose-400 hover:border-rose-400/40 transition-colors"
+                  onclick={() => (filterVal = null)}
+                  title="Clear active filter"
+                >✕</button>
+              {/if}
+            </div>
+            {#if filterValueList.length === 0}
+              <p class="text-slate-500 italic text-center mt-4">No values for this column.</p>
+            {:else}
+              <div class="text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                {filterValueList.length} value{filterValueList.length === 1 ? '' : 's'}
+              </div>
+              <ul class="flex-1 overflow-y-auto divide-y divide-slate-700/50 -mx-1">
+                {#each filterValueList as { val, count } (val)}
+                  <li>
+                    <button
+                      class="w-full text-left px-2 py-1 rounded transition-colors flex items-baseline justify-between gap-2
+                        {filterVal === val ? 'bg-cyan-400/15 text-cyan-300' : 'text-slate-300 hover:bg-slate-700/50'}"
+                      onclick={() => toggleFilterValue(val)}
+                    >
+                      <span class="truncate" title={val}>{val}</span>
+                      <span class="text-[10px] text-slate-500 font-mono shrink-0">{count}</span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          {/if}
+        </div>
       {/if}
       <div class="flex-1 h-[500px] rounded-lg overflow-hidden border border-slate-700">
         <LeafletMap
@@ -669,6 +802,17 @@
                 {#if typeof selectedDetail.salinity_psu === 'number'}<div class="text-slate-400">Salinity</div><div class="text-slate-200 font-mono">{selectedDetail.salinity_psu.toFixed(1)} PSU</div>{/if}
                 {#if typeof selectedDetail.chl_ug_l === 'number'}<div class="text-slate-400">Chl-a</div><div class="text-slate-200 font-mono">{selectedDetail.chl_ug_l.toFixed(2)} &mu;g/L</div>{/if}
                 {#if typeof selectedDetail.do_mg_l === 'number'}<div class="text-slate-400">DO</div><div class="text-slate-200 font-mono">{selectedDetail.do_mg_l.toFixed(1)} mg/L</div>{/if}
+              </div>
+            </div>
+          {/if}
+          {#if extraMeta.length > 0}
+            <div class="border-t border-slate-700 pt-2">
+              <div class="text-xs text-slate-400 mb-1">Metadata</div>
+              <div class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+                {#each extraMeta as [k, v] (k)}
+                  <div class="text-slate-400 break-words">{k.replace(/_/g, ' ')}</div>
+                  <div class="text-slate-200 font-mono break-words">{formatMetaValue(v)}</div>
+                {/each}
               </div>
             </div>
           {/if}

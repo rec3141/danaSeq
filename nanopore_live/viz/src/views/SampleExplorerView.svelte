@@ -406,6 +406,29 @@
     return { ...s, ...(m || {}) };
   });
 
+  // Metadata fields explicitly rendered above; everything else falls through
+  // into the generic "Metadata" catch-all section.
+  const SHOWN_META_KEYS = new Set(['lat', 'lon', 'station', 'depth_m']);
+
+  let extraMeta = $derived.by(() => {
+    if (!$selectedSample) return [];
+    const m = $metadata?.[$selectedSample];
+    if (!m) return [];
+    return Object.entries(m)
+      .filter(([k, v]) => !SHOWN_META_KEYS.has(k) && v != null && v !== '')
+      .sort((a, b) => a[0].localeCompare(b[0]));
+  });
+
+  function formatMetaValue(v) {
+    if (v == null) return '-';
+    if (typeof v === 'number') {
+      if (Number.isInteger(v)) return v.toLocaleString();
+      if (Math.abs(v) >= 1) return v.toLocaleString(undefined, { maximumFractionDigits: 4 });
+      return String(v);
+    }
+    return String(v);
+  }
+
   // Table columns — separate flowcell + barcode
   const tableColumns = [
     { key: 'flowcell', label: 'Flowcell' },
@@ -665,6 +688,17 @@
               <div class="text-slate-400">Lon</div><div class="text-slate-200 font-mono">{selectedDetail.lon}</div>
               {#if selectedDetail.station}<div class="text-slate-400">Station</div><div class="text-slate-200 font-mono">{selectedDetail.station}</div>{/if}
               {#if selectedDetail.depth_m != null}<div class="text-slate-400">Depth</div><div class="text-slate-200 font-mono">{selectedDetail.depth_m}m</div>{/if}
+            </div>
+          </div>
+        {/if}
+        {#if extraMeta.length > 0}
+          <div class="border-t border-slate-700 pt-2">
+            <div class="text-xs text-slate-400 mb-1">Metadata</div>
+            <div class="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+              {#each extraMeta as [k, v] (k)}
+                <div class="text-slate-400 break-words">{k.replace(/_/g, ' ')}</div>
+                <div class="text-slate-200 font-mono break-words">{formatMetaValue(v)}</div>
+              {/each}
             </div>
           </div>
         {/if}

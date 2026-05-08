@@ -1,6 +1,6 @@
 <script>
   import { cartCount, cartActive, readSelectionCount } from '../../stores/cart.js';
-  import { loadMetadataTsv, downloadMetadataTemplate, metadata, samples } from '../../stores/data.js';
+  import { loadMetadataFile, downloadMetadataTemplate, metadata, samples } from '../../stores/data.js';
   import { taxonomySource } from '../../stores/taxonomySource.js';
   import { get } from 'svelte/store';
   import FeedbackForm from '../ui/FeedbackForm.svelte';
@@ -75,24 +75,25 @@
     URL.revokeObjectURL(url);
   }
 
-  function handleMetaUpload(e) {
+  async function handleMetaUpload(e) {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = loadMetadataTsv(reader.result);
-      if (result.error) {
-        metaStatus = result.error;
-        metaError = true;
-        // Errors stay visible until dismissed
-      } else {
-        metaStatus = `${result.matched}/${result.total} matched`;
-        metaError = false;
-        setTimeout(() => { metaStatus = ''; }, 5000);
-      }
-    };
-    reader.readAsText(file);
     e.target.value = '';
+    if (!file) return;
+    let result;
+    try {
+      result = await loadMetadataFile(file);
+    } catch (err) {
+      result = { error: `Failed to read file: ${err.message || err}` };
+    }
+    if (result.error) {
+      metaStatus = result.error;
+      metaError = true;
+      // Errors stay visible until dismissed
+    } else {
+      metaStatus = `${result.matched}/${result.total} matched`;
+      metaError = false;
+      setTimeout(() => { metaStatus = ''; }, 5000);
+    }
   }
 </script>
 
@@ -159,11 +160,11 @@
 
       <!-- Metadata upload -->
       <div class="ml-4 flex items-center gap-2 shrink-0">
-        <input type="file" accept=".tsv,.txt,.csv" class="hidden" bind:this={metaInput} onchange={handleMetaUpload} />
+        <input type="file" accept=".tsv,.txt,.csv,.xlsx" class="hidden" bind:this={metaInput} onchange={handleMetaUpload} />
         <button
           class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
           onclick={() => metaInput.click()}
-          title="Upload metadata TSV (flowcell + barcode columns, OR a combined sample_id / samp_name / flowcell_barcode / id column)"
+          title="Upload metadata (TSV / CSV / XLSX) — flowcell + barcode columns, OR a combined sample_id / samp_name / flowcell_barcode / id column"
         >
           <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>

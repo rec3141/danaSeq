@@ -229,23 +229,78 @@ export function downloadMetadataTemplate() {
   return rows.join('\n') + '\n';
 }
 
-/** Parse a metadata TSV string and update the metadata store.
+/** Parse a delimited (CSV/TSV) string into rows of string fields.
+ *  Honors quoted fields with embedded delimiters, escaped double-quotes
+ *  ("" → "), and CRLF/LF line endings. Empty lines are skipped. */
+function parseDelimited(text, delim) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  let fieldStarted = false;
+  const n = text.length;
+  for (let i = 0; i < n; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; continue; }
+        inQuotes = false;
+        continue;
+      }
+      field += c;
+      continue;
+    }
+    if (c === '"' && !fieldStarted) { inQuotes = true; fieldStarted = true; continue; }
+    if (c === delim) { row.push(field); field = ''; fieldStarted = false; continue; }
+    if (c === '\r') continue;
+    if (c === '\n') {
+      row.push(field);
+      if (row.some(v => v !== '')) rows.push(row);
+      row = []; field = ''; fieldStarted = false;
+      continue;
+    }
+    field += c;
+    fieldStarted = true;
+  }
+  if (field !== '' || row.length > 0) {
+    row.push(field);
+    if (row.some(v => v !== '')) rows.push(row);
+  }
+  return rows;
+}
+
+/** Heuristically detect tab vs comma delimiter from the first line of text. */
+function detectDelimiter(text) {
+  let tabs = 0, commas = 0, inQuotes = false;
+  const lookahead = Math.min(text.length, 4096);
+  for (let i = 0; i < lookahead; i++) {
+    const c = text[i];
+    if (c === '"') inQuotes = !inQuotes;
+    else if (!inQuotes) {
+      if (c === '\n') { if (tabs > 0 || commas > 0) break; }
+      else if (c === '\t') tabs++;
+      else if (c === ',') commas++;
+    }
+  }
+  return tabs > 0 ? '\t' : ',';
+}
+
+/** Process pre-parsed metadata rows ([header, ...dataRows] of string arrays)
+ *  and update the metadata store.
  *  Accepts either flowcell + barcode columns, or a single combined column
  *  (sample_id / samp_name / flowcell_barcode / id) with values like
  *  FAR84275:barcode00, FAR84275_barcode00, or FAR84275-barcode00.
  *  Canonical sample key: FLOWCELL:barcodeNN.
  *  Validates against known sample IDs before replacing existing data.
  *  Returns { matched, total, error? }. */
-export function loadMetadataTsv(text) {
-  const lines = text.split('\n').filter(l => l.trim());
-  if (lines.length < 2) return { matched: 0, total: 0, error: 'File has no data rows' };
+function processMetadataRows(rows) {
+  if (!rows || rows.length < 2) return { matched: 0, total: 0, error: 'File has no data rows' };
 
-  const rawHeader = lines[0].split('\t');
+  const rawHeader = rows[0];
   const header = rawHeader.map(normalizeColumn);
   const hasFlowcell = header.includes('flowcell');
   const hasBarcode = header.includes('barcode');
   const hasCombined = header.includes('sample_id');
-  const hasLatLon = header.includes('lat_lon');
   const useCombined = !(hasFlowcell && hasBarcode) && hasCombined;
   if (!useCombined && !(hasFlowcell && hasBarcode)) {
     return {
@@ -257,10 +312,10 @@ export function loadMetadataTsv(text) {
   // First pass: parse rows into a list (preserving column values as raw strings)
   // so we can run a column-wide date-format autodetect before final coercion.
   const rawRows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const fields = lines[i].split('\t');
+  for (let i = 1; i < rows.length; i++) {
+    const fields = rows[i];
     const row = {};
-    header.forEach((h, j) => { row[h] = fields[j] ?? ''; });
+    header.forEach((h, j) => { row[h] = fields[j] != null ? String(fields[j]) : ''; });
 
     let flowcell, barcode;
     if (useCombined) {
@@ -339,6 +394,68 @@ export function loadMetadataTsv(text) {
 
   metadata.set(result);
   return { matched, total };
+}
+
+/** Parse a metadata TSV/CSV string (delimiter auto-detected) and update the
+ *  metadata store. Returns { matched, total, error? }. */
+export function loadMetadataTsv(text) {
+  const delim = detectDelimiter(text);
+  const rows = parseDelimited(text, delim);
+  return processMetadataRows(rows);
+}
+
+/** Parse an XLSX workbook (first sheet) and update the metadata store.
+ *  Takes an ArrayBuffer. Returns { matched, total, error? } via Promise. */
+export async function loadMetadataXlsx(arrayBuffer) {
+  let XLSX;
+  try {
+    XLSX = await import('xlsx');
+  } catch (e) {
+    return { matched: 0, total: 0, error: 'XLSX support failed to load' };
+  }
+  let wb;
+  try {
+    wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
+  } catch (e) {
+    return { matched: 0, total: 0, error: 'Could not read XLSX file (corrupt or unsupported)' };
+  }
+  const sheetName = wb.SheetNames[0];
+  if (!sheetName) return { matched: 0, total: 0, error: 'Workbook contains no sheets' };
+  const ws = wb.Sheets[sheetName];
+  const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, blankrows: false });
+  // Stringify cell values: Date → ISO YYYY-MM-DD, everything else via String().
+  const rows = rawRows.map(r => r.map(v => {
+    if (v == null) return '';
+    if (v instanceof Date) {
+      const y = v.getUTCFullYear();
+      const m = String(v.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(v.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    return String(v);
+  }));
+  return processMetadataRows(rows);
+}
+
+/** Dispatcher: import metadata from a File. Detects type by extension and
+ *  routes to the correct parser. Returns { matched, total, error? }. */
+export async function loadMetadataFile(file) {
+  if (!file) return { matched: 0, total: 0, error: 'No file selected' };
+  const name = (file.name || '').toLowerCase();
+  const dot = name.lastIndexOf('.');
+  const ext = dot >= 0 ? name.slice(dot + 1) : '';
+  if (ext === 'xlsx') {
+    const buf = await file.arrayBuffer();
+    return loadMetadataXlsx(buf);
+  }
+  if (ext === 'tsv' || ext === 'csv' || ext === 'txt') {
+    const text = await file.text();
+    return loadMetadataTsv(text);
+  }
+  return {
+    matched: 0, total: 0,
+    error: `Unsupported file type${ext ? ` (.${ext})` : ''} — use .tsv, .csv, .txt, or .xlsx`,
+  };
 }
 
 // Lazy-load read explorer data (potentially huge)

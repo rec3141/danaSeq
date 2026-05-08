@@ -24,6 +24,7 @@
     "d3": "^7.9.0",
     "leaflet": "^1.9.4",
     "plotly.js-dist-min": "^2.35.3",
-    "regl-scatterplot": "^1.10.2"
+    "regl-scatterplot": "^1.10.2",
+    "xlsx": "^0.18.5"
   }
 }
