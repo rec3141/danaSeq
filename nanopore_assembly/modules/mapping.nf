@@ -41,7 +41,15 @@ process MAP_READS {
     # -F 0x104: drop unmapped (0x4) and secondary (0x100), keep supplementary (0x800)
     # Supplementary alignments are kept for read-bridged adjacency (cross-contig links)
     # CoverM's metabat method ignores supplementary alignments, so depths are unchanged
+    #
+    # --split-prefix: assemblies >4GB (default -I) trigger a multi-part minimap2
+    # index. WITHOUT --split-prefix, minimap2 silently drops @SQ records from the
+    # SAM output ("For a multi-part index, no \\@SQ lines will be outputted"),
+    # samtools view then errors with "no SQ lines present", and the resulting
+    # BAM has 0 references / 0 reads while exiting 0 — the exact silent failure
+    # that wasted 6.5 days of the original myloasm run. Always pass it.
     minimap2 -a -x map-ont --secondary=no -t ${task.cpus} \\
+        --split-prefix "${meta.id}_split" \\
         "${assembly}" "${fastq}" \\
         | samtools view -b -F 0x104 \\
         | samtools sort -@ ${task.cpus} -o "${meta.id}.sorted.bam" -
