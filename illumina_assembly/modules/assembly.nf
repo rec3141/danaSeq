@@ -49,13 +49,17 @@ process ASSEMBLE_MEGAHIT {
 
     script:
     def mem_bytes = task.memory ? task.memory.toBytes() : 250000000000
+    // Megahit -r and --12 take comma-separated lists; works for either a single
+    // path or a list of paths (coassembly mode).
+    def merged_csv   = (merged   instanceof List) ? merged.collect{ it.toString() }.join(',')   : merged.toString()
+    def qtrimmed_csv = (qtrimmed instanceof List) ? qtrimmed.collect{ it.toString() }.join(',') : qtrimmed.toString()
     """
     set +e
     megahit \\
         --k-min 45 --k-max 225 --k-step 26 \\
         --min-count 2 \\
-        -r "${merged}" \\
-        --12 "${qtrimmed}" \\
+        -r "${merged_csv}" \\
+        --12 "${qtrimmed_csv}" \\
         -o megahit_out \\
         -m ${mem_bytes} \\
         -t ${task.cpus}

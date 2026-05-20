@@ -178,8 +178,10 @@ fi
 # Auto-detect session
 if [[ "$AUTO_SESSION" == true && -z "$RESUME_SESSION" ]]; then
     if [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.sh" ]]; then
-        RESUME_SESSION=$(grep -oP '(?<=-resume )[0-9a-f-]{36}' \
-            "${OUTDIR_HOST}/pipeline_info/run_command.sh" | tail -1)
+        # save_run_command writes "--session <uuid>"; older runs wrote "-resume <uuid>".
+        # Tolerate either, and let an empty match through (|| true) so set -e doesn't kill us.
+        RESUME_SESSION=$(grep -oP '(?<=--session |--?resume )[0-9a-f-]{36}' \
+            "${OUTDIR_HOST}/pipeline_info/run_command.sh" | tail -1 || true)
         if [[ -n "$RESUME_SESSION" ]]; then
             echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"
         fi

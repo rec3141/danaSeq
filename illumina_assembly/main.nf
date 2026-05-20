@@ -211,29 +211,36 @@ workflow {
     // ======================================================================
 
     if (params.coassembly) {
-        // Co-assembly mode: combine all samples' reads into one assembly
-        ch_all_merged   = ch_merged.map { meta, reads -> reads }.collect()
-        ch_all_qtrimmed = ch_qtrimmed.map { meta, reads -> reads }.collect()
-        ch_all_normalized = ch_normalized.map { meta, reads -> reads }.collect()
-
+        // Co-assembly mode: combine all samples' reads into one assembly.
+        // Channel.combine() with value channels holding lists flattens them
+        // (we want [coasm_meta, [m1,m2,m3], [q1,q2,q3]], not [coasm_meta, m1, m2, m3, q1, q2, q3]).
+        // So we mix tagged emissions and reconstruct the tuple in one closure.
         def coasm_meta = [id: 'coassembly']
 
-        ch_coasm_merged = ch_all_merged.map { files -> [coasm_meta, files] }
-        ch_coasm_qtrimmed = ch_all_qtrimmed.map { files -> [coasm_meta, files] }
-        ch_coasm_normalized = ch_all_normalized.map { files -> [coasm_meta, files] }
+        ch_coasm_input = ch_merged.map   { meta, reads -> [reads, 'merged'] }
+            .mix(ch_qtrimmed.map { meta, reads -> [reads, 'qtrimmed'] })
+            .toList()
+            .map { items ->
+                def m = items.findAll { it[1] == 'merged'   }.collect { it[0] }
+                def q = items.findAll { it[1] == 'qtrimmed' }.collect { it[0] }
+                [coasm_meta, m, q]
+            }
+
+        ch_coasm_normalized = ch_normalized.map { meta, reads -> reads }.toList()
+            .map { files -> [coasm_meta, files] }
 
         ch_assembly_contigs = Channel.empty()
 
         if (params.run_tadpole) {
-            ASSEMBLE_TADPOLE(ch_coasm_merged.combine(ch_coasm_qtrimmed.map { m, f -> f }))
+            ASSEMBLE_TADPOLE(ch_coasm_input)
             ch_assembly_contigs = ch_assembly_contigs.mix(ASSEMBLE_TADPOLE.out.contigs)
         }
         if (params.run_megahit) {
-            ASSEMBLE_MEGAHIT(ch_coasm_merged.combine(ch_coasm_qtrimmed.map { m, f -> f }))
+            ASSEMBLE_MEGAHIT(ch_coasm_input)
             ch_assembly_contigs = ch_assembly_contigs.mix(ASSEMBLE_MEGAHIT.out.contigs)
         }
         if (params.run_spades) {
-            ASSEMBLE_SPADES(ch_coasm_merged.combine(ch_coasm_qtrimmed.map { m, f -> f }))
+            ASSEMBLE_SPADES(ch_coasm_input)
             ch_assembly_contigs = ch_assembly_contigs.mix(ASSEMBLE_SPADES.out.contigs)
         }
         if (params.run_metaspades) {
@@ -254,15 +261,18 @@ workflow {
 
         MAP_READS_BBMAP(ch_map_input)
 
-        ch_all_bams = MAP_READS_BBMAP.out.bam
-            .map { meta, bam, bai -> bam }
-            .collect()
+        // Bundle BAMs + the assembly with a single mix/toList — same dodge as
+        // above to keep .combine from flattening the list-of-bams.
+        ch_depth_input = MAP_READS_BBMAP.out.bam.map { meta, bam, bai -> [bam, 'bam'] }
+            .mix(DEDUPE_ASSEMBLIES.out.assembly.map { meta, asm -> [asm, 'asm'] })
+            .toList()
+            .map { items ->
+                def bams = items.findAll { it[1] == 'bam' }.collect { it[0] }
+                def asm  = items.findAll { it[1] == 'asm' }.collect { it[0] }[0]
+                [coasm_meta, bams, asm]
+            }
 
-        CALCULATE_DEPTHS(
-            DEDUPE_ASSEMBLIES.out.assembly
-                .combine(ch_all_bams)
-                .map { meta, asm, bams -> [meta, bams, asm] }
-        )
+        CALCULATE_DEPTHS(ch_depth_input)
 
     } else {
         // Per-sample assembly mode (default)
