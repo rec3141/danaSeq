@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
 
-  let { markers = [], colorMap = {}, colorBy = 'flowcell', sizeBy = 'fixed', sizeScale = 1.0, nudgeMeters = 100, onMarkerClick = null, onSelect = null, highlightIds = null, dimIds = null, exportName = 'danaseq_map' } = $props();
+  let { markers = [], colorMap = {}, colorBy = 'flowcell', sizeBy = 'fixed', sizeScale = 1.0, nudgeMeters = 100, onMarkerClick = null, onSelect = null, dimIds = null, exportName = 'danaseq_map' } = $props();
   let mapContainer;
   let map = null;
   let markerLayer = null;
@@ -234,9 +234,12 @@
 
     for (const group of Object.values(posGroups)) {
       if (group.length <= 1 || spreadDeg === 0) continue;
-      // Sort by date then depth (earliest+shallowest first = northernmost offset)
+      // Sort by date then depth (earliest+shallowest first = northernmost offset).
+      // Stringify the date — uploaded metadata can carry it as a number (e.g.
+      // packed YYYYMMDD), which would blow up .localeCompare otherwise.
       group.sort((a, b) => {
-        const da = a.date || '', db = b.date || '';
+        const da = a.date != null ? String(a.date) : '';
+        const db = b.date != null ? String(b.date) : '';
         if (da !== db) return da.localeCompare(db);
         return (a.depth_m ?? 0) - (b.depth_m ?? 0);
       });
@@ -252,12 +255,11 @@
 
     for (const m of validMarkers) {
       const color = getColor(m);
-      const isHighlighted = highlightIds ? highlightIds.has(m.id) : false;
       const isDimmed = dimIds ? dimIds.has(m.id) : false;
       const dimMul = isDimmed ? 0.18 : 1;
       const radius = markerRadius(m);
-      const weight = isHighlighted ? 1.5 : 1;
-      const borderColor = isHighlighted ? '#22d3ee' : '#0f172a';
+      const weight = 1;
+      const borderColor = '#0f172a';
       const lat = m._offsetLat ?? m.lat;
       const lon = m._offsetLon ?? m.lon;
 
@@ -394,7 +396,7 @@
   });
 
   $effect(() => {
-    const _deps = [markers, colorMap, colorBy, sizeBy, sizeScale, nudgeMeters, highlightIds, dimIds];
+    const _deps = [markers, colorMap, colorBy, sizeBy, sizeScale, nudgeMeters, dimIds];
     if (map) {
       import('leaflet').then(L => updateMarkers(L));
     }

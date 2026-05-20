@@ -2,9 +2,20 @@
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import { samples, sampleTaxonomy, metadata } from '../stores/data.js';
   import { cartItems, cartActive } from '../stores/cart.js';
-  import { sampleClusters, sampleClusterK } from '../stores/clusters.js';
+  import { sampleClusters, sampleClusterK, sampleClusterColors } from '../stores/clusters.js';
   import { paletteColor } from '../stores/taxonomy.js';
   import { heatmapSettings } from '../stores/heatmapSettings.js';
+  import * as d3 from 'd3';
+
+  // Rainbow color for cluster index i of total k, spanning red → blue across
+  // [0, 1] via d3's Spectral colormap (non-cyclic, perceptually smooth).
+  // Cluster numbering is left-to-right on the dendrogram, so C1 lands at the
+  // red end and Ck at the blue end of the spectrum.
+  function clusterColor(i, k) {
+    if (k <= 1) return d3.color(d3.interpolateSpectral(0.5)).formatHex();
+    const t = i / (k - 1);
+    return d3.color(d3.interpolateSpectral(t)).formatHex();
+  }
 
   const RANK_LEVELS = [
     { code: 'P', label: 'Phylum' },
@@ -361,8 +372,13 @@
   // splits the single root into k disjoint sub-trees. Returns
   // { [sampleId]: 'C1'|'C2'|... } numbered in dendrogram leaf order so
   // adjacent clusters on the heatmap have adjacent labels.
-  function cutLinkage(linkage, leafOrder, k) {
-    const n = leafOrder.length;
+  //
+  // - sampleIds: input-order sample ids (linkage's left/right reference
+  //   these for leaf-node indices 0..n-1)
+  // - leafOrder: dendrogram leaf-order (used only to sort sub-trees left-
+  //   to-right when assigning C1..Ck labels)
+  function cutLinkage(linkage, sampleIds, leafOrder, k) {
+    const n = sampleIds.length;
     if (n === 0) return {};
     if (k <= 1 || linkage.length === 0) {
       const out = {};
@@ -395,8 +411,15 @@
       for (let i = 0; i < n; i++) subRoots.push(i);
     } else {
       // Children of broken merges, filtered to those not absorbed into a
-      // surviving merge. Walk broken merges top-down (highest first) and
-      // collect children that aren't subsumed.
+      // surviving merge AND not themselves broken merges. A broken merge's
+      // children may themselves be other broken merges further down the
+      // dendrogram — those are intermediate nodes in the broken region, not
+      // surviving subtree roots, so they must be skipped. (Failing to skip
+      // them is what previously caused k=20 to produce 38 cluster labels:
+      // each broken merge appeared once as a true subRoot and once as a
+      // candidate child of another broken merge.)
+      const brokenSet = new Set();
+      for (let i = survivingLast; i < L; i++) brokenSet.add(n + i);
       const seen = new Set();
       const candidates = [];
       for (let i = L - 1; i >= survivingLast; i--) {
@@ -405,18 +428,25 @@
       }
       for (const c of candidates) {
         if (childIds.has(c)) continue;  // absorbed by a surviving merge
+        if (brokenSet.has(c)) continue;  // itself a broken merge — skip
         if (seen.has(c)) continue;
         seen.add(c);
         subRoots.push(c);
       }
       // Edge case: if subRoots is short of kk (shouldn't happen with
       // well-formed binary linkage but be defensive), pad with the first
-      // unassigned leaves. Keeps cluster count == kk.
+      // unassigned leaves. Keeps cluster count == kk. Indices throughout
+      // are INPUT-order (the linkage's leaf id space).
       if (subRoots.length < kk) {
+        const inputIndex = new Map();
+        sampleIds.forEach((sid, i) => inputIndex.set(sid, i));
         const usedLeaves = new Set();
         for (const r of subRoots) {
           if (r < n) usedLeaves.add(r);
-          else for (const sid of linkage[r - n].leaves) usedLeaves.add(leafOrder.indexOf(sid));
+          else for (const sid of linkage[r - n].leaves) {
+            const ii = inputIndex.get(sid);
+            if (ii != null) usedLeaves.add(ii);
+          }
         }
         for (let i = 0; i < n && subRoots.length < kk; i++) {
           if (!usedLeaves.has(i)) subRoots.push(i);
@@ -424,11 +454,13 @@
       }
     }
 
-    // Resolve each sub-root to its leaf set (sample ids).
+    // Resolve each sub-root to its leaf set (sample ids). Leaf node ids
+    // 0..n-1 are INPUT-order indices (per wardClustering's linkage), so
+    // look them up via sampleIds — NOT leafOrder (dendrogram order),
+    // which would label the wrong sample whenever the two orders diverge.
     function leavesOf(nodeIdx) {
-      if (nodeIdx < n) return [leafOrder[nodeIdx]];
+      if (nodeIdx < n) return [sampleIds[nodeIdx]];
       const m = linkage[nodeIdx - n];
-      // m.leaves is already in dendrogram order — just return it.
       return m.leaves;
     }
 
@@ -524,7 +556,7 @@
   // global sampleClusters store so other views can color-by-cluster.
   let clusterAssign = $derived.by(() => {
     if (!wardResult.order.length) return {};
-    return cutLinkage(wardResult.linkage, wardResult.order, effectiveK);
+    return cutLinkage(wardResult.linkage, wardResult.sampleIds, wardResult.order, effectiveK);
   });
 
   // Sync the cluster assignment into the global store whenever it changes.
@@ -533,7 +565,17 @@
   $effect(() => {
     sampleClusters.set(clusterAssign);
     const ks = new Set(Object.values(clusterAssign));
-    sampleClusterK.set(ks.size);
+    const k = ks.size;
+    sampleClusterK.set(k);
+    // Publish the per-label color map keyed by cluster index, spanning the
+    // Spectral rainbow from C1 (red) to Ck (blue). Other views read this
+    // store so /heatmap, /samples and /map paint identical hues.
+    const colors = {};
+    for (const label of ks) {
+      const idx = parseInt(String(label).replace(/^C/, ''), 10) - 1;
+      if (!Number.isNaN(idx)) colors[label] = clusterColor(idx, k);
+    }
+    sampleClusterColors.set(colors);
   });
 
   // Build dendrogram line segments in (x = leaf-position, y = distance)
@@ -651,25 +693,29 @@
     }];
 
     // Cluster color bar: one row of cells (yaxis2) showing each column's
-    // cluster id. Use a categorical Plotly colorscale built from the
-    // shared paletteColor() so the bar's hues match every other view.
+    // cluster id. Index the palette by the NUMERIC part of the label
+    // (C{n} → paletteColor(n-1)) so colors match /samples and /map
+    // regardless of how the heatmap columns are sorted.
     const orderedClusterLabels = orderedSamples.map(s => clusterAssign[s.id] || 'C1');
-    const uniqueClusters = [];
-    const seenC = new Set();
-    for (const c of orderedClusterLabels) if (!seenC.has(c)) { seenC.add(c); uniqueClusters.push(c); }
-    const clusterIdx = new Map();
-    uniqueClusters.forEach((c, i) => clusterIdx.set(c, i));
-    const clusterZ = [orderedClusterLabels.map(c => clusterIdx.get(c))];
-    // Build a discrete colorscale for the cluster bar. Each cluster gets a
-    // [t0, t1] band of one color so adjacent cells aren't blended.
-    const nC = Math.max(uniqueClusters.length, 1);
+    const clusterNum = (label) => {
+      const n = parseInt(String(label).replace(/^C/, ''), 10) - 1;
+      return Number.isNaN(n) ? 0 : n;
+    };
+    const clusterZ = [orderedClusterLabels.map(c => clusterNum(c))];
+    // Discrete colorscale: one band per cluster index in 0..nC-1, where
+    // nC = effectiveK (every Ci from C1..Ck exists in clusterAssign).
+    // Use a tiny epsilon to inset the band's end stop so adjacent bands
+    // don't share an exact t-value — Plotly interpolates across duplicate
+    // stops, which would smear adjacent clusters into the same hue.
+    const nC = Math.max(effectiveK, 1);
+    const eps = 1e-9;
     const clusterColorscale = [];
     for (let i = 0; i < nC; i++) {
       const t0 = i / nC;
       const t1 = (i + 1) / nC;
-      const color = paletteColor(i);
+      const color = clusterColor(i, nC);
       clusterColorscale.push([t0, color]);
-      clusterColorscale.push([t1, color]);
+      clusterColorscale.push([i === nC - 1 ? t1 : t1 - eps, color]);
     }
     traces.push({
       type: 'heatmap',

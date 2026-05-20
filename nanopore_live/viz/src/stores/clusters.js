@@ -16,3 +16,8 @@ export const sampleClusters = writable({});
 // Total number of clusters in the most recent assignment (helpful for UIs
 // that want to size a categorical legend or pick a palette range).
 export const sampleClusterK = writable(0);
+
+// Shared color map for cluster labels, e.g. { 'C1': '#22d3ee', 'C2': '#34d399' }.
+// Published by HeatmapView so /samples and /map paint the same color per cluster.
+// Empty until a clustering has been computed.
+export const sampleClusterColors = writable({});

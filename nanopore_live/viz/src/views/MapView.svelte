@@ -5,6 +5,7 @@
   import { cartItems, cartActive, toggleCart, addToCart, readSelections, activeReadSelection } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
   import { taxNav, activeSubTaxa, ancestorInfo, nextRank, prevRank, rankOrder } from '../stores/taxonomy.js';
+  import { sampleClusters, sampleClusterColors } from '../stores/clusters.js';
   import TaxonomyDrillNav from '../components/layout/TaxonomyDrillNav.svelte';
 
   // Cycling button helpers
@@ -19,7 +20,9 @@
 
   // Color-by groups
   const infoGroup =   { values: ['flowcell', 'station'], labels: ['Flowcell', 'Station'] };
-  const metricGroup = { values: ['read_count', 'diversity'], labels: ['Reads', 'Diversity'] };
+  // `cluster` is populated by HeatmapView's k-cut via the sampleClusters store
+  // and rendered here as a categorical color. Empty until /heatmap is visited.
+  const metricGroup = { values: ['read_count', 'diversity', 'cluster'], labels: ['Reads', 'Diversity', 'Heatmap Cluster'] };
   const sizeGroup =   { values: ['fixed', 'read_count', 'total_bases', 'diversity'], labels: ['Fixed', 'Reads', 'Bases', 'Diversity'] };
 
   const BW = { info: '4.5rem', taxonomy: '4.5rem', metric: '4.5rem', metadata: '5rem', size: '4rem' };
@@ -203,6 +206,7 @@
         total_bases: s.total_bases,
         flowcell: s.flowcell,
         diversity: s.diversity,
+        cluster: $sampleClusters?.[s.id] ?? null,
         ...m,
       };
       if (taxSubTaxa) {
@@ -341,6 +345,12 @@
       const v = m[colorBy];
       return v != null ? String(v) : 'Unknown';
     }))].filter(v => v !== 'Unknown').sort();
+    // Cluster mode: reuse the heatmap's shared per-label color map so colors
+    // are identical across /heatmap, /samples and /map.
+    if (colorBy === 'cluster' && Object.keys($sampleClusterColors).length > 0) {
+      for (const v of values) map[v] = $sampleClusterColors[v] || '#475569';
+      return map;
+    }
     values.forEach((v, i) => { map[v] = PALETTE[i % PALETTE.length]; });
     return map;
   });
@@ -351,11 +361,6 @@
     const b = Math.round(Math.min(255, Math.max(0, 84 + (t < 0.5 ? t * 200 : (1 - t) * 200))));
     return `rgb(${r},${g},${b})`;
   }
-
-  let highlightIds = $derived.by(() => {
-    if ($cartItems.size === 0) return null;
-    return $cartItems;
-  });
 
   let noGeoData = $derived(!$metadata || allMarkers.length === 0);
   let hasDepthData = $derived(allMarkers.some(m => m.depth_m != null));
@@ -753,7 +758,6 @@
           {nudgeMeters}
           onMarkerClick={handleMarkerClick}
           onSelect={handleSelect}
-          {highlightIds}
           {dimIds}
           exportName={`danaseq_map_color-${colorBy}`}
         />

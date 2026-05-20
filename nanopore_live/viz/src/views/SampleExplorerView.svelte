@@ -6,7 +6,7 @@
   import { cartItems, cartActive, addToCart, toggleCart } from '../stores/cart.js';
   import { selectedSample } from '../stores/selection.js';
   import { taxNav, activeSubTaxa, visibleSampleIds, RANK_LABELS } from '../stores/taxonomy.js';
-  import { sampleClusters } from '../stores/clusters.js';
+  import { sampleClusters, sampleClusterColors } from '../stores/clusters.js';
   import TaxonomyDrillNav from '../components/layout/TaxonomyDrillNav.svelte';
 
   // Taxonomy-overlay view: one disc per (sample, sub-taxon) at the current
@@ -640,7 +640,9 @@
           sizeBy="raw"
           {sizeScale}
           mode="tsne"
-          colorMap={colorMode === 'taxonomy' ? taxColorMap : {}}
+          colorMap={colorMode === 'taxonomy' ? taxColorMap
+            : (colorMode === 'metric' && metricField === 'cluster') ? $sampleClusterColors
+            : {}}
           {coordExtents}
           {searchMatchIds}
           onselect={handleSelect}
