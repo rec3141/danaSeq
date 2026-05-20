@@ -74,11 +74,18 @@ process BAKTA_BASIC {
     # Shadow amrfinder with no-op stub — avoids AMRFinderPlus DB version mismatch
     export PATH="${projectDir}/bin:\$PATH"
 
+    # Bakta writes large diamond/HMMER intermediates (multi-GB on big metagenomes) to
+    # \$TMPDIR. With nothing set, that's the container's /tmp (often tmpfs/RAM-backed)
+    # and bakta OOMs silently on 5GB+ assemblies. Pin to local-SSD task workdir.
+    export TMPDIR="\$PWD/tmp"
+    mkdir -p "\$TMPDIR"
+
     bakta \
         --db "${params.bakta_light_db}" \
         --meta \
         --keep-contig-headers \
         --threads ${task.cpus} \
+        --tmp-dir "\$TMPDIR" \
         --output bakta_out \
         --prefix annotation \
         --force \
@@ -96,6 +103,7 @@ process BAKTA_BASIC {
     # Strip ##FASTA section from GFF3 (embedded sequences bloat the file and confuse parsers)
     sed '/^##FASTA/Q' bakta_out/annotation.gff3 > annotation.gff3
     cp bakta_out/annotation.hypotheticals.faa . 2>/dev/null || true
+    rm -rf "\$TMPDIR"
     """
 }
 
@@ -126,11 +134,18 @@ process BAKTA_EXTRA {
     # Shadow amrfinder with no-op stub — avoids AMRFinderPlus DB version mismatch
     export PATH="${projectDir}/bin:\$PATH"
 
+    # Bakta writes large diamond/HMMER intermediates (multi-GB on big metagenomes) to
+    # \$TMPDIR. With nothing set, that's the container's /tmp (often tmpfs/RAM-backed)
+    # and bakta OOMs silently on 5GB+ assemblies. Pin to local-SSD task workdir.
+    export TMPDIR="\$PWD/tmp"
+    mkdir -p "\$TMPDIR"
+
     bakta \
         --db "${params.bakta_db}" \
         --meta \
         --keep-contig-headers \
         --threads ${task.cpus} \
+        --tmp-dir "\$TMPDIR" \
         --output bakta_out \
         --prefix annotation \
         --force \
@@ -148,5 +163,6 @@ process BAKTA_EXTRA {
     # Strip ##FASTA section from GFF3 (embedded sequences bloat the file and confuse parsers)
     sed '/^##FASTA/Q' bakta_out/annotation.gff3 > annotation.gff3
     cp bakta_out/annotation.hypotheticals.faa bakta_out/annotation.gbff bakta_out/annotation.png . 2>/dev/null || true
+    rm -rf "\$TMPDIR"
     """
 }
