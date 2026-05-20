@@ -210,6 +210,15 @@ while (( $# )); do
             STORE_DIR_HOST="$(realpath -m "$2")"
             NF_ARGS+=("--store_dir" "$STORE_DIR_HOST")
             shift 2 ;;
+        --tnf|--assembly_info)
+            # Resolve to canonical path so container bind-path rewriting catches them.
+            # Without realpath, /home/rec3141/scratch/X stays unresolved while
+            # STORE_DIR_HOST gets canonicalized to /scratch/rec3141/X — the substring
+            # substitution then misses these args and Nextflow tries to read the host
+            # path inside the container where it isn't bound.
+            [[ -z "${2:-}" ]] && die "$1 requires a file path"
+            NF_ARGS+=("$1" "$(realpath "$2" 2>/dev/null || echo "$2")")
+            shift 2 ;;
         --all)
             NF_ARGS+=(
                 --bakta_extra
