@@ -25,6 +25,19 @@ process MAP_READS {
 
     script:
     """
+    # Refuse to map against an empty-reference fasta. A header-only fasta would
+    # produce a 0-@SQ BAM that minimap2/samtools still exit 0 on (the original
+    # silent-failure mode), with downstream coverm panicking on the result.
+    if [ ! -s "${assembly}" ]; then
+        echo "[ERROR] Reference assembly is empty: ${assembly}" >&2
+        exit 1
+    fi
+    REF_CONTIGS=\$(grep -c '^>' "${assembly}" || true)
+    if [ "\${REF_CONTIGS:-0}" -lt 1 ]; then
+        echo "[ERROR] Reference assembly contains 0 contigs: ${assembly}" >&2
+        exit 1
+    fi
+
     # -F 0x104: drop unmapped (0x4) and secondary (0x100), keep supplementary (0x800)
     # Supplementary alignments are kept for read-bridged adjacency (cross-contig links)
     # CoverM's metabat method ignores supplementary alignments, so depths are unchanged
@@ -35,9 +48,11 @@ process MAP_READS {
 
     samtools index -@ ${task.cpus} "${meta.id}.sorted.bam"
 
-    # Validate BAM
-    if [ ! -s "${meta.id}.sorted.bam" ]; then
-        echo "[ERROR] Mapping produced empty BAM for ${meta.id}" >&2
+    # Validate BAM: must contain @SQ records matching the reference, else minimap2
+    # mapped against an empty index (the bug we're guarding against).
+    BAM_SQ=\$(samtools view -H "${meta.id}.sorted.bam" | grep -c '^@SQ' || true)
+    if [ "\${BAM_SQ:-0}" -lt 1 ]; then
+        echo "[ERROR] BAM for ${meta.id} has 0 \\@SQ records (reference had \${REF_CONTIGS} contigs); minimap2 saw an empty reference" >&2
         exit 1
     fi
     """

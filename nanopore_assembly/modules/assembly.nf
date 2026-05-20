@@ -62,30 +62,18 @@ print(int(quals[len(quals)//2]) if quals else 10)
         exit 1
     fi
 
-    # Check minimum contig size
-    max_len=\$(awk '/^>/{if(len>0) print len; len=0; next} {len+=length(\$0)} END{print len}' flye_out/assembly.fasta | sort -rn | head -1)
-    if [ "\$max_len" -lt 1000 ]; then
-        echo "[ERROR] Assembly contains no contigs >= 1000bp (max: \${max_len}bp)" >&2
-        exit 1
-    fi
-
-    # Sort contigs by length (longest first) and rename with zero-padded IDs
-    NCONTIGS=\$(grep -c '^>' flye_out/assembly.fasta)
-    PAD=\${#NCONTIGS}
-    TAB=\$(printf '\\t')
-
-    awk '/^>/{if(h) print h "\\t" length(s) "\\t" s; h=substr(\$0,2); s=""; next} {s=s\$0} END{if(h) print h "\\t" length(s) "\\t" s}' flye_out/assembly.fasta \\
-    | sort -t"\$TAB" -k2,2rn \\
-    | awk -F'\\t' -v pad="\$PAD" '{n++; new=sprintf("contig_%0*d",pad,n); printf ">%s\\n",new>"assembly.fasta"; s=\$3; for(i=1;i<=length(s);i+=80) print substr(s,i,80)>"assembly.fasta"; print \$1"\\t"new>"name_map.tsv"}'
-
-    # Update assembly_info.txt
-    head -1 flye_out/assembly_info.txt > assembly_info.txt
-    tail -n+2 flye_out/assembly_info.txt \\
-    | awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} {if(\$1 in map) \$1=map[\$1]; print}' name_map.tsv - \\
-    | sort -t"\$TAB" -k2,2rn >> assembly_info.txt
-
-    # Update GFA
-    awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} \$1=="P"&&(\$2 in map){\$2=map[\$2]} {print}' name_map.tsv flye_out/assembly_graph.gfa > assembly_graph.gfa
+    # Sort/rename contigs, remap assembly_info.txt + GFA (replaces fragile awk pipeline
+    # that silently produced empty FASTA on multi-megabase contigs).
+    normalize_assembly.py \\
+        --input flye_out/assembly.fasta \\
+        --output assembly.fasta \\
+        --output-info assembly_info.txt \\
+        --output-map name_map.tsv \\
+        --header-format flye \\
+        --source-info flye_out/assembly_info.txt \\
+        --gfa-in flye_out/assembly_graph.gfa \\
+        --gfa-out assembly_graph.gfa \\
+        --min-len 1000
 
     rm -f name_map.tsv
     """
@@ -199,52 +187,40 @@ process ASSEMBLY_METAMDBG {
     # Decompress contigs
     gunzip -c metamdbg_out/contigs.fasta.gz > metamdbg_raw.fasta
 
-    # Check minimum contig size
-    max_len=\$(awk '/^>/{if(len>0) print len; len=0; next} {len+=length(\$0)} END{print len}' metamdbg_raw.fasta | sort -rn | head -1)
-    if [ "\$max_len" -lt 1000 ]; then
-        echo "[ERROR] Assembly contains no contigs >= 1000bp (max: \${max_len}bp)" >&2
-        exit 1
-    fi
-
-    # Sort contigs by length (longest first) and rename with zero-padded IDs
-    NCONTIGS=\$(grep -c '^>' metamdbg_raw.fasta)
-    PAD=\${#NCONTIGS}
-    TAB=\$(printf '\\t')
-
-    # Parse metaMDBG headers: >ctgN length=LEN circular={yes,no}
-    # Extract old_name (first word only), length, coverage, circularity
-    # Build assembly_info.txt with Flye-compatible columns
-    awk '/^>/{if(h) print h "\\t" length(s) "\\t" s; h=substr(\$0,2); s=""; next} {s=s\$0} END{if(h) print h "\\t" length(s) "\\t" s}' metamdbg_raw.fasta \\
-    | sort -t"\$TAB" -k2,2rn \\
-    | awk -F'\\t' -v pad="\$PAD" '{n++; new=sprintf("contig_%0*d",pad,n); printf ">%s\\n",new>"assembly.fasta"; s=\$3; for(i=1;i<=length(s);i+=80) print substr(s,i,80)>"assembly.fasta"; split(\$1,w," "); print w[1]"\\t"new>"name_map.tsv"}'
-
-    # Build assembly_info.txt by parsing metaMDBG FASTA headers
-    # Header format: >ctgN length=LEN circular={yes,no}
-    echo -e "#seq_name\\tlength\\tcov.\\tcirc." > assembly_info.txt
-    awk '/^>/{
-        hdr = substr(\$0, 2)
-        split(hdr, parts, " ")
-        name = parts[1]
-        len = 0; cov = 0; circ = "N"
-        for (i = 2; i <= length(parts); i++) {
-            if (parts[i] ~ /^length=/) { split(parts[i], kv, "="); len = kv[2] }
-            if (parts[i] ~ /^coverage=/) { split(parts[i], kv, "="); cov = kv[2] }
-            if (parts[i] ~ /^circular=/) { split(parts[i], kv, "="); circ = (kv[2] == "yes") ? "Y" : "N" }
-        }
-        print name "\\t" len "\\t" cov "\\t" circ
-    }' metamdbg_raw.fasta \\
-    | awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} {if(\$1 in map) \$1=map[\$1]; print}' name_map.tsv - \\
-    | sort -t"\$TAB" -k2,2rn >> assembly_info.txt
-
-    # GFA: use metaMDBG graph if available (in tmp/pass_kN/assembly_graph.gfa), otherwise stub
+    # Pick highest-k GFA if metaMDBG produced one
     METAMDBG_GFA=\$(ls metamdbg_out/tmp/pass_k*/assembly_graph.gfa 2>/dev/null | sort -t'k' -k2 -rn | head -1)
-    if [ -n "\$METAMDBG_GFA" ] && [ -f "\$METAMDBG_GFA" ]; then
-        awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} \$1=="S"&&(\$2 in map){\$2=map[\$2]} \$1=="P"&&(\$2 in map){\$2=map[\$2]} {print}' name_map.tsv "\$METAMDBG_GFA" > assembly_graph.gfa
-    else
-        # Stub GFA with S lines only (no graph topology)
-        echo "H\\tVN:Z:1.0" > assembly_graph.gfa
-        awk '/^>/{name=substr(\$0,2); next} {seq=seq\$0} /^>/{if(name) print "S\\t"name"\\t"seq; seq=""} END{if(name) print "S\\t"name"\\t"seq}' assembly.fasta \\
-        | awk -F'\\t' 'NF==3' >> assembly_graph.gfa
+
+    # Sort/rename contigs, build Flye-style assembly_info.txt from headers,
+    # remap GFA. Replaces fragile awk|sort|awk pipeline.
+    normalize_assembly.py \\
+        --input metamdbg_raw.fasta \\
+        --output assembly.fasta \\
+        --output-info assembly_info.txt \\
+        --output-map name_map.tsv \\
+        --header-format metamdbg \\
+        \${METAMDBG_GFA:+--gfa-in "\$METAMDBG_GFA"} \\
+        \${METAMDBG_GFA:+--gfa-out assembly_graph.gfa} \\
+        --min-len 1000
+
+    # If metaMDBG didn't emit a GFA, write a stub (S-lines only) from the renamed FASTA
+    if [ ! -f assembly_graph.gfa ]; then
+        python3 -c "
+import sys
+with open('assembly.fasta','rb') as fin, open('assembly_graph.gfa','wb') as fout:
+    fout.write(b'H\\tVN:Z:1.0\\n')
+    name = None
+    seq = bytearray()
+    for line in fin:
+        if line.startswith(b'>'):
+            if name:
+                fout.write(b'S\\t' + name + b'\\t' + bytes(seq) + b'\\n')
+            name = line.rstrip(b'\\r\\n')[1:]
+            seq = bytearray()
+        else:
+            seq.extend(line.rstrip(b'\\r\\n'))
+    if name:
+        fout.write(b'S\\t' + name + b'\\t' + bytes(seq) + b'\\n')
+"
     fi
 
     rm -f name_map.tsv metamdbg_raw.fasta
@@ -280,58 +256,38 @@ process ASSEMBLY_MYLOASM {
         exit 1
     fi
 
-    # Check minimum contig size
-    max_len=\$(awk '/^>/{if(len>0) print len; len=0; next} {len+=length(\$0)} END{print len}' myloasm_out/assembly_primary.fa | sort -rn | head -1)
-    if [ "\$max_len" -lt 1000 ]; then
-        echo "[ERROR] Assembly contains no contigs >= 1000bp (max: \${max_len}bp)" >&2
-        exit 1
-    fi
+    # Sort/rename contigs, build assembly_info.txt from myloasm headers,
+    # remap GFA. Replaces fragile awk|sort|awk that silently produced empty
+    # outputs on multi-megabase contigs (which myloasm regularly emits).
+    GFA_IN=myloasm_out/final_contig_graph.gfa
+    normalize_assembly.py \\
+        --input myloasm_out/assembly_primary.fa \\
+        --output assembly.fasta \\
+        --output-info assembly_info.txt \\
+        --output-map name_map.tsv \\
+        --header-format myloasm \\
+        \$( [ -f "\$GFA_IN" ] && echo "--gfa-in \$GFA_IN --gfa-out assembly_graph.gfa" ) \\
+        --min-len 1000
 
-    # Sort contigs by length (longest first) and rename with zero-padded IDs
-    NCONTIGS=\$(grep -c '^>' myloasm_out/assembly_primary.fa)
-    PAD=\${#NCONTIGS}
-    TAB=\$(printf '\\t')
-
-    # Build sorted FASTA + name map (old_name first word → new_name)
-    awk '/^>/{if(h) print h "\\t" length(s) "\\t" s; h=substr(\$0,2); s=""; next} {s=s\$0} END{if(h) print h "\\t" length(s) "\\t" s}' myloasm_out/assembly_primary.fa \\
-    | sort -t"\$TAB" -k2,2rn \\
-    | awk -F'\\t' -v pad="\$PAD" '{n++; new=sprintf("contig_%0*d",pad,n); printf ">%s\\n",new>"assembly.fasta"; s=\$3; for(i=1;i<=length(s);i+=80) print substr(s,i,80)>"assembly.fasta"; split(\$1,w," "); print w[1]"\\t"new>"name_map.tsv"}'
-
-    # Build assembly_info.txt by parsing myloasm FASTA headers
-    # Header format: >NAME_len-LEN_circular-{yes,no,possibly}_depth-D1-D2-D3_duplicated-{yes,no} mult=M
-    echo -e "#seq_name\\tlength\\tcov.\\tcirc." > assembly_info.txt
-    awk '/^>/{
-        hdr = substr(\$0, 2)
-        split(hdr, parts, " ")
-        name = parts[1]
-        len = 0; cov = 0; circ = "N"
-        # Parse underscore-delimited fields in the contig name
-        n_fields = split(name, fields, "_")
-        for (i = 1; i <= n_fields; i++) {
-            if (fields[i] ~ /^len-/) { split(fields[i], kv, "-"); len = kv[2] }
-            if (fields[i] ~ /^circular-/) {
-                split(fields[i], kv, "-")
-                circ = (kv[2] == "yes" || kv[2] == "possibly") ? "Y" : "N"
-            }
-            if (fields[i] ~ /^depth-/) { split(fields[i], kv, "-"); cov = kv[2] }
-        }
-        # Also check for mult= in the space-separated part
-        for (j = 2; j <= length(parts); j++) {
-            if (parts[j] ~ /^mult=/) { split(parts[j], kv, "="); if (cov == 0) cov = kv[2] }
-        }
-        print name "\\t" len "\\t" cov "\\t" circ
-    }' myloasm_out/assembly_primary.fa \\
-    | awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} {if(\$1 in map) \$1=map[\$1]; print}' name_map.tsv - \\
-    | sort -t"\$TAB" -k2,2rn >> assembly_info.txt
-
-    # GFA: use myloasm output if available, otherwise generate stub
-    if [ -f myloasm_out/final_contig_graph.gfa ]; then
-        awk -F'\\t' 'BEGIN{OFS="\\t"} NR==FNR{map[\$1]=\$2;next} \$1=="S"&&(\$2 in map){\$2=map[\$2]} \$1=="P"&&(\$2 in map){\$2=map[\$2]} {print}' name_map.tsv myloasm_out/final_contig_graph.gfa > assembly_graph.gfa
-    else
-        # Stub GFA with S lines only
-        echo "H\\tVN:Z:1.0" > assembly_graph.gfa
-        awk '/^>/{name=substr(\$0,2); next} {seq=seq\$0} /^>/{if(name) print "S\\t"name"\\t"seq; seq=""} END{if(name) print "S\\t"name"\\t"seq}' assembly.fasta \\
-        | awk -F'\\t' 'NF==3' >> assembly_graph.gfa
+    # If myloasm didn't emit a GFA, write a stub (S-lines only) from the renamed FASTA
+    if [ ! -f assembly_graph.gfa ]; then
+        python3 -c "
+import sys
+with open('assembly.fasta','rb') as fin, open('assembly_graph.gfa','wb') as fout:
+    fout.write(b'H\\tVN:Z:1.0\\n')
+    name = None
+    seq = bytearray()
+    for line in fin:
+        if line.startswith(b'>'):
+            if name:
+                fout.write(b'S\\t' + name + b'\\t' + bytes(seq) + b'\\n')
+            name = line.rstrip(b'\\r\\n')[1:]
+            seq = bytearray()
+        else:
+            seq.extend(line.rstrip(b'\\r\\n'))
+    if name:
+        fout.write(b'S\\t' + name + b'\\t' + bytes(seq) + b'\\n')
+"
     fi
 
     rm -f name_map.tsv
