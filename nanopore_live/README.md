@@ -210,7 +210,7 @@ Or drop the hook by hand at `<outdir>/deploy.sh`:
 
 ```bash
 #!/usr/bin/env bash
-exec /data/danav2/nanopore_live/viz/deploy.sh \
+exec /data/dev/danaSeq/nanopore_live/viz/deploy.sh \
     --preprocess-dir "$1/viz" \
     --slug genice_ci --name "GenIce CI"
 ```

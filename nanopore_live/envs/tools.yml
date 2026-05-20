@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - nextflow>=24.04
+  - nextflow>=24.04,<26
   - openjdk>=17
   - kraken2=2.1.3
   - hmmer=3.4

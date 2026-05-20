@@ -85,40 +85,37 @@ def helpMessage() {
     """.stripIndent()
 }
 
-if (params.help) {
-    helpMessage()
-    System.exit(0)
-}
+def EFFECTIVE_ANNOTATOR = null
 
-// ============================================================================
-// Parameter validation
-// ============================================================================
+def validateParams() {
+    if (params.help) {
+        helpMessage()
+        System.exit(0)
+    }
+    if (!params.assembly) {
+        log.error "ERROR: --assembly is required. Provide path to assembly FASTA."
+        System.exit(1)
+    }
+    if (!params.depths) {
+        log.error "ERROR: --depths is required. Provide path to MetaBAT2-format depth table."
+        System.exit(1)
+    }
 
-if (!params.assembly) {
-    log.error "ERROR: --assembly is required. Provide path to assembly FASTA."
-    System.exit(1)
-}
+    EFFECTIVE_ANNOTATOR = params.annotator ?:
+        (params.run_bakta ? 'bakta' : (params.run_prokka ? 'prokka' : 'none'))
 
-if (!params.depths) {
-    log.error "ERROR: --depths is required. Provide path to MetaBAT2-format depth table."
-    System.exit(1)
-}
+    if (EFFECTIVE_ANNOTATOR == 'bakta' && !params.bakta_light_db) {
+        log.error "ERROR: --bakta_light_db is required when using Bakta annotation."
+        System.exit(1)
+    }
+    if (EFFECTIVE_ANNOTATOR == 'bakta' && params.bakta_extra && !params.bakta_db) {
+        log.error "ERROR: --bakta_db is required when using --bakta_extra."
+        System.exit(1)
+    }
 
-// Resolve annotator
-def effective_annotator = params.annotator ?:
-    (params.run_bakta ? 'bakta' : (params.run_prokka ? 'prokka' : 'none'))
-
-if (effective_annotator == 'bakta' && !params.bakta_light_db) {
-    log.error "ERROR: --bakta_light_db is required when using Bakta annotation."
-    System.exit(1)
-}
-if (effective_annotator == 'bakta' && params.bakta_extra && !params.bakta_db) {
-    log.error "ERROR: --bakta_db is required when using --bakta_extra."
-    System.exit(1)
-}
-
-if (effective_annotator != 'none') {
-    log.info "Annotator: ${effective_annotator}"
+    if (EFFECTIVE_ANNOTATOR != 'none') {
+        log.info "Annotator: ${EFFECTIVE_ANNOTATOR}"
+    }
 }
 
 // ============================================================================
@@ -216,6 +213,10 @@ process STAGE_INPUTS {
 
 workflow {
 
+    main:
+
+    validateParams()
+
     // 1. Create channels from file-based inputs
     ch_assembly = Channel.fromPath(params.assembly, checkIfExists: true)
     ch_depths   = Channel.fromPath(params.depths, checkIfExists: true)
@@ -244,12 +245,12 @@ workflow {
     ch_gff            = Channel.empty()
     ch_annotation_tsv = Channel.empty()
 
-    if (effective_annotator == 'prokka') {
+    if (EFFECTIVE_ANNOTATOR == 'prokka') {
         PROKKA_ANNOTATE(ch_assembly)
         ch_proteins       = PROKKA_ANNOTATE.out.proteins
         ch_gff            = PROKKA_ANNOTATE.out.gff
         ch_annotation_tsv = PROKKA_ANNOTATE.out.tsv
-    } else if (effective_annotator == 'bakta') {
+    } else if (EFFECTIVE_ANNOTATOR == 'bakta') {
         BAKTA_BASIC(ch_assembly)
         ch_proteins       = BAKTA_BASIC.out.proteins
         ch_gff            = BAKTA_BASIC.out.gff
@@ -270,7 +271,7 @@ workflow {
     }
 
     // 2b2. Kaiju per-gene (requires annotation)
-    if (params.run_kaiju && params.kaiju_db && effective_annotator != 'none') {
+    if (params.run_kaiju && params.kaiju_db && EFFECTIVE_ANNOTATOR != 'none') {
         KAIJU_CLASSIFY(ch_proteins, ch_gff)
     }
 
@@ -323,22 +324,22 @@ workflow {
         INTEGRONFINDER(ch_assembly)
     }
 
-    if (params.run_islandpath && effective_annotator != 'none') {
+    if (params.run_islandpath && EFFECTIVE_ANNOTATOR != 'none') {
         ISLANDPATH_DIMOB(ch_assembly, ch_gff, ch_proteins)
     }
 
-    if (params.run_macsyfinder && effective_annotator != 'none' && params.macsyfinder_models) {
+    if (params.run_macsyfinder && EFFECTIVE_ANNOTATOR != 'none' && params.macsyfinder_models) {
         MACSYFINDER(ch_proteins)
     }
 
-    if (params.run_defensefinder && effective_annotator != 'none') {
+    if (params.run_defensefinder && EFFECTIVE_ANNOTATOR != 'none') {
         DEFENSEFINDER(ch_proteins, ch_gff)
     }
 
     // 2e. Metabolic profiling
     ch_annot_for_merge = Channel.empty()
 
-    if (params.run_metabolism && effective_annotator != 'none') {
+    if (params.run_metabolism && EFFECTIVE_ANNOTATOR != 'none') {
         if (params.kofam_db) {
             KOFAMSCAN(ch_proteins, file("${params.kofam_db}/profiles"), file("${params.kofam_db}/ko_list"))
             ch_annot_for_merge = ch_annot_for_merge.mix(
@@ -362,7 +363,7 @@ workflow {
     }
 
     // 2f. Per-gene depths (requires annotation GFF + BAMs)
-    if (effective_annotator != 'none' && params.bam_dir) {
+    if (EFFECTIVE_ANNOTATOR != 'none' && params.bam_dir) {
         CALCULATE_GENE_DEPTHS(ch_bam_files, ch_gff)
     }
 
@@ -461,7 +462,7 @@ workflow {
     }
 
     // 4c. Metabolic merge + map to bins
-    if (params.run_metabolism && effective_annotator != 'none') {
+    if (params.run_metabolism && EFFECTIVE_ANNOTATOR != 'none') {
         ch_annot_labels = ch_annot_for_merge.collect { it[0] }
         ch_annot_files  = ch_annot_for_merge.collect { it[1] }
 
@@ -592,7 +593,7 @@ workflow {
         VIZ_STAGE1(ch_viz1_input, false, false)
 
         // Stage 2: annotation done
-        if (effective_annotator != 'none') {
+        if (EFFECTIVE_ANNOTATOR != 'none') {
             VIZ_STAGE2(ch_proteins.collect(), true, false)
         }
 
@@ -608,7 +609,7 @@ workflow {
         if (params.checkm2_db) {
             ch_viz_stage4 = ch_viz_stage4.mix(CHECKM2.out.report.collect())
         }
-        if (effective_annotator == 'bakta' && params.bakta_extra) {
+        if (EFFECTIVE_ANNOTATOR == 'bakta' && params.bakta_extra) {
             ch_viz_stage4 = ch_viz_stage4.mix(BAKTA_EXTRA.out.tsv.collect())
         }
         if (params.run_genomad && params.genomad_db) {
@@ -617,13 +618,13 @@ workflow {
         if (params.run_integronfinder) {
             ch_viz_stage4 = ch_viz_stage4.mix(INTEGRONFINDER.out.integrons.collect())
         }
-        if (params.run_islandpath && effective_annotator != 'none') {
+        if (params.run_islandpath && EFFECTIVE_ANNOTATOR != 'none') {
             ch_viz_stage4 = ch_viz_stage4.mix(ISLANDPATH_DIMOB.out.islands.collect())
         }
-        if (params.run_macsyfinder && effective_annotator != 'none' && params.macsyfinder_models) {
+        if (params.run_macsyfinder && EFFECTIVE_ANNOTATOR != 'none' && params.macsyfinder_models) {
             ch_viz_stage4 = ch_viz_stage4.mix(MACSYFINDER.out.systems.collect())
         }
-        if (params.run_defensefinder && effective_annotator != 'none') {
+        if (params.run_defensefinder && EFFECTIVE_ANNOTATOR != 'none') {
             ch_viz_stage4 = ch_viz_stage4.mix(DEFENSEFINDER.out.systems.collect())
         }
         if (params.run_eukaryotic) {
@@ -644,7 +645,7 @@ workflow {
         if (params.run_kaiju && params.kaiju_db) {
             ch_viz_stage4 = ch_viz_stage4.mix(KAIJU_CONTIG_CLASSIFY.out.contig_taxonomy.collect())
         }
-        if (params.run_metabolism && effective_annotator != 'none') {
+        if (params.run_metabolism && EFFECTIVE_ANNOTATOR != 'none') {
             ch_viz_stage4 = ch_viz_stage4.mix(KEGG_MODULES.out.modules.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(MINPATH.out.pathways.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(KEGG_DECODER.out.output.collect())
@@ -661,28 +662,22 @@ workflow {
         }
         VIZ_STAGE4(ch_viz_stage4.collect(), true, true)
     }
-}
 
-// ============================================================================
-// Pipeline completion handler
-// ============================================================================
-
-workflow.onComplete {
-    def msg = """\
-        Pipeline completed at : ${workflow.complete}
-        Duration              : ${workflow.duration}
-        Success               : ${workflow.success}
-        Exit status           : ${workflow.exitStatus}
-        Output directory      : ${params.outdir}
-        """.stripIndent()
-
-    println msg
-
-    if (!workflow.success) {
-        println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+    workflow.onComplete = {
+        def msg = """\
+            Pipeline completed at : ${workflow.complete}
+            Duration              : ${workflow.duration}
+            Success               : ${workflow.success}
+            Exit status           : ${workflow.exitStatus}
+            Output directory      : ${params.outdir}
+            """.stripIndent()
+        println msg
+        if (!workflow.success) {
+            println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+        }
     }
-}
 
-workflow.onError {
-    println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
+    workflow.onError = {
+        println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
+    }
 }

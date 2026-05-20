@@ -67,25 +67,21 @@ def helpMessage() {
     """.stripIndent()
 }
 
-if (params.help) {
-    helpMessage()
-    System.exit(0)
+def validateParams() {
+    if (params.help) {
+        helpMessage()
+        System.exit(0)
+    }
+    if (!params.input) {
+        log.error "ERROR: --input is required. Provide path to directory containing *.fastq.gz files. Run with --help for usage."
+        System.exit(1)
+    }
+    if (!(params.assembler in ['flye', 'metamdbg', 'myloasm'])) {
+        log.error "ERROR: Invalid --assembler '${params.assembler}'. Choose from: flye, metamdbg, myloasm"
+        System.exit(1)
+    }
+    log.info "Assembler: ${params.assembler}"
 }
-
-// ============================================================================
-// Parameter validation
-// ============================================================================
-
-if (!params.input) {
-    log.error "ERROR: --input is required. Provide path to directory containing *.fastq.gz files. Run with --help for usage."
-    System.exit(1)
-}
-
-if (!(params.assembler in ['flye', 'metamdbg', 'myloasm'])) {
-    log.error "ERROR: Invalid --assembler '${params.assembler}'. Choose from: flye, metamdbg, myloasm"
-    System.exit(1)
-}
-log.info "Assembler: ${params.assembler}"
 
 // Import modules
 include { CONCAT_READS }        from './modules/preprocess'
@@ -146,6 +142,10 @@ YAML
 }
 
 workflow {
+
+    main:
+
+    validateParams()
 
     WRITE_PROVENANCE()
 
@@ -246,33 +246,27 @@ workflow {
         .flatMap { meta, bam, bai -> [bam, bai] }
         .collect()
     CALCULATE_DEPTHS(ch_bam_files, ch_assembly)
-}
 
-// ============================================================================
-// Pipeline completion handler
-// ============================================================================
+    workflow.onComplete = {
+        def msg = """\
+            Pipeline completed at : ${workflow.complete}
+            Duration              : ${workflow.duration}
+            Success               : ${workflow.success}
+            Exit status           : ${workflow.exitStatus}
+            Output directory      : ${params.outdir}
 
-workflow.onComplete {
-    def msg = """\
-        Pipeline completed at : ${workflow.complete}
-        Duration              : ${workflow.duration}
-        Success               : ${workflow.success}
-        Exit status           : ${workflow.exitStatus}
-        Output directory      : ${params.outdir}
-
-        Next step: run mag_analysis on these outputs:
-          --assembly ${params.outdir}/assembly/assembly.fasta
-          --depths   ${params.outdir}/mapping/depths.txt
-          --bam_dir  ${params.outdir}/mapping/
-        """.stripIndent()
-
-    println msg
-
-    if (!workflow.success) {
-        println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+            Next step: run mag_analysis on these outputs:
+              --assembly ${params.outdir}/assembly/assembly.fasta
+              --depths   ${params.outdir}/mapping/depths.txt
+              --bam_dir  ${params.outdir}/mapping/
+            """.stripIndent()
+        println msg
+        if (!workflow.success) {
+            println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+        }
     }
-}
 
-workflow.onError {
-    println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
+    workflow.onError = {
+        println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
+    }
 }

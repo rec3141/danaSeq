@@ -130,53 +130,53 @@ def helpMessage() {
     """.stripIndent()
 }
 
-if (params.help) {
-    helpMessage()
-    System.exit(0)
-}
+// Shared state computed at workflow start (Nextflow 26 strict syntax forbids
+// top-level statements other than declarations/imports/processes/workflows).
+def EFFECTIVE_ANNOTATOR = null
 
-// ============================================================================
-// Parameter validation
-// ============================================================================
-
-if (!params.input) {
-    log.error "ERROR: --input is required. Provide path to directory containing fastq_pass/. Run with --help for usage."
-    System.exit(1)
-}
-if (params.run_kraken && !params.kraken_db) {
-    log.error "ERROR: --kraken_db is required when using --run_kraken. Provide path to Kraken2 database directory."
-    System.exit(1)
-}
-if (params.run_db_integration && !params.danadir) {
-    log.error "ERROR: --danadir is required when using --run_db_integration. Provide path to DB scripts directory."
-    System.exit(1)
-}
-
-// Enforce consistent mode (watch vs batch) per output directory.
-// Switching modes changes task grouping (per-file vs per-sample), which
-// produces different output filenames and would corrupt the DuckDB.
-def mode_label = params.watch ? 'watch' : 'batch'
-def mode_file = file("${params.outdir}/.pipeline_mode")
-if (mode_file.exists()) {
-    def prev_mode = mode_file.text.trim()
-    if (prev_mode != mode_label) {
-        log.error "ERROR: Output directory was created in '${prev_mode}' mode but you are running in '${mode_label}' mode.\n" +
-                  "Switching modes on the same output directory would corrupt the database.\n" +
-                  "Use a different --outdir, or delete ${params.outdir} to start fresh."
+def validateParams() {
+    if (params.help) {
+        helpMessage()
+        System.exit(0)
+    }
+    if (!params.input) {
+        log.error "ERROR: --input is required. Provide path to directory containing fastq_pass/. Run with --help for usage."
         System.exit(1)
     }
-} else {
-    // First run — record mode
-    def outdir = file(params.outdir)
-    if (!outdir.exists()) outdir.mkdirs()
-    mode_file.text = mode_label
-}
+    if (params.run_kraken && !params.kraken_db) {
+        log.error "ERROR: --kraken_db is required when using --run_kraken. Provide path to Kraken2 database directory."
+        System.exit(1)
+    }
+    if (params.run_db_integration && !params.danadir) {
+        log.error "ERROR: --danadir is required when using --run_db_integration. Provide path to DB scripts directory."
+        System.exit(1)
+    }
 
-def effective_annotator = params.annotator ?: 'bakta'
+    // Enforce consistent mode (watch vs batch) per output directory.
+    // Switching modes changes task grouping (per-file vs per-sample), which
+    // produces different output filenames and would corrupt the DuckDB.
+    def mode_label = params.watch ? 'watch' : 'batch'
+    def mode_file = file("${params.outdir}/.pipeline_mode")
+    if (mode_file.exists()) {
+        def prev_mode = mode_file.text.trim()
+        if (prev_mode != mode_label) {
+            log.error "ERROR: Output directory was created in '${prev_mode}' mode but you are running in '${mode_label}' mode.\n" +
+                      "Switching modes on the same output directory would corrupt the database.\n" +
+                      "Use a different --outdir, or delete ${params.outdir} to start fresh."
+            System.exit(1)
+        }
+    } else {
+        def outdir = file(params.outdir)
+        if (!outdir.exists()) outdir.mkdirs()
+        mode_file.text = mode_label
+    }
 
-if (effective_annotator == 'bakta' && !params.bakta_db) {
-    log.error "ERROR: --bakta_db is required when using Bakta annotation. Provide path to Bakta database."
-    System.exit(1)
+    EFFECTIVE_ANNOTATOR = params.annotator ?: 'bakta'
+
+    if (EFFECTIVE_ANNOTATOR == 'bakta' && !params.bakta_db) {
+        log.error "ERROR: --bakta_db is required when using Bakta annotation. Provide path to Bakta database."
+        System.exit(1)
+    }
 }
 
 // Import modules
@@ -299,6 +299,10 @@ def create_fastq_channel() {
 
 workflow {
 
+    main:
+
+    validateParams()
+
     // Discover and validate input files
     ch_input = create_fastq_channel()
 
@@ -348,11 +352,11 @@ workflow {
     ch_annotation_proteins = Channel.empty()
     ch_annotation_tsv      = Channel.empty()
 
-    if (effective_annotator == 'prokka') {
+    if (EFFECTIVE_ANNOTATOR == 'prokka') {
         PROKKA_ANNOTATE(ch_fasta)
         ch_annotation_proteins = PROKKA_ANNOTATE.out.proteins
         ch_annotation_tsv      = PROKKA_ANNOTATE.out.tsv
-    } else if (effective_annotator == 'bakta') {
+    } else if (EFFECTIVE_ANNOTATOR == 'bakta') {
         // Fast path: CDS-only annotation — feeds HMM search and DB integration
         // Batch mode: group all FASTAs per sample to amortize DB loading overhead
         // Watch mode: pass files individually for live results
@@ -377,7 +381,7 @@ workflow {
         }
     }
 
-    if (effective_annotator != 'none') {
+    if (EFFECTIVE_ANNOTATOR != 'none') {
         // HMM search on annotation proteins (requires annotation output)
         if (params.hmm_databases) {
             // Build channel of HMM database files
@@ -424,8 +428,8 @@ workflow {
             if (params.run_kraken)  { ch_done = ch_done.mix(KRAKEN2_CLASSIFY.out.parsed.map  { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
             if (params.run_sketch)  { ch_done = ch_done.mix(SENDSKETCH.out.sketch.map        { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
             if (params.run_tetra)   { ch_done = ch_done.mix(TETRAMER_FREQ.out.lrn.map        { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
-            if (effective_annotator != 'none') { ch_done = ch_done.mix(ch_annotation_tsv.map      { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
-            if (effective_annotator != 'none' && params.hmm_databases) {
+            if (EFFECTIVE_ANNOTATOR != 'none') { ch_done = ch_done.mix(ch_annotation_tsv.map      { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
+            if (EFFECTIVE_ANNOTATOR != 'none' && params.hmm_databases) {
                 ch_done = ch_done.mix(HMM_SEARCH.out.tsv.map { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" })
             }
 
@@ -442,28 +446,23 @@ workflow {
             }
         }
     }
-}
 
-// ============================================================================
-// Pipeline completion handler
-// ============================================================================
+    workflow.onComplete = {
+        def msg = """\
+            Pipeline completed at : ${workflow.complete}
+            Duration              : ${workflow.duration}
+            Success               : ${workflow.success}
+            Exit status           : ${workflow.exitStatus}
+            Output directory      : ${params.outdir}
+            """.stripIndent()
+        println msg
+        if (!workflow.success) {
+            println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+        }
+    }
 
-workflow.onComplete {
-    def msg = """\
-        Pipeline completed at : ${workflow.complete}
-        Duration              : ${workflow.duration}
-        Success               : ${workflow.success}
-        Exit status           : ${workflow.exitStatus}
-        Output directory      : ${params.outdir}
-        """.stripIndent()
-
-    println msg
-
-    if (!workflow.success) {
-        println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+    workflow.onError = {
+        println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
     }
 }
 
-workflow.onError {
-    println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
-}

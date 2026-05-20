@@ -6,7 +6,7 @@ Automated test suite for validating the dānaSeq metagenomics pipeline security 
 
 ```bash
 # Run all tests
-cd /data/danav2/tests
+cd /data/dev/danaSeq/tests
 ./run_all_tests.sh
 
 # Run with verbose output
@@ -146,7 +146,7 @@ FAILED: 0
 
 set -euo pipefail
 
-cd /data/danav2/tests
+cd /data/dev/danaSeq/tests
 
 # Run all tests with verbose output
 ./run_all_tests.sh --verbose --stop-on-fail
@@ -170,7 +170,7 @@ Add to `.git/hooks/pre-commit`:
 # Run security tests before committing
 
 echo "Running security tests..."
-/data/danav2/tests/test_security.sh
+/data/dev/danaSeq/tests/test_security.sh
 
 if [[ $? -ne 0 ]]; then
     echo "❌ Security tests failed - commit blocked"

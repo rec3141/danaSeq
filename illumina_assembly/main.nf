@@ -83,23 +83,19 @@ def helpMessage() {
     """.stripIndent()
 }
 
-if (params.help) {
-    helpMessage()
-    System.exit(0)
-}
-
-// ============================================================================
-// Parameter validation
-// ============================================================================
-
-if (!params.input) {
-    log.error "ERROR: --input is required. Provide path to directory containing *_R1_*.fastq.gz files. Run with --help for usage."
-    System.exit(1)
-}
-
-if (params.run_remove_human && !params.human_ref) {
-    log.error "ERROR: --run_remove_human requires --human_ref (path to BBTools human reference index directory)."
-    System.exit(1)
+def validateParams() {
+    if (params.help) {
+        helpMessage()
+        System.exit(0)
+    }
+    if (!params.input) {
+        log.error "ERROR: --input is required. Provide path to directory containing *_R1_*.fastq.gz files. Run with --help for usage."
+        System.exit(1)
+    }
+    if (params.run_remove_human && !params.human_ref) {
+        log.error "ERROR: --run_remove_human requires --human_ref (path to BBTools human reference index directory)."
+        System.exit(1)
+    }
 }
 
 // ============================================================================
@@ -131,6 +127,10 @@ include { CALCULATE_DEPTHS }       from './modules/mapping'
 // ============================================================================
 
 workflow {
+
+    main:
+
+    validateParams()
 
     // 1. Discover input reads — scan for *_R1_*.fastq.gz and auto-derive R2
     def input_dir = file(params.input)
@@ -306,33 +306,27 @@ workflow {
 
         CALCULATE_DEPTHS(ch_depth_input)
     }
-}
 
-// ============================================================================
-// Pipeline completion handler
-// ============================================================================
+    workflow.onComplete = {
+        def msg = """\
+            Pipeline completed at : ${workflow.complete}
+            Duration              : ${workflow.duration}
+            Success               : ${workflow.success}
+            Exit status           : ${workflow.exitStatus}
+            Output directory      : ${params.outdir}
 
-workflow.onComplete {
-    def msg = """\
-        Pipeline completed at : ${workflow.complete}
-        Duration              : ${workflow.duration}
-        Success               : ${workflow.success}
-        Exit status           : ${workflow.exitStatus}
-        Output directory      : ${params.outdir}
-
-        Next step: run mag_analysis on these outputs:
-          --assembly <outdir>/assembly/<sample>/<sample>.dedupe.fasta
-          --depths   <outdir>/mapping/<sample>/<sample>.depths.txt
-          --bam_dir  <outdir>/mapping/<sample>/
-        """.stripIndent()
-
-    println msg
-
-    if (!workflow.success) {
-        println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+            Next step: run mag_analysis on these outputs:
+              --assembly <outdir>/assembly/<sample>/<sample>.dedupe.fasta
+              --depths   <outdir>/mapping/<sample>/<sample>.depths.txt
+              --bam_dir  <outdir>/mapping/<sample>/
+            """.stripIndent()
+        println msg
+        if (!workflow.success) {
+            println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+        }
     }
-}
 
-workflow.onError {
-    println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
+    workflow.onError = {
+        println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
+    }
 }
