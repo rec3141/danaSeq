@@ -38,6 +38,7 @@ nav:
   - Nanopore Live: nanopore-live.md
   - Nanopore Assembly: nanopore-assembly.md
   - Illumina Assembly: illumina-assembly.md
+  - Illumina RNA: illumina-rna.md
   - MAG Analysis: mag-analysis.md
 
 markdown_extensions:

@@ -1,6 +1,6 @@
 # danaSeq
 
-Metagenomic analysis pipelines for Oxford Nanopore and Illumina sequencing data. Four independent Nextflow DSL2 pipelines cover real-time read classification, long-read and short-read assembly, and downstream MAG analysis including binning, annotation, taxonomy, and metabolic profiling. Assembly pipelines produce a FASTA + depth table that feeds directly into `mag_analysis`.
+Metagenomic analysis pipelines for Oxford Nanopore and Illumina sequencing data. Five independent Nextflow DSL2 pipelines cover real-time read classification, long-read and short-read assembly, metatranscriptomic RNA-seq, and downstream MAG analysis including binning, annotation, taxonomy, and metabolic profiling. Assembly pipelines produce a FASTA + depth table that feeds directly into `mag_analysis`; `illumina_rna` consumes those same assembly/MAG FASTAs as mapping references.
 
 ## Architecture
 
@@ -19,6 +19,12 @@ danaSeq/
 │   │                       merge_reads, assembly, dedupe, mapping
 │   │                       Output: assembly.fasta + depths.txt + BAMs
 │
+├── illumina_rna/           Metatranscriptomic RNA-seq vs references
+│   │                       5 modules: preprocess, rrna, alignment, quantify, summarize
+│   │                       SortMeRNA -> BBmap -> featureCounts
+│   │                       Output: gene_counts.tsv per reference + viz JSONs
+│   ├── viz/                Interactive Svelte dashboard (gene-expression heatmap)
+│
 ├── mag_analysis/           Technology-agnostic downstream analysis
 │   │                       10 modules: binning, annotation, taxonomy, rrna,
 │   │                       metabolism, mge, eukaryotic, gene_depths,
@@ -36,6 +42,7 @@ danaSeq/
 | [**nanopore_live**](nanopore-live.md) | Real-time analysis during sequencing | Kraken2, Prokka/Bakta, HMMER3, DuckDB |
 | [**nanopore_assembly**](nanopore-assembly.md) | Long-read assembly + mapping + depth | Flye, metaMDBG, myloasm, minimap2, CoverM |
 | [**illumina_assembly**](illumina-assembly.md) | Multi-assembler consensus assembly | Tadpole, Megahit, SPAdes, metaSPAdes, BBMap |
+| [**illumina_rna**](illumina-rna.md) | Metatranscriptomic RNA-seq vs references | SortMeRNA, BBmap, subread/featureCounts |
 | [**mag_analysis**](mag-analysis.md) | Technology-agnostic downstream analysis | 7-binner consensus, DAS Tool, Binette, 50+ processes |
 
 ## Getting Started
