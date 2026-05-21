@@ -103,7 +103,11 @@ include { BBDUK_TRIM }       from './modules/preprocess'
 include { BBDUK_FILTER }     from './modules/preprocess'
 include { REMOVE_HUMAN }     from './modules/preprocess'
 include { FASTQC }           from './modules/preprocess'
-include { COUNT_READS }      from './modules/preprocess'
+include { COUNT_READS as COUNT_READS_CLUMPED  } from './modules/preprocess'
+include { COUNT_READS as COUNT_READS_TRIMMED  } from './modules/preprocess'
+include { COUNT_READS as COUNT_READS_FILTERED } from './modules/preprocess'
+include { COUNT_READS as COUNT_READS_NOHUMAN  } from './modules/preprocess'
+include { COUNT_READS as COUNT_READS_NORRNA   } from './modules/preprocess'
 include { REMOVE_RRNA }      from './modules/rrna'
 include { BBMAP_INDEX }      from './modules/alignment'
 include { MAP_READS_BBMAP }  from './modules/alignment'
@@ -194,20 +198,28 @@ workflow {
         }
 
     // ----- 3. Preprocessing -----
+    // Accumulate per-stage read counts into a single channel — much easier
+    // than chasing conditionally-invoked process outputs in section 8.
+    ch_readcounts = Channel.empty()
+
     CLUMPIFY(ch_raw_reads)
-    COUNT_READS(CLUMPIFY.out.reads.map { meta, r -> [meta, 'clumped', r] })
+    COUNT_READS_CLUMPED(CLUMPIFY.out.reads.map { meta, r -> [meta, 'clumped', r] })
+    ch_readcounts = ch_readcounts.mix(COUNT_READS_CLUMPED.out.count)
 
     FILTER_BY_TILE(CLUMPIFY.out.reads)
     BBDUK_TRIM(FILTER_BY_TILE.out.reads)
-    COUNT_READS(BBDUK_TRIM.out.reads.map { meta, r -> [meta, 'trimmed', r] })
+    COUNT_READS_TRIMMED(BBDUK_TRIM.out.reads.map { meta, r -> [meta, 'trimmed', r] })
+    ch_readcounts = ch_readcounts.mix(COUNT_READS_TRIMMED.out.count)
 
     BBDUK_FILTER(BBDUK_TRIM.out.reads)
-    COUNT_READS(BBDUK_FILTER.out.reads.map { meta, r -> [meta, 'filtered', r] })
+    COUNT_READS_FILTERED(BBDUK_FILTER.out.reads.map { meta, r -> [meta, 'filtered', r] })
+    ch_readcounts = ch_readcounts.mix(COUNT_READS_FILTERED.out.count)
 
     if (params.run_remove_human) {
         REMOVE_HUMAN(BBDUK_FILTER.out.reads)
         ch_filtered = REMOVE_HUMAN.out.reads
-        COUNT_READS(ch_filtered.map { meta, r -> [meta, 'nohuman', r] })
+        COUNT_READS_NOHUMAN(ch_filtered.map { meta, r -> [meta, 'nohuman', r] })
+        ch_readcounts = ch_readcounts.mix(COUNT_READS_NOHUMAN.out.count)
     } else {
         ch_filtered = BBDUK_FILTER.out.reads
     }
@@ -220,7 +232,8 @@ workflow {
     if (params.run_remove_rrna) {
         REMOVE_RRNA(ch_filtered)
         ch_clean = REMOVE_RRNA.out.reads
-        COUNT_READS(ch_clean.map { meta, r -> [meta, 'norrna', r] })
+        COUNT_READS_NORRNA(ch_clean.map { meta, r -> [meta, 'norrna', r] })
+        ch_readcounts = ch_readcounts.mix(COUNT_READS_NORRNA.out.count)
     } else {
         ch_clean = ch_filtered
     }
@@ -260,14 +273,16 @@ workflow {
     ch_idxstats   = MAP_READS_BBMAP.out.idxstats.map { meta, ref, f -> f }.collect()
     ch_flagstat   = MAP_READS_BBMAP.out.flagstat.map { meta, ref, f -> f }.collect()
     ch_covstats   = MAP_READS_BBMAP.out.covstats.map { meta, ref, f -> f }.collect()
-    ch_readcounts = COUNT_READS.out.count.map { meta, stage, f -> f }.collect()
+    ch_readcounts_collected = ch_readcounts
+        .map { meta, stage, f -> f }
+        .collect()
     ch_genecounts = MERGE_GENE_COUNTS.out.counts.map { ref, tsv -> tsv }.collect()
 
     VIZ_PREPROCESS(
         ch_idxstats,
         ch_flagstat,
         ch_covstats,
-        ch_readcounts,
+        ch_readcounts_collected,
         ch_genecounts
     )
 

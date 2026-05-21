@@ -17,8 +17,12 @@ process BBMAP_INDEX {
     script:
     def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    # Stage the FASTA with a canonical name so downstream tasks can find it
-    cp "${fasta}" "${ref.name}.fasta"
+    # Stage the FASTA with a canonical name. cp would fail with "same file"
+    # when the upstream channel already provided <ref>.fasta, so skip if the
+    # path is identical.
+    if [ "${fasta}" != "${ref.name}.fasta" ]; then
+        cp "${fasta}" "${ref.name}.fasta"
+    fi
 
     bbmap.sh ${xmx} \\
         ref="${ref.name}.fasta" \\
@@ -36,7 +40,9 @@ process MAP_READS_BBMAP {
     tag "${meta.id}_vs_${ref.name}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/mapping/${meta.id}/${ref.name}", mode: 'copy',
+    // Hardlink mode keeps disk usage flat across work/ and outdir/ on the same
+    // filesystem. (Cross-fs hardlink fails; symlink is the safe fallback.)
+    publishDir "${params.outdir}/mapping/${meta.id}/${ref.name}", mode: 'symlink',
         pattern: '*.{bam,bai,covhist,covstats,flagstat,idxstats}'
     storeDir params.store_dir ? "${params.store_dir}/mapping/${meta.id}/${ref.name}" : null
 

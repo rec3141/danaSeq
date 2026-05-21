@@ -167,9 +167,11 @@ fi
 # Auto-detect session
 if [[ "$AUTO_SESSION" == true && -z "$RESUME_SESSION" ]]; then
     if [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.sh" ]]; then
-        # save_run_command writes "--session <uuid>"; tolerate either prefix
-        # and let an empty match through (|| true) so set -e doesn't trip.
-        RESUME_SESSION=$(grep -oP '(?<=--session |--?resume )[0-9a-f-]{36}' \
+        # save_run_command writes "--session <uuid>"; tolerate either prefix.
+        # Avoid PCRE's variable-length-lookbehind error by capturing the uuid
+        # via grep -oP's `\K` reset-match-start operator. `|| true` keeps
+        # set -e happy when grep finds nothing.
+        RESUME_SESSION=$(grep -oP -- '(--session|--?resume)\s+\K[0-9a-f-]{36}' \
             "${OUTDIR_HOST}/pipeline_info/run_command.sh" | tail -1 || true)
         if [[ -n "$RESUME_SESSION" ]]; then
             echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"

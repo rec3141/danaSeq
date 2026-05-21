@@ -6,7 +6,7 @@ process CLUMPIFY {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
+    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
 
     input:
@@ -18,33 +18,33 @@ process CLUMPIFY {
     script:
     def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    # Optical dedup requires Illumina tile coordinates. SRA-stripped headers
-    # crash clumpify; fall back to interleave-only reformat.sh on failure.
-    input_size=\$(stat -c%s "${r1}" 2>/dev/null || echo 0)
-    timeout_sec=\$(( input_size / 1073741824 * 300 + 120 ))
-
-    set +e
-    timeout \${timeout_sec} clumpify.sh ${xmx} \\
-        in1="${r1}" \\
-        in2="${r2}" \\
-        out="${meta.id}.clumped.fq.gz" \\
-        dedupe optical \\
-        ow=t \\
-        t=${task.cpus}
-    clump_exit=\$?
-    set -e
-
-    if [ \$clump_exit -ne 0 ] || [ ! -s "${meta.id}.clumped.fq.gz" ]; then
-        echo "[WARNING] Optical dedup failed (exit \$clump_exit) — falling back to interleave-only" >&2
-        reformat.sh ${xmx} \\
-            in1="${r1}" \\
-            in2="${r2}" \\
+    # Try optical dedup if --run_optical_dedup; only useful for Illumina libraries
+    # with intact tile headers, and only feasible when memory >= ~600B/read in the
+    # library. Otherwise (BGI/MGI, large libs on small boxes) skip straight to
+    # interleave-only via reformat.sh.
+    if [ "${params.run_optical_dedup}" = "true" ]; then
+        input_size=\$(stat -c%s "${r1}" 2>/dev/null || echo 0)
+        timeout_sec=\$(( input_size / 1073741824 * 300 + 120 ))
+        set +e
+        timeout \${timeout_sec} clumpify.sh ${xmx} \\
+            in1="${r1}" in2="${r2}" \\
             out="${meta.id}.clumped.fq.gz" \\
-            ow=t
+            dedupe optical ow=t t=${task.cpus}
+        clump_exit=\$?
+        set -e
+    else
+        clump_exit=1   # force fallback
+    fi
+
+    if [ "\${clump_exit:-1}" -ne 0 ] || [ ! -s "${meta.id}.clumped.fq.gz" ] || [ \$(stat -c%s "${meta.id}.clumped.fq.gz" 2>/dev/null || echo 0) -lt 100 ]; then
+        [ "${params.run_optical_dedup}" = "true" ] && \\
+            echo "[INFO] Optical dedup skipped/failed (exit \${clump_exit:-skip}) — interleaving with reformat.sh" >&2
+        rm -f "${meta.id}.clumped.fq.gz"
+        reformat.sh ${xmx} in1="${r1}" in2="${r2}" out="${meta.id}.clumped.fq.gz" ow=t
     fi
 
     if [ ! -s "${meta.id}.clumped.fq.gz" ]; then
-        echo "[ERROR] Clumpify/reformat produced empty output for ${meta.id}" >&2
+        echo "[ERROR] reformat produced empty output for ${meta.id}" >&2
         exit 1
     fi
     """
@@ -54,7 +54,7 @@ process FILTER_BY_TILE {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
+    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
 
     input:
@@ -89,7 +89,7 @@ process BBDUK_TRIM {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
+    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
 
     input:
@@ -123,7 +123,7 @@ process BBDUK_FILTER {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
+    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
 
     input:
@@ -156,7 +156,7 @@ process REMOVE_HUMAN {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.fq.gz'
+    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
     storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
 
     input:
