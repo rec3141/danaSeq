@@ -5,6 +5,10 @@ export const samples      = writable([]);
 export const references   = writable([]);
 export const readFlow     = writable(null);
 export const expression   = writable(null);  // { <ref>: {genes, samples, matrix} }
+export const functions_   = writable(null);  // { <ref>: {genes, samples, matrix, annotations[]} }
+export const tsne         = writable(null);  // { <ref>: {gene_ids, products, totals, coords} }
+export const contigs      = writable(null);  // { samples, contigs: [{id, mag, length, gc, x, y, total_reads, reads_by_sample}] }
+export const taxonomy     = writable(null);  // { <mag>: {lineage, ani} }
 
 export const loading = writable(true);
 export const error   = writable(null);
@@ -39,18 +43,26 @@ export async function loadAllData() {
   loading.set(true);
   error.set(null);
   try {
-    const [ov, sm, rf, rd, ex] = await Promise.all([
+    const [ov, sm, rf, rd, ex, fn, ts, ct, tx] = await Promise.all([
       fetchJSON('./data/overview.json').catch(() => null),
       fetchJSON('./data/samples.json').catch(() => []),
       fetchJSON('./data/references.json').catch(() => []),
       fetchJSON('./data/read_flow.json').catch(() => null),
       fetchJSON('./data/expression.json').catch(() => null),
+      fetchJSON('./data/functions.json').catch(() => null),
+      fetchJSON('./data/tsne.json').catch(() => null),
+      fetchJSON('./data/contigs.json').catch(() => null),
+      fetchJSON('./data/taxonomy.json').catch(() => null),
     ]);
     overview.set(ov);
     samples.set(sm || []);
     references.set(rf || []);
     readFlow.set(rd);
     expression.set(ex);
+    functions_.set(fn);
+    tsne.set(ts);
+    contigs.set(ct);
+    taxonomy.set(tx);
   } catch (e) {
     error.set(e.message);
     console.error('Data load error:', e);

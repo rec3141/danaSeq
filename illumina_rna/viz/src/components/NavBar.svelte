@@ -4,7 +4,10 @@
     { id: 'overview',   label: 'Overview' },
     { id: 'samples',    label: 'Samples' },
     { id: 'expression', label: 'Expression' },
-    { id: 'references', label: 'References' },
+    { id: 'functions',  label: 'Functions' },
+    { id: 'tsne',       label: 'Gene t-SNE' },
+    { id: 'contigs',    label: 'Contig t-SNE' },
+    { id: 'references', label: 'MAGs' },
   ];
 </script>
 

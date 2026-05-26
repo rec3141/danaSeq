@@ -167,3 +167,7 @@ bakta-src/
 
 # NCLB (separate repo)
 nclb/
+
+# Node viz
+**/viz/node_modules/
+**/viz/dist/

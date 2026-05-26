@@ -42,8 +42,12 @@ process MAP_READS_BBMAP {
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
     // Hardlink mode keeps disk usage flat across work/ and outdir/ on the same
     // filesystem. (Cross-fs hardlink fails; symlink is the safe fallback.)
+    // Symlink works across filesystems (the hardlink mode is fine on a single
+    // FS but /data and /data/scratch are separate nvme devices here).
+    // Pattern catches both bare-extension files and the .tsv/.txt-suffixed
+    // ones that samtools+bbmap actually emit.
     publishDir "${params.outdir}/mapping/${meta.id}/${ref.name}", mode: 'symlink',
-        pattern: '*.{bam,bai,covhist,covstats,flagstat,idxstats}'
+        pattern: '*.{bam,bai,covhist.txt,covstats.txt,flagstat.txt,idxstats.tsv}'
     storeDir params.store_dir ? "${params.store_dir}/mapping/${meta.id}/${ref.name}" : null
 
     input:

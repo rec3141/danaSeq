@@ -1,24 +1,17 @@
 <script>
-  import { onMount } from 'svelte';
-  import Plotly from 'plotly.js-dist-min';
+  import PlotlyChart from '../components/PlotlyChart.svelte';
   import { expression } from '../stores/data.js';
 
-  let heatmapEl;
   let selectedRef = $state(null);
   let topN = $state(50);
 
   let refKeys = $derived(Object.keys($expression || {}));
 
-  $effect(() => {
-    if (!selectedRef && refKeys.length) selectedRef = refKeys[0];
-  });
+  $effect(() => { if (!selectedRef && refKeys.length) selectedRef = refKeys[0]; });
 
-  // log2(count + 1) — keeps low-counts visible without taking actual log of zeros.
   function logTransform(matrix) {
     return matrix.map(row => row.map(x => Math.log2((x || 0) + 1)));
   }
-
-  // Rank genes by row variance, take top N
   function topByVariance(genes, matrix, n) {
     if (!matrix.length) return { genes: [], matrix: [] };
     const stats = matrix.map((row, i) => {
@@ -32,34 +25,25 @@
     };
   }
 
-  function drawHeatmap(ref) {
-    if (!heatmapEl || !ref || !$expression?.[ref]) return;
-    const { genes, samples, matrix } = $expression[ref];
-    if (!matrix.length) {
-      Plotly.purge(heatmapEl);
-      return;
-    }
+  let traces = $derived.by(() => {
+    if (!selectedRef || !$expression?.[selectedRef]) return [];
+    const { genes, samples, matrix } = $expression[selectedRef];
+    if (!matrix.length) return [];
     const lg = logTransform(matrix);
     const { genes: top_genes, matrix: top_mat } = topByVariance(genes, lg, topN);
-    Plotly.purge(heatmapEl);
-    Plotly.newPlot(heatmapEl, [{
-      type: 'heatmap',
-      z: top_mat,
-      x: samples,
-      y: top_genes,
+    return [{
+      type: 'heatmap', z: top_mat, x: samples, y: top_genes,
       colorscale: 'Cividis',
       colorbar: { title: 'log₂(count+1)' },
       hovertemplate: '%{y} · %{x}<br>%{z:.2f}<extra></extra>',
-    }], {
-      paper_bgcolor: '#0f172a', plot_bgcolor: '#0f172a',
-      font: { color: '#cbd5e1', size: 10 },
-      margin: { l: 200, r: 40, t: 20, b: 100 },
-      xaxis: { tickangle: -45, automargin: true },
-      yaxis: { automargin: true },
-    }, { responsive: true, displaylogo: false });
-  }
+    }];
+  });
 
-  $effect(() => { drawHeatmap(selectedRef); });
+  let layout = {
+    margin: { l: 200, r: 40, t: 20, b: 100 },
+    xaxis: { tickangle: -45, automargin: true },
+    yaxis: { automargin: true },
+  };
 </script>
 
 <div class="space-y-4">
@@ -76,6 +60,7 @@
         <input type="number" min="10" max="500" step="10" bind:value={topN}
                class="ml-2 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 text-sm w-20"/>
       </label>
+      <div class="text-xs text-slate-500 ml-auto">scroll to zoom, drag to pan</div>
     </div>
   </div>
 
@@ -85,7 +70,7 @@
         No expression data available. featureCounts requires a <code>&lt;ref&gt;.gff</code> alongside each reference FASTA.
       </div>
     {:else}
-      <div bind:this={heatmapEl} style="width:100%;height:640px"></div>
+      <PlotlyChart data={traces} {layout} height="640px" />
     {/if}
   </div>
 </div>

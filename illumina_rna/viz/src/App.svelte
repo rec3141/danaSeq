@@ -6,6 +6,9 @@
   import OverviewView   from './views/OverviewView.svelte';
   import SamplesView    from './views/SamplesView.svelte';
   import ExpressionView from './views/ExpressionView.svelte';
+  import FunctionsView  from './views/FunctionsView.svelte';
+  import TsneView       from './views/TsneView.svelte';
+  import ContigsView    from './views/ContigsView.svelte';
   import ReferencesView from './views/ReferencesView.svelte';
 
   let activeTab = $state('overview');
@@ -41,6 +44,12 @@
         <SamplesView />
       {:else if activeTab === 'expression'}
         <ExpressionView />
+      {:else if activeTab === 'functions'}
+        <FunctionsView />
+      {:else if activeTab === 'tsne'}
+        <TsneView />
+      {:else if activeTab === 'contigs'}
+        <ContigsView />
       {:else if activeTab === 'references'}
         <ReferencesView />
       {/if}
