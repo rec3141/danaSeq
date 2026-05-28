@@ -158,7 +158,7 @@ process DB_SYNC {
     last_tsne_time=0
     last_tsne_rows=0
     last_sync_files=0
-    tsne_interval=3600  # Run t-SNE at most once per hour
+    tsne_interval=600   # Run t-SNE at most once per DB_SYNC tick (10 min default)
     while true; do
         echo "[INFO] DB_SYNC tick=\${tick}: scanning ${outdir} for barcode directories"
 
