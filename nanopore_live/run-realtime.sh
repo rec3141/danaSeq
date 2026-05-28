@@ -108,9 +108,16 @@ usage() {
     echo "  --min_file_size N    Minimum FASTQ size in bytes [default: 1000000]"
     echo ""
     echo "microscape.app live deploy (watch mode + DB_SYNC):"
-    echo "  --deploy_slug SLUG   URL slug for the run on microscape.app"
-    echo "  --deploy_name NAME   Display name (quote if it contains spaces)"
-    echo "  --deploy_public      Mark the run as publicly visible on microscape.app"
+    echo "  --deploy_slug SLUG       URL slug for the run on microscape.app"
+    echo "  --deploy_name NAME       Display name (quote if it contains spaces)"
+    echo "  --deploy_visibility V    Run visibility: private (default) | shared | public"
+    echo "                             private — lab-only"
+    echo "                             shared  — any signed-in user (any lab)"
+    echo "                             public  — also moves the run into the public"
+    echo "                                       lab so anonymous web visitors can"
+    echo "                                       read it (requires API key with"
+    echo "                                       can_publish_public=1)"
+    echo "  --deploy_public          DEPRECATED — alias of --deploy_visibility shared"
     echo "  Setting --deploy_slug + --deploy_name writes <outdir>/deploy.sh that"
     echo "  DB_SYNC fires every sync tick. Existing hook is overwritten. Requires"
     echo "  \$MICROSCAPE_API_KEY or ~/.config/microscape/api-key."
@@ -148,7 +155,7 @@ RESUME_SESSION=""
 AUTO_SESSION=true
 DEPLOY_SLUG=""
 DEPLOY_NAME=""
-DEPLOY_PUBLIC=false
+DEPLOY_VISIBILITY="private"
 
 while (( $# )); do
     case "$1" in
@@ -199,8 +206,13 @@ while (( $# )); do
             [[ -z "${2:-}" ]] && die "--deploy_name requires a value"
             DEPLOY_NAME="$2"
             shift 2 ;;
+        --deploy_visibility)
+            [[ -z "${2:-}" ]] && die "--deploy_visibility requires a value (private|shared|public)"
+            DEPLOY_VISIBILITY="$2"
+            shift 2 ;;
         --deploy_public)
-            DEPLOY_PUBLIC=true
+            warn "--deploy_public is deprecated; use --deploy_visibility shared"
+            DEPLOY_VISIBILITY="shared"
             shift ;;
         *)
             NF_ARGS+=("$1")
@@ -212,6 +224,11 @@ done
 if [[ -n "$DEPLOY_SLUG" && -z "$DEPLOY_NAME" ]] || [[ -z "$DEPLOY_SLUG" && -n "$DEPLOY_NAME" ]]; then
     die "--deploy_slug and --deploy_name must be provided together"
 fi
+
+case "$DEPLOY_VISIBILITY" in
+    private|shared|public) ;;
+    *) die "--deploy_visibility must be private|shared|public (got '$DEPLOY_VISIBILITY')" ;;
+esac
 
 # ============================================================================
 # Validate required paths
@@ -236,8 +253,7 @@ fi
 
 if [[ -n "$DEPLOY_SLUG" ]]; then
     DEPLOY_HOOK="${OUTDIR_HOST}/deploy.sh"
-    deploy_tail="    --slug $(printf '%q' "$DEPLOY_SLUG") --name $(printf '%q' "$DEPLOY_NAME")"
-    [[ "$DEPLOY_PUBLIC" == true ]] && deploy_tail="${deploy_tail} --public"
+    deploy_tail="    --slug $(printf '%q' "$DEPLOY_SLUG") --name $(printf '%q' "$DEPLOY_NAME") --visibility ${DEPLOY_VISIBILITY}"
     # Quote slug/name through printf %q so spaces and special chars survive
     printf '%s\n' \
         '#!/usr/bin/env bash' \
@@ -246,7 +262,7 @@ if [[ -n "$DEPLOY_SLUG" ]]; then
         "${deploy_tail}" \
         > "$DEPLOY_HOOK"
     chmod +x "$DEPLOY_HOOK"
-    echo "[INFO] Wrote deploy hook: $DEPLOY_HOOK (slug=$DEPLOY_SLUG, public=$DEPLOY_PUBLIC)"
+    echo "[INFO] Wrote deploy hook: $DEPLOY_HOOK (slug=$DEPLOY_SLUG, visibility=$DEPLOY_VISIBILITY)"
 
     # Soft check for credentials — deploy will still run, just warn early
     if [[ -z "${MICROSCAPE_API_KEY:-}" && ! -f "${HOME}/.config/microscape/api-key" ]]; then

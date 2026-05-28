@@ -34,7 +34,14 @@ Optional:
                          [default: ${API_KEY_FILE_DEFAULT}]
   --api-key KEY          Inline API key (overrides --api-key-file)
   --skip-build           Reuse existing viz/dist/ (useful for rapid iteration)
-  --public               Mark run as publicly visible (X-Microscape-Public: 1)
+  --visibility V         Run visibility: private (default) | shared | public
+                           private — lab-only
+                           shared  — any signed-in user (any lab)
+                           public  — also moves the run into the public lab so
+                                     anonymous web visitors can read it
+                                     (requires the API key to have
+                                     can_publish_public=1).
+  --public               DEPRECATED — alias of --visibility shared.
   --dry-run              Build + tarball but do not POST
   -h, --help             Show this help
 
@@ -62,7 +69,7 @@ API_KEY_FILE="$API_KEY_FILE_DEFAULT"
 API_KEY_INLINE=""
 SKIP_BUILD=false
 DRY_RUN=false
-PUBLIC=false
+VISIBILITY="private"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -74,12 +81,20 @@ while [[ $# -gt 0 ]]; do
         --api-key-file)   API_KEY_FILE="$2"; shift 2 ;;
         --api-key)        API_KEY_INLINE="$2"; shift 2 ;;
         --skip-build)     SKIP_BUILD=true; shift ;;
-        --public)         PUBLIC=true; shift ;;
+        --visibility)     VISIBILITY="$2"; shift 2 ;;
+        --public)
+            echo "[deploy] WARNING: --public is deprecated; use --visibility shared" >&2
+            VISIBILITY="shared"; shift ;;
         --dry-run)        DRY_RUN=true; shift ;;
         -h|--help)        usage; exit 0 ;;
         *)  echo "[ERROR] Unknown argument: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+case "$VISIBILITY" in
+    private|shared|public) ;;
+    *) echo "[ERROR] --visibility must be private|shared|public (got '$VISIBILITY')" >&2; exit 2 ;;
+esac
 
 die() { echo "[ERROR] $1" >&2; exit 1; }
 info() { echo "[deploy] $*" >&2; }
@@ -140,16 +155,14 @@ if [[ "$DRY_RUN" == true ]]; then
     exit 0
 fi
 
-info "POST $ENDPOINT  slug=$SLUG  pipeline=$PIPELINE  public=$PUBLIC"
-public_header=()
-[[ "$PUBLIC" == true ]] && public_header=(-H "X-Microscape-Public: 1")
+info "POST $ENDPOINT  slug=$SLUG  pipeline=$PIPELINE  visibility=$VISIBILITY"
 response=$(curl --fail -sS -X POST \
     -H "Authorization: Bearer $API_KEY" \
     -H "Content-Type: application/gzip" \
     -H "X-Microscape-Slug: $SLUG" \
     -H "X-Microscape-Pipeline: $PIPELINE" \
     -H "X-Microscape-Name: $DISPLAY_NAME" \
-    "${public_header[@]}" \
+    -H "X-Microscape-Visibility: $VISIBILITY" \
     --data-binary "@$TARBALL" \
     "$ENDPOINT")
 echo "$response"
