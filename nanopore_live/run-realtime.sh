@@ -272,17 +272,53 @@ fi
 
 # ============================================================================
 # Auto-detect session ID from previous runs in this outdir
+#
+# Three sources, in priority order:
+#   1. pipeline_info/session.uuid  — written by the EXIT trap below, survives
+#      SIGTERM/SIGINT of run-realtime.sh.
+#   2. pipeline_info/run_command.sh — legacy, written only on clean exit.
+#   3. <outdir>/.nextflow.log[.N] — last-ditch grep, works as long as the
+#      previous run was launched with cwd=outdir (which we now enforce).
 # ============================================================================
 
+SESSION_FILE="${OUTDIR_HOST}/pipeline_info/session.uuid"
+
 if [[ "$AUTO_SESSION" == true && -z "$RESUME_SESSION" ]]; then
-    if [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.sh" ]]; then
+    if [[ -f "$SESSION_FILE" ]]; then
+        RESUME_SESSION=$(tr -d '[:space:]' < "$SESSION_FILE")
+    elif [[ -f "${OUTDIR_HOST}/pipeline_info/run_command.sh" ]]; then
         RESUME_SESSION=$(grep -oP '(?<=-resume )[0-9a-f-]{36}' \
             "${OUTDIR_HOST}/pipeline_info/run_command.sh" | tail -1)
-        if [[ -n "$RESUME_SESSION" ]]; then
-            echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"
-        fi
+    else
+        # Fallback: scrape the most recent Session UUID from nextflow's own
+        # log in the outdir. Globs include rotated .nextflow.log.[1-9] so a
+        # very recent prior session is still recoverable.
+        RESUME_SESSION=$(grep -hoP 'Session UUID: \K[0-9a-f-]{36}' \
+            "${OUTDIR_HOST}"/.nextflow.log "${OUTDIR_HOST}"/.nextflow.log.[0-9] 2>/dev/null | tail -1)
+    fi
+    if [[ -n "$RESUME_SESSION" ]]; then
+        echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"
     fi
 fi
+
+# Persist the session UUID as soon as nextflow logs it, so a SIGTERM that
+# kills the launcher mid-run still leaves a resume marker behind. Reads
+# nextflow's own log in the outdir (we cd there below for predictability).
+persist_session() {
+    local uuid
+    uuid=$(grep -hoP 'Session UUID: \K[0-9a-f-]{36}' \
+        "${OUTDIR_HOST}"/.nextflow.log "${OUTDIR_HOST}"/.nextflow.log.[0-9] 2>/dev/null | tail -1)
+    if [[ -n "$uuid" ]]; then
+        mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
+        echo "$uuid" > "$SESSION_FILE"
+    fi
+}
+trap persist_session EXIT
+
+# nextflow drops .nextflow.log + .nextflow/cache/<uuid>/ in cwd. Pinning
+# cwd to the outdir makes both predictable: the resume cache stays with
+# the run rather than scattered across whatever shell launched us.
+cd "$OUTDIR_HOST"
 
 # ============================================================================
 # Docker mode
@@ -362,7 +398,7 @@ if [[ "$USE_DOCKER" == true ]]; then
     NF_EXIT=$?
 
     # Capture session ID from Nextflow log and save command with it for reliable resume
-    NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
+    NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${OUTDIR_HOST}/.nextflow.log" 2>/dev/null | tail -1)
     if [[ -n "$NF_SESSION" ]]; then
         DOCKER_CMD[-1]="-resume ${NF_SESSION}"
     fi
@@ -425,7 +461,7 @@ mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 NF_EXIT=$?
 
 # Capture session ID from Nextflow log and save command with it for reliable resume
-NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
+NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${OUTDIR_HOST}/.nextflow.log" 2>/dev/null | tail -1)
 if [[ -n "$NF_SESSION" ]]; then
     LOCAL_CMD[-1]="-resume ${NF_SESSION}"
 fi
