@@ -110,9 +110,10 @@ usage() {
     echo "microscape.app live deploy (watch mode + DB_SYNC):"
     echo "  --deploy_slug SLUG   URL slug for the run on microscape.app"
     echo "  --deploy_name NAME   Display name (quote if it contains spaces)"
-    echo "  Setting both writes <outdir>/deploy.sh that DB_SYNC fires every"
-    echo "  sync tick. Existing hook is overwritten. Requires \$MICROSCAPE_API_KEY"
-    echo "  or ~/.config/microscape/api-key."
+    echo "  --deploy_public      Mark the run as publicly visible on microscape.app"
+    echo "  Setting --deploy_slug + --deploy_name writes <outdir>/deploy.sh that"
+    echo "  DB_SYNC fires every sync tick. Existing hook is overwritten. Requires"
+    echo "  \$MICROSCAPE_API_KEY or ~/.config/microscape/api-key."
     echo ""
     echo "Notes:"
     echo "  - watch vs batch mode is locked per --outdir (recorded in"
@@ -147,6 +148,7 @@ RESUME_SESSION=""
 AUTO_SESSION=true
 DEPLOY_SLUG=""
 DEPLOY_NAME=""
+DEPLOY_PUBLIC=false
 
 while (( $# )); do
     case "$1" in
@@ -197,6 +199,9 @@ while (( $# )); do
             [[ -z "${2:-}" ]] && die "--deploy_name requires a value"
             DEPLOY_NAME="$2"
             shift 2 ;;
+        --deploy_public)
+            DEPLOY_PUBLIC=true
+            shift ;;
         *)
             NF_ARGS+=("$1")
             shift ;;
@@ -231,15 +236,17 @@ fi
 
 if [[ -n "$DEPLOY_SLUG" ]]; then
     DEPLOY_HOOK="${OUTDIR_HOST}/deploy.sh"
+    deploy_tail="    --slug $(printf '%q' "$DEPLOY_SLUG") --name $(printf '%q' "$DEPLOY_NAME")"
+    [[ "$DEPLOY_PUBLIC" == true ]] && deploy_tail="${deploy_tail} --public"
     # Quote slug/name through printf %q so spaces and special chars survive
     printf '%s\n' \
         '#!/usr/bin/env bash' \
         "exec ${SCRIPT_DIR}/viz/deploy.sh \\" \
         '    --preprocess-dir "$1/viz" \' \
-        "    --slug $(printf '%q' "$DEPLOY_SLUG") --name $(printf '%q' "$DEPLOY_NAME")" \
+        "${deploy_tail}" \
         > "$DEPLOY_HOOK"
     chmod +x "$DEPLOY_HOOK"
-    echo "[INFO] Wrote deploy hook: $DEPLOY_HOOK (slug=$DEPLOY_SLUG)"
+    echo "[INFO] Wrote deploy hook: $DEPLOY_HOOK (slug=$DEPLOY_SLUG, public=$DEPLOY_PUBLIC)"
 
     # Soft check for credentials — deploy will still run, just warn early
     if [[ -z "${MICROSCAPE_API_KEY:-}" && ! -f "${HOME}/.config/microscape/api-key" ]]; then
