@@ -18,6 +18,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db_schema import ensure_schema
+from import_mapping import import_mapping
 
 TAXID_RE = re.compile(r'\(taxid (\d+)\)$')
 EC_RE = re.compile(r'EC:(\S+)')
@@ -450,6 +451,7 @@ def main():
     import_annotations(con, imported)
     import_sketch(con, imported)
     import_tetra(con, imported)
+    import_mapping(con, imported)
 
     con.close()
 

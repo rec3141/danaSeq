@@ -101,3 +101,22 @@ def ensure_schema(con):
             fileid    TEXT
         )
     """)
+
+    # Per-read minimap2 alignments against arbitrary references (e.g. AIS
+    # genomes). Loaded by import_mapping.py from map/<refname>.txt files.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS mapping (
+            reference    TEXT,
+            qname        TEXT,
+            flag         INTEGER,
+            rname        TEXT,
+            pos          INTEGER,
+            mapq         INTEGER,
+            cigar        TEXT,
+            nm           INTEGER,
+            as_score     INTEGER,
+            de           REAL,
+            identity_pct REAL,
+            aligned_len  INTEGER
+        )
+    """)

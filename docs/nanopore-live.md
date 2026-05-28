@@ -27,6 +27,7 @@ cd nanopore_live
 | 5d | `HMM_SEARCH` | HMMER3 | Profile HMM search against user-supplied databases |
 | 5e | `SENDSKETCH` | BBTools | Rapid taxonomic sketching via MinHash |
 | 5f | `TETRAMER_FREQ` | tetramer_freqs (C) | Tetranucleotide composition profiles |
+| 5g | `MAP_REFERENCE` | minimap2 (ONT) | Per-reference alignment for AIS / custom genomes — see [mapping-references.md](mapping-references.md) |
 | 6 | `DB_INTEGRATION` | R + DuckDB | Load all results into DuckDB |
 | 7 | `DB_SYNC` | R + DuckDB | Periodic sync during watch mode |
 | 8 | `CLEANUP` | bash | Compress/delete source files after DB import |
@@ -44,6 +45,7 @@ cd nanopore_live
 | `--bakta_db` | (required if bakta) | Path to Bakta database |
 | `--bakta_full` | `false` | Run full Bakta annotation (ncRNA/tRNA/CRISPR) |
 | `--hmm_databases` | (skip) | Comma-delimited paths to HMM files |
+| `--mapping_refs` | (skip) | Directory of reference subdirs for minimap2 mapping (AIS / custom) — see [mapping-references.md](mapping-references.md) |
 | `--run_sketch` | `false` | Enable Sendsketch profiling |
 | `--run_tetra` | `false` | Enable tetranucleotide frequency |
 | `--watch` | `false` | Monitor for new files during live sequencing |

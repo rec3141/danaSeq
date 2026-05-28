@@ -40,6 +40,7 @@ nav:
   - Illumina Assembly: illumina-assembly.md
   - Illumina RNA: illumina-rna.md
   - MAG Analysis: mag-analysis.md
+  - Reference Mapping (AIS): mapping-references.md
 
 markdown_extensions:
   - admonition

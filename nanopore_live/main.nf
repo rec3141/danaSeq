@@ -47,6 +47,11 @@ def helpMessage() {
       --sendsketch_address URL  Sendsketch server URL [default: local GTDB]
       --run_tetra        Tetranucleotide frequency analysis
       --hmm_databases    Comma-separated HMM file paths (requires annotation)
+      --mapping_refs DIR Directory of reference subdirs for minimap2 mapping (AIS / others).
+                         Each subdir holds <refname>.idx (required), <refname>.fna,
+                         <refname>.contigs.json, and an optional meta.json describing
+                         the reference. The subdir / .idx basename is the canonical
+                         reference name. See refs/PROTOCOL.md.
       --metadata FILE    Sample metadata TSV (flowcell, barcode, lat, lon, etc.)
 
     Database paths:
@@ -130,10 +135,6 @@ def helpMessage() {
     """.stripIndent()
 }
 
-// Shared state computed at workflow start (Nextflow 26 strict syntax forbids
-// top-level statements other than declarations/imports/processes/workflows).
-def EFFECTIVE_ANNOTATOR = null
-
 def validateParams() {
     if (params.help) {
         helpMessage()
@@ -171,9 +172,9 @@ def validateParams() {
         mode_file.text = mode_label
     }
 
-    EFFECTIVE_ANNOTATOR = params.annotator ?: 'bakta'
+    def annotator = params.annotator ?: 'bakta'
 
-    if (EFFECTIVE_ANNOTATOR == 'bakta' && !params.bakta_db) {
+    if (annotator == 'bakta' && !params.bakta_db) {
         log.error "ERROR: --bakta_db is required when using Bakta annotation. Provide path to Bakta database."
         System.exit(1)
     }
@@ -190,6 +191,7 @@ include { BAKTA_FULL }         from './modules/bakta'
 include { SENDSKETCH }        from './modules/sketch'
 include { HMM_SEARCH }        from './modules/hmm'
 include { TETRAMER_FREQ }     from './modules/tetramer'
+include { MAP_REFERENCE }     from './modules/mapping'
 include { DB_INTEGRATION }    from './modules/db_integration'
 include { DB_SYNC }           from './modules/db_integration'
 include { CLEANUP }           from './modules/db_integration'
@@ -302,6 +304,7 @@ workflow {
     main:
 
     validateParams()
+    def annotator = params.annotator ?: 'bakta'
 
     // Discover and validate input files
     ch_input = create_fastq_channel()
@@ -348,15 +351,50 @@ workflow {
         TETRAMER_FREQ(ch_fasta)
     }
 
+    // Reference mapping (AIS / arbitrary minimap2 references)
+    //
+    // --mapping_refs points at a directory of reference subdirs. Each subdir
+    // must contain <refname>.idx (precomputed minimap2 ONT index). The .idx
+    // basename is the canonical reference name and becomes the output
+    // filename + the `mapping.reference` column in dana.duckdb. Optional
+    // meta.json in each subdir is consumed by the SPA preprocess for
+    // species labels — see refs/PROTOCOL.md.
+    //
+    // Inputs are the QC'd nanopore fastqs (length+quality filtered) — kept
+    // as fastq, not fasta, so minimap2 can use the quality info.
+    ch_map_hits = Channel.empty()
+    if (params.mapping_refs) {
+        def refsdir = file(params.mapping_refs)
+        if (!refsdir.isDirectory()) {
+            error "ERROR: --mapping_refs is not a directory: ${params.mapping_refs}"
+        }
+        // Find <refname>/<refname>.idx files. Skip subdirs that don't have one.
+        def idx_entries = refsdir.listFiles().findAll { it.isDirectory() }.collect { sub ->
+            def name = sub.name
+            def idx  = file("${sub}/${name}.idx")
+            idx.exists() ? [ name, idx ] : null
+        }.findAll { it != null }
+        if (!idx_entries) {
+            error "ERROR: --mapping_refs ${refsdir} contains no <name>/<name>.idx files."
+        }
+        log.info "Mapping references (${idx_entries.size()}): ${idx_entries.collect { it[0] }.join(', ')}"
+
+        ch_refs = Channel.fromList(idx_entries)
+        ch_map_in = QC_FASTQ_FILTER.out.filtered.combine(ch_refs)
+            .map { meta, fastq, refname, idx -> [ meta, fastq, refname, idx ] }
+        MAP_REFERENCE(ch_map_in)
+        ch_map_hits = MAP_REFERENCE.out.hits
+    }
+
     // Gene annotation (prokka, bakta, or none)
     ch_annotation_proteins = Channel.empty()
     ch_annotation_tsv      = Channel.empty()
 
-    if (EFFECTIVE_ANNOTATOR == 'prokka') {
+    if (annotator == 'prokka') {
         PROKKA_ANNOTATE(ch_fasta)
         ch_annotation_proteins = PROKKA_ANNOTATE.out.proteins
         ch_annotation_tsv      = PROKKA_ANNOTATE.out.tsv
-    } else if (EFFECTIVE_ANNOTATOR == 'bakta') {
+    } else if (annotator == 'bakta') {
         // Fast path: CDS-only annotation — feeds HMM search and DB integration
         // Batch mode: group all FASTAs per sample to amortize DB loading overhead
         // Watch mode: pass files individually for live results
@@ -381,7 +419,7 @@ workflow {
         }
     }
 
-    if (EFFECTIVE_ANNOTATOR != 'none') {
+    if (annotator != 'none') {
         // HMM search on annotation proteins (requires annotation output)
         if (params.hmm_databases) {
             // Build channel of HMM database files
@@ -428,8 +466,9 @@ workflow {
             if (params.run_kraken)  { ch_done = ch_done.mix(KRAKEN2_CLASSIFY.out.parsed.map  { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
             if (params.run_sketch)  { ch_done = ch_done.mix(SENDSKETCH.out.sketch.map        { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
             if (params.run_tetra)   { ch_done = ch_done.mix(TETRAMER_FREQ.out.lrn.map        { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
-            if (EFFECTIVE_ANNOTATOR != 'none') { ch_done = ch_done.mix(ch_annotation_tsv.map      { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
-            if (EFFECTIVE_ANNOTATOR != 'none' && params.hmm_databases) {
+            if (params.mapping_refs) { ch_done = ch_done.mix(ch_map_hits.map                  { meta, refname, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
+            if (annotator != 'none') { ch_done = ch_done.mix(ch_annotation_tsv.map      { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
+            if (annotator != 'none' && params.hmm_databases) {
                 ch_done = ch_done.mix(HMM_SEARCH.out.tsv.map { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" })
             }
 

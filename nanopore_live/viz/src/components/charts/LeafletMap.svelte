@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
 
-  let { markers = [], colorMap = {}, colorBy = 'flowcell', sizeBy = 'fixed', sizeScale = 1.0, nudgeMeters = 100, onMarkerClick = null, onSelect = null, dimIds = null, exportName = 'danaseq_map' } = $props();
+  let { markers = [], colorMap = {}, colorBy = 'flowcell', sizeBy = 'fixed', sizeScale = 1.0, sizeExp = 1.0, nudgeMeters = 100, onMarkerClick = null, onSelect = null, dimIds = null, exportName = 'danaseq_map' } = $props();
   let mapContainer;
   let map = null;
   let markerLayer = null;
@@ -37,7 +37,11 @@
     if (sizeBy === 'fixed') return 8 * sizeScale;
     const val = typeof m[sizeBy] === 'number' ? m[sizeBy] : 0;
     if (val <= 0 || !sizeNorm) return 3 * sizeScale;
-    const t = (Math.log1p(val) - sizeNorm.logMin) / sizeNorm.range;
+    let t = (Math.log1p(val) - sizeNorm.logMin) / sizeNorm.range;
+    // Apply r ∝ val^(1/sizeExp) on top of the log-normalised t. Larger sizeExp
+    // → flatter top end (more dynamic range visible at the low end where
+    // most AIS samples sit). Defaults to 1 (no change).
+    if (sizeExp !== 1.0) t = Math.pow(t, 1.0 / sizeExp);
     return (3 + t * 27) * sizeScale; // 3px to 30px full range
   }
 
@@ -396,7 +400,7 @@
   });
 
   $effect(() => {
-    const _deps = [markers, colorMap, colorBy, sizeBy, sizeScale, nudgeMeters, dimIds];
+    const _deps = [markers, colorMap, colorBy, sizeBy, sizeScale, sizeExp, nudgeMeters, dimIds];
     if (map) {
       import('leaflet').then(L => updateMarkers(L));
     }
