@@ -154,11 +154,14 @@ process DB_SYNC {
         echo "[INFO] CLEANUP \$bdir: \$before -> \$after"
     }
 
+    # Clear any stale t-SNE trigger left over from a previous run. The next
+    # tick writes a fresh one if rows grew. See READ_TSNE in
+    # modules/read_tsne.nf for the consumer side.
+    rm -f "${outdir}/.tsne_pending"
+
     tick=0
-    last_tsne_time=0
     last_tsne_rows=0
     last_sync_files=0
-    tsne_interval=600   # Run t-SNE at most once per DB_SYNC tick (10 min default)
     while true; do
         echo "[INFO] DB_SYNC tick=\${tick}: scanning ${outdir} for barcode directories"
 
@@ -216,13 +219,13 @@ process DB_SYNC {
             echo "[INFO] DB_SYNC tick=\${tick}: no new data files (count=\${cur_files})"
         fi
 
-        # t-SNE: run at most once per hour, and only if new data arrived since last t-SNE
-        read_tsne="${projectDir}/viz/preprocess/compute_read_tsne.py"
-        viz_output="${outdir}/viz"
-        if [ -f "\${read_tsne}" ]; then
-            now=\$(date +%s)
-            elapsed=\$((now - last_tsne_time))
-            # Count total tetra_data rows across all samples
+        # Queue a read-level t-SNE if (a) no trigger is already pending and
+        # (b) rows grew since we last queued one. The READ_TSNE process
+        # (maxForks=1) picks the trigger up via Channel.watchPath, removes
+        # the pending file at the start of its run, and writes the new
+        # read_explorer.json into \${outdir}/viz. See modules/read_tsne.nf.
+        pending="${outdir}/.tsne_pending"
+        if [ ! -f "\$pending" ]; then
             cur_rows=0
             for barcode_dir in \$(find ${outdir} -mindepth 2 -maxdepth 2 -type d -name 'barcode*' 2>/dev/null); do
                 db="\${barcode_dir}/dana.duckdb"
@@ -230,15 +233,17 @@ process DB_SYNC {
                 nr=\$(python3 -c "import duckdb; c=duckdb.connect('\$db',read_only=True); print(c.execute('SELECT count(*) FROM tetra_data').fetchone()[0])" 2>/dev/null || echo 0)
                 cur_rows=\$((cur_rows + nr))
             done
-            if [ \$elapsed -ge \$tsne_interval ] && [ \$cur_rows -gt \$last_tsne_rows ]; then
-                echo "[INFO] DB_SYNC tick=\${tick}: running read t-SNE (\${cur_rows} rows, \${last_tsne_rows} last time)"
-                mkdir -p "\${viz_output}"
-                python3 "\${read_tsne}" --input "${outdir}" --output "\${viz_output}" 2>&1 | sed 's/^/  [VIZ] /' || true
-                last_tsne_time=\$(date +%s)
+            if [ \$cur_rows -gt \$last_tsne_rows ]; then
+                # Atomic rename so the watchPath create event lands on a
+                # complete file, not a half-written one.
+                echo "\$cur_rows" > "\${pending}.tmp" && mv "\${pending}.tmp" "\$pending"
                 last_tsne_rows=\$cur_rows
+                echo "[INFO] DB_SYNC tick=\${tick}: queued t-SNE trigger (\${cur_rows} rows)"
             else
-                echo "[INFO] DB_SYNC tick=\${tick}: skipping t-SNE (elapsed=\${elapsed}s, rows=\${cur_rows}, last=\${last_tsne_rows})"
+                echo "[INFO] DB_SYNC tick=\${tick}: no t-SNE trigger (rows=\${cur_rows}, last=\${last_tsne_rows})"
             fi
+        else
+            echo "[INFO] DB_SYNC tick=\${tick}: t-SNE trigger already pending"
         fi
 
         # Optional per-run deploy hook: if \${outdir}/deploy.sh exists and is
