@@ -80,7 +80,7 @@ declare -A ENV_CHECK=(
 )
 
 # Additional binaries to verify in dana-tools
-TOOLS_CHECK=(nextflow java kraken2 hmmsearch gawk perl Rscript)
+TOOLS_CHECK=(nextflow java kraken2 hmmsearch minimap2 gawk perl Rscript)
 
 yaml_to_envname() {
     local yaml="$1"
@@ -117,17 +117,31 @@ do_install() {
             continue
         fi
 
-        if [[ -d "${env_path}/conda-meta" ]]; then
-            echo "  Already exists, skipping (use --clean to rebuild)"
-            continue
-        fi
+        local exists=false
+        [[ -d "${env_path}/conda-meta" ]] && exists=true
 
-        echo "  Creating environment from ${yaml}..."
+        if [[ "${exists}" == true ]]; then
+            echo "  Already exists — updating from ${yaml} (additive)..."
+        else
+            echo "  Creating environment from ${yaml}..."
+        fi
         local log_file
         log_file=$(mktemp)
-        if ! ${CONDA_CMD} env create -y -p "${env_path}" -f "${yaml_path}" \
-            > "${log_file}" 2>&1; then
-            echo "  [ERROR] Failed to create ${env_name}" >&2
+        local cmd_ok=true
+        if [[ "${exists}" == true ]]; then
+            # `env update` reconciles the existing env against the yaml.
+            # No --prune: we add/upgrade what's declared but leave any
+            # extras (e.g. pip-installed tools) in place. --clean is the
+            # path for a hard reset.
+            ${CONDA_CMD} env update -p "${env_path}" -f "${yaml_path}" \
+                > "${log_file}" 2>&1 || cmd_ok=false
+        else
+            ${CONDA_CMD} env create -y -p "${env_path}" -f "${yaml_path}" \
+                > "${log_file}" 2>&1 || cmd_ok=false
+        fi
+        if [[ "${cmd_ok}" != true ]]; then
+            local verb=create; [[ "${exists}" == true ]] && verb=update
+            echo "  [ERROR] Failed to ${verb} ${env_name}" >&2
             sed 's/^/  /' "${log_file}" >&2
             rm -f "${log_file}"
             failed=$((failed + 1))

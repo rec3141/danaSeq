@@ -26,6 +26,12 @@ process MAP_REFERENCE {
 
     script:
     """
+    # pipefail is essential here — minimap2 failing (e.g. wrong env, no
+    # binary on PATH) must propagate past awk so Nextflow marks the task
+    # failed. Without it, the awk leg returns 0 even when minimap2 wrote
+    # nothing, and the empty .txt gets cached as "successful".
+    set -o pipefail
+
     # Stream the QC'd fastq through minimap2 ONT preset, then the awk filter
     # (drops headers, keeps mapq>=1 + aligned_len>=10). --secondary=no keeps
     # one primary alignment per read, matching the standalone protocol.
