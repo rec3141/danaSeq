@@ -9,6 +9,7 @@
   import ReadExplorerView from './views/ReadExplorerView.svelte';
   import MapView from './views/MapView.svelte';
   import AISView from './views/AISView.svelte';
+  import HABsView from './views/HABsView.svelte';
   import EnvironmentalView from './views/EnvironmentalView.svelte';
   import TaxonomyView from './views/TaxonomyView.svelte';
   import HeatmapView from './views/HeatmapView.svelte';
@@ -52,6 +53,8 @@
         <MapView />
       {:else if activeTab === 'ais'}
         <AISView />
+      {:else if activeTab === 'habs'}
+        <HABsView />
       {:else if activeTab === 'environmental'}
         <EnvironmentalView />
       {:else if activeTab === 'taxonomy'}

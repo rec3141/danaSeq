@@ -201,6 +201,40 @@ $DPY preprocess_ais.py \
 
 Then `viz/deploy.sh` to push to microscape.app.
 
+## HAB compound references
+
+The same `mapping_refs` plumbing powers the SPA's `/habs` view for
+cyanobacterial HAB compound BGC detection. Differences vs. AIS:
+
+- Each ref is a **biosynthetic gene cluster** (full BGC fasta with
+  intergenic regions, not just CDS) named after the chemical compound:
+  `microcystin`, `cylindrospermopsin`, `saxitoxin`, `anatoxin_a`,
+  `nodularin`.
+- The fasta concatenates the BGC from **multiple producer taxa** per
+  compound (e.g. `microcystin.fna` contains the mcy cluster from
+  *Microcystis*, *Planktothrix*, *Anabaena/Dolichospermum*, …) so a hit
+  reflects bloom potential regardless of which producer is present. The
+  per-producer offsets are surfaced as ticks on the position histogram.
+- `meta.json` uses `category: "HAB"` and adds `compound` (chemical name)
+  + `class` (chemistry / syndrome class, e.g. `cyclic heptapeptide`) in
+  place of `species` / `common_name`.
+- Preprocess: run `preprocess_habs.py` (sister to `preprocess_ais.py`)
+  to emit `hab_<id>.json`:
+
+  ```bash
+  $DPY preprocess_habs.py \
+      --reference $REFNAME \
+      --compound  "$(jq -r .compound refs/$REFNAME/meta.json)" \
+      --class     "$(jq -r .class    refs/$REFNAME/meta.json)" \
+      --contigs   refs/$REFNAME/$REFNAME.contigs.json \
+      --output    <preprocess_dir>/hab_$REFNAME.json
+  ```
+
+- SPA: `nanopore_live/viz/src/views/HABsView.svelte` mirrors AISView
+  (same Leaflet + identity + position histograms, amber accent instead
+  of emerald). Add new compounds to `HAB_COMPOUNDS` there; `id` must
+  match the ref dirname / `.idx` basename / `hab_<id>.json` filename.
+
 ## Standalone scripts (no Nextflow)
 
 For one-off batches outside the pipeline:

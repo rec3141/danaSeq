@@ -8,17 +8,17 @@
   import { sampleClusters, sampleClusterColors } from '../stores/clusters.js';
   import TaxonomyDrillNav from '../components/layout/TaxonomyDrillNav.svelte';
 
-  // Per-species AIS payload, loaded lazily on mount. Shape:
-  //   { zebra_mussel: { counts: {...}, stats: {...}, identity_bins: {...} } }
-  // File-name convention: ./data/ais_<species.id>.json[.gz].
-  let aisPayloads = $state({});
-  let aisLoaded = $state(new Set());
+  // Per-compound HAB payload, loaded lazily on mount. Shape:
+  //   { microcystin: { counts: {...}, stats: {...}, identity_bins: {...} } }
+  // File-name convention: ./data/hab_<compound.id>.json[.gz].
+  let habPayloads = $state({});
+  let habLoaded = $state(new Set());
 
-  async function loadAisCounts(speciesId) {
-    if (aisLoaded.has(speciesId)) return;
-    aisLoaded.add(speciesId);
+  async function loadHabCounts(compoundId) {
+    if (habLoaded.has(compoundId)) return;
+    habLoaded.add(compoundId);
     const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
-    const url = `${base}/data/ais_${speciesId}.json`;
+    const url = `${base}/data/hab_${compoundId}.json`;
     try {
       let res = await fetch(url + '.gz');
       let payload;
@@ -35,14 +35,14 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         payload = await res.json();
       }
-      aisPayloads = { ...aisPayloads, [speciesId]: payload };
+      habPayloads = { ...habPayloads, [compoundId]: payload };
     } catch (e) {
-      console.warn(`AIS counts for ${speciesId} not available:`, e.message);
-      aisPayloads = { ...aisPayloads, [speciesId]: { counts: {}, stats: {} } };
+      console.warn(`HAB counts for ${compoundId} not available:`, e.message);
+      habPayloads = { ...habPayloads, [compoundId]: { counts: {}, stats: {} } };
     }
   }
 
-  let activePayload = $derived(aisPayloads[species.id] || { counts: {}, stats: {} });
+  let activePayload = $derived(habPayloads[compound.id] || { counts: {}, stats: {} });
   let activeStats = $derived(activePayload.stats || {});
   let identityBins = $derived(activePayload.identity_bins || { lo_pct: 60, hi_pct: 100, n: 40 });
   let posBins = $derived(activePayload.pos_bins || { n: 200, total_length: 0, n_contigs: 0 });
@@ -50,8 +50,8 @@
   // fragmented refs (e.g. CDS catalogs) we render a single linear axis.
   let contigs = $derived(activePayload.contigs || null);
 
-  // Lazy-load each species' payload the first time it's selected.
-  $effect(() => { loadAisCounts(species.id); });
+  // Lazy-load each compound' payload the first time it's selected.
+  $effect(() => { loadHabCounts(compound.id); });
 
   // Cycling button helpers
   function cycle(values, current) {
@@ -78,34 +78,39 @@
     const lo = identityBins.lo_pct ?? 60;
     return Math.max(0, Math.min(identityBins.n ?? 40, Math.round(hqCutoff - lo)));
   });
-  const metricGroup = $derived({ values: ['ais_hits', 'ais_hq_hits', 'ais_fraction', 'ais_hq_fraction', 'read_count', 'diversity', 'cluster'], labels: ['AIS hits', `HQ hits (>${hqCutoff}%)`, 'AIS / read', 'HQ / read', 'Reads', 'Diversity', 'Heatmap Cluster'] });
-  // Default sizing for /ais is the AIS-hit count — that's the whole point of
-  // the page. `ais_fraction` is hits / sample_read_count (relative abundance).
-  const sizeGroup =   $derived({ values: ['ais_hits', 'ais_hq_hits', 'ais_fraction', 'ais_hq_fraction', 'fixed', 'read_count', 'total_bases', 'diversity'], labels: ['AIS hits', `HQ hits (>${hqCutoff}%)`, 'AIS / read', 'HQ / read', 'Fixed', 'Reads', 'Bases', 'Diversity'] });
+  const metricGroup = $derived({ values: ['hab_hits', 'hab_hq_hits', 'hab_fraction', 'hab_hq_fraction', 'read_count', 'diversity', 'cluster'], labels: ['HAB hits', `HQ hits (>${hqCutoff}%)`, 'HAB / read', 'HQ / read', 'Reads', 'Diversity', 'Heatmap Cluster'] });
+  // Default sizing for /ais is the HAB-hit count — that's the whole point of
+  // the page. `hab_fraction` is hits / sample_read_count (relative abundance).
+  const sizeGroup =   $derived({ values: ['hab_hits', 'hab_hq_hits', 'hab_fraction', 'hab_hq_fraction', 'fixed', 'read_count', 'total_bases', 'diversity'], labels: ['HAB hits', `HQ hits (>${hqCutoff}%)`, 'HAB / read', 'HQ / read', 'Fixed', 'Reads', 'Bases', 'Diversity'] });
 
-  const BW = { species: '7rem', info: '4.5rem', taxonomy: '4.5rem', metric: '4.5rem', metadata: '5rem', size: '4rem' };
+  const BW = { compound: '7rem', info: '4.5rem', taxonomy: '4.5rem', metric: '4.5rem', metadata: '5rem', size: '4rem' };
 
-  // AIS species selector — additional species will be wired in as their
-  // alignment layers come online. Cycle button pattern matches the rest of
-  // the controls.
-  // `id` must match the mapping reference name (the .idx basename used by
-  // run-nanopore-mapping.sh) AND the JSON filename suffix (./data/ais_<id>.json).
-  const AIS_SPECIES = [
-    { id: 'zebramussel',  label: 'Zebra mussel',  latin: 'Dreissena polymorpha' },
-    { id: 'quaggamussel', label: 'Quagga mussel', latin: 'Dreissena rostriformis bugensis' },
-    { id: 'sealamprey',   label: 'Sea lamprey',   latin: 'Petromyzon marinus' },
+  // HAB compound selector — additional compounds will be wired in as their
+  // BGC alignment layers come online. Cycle button pattern matches the rest
+  // of the controls.
+  // `id` must match the mapping reference name (the .idx basename in the
+  // HAB refs/ tree) AND the JSON filename suffix (./data/hab_<id>.json).
+  // `class` is the chemistry / syndrome class shown as a subtitle in the
+  // detail panel; refs concatenate the BGC from multiple producer taxa per
+  // compound so the count reflects bloom potential across producers.
+  const HAB_COMPOUNDS = [
+    { id: 'microcystin',        label: 'Microcystin',        class: 'cyclic heptapeptide' },
+    { id: 'cylindrospermopsin', label: 'Cylindrospermopsin', class: 'guanidine alkaloid' },
+    { id: 'saxitoxin',          label: 'Saxitoxin',          class: 'PSP alkaloid' },
+    { id: 'anatoxin_a',         label: 'Anatoxin-a',         class: 'tropane alkaloid' },
+    { id: 'nodularin',          label: 'Nodularin',          class: 'cyclic pentapeptide' },
   ];
-  let speciesIdx = $state(0);
-  let species = $derived(AIS_SPECIES[speciesIdx]);
-  function cycleSpecies() { speciesIdx = (speciesIdx + 1) % AIS_SPECIES.length; }
+  let compoundIdx = $state(0);
+  let compound = $derived(HAB_COMPOUNDS[compoundIdx]);
+  function cycleCompound() { compoundIdx = (compoundIdx + 1) % HAB_COMPOUNDS.length; }
 
-  // AISView defaults: color by AIS abundance, size by AIS hits.
+  // HABView defaults: color by HAB abundance, size by HAB hits.
   let colorMode = $state('metric'); // 'info' | 'taxonomy' | 'metric' | 'metadata'
   let infoField = $state('flowcell');
-  let metricField = $state('ais_hits');
+  let metricField = $state('hab_hits');
   let metaField = $state('');
 
-  let sizeBy = $state('ais_hits');
+  let sizeBy = $state('hab_hits');
   let sizeScale = $state(1.0);
   let nudgeIdx = $state(3);
   const NUDGE_STEPS = [0, 1, 10, 100, 1000];
@@ -219,7 +224,7 @@
   let colorIsContinuous = $derived.by(() => {
     const mc = metaColumns.find(c => c.key === colorBy);
     if (mc) return mc.continuous;
-    return ['read_count', 'total_bases', 'diversity', 'ais_hits', 'ais_hq_hits', 'ais_fraction', 'ais_hq_fraction'].includes(colorBy);
+    return ['read_count', 'total_bases', 'diversity', 'hab_hits', 'hab_hq_hits', 'hab_fraction', 'hab_hq_fraction'].includes(colorBy);
   });
 
   // log2 read count filter ceiling
@@ -268,23 +273,23 @@
 
     // First pass: build per-sample fractions, using the sample's own total
     // read count as the denominator for cross-sample comparability.
-    const speciesCounts = activePayload.counts || {};
-    const speciesStats = activePayload.stats || {};
+    const compoundCounts = activePayload.counts || {};
+    const compoundStats = activePayload.stats || {};
     const markers = $samples.map(s => {
       const m = $metadata[s.id];
       if (!m || m.lat == null || m.lon == null) return null;
-      const ais_hits = speciesCounts[s.id] ?? 0;
-      const ais_fraction = s.read_count > 0 ? ais_hits / s.read_count : 0;
-      const stat = speciesStats[s.id];
+      const hab_hits = compoundCounts[s.id] ?? 0;
+      const hab_fraction = s.read_count > 0 ? hab_hits / s.read_count : 0;
+      const stat = compoundStats[s.id];
       // Recompute hq_hits live from the identity histogram so the slider
       // takes effect without re-running preprocess.
-      let ais_hq_hits = 0;
+      let hab_hq_hits = 0;
       if (stat?.identity_hist) {
-        for (let i = hqBinIdx; i < stat.identity_hist.length; i++) ais_hq_hits += stat.identity_hist[i];
+        for (let i = hqBinIdx; i < stat.identity_hist.length; i++) hab_hq_hits += stat.identity_hist[i];
       } else {
-        ais_hq_hits = stat?.hq_hits ?? 0;
+        hab_hq_hits = stat?.hq_hits ?? 0;
       }
-      const ais_hq_fraction = s.read_count > 0 ? ais_hq_hits / s.read_count : 0;
+      const hab_hq_fraction = s.read_count > 0 ? hab_hq_hits / s.read_count : 0;
       const marker = {
         id: s.id,
         lat: m.lat,
@@ -294,13 +299,13 @@
         flowcell: s.flowcell,
         diversity: s.diversity,
         cluster: $sampleClusters?.[s.id] ?? null,
-        ais_hits,
-        ais_fraction,
-        ais_hq_hits,
-        ais_hq_fraction,
-        ais_mean_identity: stat?.mean_identity ?? null,
-        ais_mean_mapq: stat?.mean_mapq ?? null,
-        ais_identity_hist: stat?.identity_hist ?? null,
+        hab_hits,
+        hab_fraction,
+        hab_hq_hits,
+        hab_hq_fraction,
+        hab_mean_identity: stat?.mean_identity ?? null,
+        hab_mean_mapq: stat?.mean_mapq ?? null,
+        hab_identity_hist: stat?.identity_hist ?? null,
         ...m,
       };
       if (taxSubTaxa) {
@@ -549,7 +554,7 @@
     return { ...s, ...(m || {}) };
   });
 
-  let selectedAis = $derived(activeStats[$selectedSample ?? ''] || null);
+  let selectedHab = $derived(activeStats[$selectedSample ?? ''] || null);
 
   // Metadata fields explicitly rendered above; everything else falls through
   // into the generic "Metadata" catch-all section.
@@ -596,18 +601,18 @@
     { key: 'depth_m', label: 'Depth (m)' },
     { key: 'date', label: 'Date' },
     { key: 'read_count', label: 'Reads', render: v => v?.toLocaleString() ?? '-' },
-    { key: 'ais_hits', label: 'AIS hits', render: v => v ? v.toLocaleString() : '-' },
-    { key: 'ais_hq_hits', label: `HQ hits (>${hqCutoff}%)`, render: v => v ? v.toLocaleString() : '-' },
-    { key: 'ais_fraction', label: 'AIS / read', render: fmtFraction },
-    { key: 'ais_hq_fraction', label: 'HQ / read', render: fmtFraction },
+    { key: 'hab_hits', label: 'HAB hits', render: v => v ? v.toLocaleString() : '-' },
+    { key: 'hab_hq_hits', label: `HQ hits (>${hqCutoff}%)`, render: v => v ? v.toLocaleString() : '-' },
+    { key: 'hab_fraction', label: 'HAB / read', render: fmtFraction },
+    { key: 'hab_hq_fraction', label: 'HQ / read', render: fmtFraction },
   ]);
 
   // Totals across currently-visible markers (after cart/reads/depth/meta filters).
   let tableTotals = $derived.by(() => {
     let hits = 0, hq = 0, reads = 0;
     for (const m of markers) {
-      hits += m.ais_hits || 0;
-      hq += m.ais_hq_hits || 0;
+      hits += m.hab_hits || 0;
+      hq += m.hab_hq_hits || 0;
       reads += m.read_count || 0;
     }
     return {
@@ -646,14 +651,14 @@
   {/if}
     <!-- Controls -->
     <div class="flex items-center gap-2 flex-wrap text-xs">
-      <!-- AIS species selector -->
+      <!-- HAB compound selector -->
       <button
-        class="px-3 py-1 rounded-md border border-emerald-400 bg-emerald-400/10 text-emerald-300 transition-colors text-center"
-        style="min-width: {BW.species}"
-        onclick={cycleSpecies}
-        title={`AIS species — click to cycle (${AIS_SPECIES.length} available)`}
+        class="px-3 py-1 rounded-md border border-amber-400 bg-amber-400/10 text-amber-300 transition-colors text-center"
+        style="min-width: {BW.compound}"
+        onclick={cycleCompound}
+        title={`HAB compound — click to cycle (${HAB_COMPOUNDS.length} available)`}
       >
-        <span class="italic">{species.latin}</span> &#x25BE;
+        <span class="font-medium">{compound.label}</span> &#x25BE;
       </button>
 
       <!-- HQ identity cutoff slider. Recomputes hq_hits / hq_fraction live
@@ -914,7 +919,7 @@
           onMarkerClick={handleMarkerClick}
           onSelect={handleSelect}
           {dimIds}
-          exportName={`danaseq_ais_${species.id}_color-${colorBy}`}
+          exportName={`danaseq_hab_${compound.id}_color-${colorBy}`}
         />
       </div>
 
@@ -934,24 +939,27 @@
             </button>
           </div>
 
-          <!-- AIS hit-quality summary + identity histogram. Bars span the
+          <!-- HAB hit-quality summary + identity histogram. Bars span the
                identity_bins range from the data file (defaults 60-100%).
                Red vertical line marks the HQ identity cutoff. Bins to the
                right of the line are the HQ hits surfaced in the table. -->
-          <div class="border border-emerald-400/30 bg-emerald-400/5 rounded-md p-2 space-y-1">
-            <div class="flex items-baseline justify-between text-xs">
-              <span class="text-emerald-300 italic font-medium truncate">{species.latin}</span>
-              <span class="text-slate-400">
-                {selectedAis ? selectedAis.n.toLocaleString() : 0} hits
-                {#if selectedAis?.hq_hits}<span class="text-rose-300 ml-1">({selectedAis.hq_hits.toLocaleString()} HQ)</span>{/if}
+          <div class="border border-amber-400/30 bg-amber-400/5 rounded-md p-2 space-y-1">
+            <div class="flex items-baseline justify-between text-xs gap-2">
+              <div class="flex flex-col min-w-0">
+                <span class="text-amber-300 font-medium truncate">{compound.label}</span>
+                <span class="text-[10px] text-amber-200/70 italic truncate">{compound.class}</span>
+              </div>
+              <span class="text-slate-400 shrink-0">
+                {selectedHab ? selectedHab.n.toLocaleString() : 0} hits
+                {#if selectedHab?.hq_hits}<span class="text-rose-300 ml-1">({selectedHab.hq_hits.toLocaleString()} HQ)</span>{/if}
               </span>
             </div>
-            {#if selectedAis && selectedAis.n > 0}
+            {#if selectedHab && selectedHab.n > 0}
               <div class="text-[10px] text-slate-400 flex justify-between">
-                <span>mean id <span class="text-slate-200 font-mono">{selectedAis.mean_identity.toFixed(1)}%</span></span>
-                <span>mean mapq <span class="text-slate-200 font-mono">{selectedAis.mean_mapq.toFixed(1)}</span></span>
+                <span>mean id <span class="text-slate-200 font-mono">{selectedHab.mean_identity.toFixed(1)}%</span></span>
+                <span>mean mapq <span class="text-slate-200 font-mono">{selectedHab.mean_mapq.toFixed(1)}</span></span>
               </div>
-              {@const hist = selectedAis.identity_hist}
+              {@const hist = selectedHab.identity_hist}
               {@const maxBin = Math.max(1, ...hist)}
               {@const lo = identityBins.lo_pct}
               {@const hi = identityBins.hi_pct}
@@ -965,7 +973,7 @@
                       y={40 - (count / maxBin) * 36}
                       width={Math.max(0.5, 100 / hist.length - 0.2)}
                       height={(count / maxBin) * 36}
-                      fill={binLo >= hqCutoff ? '#fb7185' : '#34d399'}
+                      fill={binLo >= hqCutoff ? '#fb7185' : '#fbbf24'}
                     ><title>{binLo.toFixed(0)}–{(lo + (i + 1) * (hi - lo) / hist.length).toFixed(0)}% — {count} hits</title></rect>
                   {/if}
                 {/each}
@@ -982,8 +990,8 @@
                 <span>{hi}%</span>
               </div>
 
-              {#if selectedAis.pos_hist}
-                {@const ph = selectedAis.pos_hist}
+              {#if selectedHab.pos_hist}
+                {@const ph = selectedHab.pos_hist}
                 {@const phMax = Math.max(1, ...ph)}
                 {@const totalMb = (posBins.total_length / 1e6).toFixed(0)}
                 <div class="text-[10px] text-slate-400 mt-2 flex justify-between">
@@ -1077,13 +1085,13 @@
       </div>
     </div>
 
-    <!-- AIS totals across the currently-visible (post-filter) markers. -->
+    <!-- HAB totals across the currently-visible (post-filter) markers. -->
     <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-xs px-2">
       <span class="text-slate-400 uppercase tracking-wide text-[10px]">Totals (visible):</span>
       <span class="text-slate-300">Samples <span class="text-slate-100 font-mono">{tableTotals.n.toLocaleString()}</span></span>
       <span class="text-slate-300">Reads <span class="text-slate-100 font-mono">{tableTotals.reads.toLocaleString()}</span></span>
-      <span class="text-emerald-300">AIS hits <span class="text-slate-100 font-mono">{tableTotals.hits.toLocaleString()}</span></span>
-      <span class="text-emerald-300">AIS / read <span class="text-slate-100 font-mono">{fmtFraction(tableTotals.fraction)}</span></span>
+      <span class="text-amber-300">HAB hits <span class="text-slate-100 font-mono">{tableTotals.hits.toLocaleString()}</span></span>
+      <span class="text-amber-300">HAB / read <span class="text-slate-100 font-mono">{fmtFraction(tableTotals.fraction)}</span></span>
       <span class="text-rose-300">HQ hits (&gt;{hqCutoff}%) <span class="text-slate-100 font-mono">{tableTotals.hq.toLocaleString()}</span></span>
       <span class="text-rose-300">HQ / read <span class="text-slate-100 font-mono">{fmtFraction(tableTotals.hq_fraction)}</span></span>
     </div>
@@ -1096,7 +1104,7 @@
       selectedId={$selectedSample}
       idKey="id"
       maxHeight="300px"
-      exportFilename={`ais_${species.id}_samples`}
+      exportFilename={`hab_${compound.id}_samples`}
       actionLabel={(row) => $cartItems.has(row.id) ? 'In Cart' : '+ Cart'}
       actionFn={(row) => toggleCart(row.id)}
       actionStyle={(row) => $cartItems.has(row.id)
