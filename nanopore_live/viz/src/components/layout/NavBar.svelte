@@ -10,6 +10,7 @@
     { id: 'reads', label: 'Reads' },
     { id: 'map', label: 'Map' },
     { id: 'ais', label: 'AIS' },
+    { id: 'sar', label: 'SAR' },
     { id: 'habs', label: 'HABs' },
     { id: 'environmental', label: 'Environmental' },
     { id: 'taxonomy', label: 'Taxonomy' },
