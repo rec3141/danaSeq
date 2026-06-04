@@ -292,9 +292,11 @@ if [[ "$AUTO_SESSION" == true && -z "$RESUME_SESSION" ]]; then
     else
         # Fallback: scrape the most recent Session UUID from nextflow's own
         # log in the outdir. Globs include rotated .nextflow.log.[1-9] so a
-        # very recent prior session is still recoverable.
+        # very recent prior session is still recoverable. `|| true` keeps a
+        # fresh outdir (no log files yet) from tripping pipefail+set -e —
+        # we just want the variable to come out empty in that case.
         RESUME_SESSION=$(grep -hoP 'Session UUID: \K[0-9a-f-]{36}' \
-            "${OUTDIR_HOST}"/.nextflow.log "${OUTDIR_HOST}"/.nextflow.log.[0-9] 2>/dev/null | tail -1)
+            "${OUTDIR_HOST}"/.nextflow.log "${OUTDIR_HOST}"/.nextflow.log.[0-9] 2>/dev/null | tail -1 || true)
     fi
     if [[ -n "$RESUME_SESSION" ]]; then
         echo "[INFO] Auto-detected session from previous run: $RESUME_SESSION"
@@ -306,8 +308,10 @@ fi
 # nextflow's own log in the outdir (we cd there below for predictability).
 persist_session() {
     local uuid
+    # `|| true` so a missing log file (e.g. trap fires before nextflow ever
+    # started) doesn't fail the trap under set -e + pipefail.
     uuid=$(grep -hoP 'Session UUID: \K[0-9a-f-]{36}' \
-        "${OUTDIR_HOST}"/.nextflow.log "${OUTDIR_HOST}"/.nextflow.log.[0-9] 2>/dev/null | tail -1)
+        "${OUTDIR_HOST}"/.nextflow.log "${OUTDIR_HOST}"/.nextflow.log.[0-9] 2>/dev/null | tail -1 || true)
     if [[ -n "$uuid" ]]; then
         mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
         echo "$uuid" > "$SESSION_FILE"
