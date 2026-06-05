@@ -156,6 +156,20 @@ def import_krakenreport(con, imported):
 def import_sketch(con, imported):
     files = sorted(glob.glob('sketch/*.sendsketch_reads.tsv'))
     pending = [f for f in files if f not in imported]
+
+    # Back-migrate any pre-existing rows whose read_id still has the nanopore
+    # FASTA header tail (`<uuid> qs:f:... mx:i:... RG:Z:...`). The bare UUID
+    # is the join key against tetra_data.seqid; without this, the read-level
+    # GTDB lookup in viz/preprocess/compute_read_tsne.py returns zero hits
+    # and the read explorer shows all-grey dots. Idempotent (no-op once clean).
+    try:
+        con.execute(
+            "UPDATE sendsketch SET read_id = split_part(read_id, ' ', 1) "
+            "WHERE strpos(read_id, ' ') > 0"
+        )
+    except Exception as e:
+        print(f"[WARNING] sendsketch read_id migration failed: {e}", file=sys.stderr)
+
     if not pending:
         return
 
@@ -170,6 +184,10 @@ def import_sketch(con, imported):
                     if len(parts) < 5:
                         continue
                     read_id, status, ani_s, ref_name, lineage = parts[:5]
+                    # sendsketch echoes the full FASTA header (uuid + SAM tags)
+                    # into its name column; we only want the bare UUID so it
+                    # joins against tetra_data.seqid.
+                    read_id = read_id.split(None, 1)[0]
                     try:
                         ani = float(ani_s)
                     except ValueError:
