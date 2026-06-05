@@ -592,6 +592,47 @@
     return ppm.toFixed(2) + ' ppm';
   }
 
+  // Table includes ALL samples — positionless ones (missing lat/lon) too,
+  // so contributors without coordinates still show up in the HAB summary.
+  // Cart filter is the only filter the table honors; the map-only filters
+  // (read-count slider, depth, metadata) intentionally don't apply here.
+  let tableRows = $derived.by(() => {
+    if (!$samples) return [];
+    const compoundCounts = activePayload.counts || {};
+    const compoundStats = activePayload.stats || {};
+    let rows = $samples.map(s => {
+      const m = $metadata?.[s.id] || {};
+      const hab_hits = compoundCounts[s.id] ?? 0;
+      const hab_fraction = s.read_count > 0 ? hab_hits / s.read_count : 0;
+      const stat = compoundStats[s.id];
+      let hab_hq_hits = 0;
+      if (stat?.identity_hist) {
+        for (let i = hqBinIdx; i < stat.identity_hist.length; i++) hab_hq_hits += stat.identity_hist[i];
+      } else {
+        hab_hq_hits = stat?.hq_hits ?? 0;
+      }
+      const hab_hq_fraction = s.read_count > 0 ? hab_hq_hits / s.read_count : 0;
+      return {
+        id: s.id,
+        lat: m.lat ?? null,
+        lon: m.lon ?? null,
+        read_count: s.read_count,
+        total_bases: s.total_bases,
+        flowcell: s.flowcell,
+        diversity: s.diversity,
+        hab_hits,
+        hab_fraction,
+        hab_hq_hits,
+        hab_hq_fraction,
+        ...m,
+      };
+    });
+    if ($cartActive && $cartItems.size > 0) {
+      rows = rows.filter(r => $cartItems.has(r.id));
+    }
+    return rows;
+  });
+
   // $derived so the "HQ hits (>N%)" column header updates with the slider.
   let tableColumns = $derived([
     { key: 'id', label: 'Sample' },
@@ -607,19 +648,19 @@
     { key: 'hab_hq_fraction', label: 'HQ / read', render: fmtFraction },
   ]);
 
-  // Totals across currently-visible markers (after cart/reads/depth/meta filters).
+  // Totals across the table contents (all samples, or cart-filtered).
   let tableTotals = $derived.by(() => {
     let hits = 0, hq = 0, reads = 0;
-    for (const m of markers) {
-      hits += m.hab_hits || 0;
-      hq += m.hab_hq_hits || 0;
-      reads += m.read_count || 0;
+    for (const r of tableRows) {
+      hits += r.hab_hits || 0;
+      hq += r.hab_hq_hits || 0;
+      reads += r.read_count || 0;
     }
     return {
       hits,
       hq,
       reads,
-      n: markers.length,
+      n: tableRows.length,
       fraction: reads > 0 ? hits / reads : 0,
       hq_fraction: reads > 0 ? hq / reads : 0,
     };
@@ -1085,9 +1126,9 @@
       </div>
     </div>
 
-    <!-- HAB totals across the currently-visible (post-filter) markers. -->
+    <!-- HAB totals across the table contents (all samples, or cart-filtered). -->
     <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-xs px-2">
-      <span class="text-slate-400 uppercase tracking-wide text-[10px]">Totals (visible):</span>
+      <span class="text-slate-400 uppercase tracking-wide text-[10px]">Totals (table):</span>
       <span class="text-slate-300">Samples <span class="text-slate-100 font-mono">{tableTotals.n.toLocaleString()}</span></span>
       <span class="text-slate-300">Reads <span class="text-slate-100 font-mono">{tableTotals.reads.toLocaleString()}</span></span>
       <span class="text-amber-300">HAB hits <span class="text-slate-100 font-mono">{tableTotals.hits.toLocaleString()}</span></span>
@@ -1099,7 +1140,7 @@
     <!-- Location table -->
     <DataTable
       columns={tableColumns}
-      rows={markers}
+      rows={tableRows}
       onRowClick={(row) => { selectedSample.set(row.id); }}
       selectedId={$selectedSample}
       idKey="id"

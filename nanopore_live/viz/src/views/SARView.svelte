@@ -85,17 +85,31 @@
 
   const BW = { species: '7rem', info: '4.5rem', taxonomy: '4.5rem', metric: '4.5rem', metadata: '5rem', size: '4rem' };
 
-  // SAR species selector — additional species will be wired in as their
-  // alignment layers come online. Cycle button pattern matches the rest of
-  // the controls. Seed list is Manitoba-focused aquatic species at risk —
-  // all three are also on SARA Schedule 1 (federal). See SARGDB for the
-  // full inventory: https://github.com/rec3141/SARGDB.
-  // `id` must match the mapping reference name (the .idx basename used by
-  // run-nanopore-mapping.sh) AND the JSON filename suffix (./data/sar_<id>.json).
+  // SAR species selector — references are named by the actual mapped
+  // genome species (not by the SAR-listed species they stand in for),
+  // since some MB SAR species have no public WGS and the mapping target
+  // is a related taxon or a host-specific virus. See SARGDB for the
+  // full conservation inventory: https://github.com/rec3141/SARGDB.
+  //
+  //   namaovirus     — sturgeon-detection proxy. NV is the Winnipeg
+  //                    River type strain (Hwang et al. 2020) plus
+  //                    Hudson Bay drainage basin isolates and related
+  //                    Acipenseridae viruses. Stands in for the absent
+  //                    Acipenser fulvescens (Lake sturgeon) WGS.
+  //   megalonaias    — washboard mussel (Megalonaias nervosa). Closest
+  //                    WGS-assembled Ambleminae member; stands in for
+  //                    the absent Quadrula quadrula (Mapleleaf mussel)
+  //                    assembly.
+  //   carmineshiner  — Notropis percobromus, MB-endangered. Direct
+  //                    species reference (scaffold-level WGS).
+  //
+  // `id` must match the mapping reference name (the .idx basename used
+  // by run-nanopore-mapping.sh) AND the JSON filename suffix
+  // (./data/sar_<id>.json).
   const SAR_SPECIES = [
-    { id: 'lakesturgeon',    label: 'Lake sturgeon',    latin: 'Acipenser fulvescens' },
-    { id: 'mapleleafmussel', label: 'Mapleleaf mussel', latin: 'Quadrula quadrula' },
-    { id: 'carmineshiner',   label: 'Carmine shiner',   latin: 'Notropis percobromus' },
+    { id: 'namaovirus',    label: 'Namao virus',         latin: 'Namao virus' },
+    { id: 'megalonaias',   label: 'Megalonaias nervosa', latin: 'Megalonaias nervosa' },
+    { id: 'carmineshiner', label: 'Carmine shiner',      latin: 'Notropis percobromus' },
   ];
   let speciesIdx = $state(0);
   let species = $derived(SAR_SPECIES[speciesIdx]);
@@ -589,6 +603,47 @@
     return ppm.toFixed(2) + ' ppm';
   }
 
+  // Table includes ALL samples — positionless ones (missing lat/lon) too,
+  // so contributors without coordinates still show up in the SAR summary.
+  // Cart filter is the only filter the table honors; the map-only filters
+  // (read-count slider, depth, metadata) intentionally don't apply here.
+  let tableRows = $derived.by(() => {
+    if (!$samples) return [];
+    const speciesCounts = activePayload.counts || {};
+    const speciesStats = activePayload.stats || {};
+    let rows = $samples.map(s => {
+      const m = $metadata?.[s.id] || {};
+      const sar_hits = speciesCounts[s.id] ?? 0;
+      const sar_fraction = s.read_count > 0 ? sar_hits / s.read_count : 0;
+      const stat = speciesStats[s.id];
+      let sar_hq_hits = 0;
+      if (stat?.identity_hist) {
+        for (let i = hqBinIdx; i < stat.identity_hist.length; i++) sar_hq_hits += stat.identity_hist[i];
+      } else {
+        sar_hq_hits = stat?.hq_hits ?? 0;
+      }
+      const sar_hq_fraction = s.read_count > 0 ? sar_hq_hits / s.read_count : 0;
+      return {
+        id: s.id,
+        lat: m.lat ?? null,
+        lon: m.lon ?? null,
+        read_count: s.read_count,
+        total_bases: s.total_bases,
+        flowcell: s.flowcell,
+        diversity: s.diversity,
+        sar_hits,
+        sar_fraction,
+        sar_hq_hits,
+        sar_hq_fraction,
+        ...m,
+      };
+    });
+    if ($cartActive && $cartItems.size > 0) {
+      rows = rows.filter(r => $cartItems.has(r.id));
+    }
+    return rows;
+  });
+
   // $derived so the "HQ hits (>N%)" column header updates with the slider.
   let tableColumns = $derived([
     { key: 'id', label: 'Sample' },
@@ -604,19 +659,19 @@
     { key: 'sar_hq_fraction', label: 'HQ / read', render: fmtFraction },
   ]);
 
-  // Totals across currently-visible markers (after cart/reads/depth/meta filters).
+  // Totals across the table contents (all samples, or cart-filtered).
   let tableTotals = $derived.by(() => {
     let hits = 0, hq = 0, reads = 0;
-    for (const m of markers) {
-      hits += m.sar_hits || 0;
-      hq += m.sar_hq_hits || 0;
-      reads += m.read_count || 0;
+    for (const r of tableRows) {
+      hits += r.sar_hits || 0;
+      hq += r.sar_hq_hits || 0;
+      reads += r.read_count || 0;
     }
     return {
       hits,
       hq,
       reads,
-      n: markers.length,
+      n: tableRows.length,
       fraction: reads > 0 ? hits / reads : 0,
       hq_fraction: reads > 0 ? hq / reads : 0,
     };
@@ -1081,7 +1136,7 @@
 
     <!-- SAR totals across the currently-visible (post-filter) markers. -->
     <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-xs px-2">
-      <span class="text-slate-400 uppercase tracking-wide text-[10px]">Totals (visible):</span>
+      <span class="text-slate-400 uppercase tracking-wide text-[10px]">Totals (table):</span>
       <span class="text-slate-300">Samples <span class="text-slate-100 font-mono">{tableTotals.n.toLocaleString()}</span></span>
       <span class="text-slate-300">Reads <span class="text-slate-100 font-mono">{tableTotals.reads.toLocaleString()}</span></span>
       <span class="text-emerald-300">SAR hits <span class="text-slate-100 font-mono">{tableTotals.hits.toLocaleString()}</span></span>
@@ -1093,7 +1148,7 @@
     <!-- Location table -->
     <DataTable
       columns={tableColumns}
-      rows={markers}
+      rows={tableRows}
       onRowClick={(row) => { selectedSample.set(row.id); }}
       selectedId={$selectedSample}
       idKey="id"

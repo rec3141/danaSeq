@@ -587,6 +587,47 @@
     return ppm.toFixed(2) + ' ppm';
   }
 
+  // Table includes ALL samples — positionless ones (missing lat/lon) too,
+  // so contributors without coordinates still show up in the AIS summary.
+  // Cart filter is the only filter the table honors; the map-only filters
+  // (read-count slider, depth, metadata) intentionally don't apply here.
+  let tableRows = $derived.by(() => {
+    if (!$samples) return [];
+    const speciesCounts = activePayload.counts || {};
+    const speciesStats = activePayload.stats || {};
+    let rows = $samples.map(s => {
+      const m = $metadata?.[s.id] || {};
+      const ais_hits = speciesCounts[s.id] ?? 0;
+      const ais_fraction = s.read_count > 0 ? ais_hits / s.read_count : 0;
+      const stat = speciesStats[s.id];
+      let ais_hq_hits = 0;
+      if (stat?.identity_hist) {
+        for (let i = hqBinIdx; i < stat.identity_hist.length; i++) ais_hq_hits += stat.identity_hist[i];
+      } else {
+        ais_hq_hits = stat?.hq_hits ?? 0;
+      }
+      const ais_hq_fraction = s.read_count > 0 ? ais_hq_hits / s.read_count : 0;
+      return {
+        id: s.id,
+        lat: m.lat ?? null,
+        lon: m.lon ?? null,
+        read_count: s.read_count,
+        total_bases: s.total_bases,
+        flowcell: s.flowcell,
+        diversity: s.diversity,
+        ais_hits,
+        ais_fraction,
+        ais_hq_hits,
+        ais_hq_fraction,
+        ...m,
+      };
+    });
+    if ($cartActive && $cartItems.size > 0) {
+      rows = rows.filter(r => $cartItems.has(r.id));
+    }
+    return rows;
+  });
+
   // $derived so the "HQ hits (>N%)" column header updates with the slider.
   let tableColumns = $derived([
     { key: 'id', label: 'Sample' },
@@ -602,19 +643,19 @@
     { key: 'ais_hq_fraction', label: 'HQ / read', render: fmtFraction },
   ]);
 
-  // Totals across currently-visible markers (after cart/reads/depth/meta filters).
+  // Totals across the table contents (all samples, or cart-filtered).
   let tableTotals = $derived.by(() => {
     let hits = 0, hq = 0, reads = 0;
-    for (const m of markers) {
-      hits += m.ais_hits || 0;
-      hq += m.ais_hq_hits || 0;
-      reads += m.read_count || 0;
+    for (const r of tableRows) {
+      hits += r.ais_hits || 0;
+      hq += r.ais_hq_hits || 0;
+      reads += r.read_count || 0;
     }
     return {
       hits,
       hq,
       reads,
-      n: markers.length,
+      n: tableRows.length,
       fraction: reads > 0 ? hits / reads : 0,
       hq_fraction: reads > 0 ? hq / reads : 0,
     };
@@ -1077,9 +1118,9 @@
       </div>
     </div>
 
-    <!-- AIS totals across the currently-visible (post-filter) markers. -->
+    <!-- AIS totals across the table contents (all samples, or cart-filtered). -->
     <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-xs px-2">
-      <span class="text-slate-400 uppercase tracking-wide text-[10px]">Totals (visible):</span>
+      <span class="text-slate-400 uppercase tracking-wide text-[10px]">Totals (table):</span>
       <span class="text-slate-300">Samples <span class="text-slate-100 font-mono">{tableTotals.n.toLocaleString()}</span></span>
       <span class="text-slate-300">Reads <span class="text-slate-100 font-mono">{tableTotals.reads.toLocaleString()}</span></span>
       <span class="text-emerald-300">AIS hits <span class="text-slate-100 font-mono">{tableTotals.hits.toLocaleString()}</span></span>
@@ -1091,7 +1132,7 @@
     <!-- Location table -->
     <DataTable
       columns={tableColumns}
-      rows={markers}
+      rows={tableRows}
       onRowClick={(row) => { selectedSample.set(row.id); }}
       selectedId={$selectedSample}
       idKey="id"
