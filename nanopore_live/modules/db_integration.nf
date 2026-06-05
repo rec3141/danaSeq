@@ -210,6 +210,11 @@ process DB_SYNC {
             if [ "${metadata_file}" != "none" ] && [ -f "${metadata_file}" ]; then
                 preprocess_args="\${preprocess_args} --metadata ${metadata_file}"
             fi
+            # Mapping refs dir → enriches the per-ref AIS/HAB/SAR payloads
+            # with contig offsets and the category label from meta.json.
+            if [ -n "${params.mapping_refs ?: ''}" ] && [ -d "${params.mapping_refs ?: ''}" ]; then
+                preprocess_args="\${preprocess_args} --mapping-refs ${params.mapping_refs ?: ''}"
+            fi
             if [ -f "\${viz_preprocess}" ]; then
                 echo "[INFO] DB_SYNC tick=\${tick}: running viz preprocess"
                 mkdir -p "\${viz_output}"

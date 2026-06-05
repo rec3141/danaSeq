@@ -651,6 +651,171 @@ def load_metadata(metadata_file):
     return metadata
 
 
+def build_mapping_payloads(samples, mapping_refs_dir, output_dir):
+    """Build per-reference AIS-style JSON payloads from the mapping table.
+
+    Output filename = <category_prefix><refname>.json, where category is
+    looked up from <mapping_refs_dir>/<refname>/meta.json and mapped to
+    'ais_' / 'hab_' / 'sar_'. References without meta.json default to
+    'ais_' so the AIS view still finds them (matches the existing UI's
+    no-fallback fetch convention).
+
+    Per-sample stats include identity_hist (40 bins, 60-100% in 1% steps)
+    and pos_hist (200 bins across the reference's total length, contig
+    offsets from <refname>.contigs.json if available). Without contigs
+    metadata we drop pos_hist; the view falls back to identity-only.
+    """
+    IDENTITY_LO = 60
+    IDENTITY_HI = 100
+    IDENTITY_BINS = 40
+    POS_BINS = 200
+    HQ_DEFAULT_PCT = 90  # Precomputed hq_hits cutoff; the UI slider
+                         # recomputes live from identity_hist so this is
+                         # just an initial scalar for sorters.
+
+    # Discover all references seen anywhere in this run.
+    refs = set()
+    for s in samples:
+        try:
+            con = duckdb.connect(s['db_path'], read_only=True)
+            for (r,) in con.execute(
+                "SELECT DISTINCT reference FROM mapping WHERE reference IS NOT NULL"
+            ).fetchall():
+                refs.add(r)
+            con.close()
+        except Exception:
+            # No mapping table on this sample's DB — skip.
+            continue
+
+    if not refs:
+        print("[INFO] No mapping data found across samples; skipping AIS payloads",
+              file=sys.stderr)
+        return
+
+    # Resolve reference metadata (category + contigs).
+    ref_meta = {}
+    for ref in refs:
+        meta = {'category': 'AIS', 'contigs': None, 'total_length': 0}
+        if mapping_refs_dir:
+            mdir = Path(mapping_refs_dir) / ref
+            mj = mdir / 'meta.json'
+            if mj.exists():
+                try:
+                    md = json.load(open(mj))
+                    # 'SAR-proxy' / 'SAR' / 'AIS' / 'HAB' → uppercase, strip
+                    # the proxy qualifier.
+                    cat = (md.get('category') or 'AIS').split('-')[0].upper()
+                    if cat in ('AIS', 'HAB', 'SAR'):
+                        meta['category'] = cat
+                except Exception as e:
+                    print(f"  [WARNING] meta.json {ref}: {e}", file=sys.stderr)
+            cj = mdir / f'{ref}.contigs.json'
+            if cj.exists():
+                try:
+                    cd = json.load(open(cj))
+                    meta['contigs'] = cd.get('contigs', [])
+                    meta['total_length'] = cd.get('total_length',
+                        sum(c.get('length', 0) for c in meta['contigs']))
+                except Exception as e:
+                    print(f"  [WARNING] contigs.json {ref}: {e}", file=sys.stderr)
+        ref_meta[ref] = meta
+
+    # Build per-ref payloads.
+    for ref in sorted(refs):
+        meta = ref_meta[ref]
+        contigs = meta['contigs']
+        total_length = meta['total_length']
+        # Lookup contig name → offset for the per-hit position bin.
+        contig_offset = {c['name']: c['offset'] for c in (contigs or [])}
+        use_pos_hist = total_length > 0
+
+        counts = {}
+        stats = {}
+        for s in samples:
+            try:
+                con = duckdb.connect(s['db_path'], read_only=True)
+                rows = con.execute(
+                    "SELECT identity_pct, mapq, rname, pos FROM mapping "
+                    "WHERE reference = ?",
+                    [ref]
+                ).fetchall()
+                con.close()
+            except Exception:
+                continue
+            if not rows:
+                continue
+            sid = s['id']
+            n = len(rows)
+            counts[sid] = n
+            sum_id = 0.0
+            sum_mapq = 0.0
+            id_hist = [0] * IDENTITY_BINS
+            pos_hist = [0] * POS_BINS if use_pos_hist else None
+            for ident, mapq, rname, pos in rows:
+                sum_id += ident
+                sum_mapq += mapq
+                # Identity bin: clamp out-of-range to the edge bins so
+                # the histogram totals match n exactly.
+                bi = int(ident - IDENTITY_LO)
+                if bi < 0:
+                    bi = 0
+                elif bi >= IDENTITY_BINS:
+                    bi = IDENTITY_BINS - 1
+                id_hist[bi] += 1
+                if pos_hist is not None:
+                    off = contig_offset.get(rname, 0)
+                    gp = off + pos
+                    pi = int(gp / total_length * POS_BINS)
+                    if pi < 0:
+                        pi = 0
+                    elif pi >= POS_BINS:
+                        pi = POS_BINS - 1
+                    pos_hist[pi] += 1
+            # Initial hq_hits at the 90% default cutoff; UI slider updates live.
+            hq_bin_idx = max(0, min(IDENTITY_BINS, HQ_DEFAULT_PCT - IDENTITY_LO))
+            hq_hits = sum(id_hist[hq_bin_idx:])
+            stat = {
+                'n': n,
+                'hq_hits': hq_hits,
+                'mean_identity': sum_id / n,
+                'mean_mapq': sum_mapq / n,
+                'identity_hist': id_hist,
+            }
+            if pos_hist is not None:
+                stat['pos_hist'] = pos_hist
+            stats[sid] = stat
+
+        payload = {
+            'counts': counts,
+            'stats': stats,
+            'identity_bins': {
+                'lo_pct': IDENTITY_LO, 'hi_pct': IDENTITY_HI, 'n': IDENTITY_BINS
+            },
+        }
+        if use_pos_hist:
+            n_contigs = len(contigs or [])
+            payload['pos_bins'] = {
+                'n': POS_BINS,
+                'total_length': total_length,
+                'n_contigs': n_contigs,
+            }
+            # `contigs` array is only useful for chromosome-scale refs;
+            # for fragmented refs the view renders a single linear axis.
+            if contigs and n_contigs <= 64:
+                payload['contigs'] = contigs
+
+        prefix = meta['category'].lower() + '_'
+        filename = f'{prefix}{ref}.json'
+        path = os.path.join(output_dir, filename)
+        with open(path, 'w') as f:
+            json.dump(payload, f, separators=(',', ':'))
+        size = os.path.getsize(path)
+        total_hits = sum(counts.values())
+        print(f"  {filename}: {size / 1024:.1f} KB "
+              f"({len(counts)} samples, {total_hits} hits, "
+              f"category={meta['category']})", file=sys.stderr)
+
+
 def shannon_diversity(taxonomy):
     """Compute Shannon diversity index from taxonomy counts."""
     total = sum(taxonomy.values())
@@ -670,7 +835,27 @@ def main():
     parser.add_argument('--output', required=True, help='Output directory for JSON files')
     parser.add_argument('--metadata', help='Sample metadata TSV file')
     parser.add_argument('--sketch-distances', help='comparesketch distances TSV')
+    parser.add_argument('--mapping-refs',
+        help='Directory of reference subdirs (matches --mapping_refs in main.nf). '
+             'Used to enrich the AIS/HAB/SAR payloads with contig offsets and '
+             'category labels from per-ref meta.json.')
     args = parser.parse_args()
+
+    # Fall back to a marker file the launcher dropped in the outdir at start —
+    # avoids needing to thread --mapping-refs through every caller, and lets
+    # us pick up the path for already-running DB_SYNC loops where the
+    # Nextflow script body was templated before the flag existed.
+    if not args.mapping_refs:
+        marker = Path(args.input) / '.pipeline_state' / 'mapping_refs'
+        if marker.exists():
+            try:
+                p = marker.read_text().strip()
+                if p and Path(p).is_dir():
+                    args.mapping_refs = p
+                    print(f"[INFO] mapping refs auto-detected from {marker} -> {p}",
+                          file=sys.stderr)
+            except Exception:
+                pass
 
     os.makedirs(args.output, exist_ok=True)
 
@@ -841,6 +1026,12 @@ def main():
     write_json('taxonomy_sunburst.json', sunburst)
     write_json('sample_function.json', {k: v for k, v in all_function.items() if k in sample_ids})
     write_json('metadata.json', metadata)
+
+    # Per-reference AIS/HAB/SAR payloads from the mapping table. Writes one
+    # JSON per reference into the same output dir; the SPA's AIS/HAB/SAR
+    # views fetch them on demand by name.
+    print("[INFO] Building reference-mapping payloads (ais_/hab_/sar_)...", file=sys.stderr)
+    build_mapping_payloads(samples, args.mapping_refs, args.output)
 
     print("[SUCCESS] Main preprocessing complete", file=sys.stderr)
 

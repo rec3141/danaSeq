@@ -307,6 +307,16 @@ workflow {
     validateParams()
     def annotator = params.annotator ?: 'bakta'
 
+    // Drop a marker file with the resolved mapping_refs path so the viz
+    // preprocess can find it without --mapping-refs being threaded through
+    // every caller. The DB_SYNC loop runs preprocess.py per tick and reads
+    // the marker if the flag wasn't passed (see viz/preprocess/preprocess.py).
+    if (params.mapping_refs) {
+        def stateDir = file("${params.outdir}/.pipeline_state")
+        if (!stateDir.exists()) stateDir.mkdirs()
+        file("${stateDir}/mapping_refs").text = file(params.mapping_refs).toAbsolutePath().toString()
+    }
+
     // Discover and validate input files
     ch_input = create_fastq_channel()
 
