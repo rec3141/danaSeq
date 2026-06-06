@@ -2,6 +2,54 @@
 
 Real-time metagenomic analysis for Oxford Nanopore sequencing data. Processes reads as they stream from MinKNOW, providing live taxonomic classification, gene annotation, and functional profiling.
 
+## Storage conventions
+
+Data for each sequencing run lives across three locations, by data tier:
+
+| Tier | Location | Contents | Drive | Lifetime |
+|---|---|---|---|
+| **Raw reads** | `/data/<PROJECT>/<EXPERIMENT>/<RUN>/fastq_pass/` | Sequencer-output fastq files as they come off MinKNOW. Basecalled + demultiplexed per-barcode fastqs.  The working source for downstream pipelines (mapping, sketching, etc.). | SSD | Permanent |
+| **Archived reads** | `/matika/seqs/metagenome/nanopore/reads/` | <RUN> folders are rsync'd here; run_logger.sh adds new folders to the run_log.tsv | NAS | Permanent. 
+| **Pipeline outputs (active)** | `/data/scratch/nanopore_live/<RUN>/<FC>/<BC>` | Per-run workspace for `run-realtime.sh` / nextflow — sketches, viz JSONs, intermediate files. | SSD-backed for speed during active analysis. | SSD | Until run is completed |
+| **Pipeline outputs (archived)** | `/vistara/dana/out_dana_bc/<RUN>/<FC>/<BC>` | Same per-run dirs after the pipeline is done — moved off the scratch SSD to free working space. Same layout, longer retention. | USB3 | Long-term (manual cleanup) |
+| **Mapping references** | `/data/scratch/refdbs/mapping_refs/<ref>/` | `.fna` + `.idx` + sidecar files for each mapping reference (AIS / SAR / virus / etc.). See `mapping_refs/PROTOCOL.md`. | SSD | Permanent |
+
+### Archiving a completed run
+
+**Automatic (watch mode):** add `--archive` to `run-realtime.sh`. The
+launcher spawns `bin/watch_for_completion.sh`, which polls the input dir
+for MinKNOW's `final_summary_*.txt` (one per flow cell). Once every
+observed FC has one and nextflow has drained (no in-flight tasks, trace
+stable), it SIGTERMs nextflow and invokes `bin/archive_run.sh`.
+
+```bash
+./run-realtime.sh --input /data/<RUN> --outdir /data/scratch/nanopore_live/<RUN> \
+    --watch --run_db_integration ... \
+    --archive \
+    --archive_raw_dest /matika/seqs/metagenome/nanopore/reads \
+    --archive_out_dest /vistara/dana/out_dana_bc
+```
+
+The destination roots are configurable via flags or
+`$ARCHIVE_RAW_DEST` / `$ARCHIVE_OUT_DEST` so the mechanism is portable
+across sites.
+
+**Manual** (for runs that finished before the flag existed):
+
+```bash
+RUN=2026_05_25_Winnipeg_River
+# Verify nothing is writing
+lsof +D /data/scratch/nanopore_live/$RUN | head
+# Call archive_run.sh directly:
+bin/archive_run.sh \
+    --input  /data/$RUN \
+    --outdir /data/scratch/nanopore_live/$RUN \
+    --raw-dest /matika/seqs/metagenome/nanopore/reads \
+    --out-dest /vistara/dana/out_dana_bc
+```
+
+Raw reads move to `/matika/`, processed reads and pipeline outputs move to `/vistara`,
+
 ## Quick Start
 
 ```bash

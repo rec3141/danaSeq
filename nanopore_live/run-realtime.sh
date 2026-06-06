@@ -122,6 +122,17 @@ usage() {
     echo "  DB_SYNC fires every sync tick. Existing hook is overwritten. Requires"
     echo "  \$MICROSCAPE_API_KEY or ~/.config/microscape/api-key."
     echo ""
+    echo "End-of-run archive (watch mode only):"
+    echo "  --archive                Watch for MinKNOW final_summary_*.txt across all FCs"
+    echo "                             in --input. Once seen and nextflow has drained,"
+    echo "                             SIGTERM nextflow and rsync raw + outputs to the"
+    echo "                             archive destinations."
+    echo "  --archive_raw_dest DIR   Where to move raw reads (every FC run dir under"
+    echo "                             --input). Falls back to \$ARCHIVE_RAW_DEST."
+    echo "  --archive_out_dest DIR   Where to move pipeline FC outputs (FC subdirs of"
+    echo "                             --outdir). Falls back to \$ARCHIVE_OUT_DEST."
+    echo "  --archive_poll SECONDS   Completion-watcher poll interval [default: 30]"
+    echo ""
     echo "Notes:"
     echo "  - watch vs batch mode is locked per --outdir (recorded in"
     echo "    <outdir>/.pipeline_mode); switching modes on the same outdir is rejected."
@@ -156,6 +167,10 @@ AUTO_SESSION=true
 DEPLOY_SLUG=""
 DEPLOY_NAME=""
 DEPLOY_VISIBILITY="private"
+ARCHIVE=false
+ARCHIVE_RAW_DEST="${ARCHIVE_RAW_DEST:-}"
+ARCHIVE_OUT_DEST="${ARCHIVE_OUT_DEST:-}"
+ARCHIVE_POLL=30
 
 while (( $# )); do
     case "$1" in
@@ -214,11 +229,37 @@ while (( $# )); do
             warn "--deploy_public is deprecated; use --deploy_visibility shared"
             DEPLOY_VISIBILITY="shared"
             shift ;;
+        --archive)
+            ARCHIVE=true
+            shift ;;
+        --archive_raw_dest)
+            [[ -z "${2:-}" ]] && die "--archive_raw_dest requires a directory path"
+            ARCHIVE_RAW_DEST="$2"
+            shift 2 ;;
+        --archive_out_dest)
+            [[ -z "${2:-}" ]] && die "--archive_out_dest requires a directory path"
+            ARCHIVE_OUT_DEST="$2"
+            shift 2 ;;
+        --archive_poll)
+            [[ -z "${2:-}" ]] && die "--archive_poll requires a poll interval (seconds)"
+            ARCHIVE_POLL="$2"
+            shift 2 ;;
         *)
             NF_ARGS+=("$1")
             shift ;;
     esac
 done
+
+# --archive is only meaningful in watch mode. Detect by looking at NF_ARGS.
+ARCHIVE_WATCH_MODE=false
+for arg in "${NF_ARGS[@]}"; do
+    [[ "$arg" == "--watch" ]] && ARCHIVE_WATCH_MODE=true
+done
+if [[ "$ARCHIVE" == true ]]; then
+    [[ "$ARCHIVE_WATCH_MODE" == true ]] || die "--archive requires --watch"
+    [[ -n "$ARCHIVE_RAW_DEST" ]] || die "--archive requires --archive_raw_dest or \$ARCHIVE_RAW_DEST"
+    [[ -n "$ARCHIVE_OUT_DEST" ]] || die "--archive requires --archive_out_dest or \$ARCHIVE_OUT_DEST"
+fi
 
 # --deploy_slug and --deploy_name are paired
 if [[ -n "$DEPLOY_SLUG" && -z "$DEPLOY_NAME" ]] || [[ -z "$DEPLOY_SLUG" && -n "$DEPLOY_NAME" ]]; then
@@ -461,8 +502,38 @@ echo ""
 
 mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
+# Pull -w / --work-dir out of NF_ARGS so the completion-watcher can detect
+# in-flight tasks without a second grep through .nextflow.log.
+NF_WORKDIR=""
+for ((i=0; i<${#NF_ARGS[@]}; i++)); do
+    case "${NF_ARGS[$i]}" in
+        -w|-work-dir|--work-dir)
+            NF_WORKDIR="${NF_ARGS[$((i+1))]:-}"
+            ;;
+    esac
+done
+
+# Launch the completion-watcher BEFORE nextflow so it sees its first poll
+# while there's no input yet (it just keeps waiting). It SIGTERMs nextflow
+# when MinKNOW signals end-of-run and the pipeline has drained.
+WATCH_PID=""
+if [[ "$ARCHIVE" == true ]]; then
+    WATCH_CMD=(
+        "${SCRIPT_DIR}/bin/watch_for_completion.sh"
+        --input  "$INPUT_HOST"
+        --outdir "$OUTDIR_HOST"
+        --poll   "$ARCHIVE_POLL"
+    )
+    [[ -n "$NF_WORKDIR" ]] && WATCH_CMD+=(--workdir "$NF_WORKDIR")
+    echo "[INFO] Launching completion-watcher: ${WATCH_CMD[*]}"
+    "${WATCH_CMD[@]}" &
+    WATCH_PID=$!
+fi
+
+set +e
 "${LOCAL_CMD[@]}"
 NF_EXIT=$?
+set -e
 
 # Capture session ID from Nextflow log and save command with it for reliable resume
 NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${OUTDIR_HOST}/.nextflow.log" 2>/dev/null | tail -1)
@@ -470,5 +541,31 @@ if [[ -n "$NF_SESSION" ]]; then
     LOCAL_CMD[-1]="-resume ${NF_SESSION}"
 fi
 printf '%s\n' "${LOCAL_CMD[*]}" >> "${OUTDIR_HOST}/pipeline_info/run_command.sh"
+
+# If --archive: the watcher SIGTERMed nextflow when the run finished, which
+# typically yields a non-zero exit. Treat that as a clean shutdown only if
+# the watcher's marker file is present; otherwise propagate the failure.
+if [[ "$ARCHIVE" == true ]]; then
+    # Reap the watcher (it should have exited after sending SIGTERM).
+    if [[ -n "$WATCH_PID" ]]; then
+        wait "$WATCH_PID" 2>/dev/null || true
+    fi
+    MARKER="${OUTDIR_HOST}/pipeline_info/final_summary_seen.txt"
+    if [[ -f "$MARKER" ]]; then
+        echo "[INFO] Completion-watcher signalled end of run at $(cat "$MARKER")"
+        echo "[INFO] Running archive: raw -> $ARCHIVE_RAW_DEST  out -> $ARCHIVE_OUT_DEST"
+        "${SCRIPT_DIR}/bin/archive_run.sh" \
+            --input    "$INPUT_HOST" \
+            --outdir   "$OUTDIR_HOST" \
+            --raw-dest "$ARCHIVE_RAW_DEST" \
+            --out-dest "$ARCHIVE_OUT_DEST"
+        # Override NF_EXIT — completion-driven SIGTERM is success.
+        NF_EXIT=0
+    else
+        warn "Nextflow exited (code=$NF_EXIT) but no final_summary marker was written"
+        warn "Skipping archive. Re-run with -resume to continue watching, or invoke"
+        warn "bin/archive_run.sh manually once the run is genuinely complete."
+    fi
+fi
 
 exit $NF_EXIT
