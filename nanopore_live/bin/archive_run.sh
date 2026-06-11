@@ -74,6 +74,9 @@ if ! $DRY_RUN; then
     mkdir -p "$RAW_DEST" "$OUT_DEST"
 fi
 
+# Destinations we actually archived this run (for the post-archive integrity scan).
+ARCHIVED_DESTS=()
+
 archive_one() {
     local src="$1" dst="$2" kind="$3"
     if [[ -d "$dst" ]]; then
@@ -84,6 +87,37 @@ archive_one() {
     run rsync -aH --remove-source-files "$src/" "$dst/"
     run find "$src" -depth -type d -empty -delete
     run rmdir "$src" 2>/dev/null || true
+    ARCHIVED_DESTS+=("$dst")
+}
+
+# Verify gzip/BGZF integrity of every archived FASTQ. `gzip -t` catches
+# truncation / hard corruption (non-zero exit); its "trailing garbage" warning
+# catches the appended-junk corruption that silently truncated cat'd BGZF
+# streams (see fastq_filter / mapping_refs/PROTOCOL.md). We verify AFTER the
+# move (rsync is faithful), so this flags corruption that was already present
+# in the pipeline output — letting us catch a bad run before the source dirs
+# are gone for good. Warns rather than failing: the data is already archived,
+# and the operator needs the report, not a dead exit.
+verify_archives() {
+    local report="$1"; shift
+    local dirs=("$@")
+    [[ ${#dirs[@]} -gt 0 ]] || return 0
+    if $DRY_RUN; then log "DRY-RUN: would verify FASTQ integrity under ${#dirs[@]} dest(s)"; return 0; fi
+    log "verifying FASTQ integrity under ${#dirs[@]} archived dest(s)..."
+    : > "$report"
+    find "${dirs[@]}" -name '*.fastq.gz' -print0 2>/dev/null \
+      | xargs -0 -P 8 -n 1 bash -c '
+            f="$1"; msg=$(gzip -t "$f" 2>&1)
+            if [[ $? -ne 0 ]]; then printf "CORRUPT(error)\t%s\n" "$f"
+            elif grep -q "trailing garbage" <<<"$msg"; then printf "CORRUPT(trailing-garbage)\t%s\n" "$f"; fi
+        ' _ >> "$report"
+    local nbad; nbad=$(wc -l < "$report")
+    if [[ "$nbad" -gt 0 ]]; then
+        log "WARNING: archive integrity — $nbad corrupt FASTQ file(s) detected; see $report"
+    else
+        log "archive integrity OK (no corrupt FASTQ)"
+        rm -f "$report"
+    fi
 }
 
 # ---------- Raw archive: each FC run dir (identified by final_summary) ----------
@@ -112,5 +146,8 @@ for fc in "$OUTDIR"/*/; do
     out_count=$((out_count + 1))
 done
 log "outputs archive: processed $out_count FC subdir(s)"
+
+# ---------- Post-archive integrity scan ----------
+verify_archives "${OUTDIR}/pipeline_info/archive_integrity_report.txt" "${ARCHIVED_DESTS[@]}"
 
 log "archive_run done"
