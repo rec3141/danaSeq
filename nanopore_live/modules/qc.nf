@@ -27,6 +27,10 @@ process QC_BBDUK {
 process QC_FASTQ_FILTER {
     tag "${meta.id}"
     label 'process_low'
+    // Empty output (all reads below min_readlen) exits 64 and is skipped, not
+    // fatal — a single short-read file must not kill a live --watch run. Any
+    // other (real) failure still terminates.
+    errorStrategy { task.exitStatus == 64 ? 'ignore' : 'terminate' }
 
     input:
     tuple val(meta), path(fastq)
@@ -45,8 +49,8 @@ process QC_FASTQ_FILTER {
 
     # Fail if output is empty (all reads filtered out)
     if [ ! -s "${meta.id}.filtered.fastq" ]; then
-        echo "[WARNING] All reads filtered out for ${meta.id}" >&2
-        exit 1
+        echo "[WARNING] All reads filtered out for ${meta.id} — skipping" >&2
+        exit 64
     fi
     """
 }
@@ -54,6 +58,8 @@ process QC_FASTQ_FILTER {
 process CONVERT_TO_FASTA {
     tag "${meta.id}"
     label 'process_low'
+    // Same as QC_FASTQ_FILTER: empty FASTA exits 64 and is skipped, not fatal.
+    errorStrategy { task.exitStatus == 64 ? 'ignore' : 'terminate' }
     publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/fa", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/fa" : null
 
@@ -69,8 +75,8 @@ process CONVERT_TO_FASTA {
         "${fastq}" > "${meta.id}.fa"
 
     if [ ! -s "${meta.id}.fa" ]; then
-        echo "[WARNING] Empty FASTA output for ${meta.id}" >&2
-        exit 1
+        echo "[WARNING] Empty FASTA output for ${meta.id} — skipping" >&2
+        exit 64
     fi
     """
 }
