@@ -293,6 +293,13 @@ def create_fastq_channel() {
             ]
             [ meta, fastq ]
         }
+        // Dedupe by read id. In watch mode the existing-files glob and the
+        // 'create' watcher can emit the same FASTQ twice, spawning duplicate
+        // per-file tasks for one meta.id; the second task's storeDir
+        // directory move then collides ("Directory not empty") and kills the
+        // run. storeDir handles cross-session dedupe; this handles the
+        // within-session duplicate. Streaming-safe on the unbounded channel.
+        .unique { meta, fastq -> meta.id }
 }
 
 // ============================================================================
