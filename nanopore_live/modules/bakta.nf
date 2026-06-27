@@ -17,10 +17,16 @@ process BAKTA_CDS {
     tuple val(meta), path("fastas/*")
 
     output:
-    tuple val(meta), path("${meta.id}/*.faa"),   emit: proteins
-    tuple val(meta), path("${meta.id}/*.tsv"),   emit: tsv
-    tuple val(meta), path("${meta.id}/*.gff3"),  emit: gff
-    tuple val(meta), path("${meta.id}"),         emit: bakta_dir
+    // Declare specific files, NOT the directory plus globs inside it. storeDir
+    // publishes by MOVING each output; a directory output that overlaps the
+    // globs within it self-collides — moving the dir then the files (or vice
+    // versa) fails with "Directory not empty" / "cannot stat", killing the run.
+    // Importer (import_all.py) needs the main .tsv + .gff3; HMM needs the main
+    // .faa, which already holds all CDS proteins (.hypotheticals.faa is a
+    // redundant subset). The bakta_dir emit was unused.
+    tuple val(meta), path("${meta.id}/${meta.id}.faa"),  emit: proteins
+    tuple val(meta), path("${meta.id}/${meta.id}.tsv"),  emit: tsv
+    tuple val(meta), path("${meta.id}/${meta.id}.gff3"), emit: gff
 
     script:
     """
