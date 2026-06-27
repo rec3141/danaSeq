@@ -43,6 +43,17 @@ process BAKTA_CDS {
         --skip-crispr --skip-sorf \
         --skip-gap --skip-ori --skip-plot \
         combined.fa
+
+    # storeDir publishes by MOVING ${meta.id}/ into the store after this script
+    # exits. If that slot is already populated (a resumed or duplicate run that
+    # storeDir's skip-check didn't catch), Nextflow's directory move fails with
+    # "Directory not empty" and terminates the whole pipeline. Clear the
+    # destination so the move always lands cleanly (last-writer-wins; the
+    # output is identical). When storeDir skip works, this script never runs,
+    # so the existing complete copy is preserved.
+    if [ -n "${params.store_dir ?: ''}" ]; then
+        rm -rf "${params.store_dir}/${meta.flowcell}/${meta.barcode}/bakta/${meta.id}"
+    fi
     """
 }
 
