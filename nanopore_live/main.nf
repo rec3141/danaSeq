@@ -195,7 +195,6 @@ include { MAP_REFERENCE }     from './modules/mapping'
 include { DB_INTEGRATION }    from './modules/db_integration'
 include { DB_SYNC }           from './modules/db_integration'
 include { CLEANUP }           from './modules/db_integration'
-include { READ_TSNE }         from './modules/read_tsne'
 
 // ============================================================================
 // Input channel: discover FASTQ files from Nanopore output structure
@@ -471,14 +470,12 @@ workflow {
             def metadata_path = params.metadata ? file(params.metadata).toAbsolutePath().toString() : "none"
             DB_SYNC(abs_outdir, params.danadir, sync_secs, cleanup_flag, metadata_path)
 
-            // Read-level t-SNE runs in its own process (maxForks=1) so a long
-            // compute doesn't stampede DB_SYNC ticks. DB_SYNC drops a
-            // .tsne_pending file when rows grew; we watchPath that file and
-            // feed it into READ_TSNE. See modules/read_tsne.nf for the
-            // back-pressure semantics. DB_SYNC clears any stale pending file
-            // at startup, so resume just picks up at the next tick.
-            tsne_trigger_ch = Channel.watchPath("${abs_outdir}/.tsne_pending")
-            READ_TSNE(tsne_trigger_ch, abs_outdir)
+            // Read-level t-SNE is launched directly by DB_SYNC as a detached
+            // background job (pidfile-guarded for back-pressure). The old
+            // Channel.watchPath(".tsne_pending") trigger was removed because
+            // it never reliably delivered the create event, so READ_TSNE
+            // never ran and read_explorer.json was never produced. See the
+            // t-SNE block in modules/db_integration.nf.
         } else {
             // Batch mode: barrier approach — wait for all processes to finish
             // .collect() blocks until ALL mixed channels are drained

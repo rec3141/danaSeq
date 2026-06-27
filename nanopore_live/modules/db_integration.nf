@@ -154,10 +154,10 @@ process DB_SYNC {
         echo "[INFO] CLEANUP \$bdir: \$before -> \$after"
     }
 
-    # Clear any stale t-SNE trigger left over from a previous run. The next
-    # tick writes a fresh one if rows grew. See READ_TSNE in
-    # modules/read_tsne.nf for the consumer side.
-    rm -f "${outdir}/.tsne_pending"
+    # Clear any stale t-SNE state from a previous run: the legacy watchPath
+    # trigger file and our background-job pidfile. A fresh run starts with no
+    # t-SNE in flight; the loop below launches one directly when rows grow.
+    rm -f "${outdir}/.tsne_pending" "${outdir}/.tsne.pid"
 
     tick=0
     last_tsne_rows=0
@@ -224,13 +224,18 @@ process DB_SYNC {
             echo "[INFO] DB_SYNC tick=\${tick}: no new data files (count=\${cur_files})"
         fi
 
-        # Queue a read-level t-SNE if (a) no trigger is already pending and
-        # (b) rows grew since we last queued one. The READ_TSNE process
-        # (maxForks=1) picks the trigger up via Channel.watchPath, removes
-        # the pending file at the start of its run, and writes the new
-        # read_explorer.json into \${outdir}/viz. See modules/read_tsne.nf.
-        pending="${outdir}/.tsne_pending"
-        if [ ! -f "\$pending" ]; then
+        # Read-level t-SNE. Launched here as a detached background job so a
+        # slow t-SNE (minutes on ~1M rows) doesn't block the next sync tick.
+        # A pidfile bounds concurrency to one running job; while it runs,
+        # ticks skip, and the first tick after it exits relaunches if rows
+        # grew. This replaces the old Channel.watchPath/.tsne_pending trigger,
+        # which silently missed its filesystem create events and so never
+        # fired (read_explorer.json was never produced).
+        tsne_lock="${outdir}/.tsne.pid"
+        if [ -f "\$tsne_lock" ] && kill -0 "\$(cat \$tsne_lock 2>/dev/null)" 2>/dev/null; then
+            echo "[INFO] DB_SYNC tick=\${tick}: t-SNE already running (pid \$(cat \$tsne_lock)), skip"
+        else
+            rm -f "\$tsne_lock"
             cur_rows=0
             for barcode_dir in \$(find ${outdir} -mindepth 2 -maxdepth 2 -type d -name 'barcode*' 2>/dev/null); do
                 db="\${barcode_dir}/dana.duckdb"
@@ -239,16 +244,16 @@ process DB_SYNC {
                 cur_rows=\$((cur_rows + nr))
             done
             if [ \$cur_rows -gt \$last_tsne_rows ]; then
-                # Atomic rename so the watchPath create event lands on a
-                # complete file, not a half-written one.
-                echo "\$cur_rows" > "\${pending}.tmp" && mv "\${pending}.tmp" "\$pending"
+                mkdir -p "${outdir}/viz"
+                nohup python3 "${projectDir}/viz/preprocess/compute_read_tsne.py" \\
+                    --input "${outdir}" --output "${outdir}/viz" \\
+                    > "${outdir}/tsne.log" 2>&1 &
+                echo \$! > "\$tsne_lock"
                 last_tsne_rows=\$cur_rows
-                echo "[INFO] DB_SYNC tick=\${tick}: queued t-SNE trigger (\${cur_rows} rows)"
+                echo "[INFO] DB_SYNC tick=\${tick}: launched t-SNE (pid \$!, \${cur_rows} rows)"
             else
-                echo "[INFO] DB_SYNC tick=\${tick}: no t-SNE trigger (rows=\${cur_rows}, last=\${last_tsne_rows})"
+                echo "[INFO] DB_SYNC tick=\${tick}: no t-SNE needed (rows=\${cur_rows}, last=\${last_tsne_rows})"
             fi
-        else
-            echo "[INFO] DB_SYNC tick=\${tick}: t-SNE trigger already pending"
         fi
 
         # Optional per-run deploy hook: if \${outdir}/deploy.sh exists and is
