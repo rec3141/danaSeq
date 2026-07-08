@@ -108,7 +108,22 @@ process PREPARE_READS {
         filter_args += " --target_bases ${params.filtlong_size}"
     }
     """
-    cat ${fastqs} | fastq_filter ${filter_args} -o all_reads.fastq.gz
+    # Stream each input to fastq_filter. FASTA inputs (.fa/.fasta[.gz]) are
+    # converted to FASTQ with a placeholder quality (Q40) on the fly — used for
+    # pre-QC'd reads exported as fasta (e.g. nanopore_live fa/ store). zcat -f
+    # transparently handles both plain and gzipped inputs. awk accumulates
+    # multi-line fasta records so wrapped sequences are handled correctly.
+    for f in ${fastqs}; do
+        case "\$f" in
+            *.fa|*.fasta|*.fa.gz|*.fasta.gz)
+                zcat -f "\$f" | awk '
+                    /^>/ { if (s) { print "@"n; print s; print "+"; q=s; gsub(/./,"I",q); print q } n=substr(\$0,2); s=""; next }
+                    { s=s\$0 }
+                    END { if (s) { print "@"n; print s; print "+"; q=s; gsub(/./,"I",q); print q } }' | gzip ;;
+            *)
+                cat "\$f" ;;
+        esac
+    done | fastq_filter ${filter_args} -o all_reads.fastq.gz
     """
 }
 

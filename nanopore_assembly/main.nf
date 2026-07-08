@@ -157,7 +157,11 @@ workflow {
 
     def barcode_dirs = file("${params.input}/**/fastq_pass/barcode*", type: 'dir') +
                        file("${params.input}/fastq_pass/barcode*", type: 'dir')
-    def flat_fastqs  = file("${params.input}/*.fastq.gz")
+    // Flat mode accepts fastq(.gz) and fasta(.fa/.fasta[.gz]). FASTA input (e.g.
+    // pre-QC'd reads exported from nanopore_live's fa/ store) is converted to
+    // fastq with placeholder quality inside PREPARE_READS; pair with
+    // --read_type to avoid quality-based Flye mode auto-detection.
+    def flat_fastqs  = file("${params.input}/*.{fastq.gz,fq.gz,fa,fasta,fa.gz,fasta.gz}")
 
     if (barcode_dirs) {
         log.info "Detected nanopore barcode structure: ${barcode_dirs.size()} barcode directories"
@@ -185,14 +189,14 @@ workflow {
         ch_reads = CONCAT_READS.out.reads
             .filter { meta, fastq -> fastq.size() > 1024 }
     } else if (flat_fastqs) {
-        log.info "Detected flat FASTQ directory: ${flat_fastqs.size()} files"
-        ch_reads = Channel.fromPath("${params.input}/*.fastq.gz")
-            .map { fastq ->
-                def name = fastq.baseName.replace('.fastq', '')
-                [[id: name], fastq]
+        log.info "Detected flat read directory: ${flat_fastqs.size()} files (fastq/fasta)"
+        ch_reads = Channel.fromPath("${params.input}/*.{fastq.gz,fq.gz,fa,fasta,fa.gz,fasta.gz}")
+            .map { reads ->
+                def name = reads.baseName.replaceAll(/\.(fastq|fq|fasta|fa)$/, '')
+                [[id: name], reads]
             }
     } else {
-        error "ERROR: No FASTQ files found in ${params.input}. Expected either *.fastq.gz or fastq_pass/barcode*/ structure.\nRun with --help for usage."
+        error "ERROR: No reads found in ${params.input}. Expected *.fastq.gz / *.fasta[.gz] or a fastq_pass/barcode*/ structure.\nRun with --help for usage."
     }
 
     // 2. Concatenate + dedupe + optional filtlong -> single all_reads.fastq.gz
