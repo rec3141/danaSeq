@@ -302,7 +302,10 @@ workflow {
     // 2c. Eukaryotic classification
     if (params.run_eukaryotic) {
         TIARA_CLASSIFY(ch_assembly)
-        WHOKARYOTE_CLASSIFY(ch_assembly, ch_gff)
+        // Whokaryote's calculate_features.py parses the Prodigal GFF attribute layout
+        // (rbs_motif as the 4th ';'-field). Feeding it our Bakta/Prokka annotation GFF
+        // crashes with IndexError, so pass NO_GFF and let whokaryote run its own prodigal.
+        WHOKARYOTE_CLASSIFY(ch_assembly, file('NO_GFF'))
 
         if (params.run_metaeuk && params.metaeuk_db) {
             METAEUK_PREDICT(

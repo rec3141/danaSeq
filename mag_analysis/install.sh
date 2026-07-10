@@ -11,7 +11,8 @@ set -euo pipefail
 # Merged environments (9 envs, matching the slim Docker image):
 #   dana-mag-assembly  - Flye, metaMDBG, myloasm, BBMap, minimap2, samtools, filtlong
 #   dana-mag-binning   - MetaBAT2, MaxBin2, SemiBin2, COMEBin, LorBin, DAS_Tool
-#   dana-mag-quality   - geNomad, CheckV, CheckM2, Tiara, Whokaryote
+#   dana-mag-quality   - geNomad, CheckV, CheckM2, Tiara
+#   dana-mag-whokaryote- Whokaryote (pinned scikit-learn 1.0.2 for its RF models)
 #   dana-mag-annotate  - Bakta, eggNOG-mapper, MarFERReT/DIAMOND
 #   dana-mag-classify  - Kaiju, Kraken2, barrnap/vsearch, KofamScan, MetaEuk
 #   dana-mag-genomic   - IntegronFinder, IslandPath, MacSyFinder, DefenseFinder, dbCAN
@@ -91,6 +92,7 @@ STANDALONE_YAMLS=(
     vamb.yml
     binette.yml
     antismash.yml
+    whokaryote.yml
 )
 
 # Which tool binary to check for each environment
@@ -111,6 +113,7 @@ declare -A ENV_CHECK=(
     [dana-mag-vamb]="vamb"
     [dana-mag-binette]="binette"
     [dana-mag-antismash]="antismash"
+    [dana-mag-whokaryote]="whokaryote.py"
 )
 
 # Additional binaries to verify per env
@@ -287,11 +290,12 @@ WRAPPER
     fi
 
     if [[ "${env_name}" == "dana-mag-quality" ]]; then
-        echo "  Installing whokaryote + tiara via pip..."
-        "${env_path}/bin/pip" install --no-deps \
-            'whokaryote @ git+https://github.com/LottePronk/whokaryote.git' tiara \
-            > /dev/null 2>&1
-        echo "  whokaryote + tiara installed"
+        # Tiara only. Whokaryote lives in its own env (dana-mag-whokaryote / whokaryote.yml)
+        # because its bundled RF models require scikit-learn 1.0.2, while this env ships a
+        # much newer sklearn for genomad/checkm2 — the pickles won't load across that gap.
+        echo "  Installing tiara via pip..."
+        "${env_path}/bin/pip" install --no-deps tiara > /dev/null 2>&1
+        echo "  tiara installed"
     fi
 
     if [[ "${env_name}" == "dana-mag-strain" ]]; then
@@ -325,6 +329,16 @@ post_install_standalone() {
     local env_path="$2"
 
     # (magscot standalone env removed — Python port in bin/magscot.py uses binning env)
+
+    if [[ "${env_name}" == "dana-mag-whokaryote" ]]; then
+        # Deps (incl. the pinned scikit-learn 1.0.2) come from the yaml; install the
+        # whokaryote package itself via pip --no-deps to avoid re-resolving that pin.
+        echo "  Installing whokaryote via pip (no-deps)..."
+        "${env_path}/bin/pip" install --no-deps -q \
+            'whokaryote @ git+https://github.com/LottePronk/whokaryote.git' \
+            > /dev/null 2>&1
+        echo "  whokaryote installed"
+    fi
 }
 
 do_check() {

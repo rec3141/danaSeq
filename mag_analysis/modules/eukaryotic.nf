@@ -50,6 +50,10 @@ process TIARA_CLASSIFY {
 process WHOKARYOTE_CLASSIFY {
     tag "whokaryote"
     label 'process_medium'
+    // Dedicated env: whokaryote's bundled RF models are pickled with scikit-learn 1.0.2
+    // and cannot be unpickled by newer sklearn (the tree node dtype gained
+    // missing_go_to_left in 1.3). dana-mag-quality ships sklearn 1.6.1, so whokaryote
+    // needs its own env pinned to 1.0.2 (built on py3.10; 1.0.2 has no py3.12 wheels).
     conda "${projectDir}/conda-envs/dana-mag-whokaryote"
     publishDir "${params.outdir}/eukaryotic/whokaryote", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/eukaryotic/whokaryote" : null
@@ -65,21 +69,27 @@ process WHOKARYOTE_CLASSIFY {
     def min_len = params.whokaryote_min_len ?: 5000
     def gff_arg = gff.name != 'NO_GFF' ? "--gff ${gff}" : ''
     """
+    # --model S: stand-alone gene-structure RF (no internal tiara call); tiara runs as
+    # its own process (TIARA_CLASSIFY), so the dedicated env stays minimal (no PyTorch,
+    # no numpy conflict with the pinned sklearn 1.0.2).
     set +e
     whokaryote.py \\
         --contigs "${contigs}" \\
         --outdir whokaryote_out/ \\
         ${gff_arg} \\
+        --model S \\
         --minsize ${min_len} \\
         --threads ${task.cpus}
     whokaryote_exit=\$?
     set -e
 
+    # whokaryote writes featuretable_predictions_<model>.tsv (S or T); match either.
+    pred_tsv=\$(ls whokaryote_out/featuretable_predictions_*.tsv 2>/dev/null | head -1)
     if [ \$whokaryote_exit -ne 0 ]; then
         echo "[WARNING] Whokaryote exited with code \$whokaryote_exit" >&2
         printf 'contig\\tprediction\\n' > whokaryote_classifications.tsv
-    elif [ -f whokaryote_out/featuretable_predictions_T.tsv ]; then
-        cp whokaryote_out/featuretable_predictions_T.tsv whokaryote_classifications.tsv
+    elif [ -n "\$pred_tsv" ] && [ -f "\$pred_tsv" ]; then
+        cp "\$pred_tsv" whokaryote_classifications.tsv
     else
         echo "[WARNING] Whokaryote produced no predictions" >&2
         printf 'contig\\tprediction\\n' > whokaryote_classifications.tsv

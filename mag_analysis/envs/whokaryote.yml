@@ -2,6 +2,18 @@ name: dana-mag-whokaryote
 channels:
   - conda-forge
   - bioconda
+# whokaryote's bundled RandomForest models are pickled with scikit-learn 1.0.2 and cannot
+# be unpickled by newer sklearn (the tree node dtype gained missing_go_to_left in 1.3), so
+# this env is pinned to 1.0.2 — which has no py3.12 wheels, hence python 3.10.
+# NB: installing whokaryote itself from bioconda triggers a pathologically slow classic
+# solve against the 1.0.2 pin, so we pull the deps from conda-forge here and install the
+# whokaryote package via pip --no-deps in the install.sh post-install hook.
 dependencies:
-  - whokaryote >=1.1.2
+  - python=3.10
+  - scikit-learn=1.0.2
+  - numpy<1.24
   - prodigal
+  - pandas
+  - biopython
+  - joblib
+  - pip

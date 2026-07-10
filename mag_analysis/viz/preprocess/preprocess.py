@@ -1616,8 +1616,13 @@ def build_eukaryotic(results_dir, assembly_info):
     who_df = load_tsv(who_path)
     who_summary = Counter()
     if who_df is not None:
+        # whokaryote's featuretable_predictions_*.tsv names the call column 'predicted'
+        # (older/simple output used 'classification'). Fall back to the last column,
+        # matching the contig_explorer parse below (row.iloc[-1]).
         for _, row in who_df.iterrows():
-            cls = row.get('classification', row.get('predicted_class', 'unknown'))
+            cls = row.get('predicted',
+                          row.get('classification',
+                                  row.get('predicted_class', row.iloc[-1])))
             who_summary[cls] += 1
 
     # MarFERReT
