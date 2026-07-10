@@ -185,11 +185,13 @@ process STAGE_INPUTS {
     input:
     path(assembly)
     path(depths)
+    path(tnf)
 
     output:
-    path("assembly/assembly.fasta")
+    path("assembly/assembly.fasta"), emit: assembly
     path("assembly/assembly_info.txt")
     path("assembly/gc.tsv")
+    path("assembly/tnf.tsv"), optional: true, emit: tnf
     path("mapping/depths.txt")
 
     script:
@@ -205,6 +207,10 @@ process STAGE_INPUTS {
     awk '/^>/{if(name) printf "%s\\t%.2f\\n", name, (gc/(gc+at))*100; name=substr(\$1,2); gc=0; at=0; next} {for(i=1;i<=length(\$0);i++){c=substr(\$0,i,1); if(c~/[GCgc]/)gc++; else at++}} END{if(name) printf "%s\\t%.2f\\n", name, (gc/(gc+at))*100}' ${assembly} \
         | awk 'BEGIN{print "contig_id\\tgc_pct"} {print}' \
         > assembly/gc.tsv
+    # Stage the tetranucleotide-frequency table (for viz t-SNE/UMAP) if one was
+    # provided. preprocess.py reads it from ${params.outdir}/assembly/tnf.tsv, so it
+    # must be published beside gc.tsv here rather than only handed to the viz process.
+    if [ -s ${tnf} ]; then cp ${tnf} assembly/tnf.tsv; fi
     cp ${depths} mapping/depths.txt
     """
 }
@@ -241,7 +247,7 @@ workflow {
     }
 
     // 1b. Publish assembly inputs into outdir so viz preprocess can find them
-    STAGE_INPUTS(ch_assembly, ch_depths)
+    STAGE_INPUTS(ch_assembly, ch_depths, ch_tnf.ifEmpty(file("${projectDir}/assets/NO_FILE")))
 
     // 2. Gene annotation on assembly (optional)
     ch_proteins       = Channel.empty()
@@ -591,8 +597,10 @@ workflow {
 
     // 7. Viz dashboard
     if (params.run_viz) {
-        // Stage 1: TNF done (or assembly-only snapshot)
-        ch_viz1_input = ch_tnf.ifEmpty(ch_assembly).collect()
+        // Stage 1: TNF done (or assembly-only snapshot). Trigger off STAGE_INPUTS so
+        // viz1 runs only after tnf.tsv/gc.tsv are published into the outdir, which is
+        // where preprocess.py reads them from (not the staged process inputs).
+        ch_viz1_input = STAGE_INPUTS.out.tnf.ifEmpty(STAGE_INPUTS.out.assembly).collect()
         VIZ_STAGE1(ch_viz1_input, false, false)
 
         // Stage 2: annotation done
