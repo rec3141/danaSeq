@@ -75,11 +75,14 @@ process BAKTA_BASIC {
     // defeats projectDir/bin and causes the real amrfinder to be picked up instead
     // of our stub — and amrfinder then crashes bakta on big assemblies (exit 1 on
     // 5M+ CDSs, DB version mismatch). Call bakta from the conda env directly.
-    def conda_bin = "/opt/conda/envs/dana-mag-annotate/bin"
     """
     # PATH order: projectDir/bin FIRST so the amrfinder stub shadows the conda binary,
     # then conda env so bakta's other subprocesses (diamond, HMMER) resolve.
-    export PATH="${projectDir}/bin:${conda_bin}:\$PATH"
+    # Resolve the annotate env's bin for container (/opt/conda) or local conda
+    # (projectDir/conda-envs) execution.
+    CONDA_BIN=/opt/conda/envs/dana-mag-annotate/bin
+    [ -d "\$CONDA_BIN" ] || CONDA_BIN=${projectDir}/conda-envs/dana-mag-annotate/bin
+    export PATH="${projectDir}/bin:\$CONDA_BIN:\$PATH"
 
     # Bakta writes large diamond/HMMER intermediates (multi-GB on big metagenomes) to
     # \$TMPDIR. With nothing set, that's the container's /tmp (often tmpfs/RAM-backed)
@@ -87,7 +90,7 @@ process BAKTA_BASIC {
     export TMPDIR="\$PWD/tmp"
     mkdir -p "\$TMPDIR"
 
-    ${conda_bin}/bakta \
+    "\$CONDA_BIN"/bakta \
         --db "${params.bakta_light_db}" \
         --meta \
         --keep-contig-headers \
@@ -138,9 +141,10 @@ process BAKTA_EXTRA {
 
     script:
     // See BAKTA_BASIC comment: bypass dana-tools wrapper so projectDir/bin wins for amrfinder.
-    def conda_bin = "/opt/conda/envs/dana-mag-annotate/bin"
     """
-    export PATH="${projectDir}/bin:${conda_bin}:\$PATH"
+    CONDA_BIN=/opt/conda/envs/dana-mag-annotate/bin
+    [ -d "\$CONDA_BIN" ] || CONDA_BIN=${projectDir}/conda-envs/dana-mag-annotate/bin
+    export PATH="${projectDir}/bin:\$CONDA_BIN:\$PATH"
 
     # Bakta writes large diamond/HMMER intermediates (multi-GB on big metagenomes) to
     # \$TMPDIR. With nothing set, that's the container's /tmp (often tmpfs/RAM-backed)
@@ -148,7 +152,7 @@ process BAKTA_EXTRA {
     export TMPDIR="\$PWD/tmp"
     mkdir -p "\$TMPDIR"
 
-    ${conda_bin}/bakta \
+    "\$CONDA_BIN"/bakta \
         --db "${params.bakta_db}" \
         --meta \
         --keep-contig-headers \
