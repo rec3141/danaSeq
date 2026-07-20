@@ -46,9 +46,9 @@ process MAP_READS_BBMAP {
     // FS but /data and /data/scratch are separate nvme devices here).
     // Pattern catches both bare-extension files and the .tsv/.txt-suffixed
     // ones that samtools+bbmap actually emit.
-    publishDir "${params.outdir}/mapping/${meta.id}/${ref.name}", mode: 'symlink',
+    publishDir { "${params.outdir}/mapping/${meta.id}/${ref.name}" }, mode: 'symlink',
         pattern: '*.{bam,bai,covhist.txt,covstats.txt,flagstat.txt,idxstats.tsv}'
-    storeDir params.store_dir ? "${params.store_dir}/mapping/${meta.id}/${ref.name}" : null
+    storeDir { params.store_dir ? "${params.store_dir}/mapping/${meta.id}/${ref.name}" : null }
 
     input:
     tuple val(meta), path(reads), val(ref), path(ref_fasta), path(ref_index)

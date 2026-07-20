@@ -6,8 +6,8 @@ process CLUMPIFY {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
-    storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
+    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'symlink', pattern: '*.fq.gz'
+    storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:
     tuple val(meta), path(r1), path(r2)
@@ -54,8 +54,8 @@ process FILTER_BY_TILE {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
-    storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
+    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'symlink', pattern: '*.fq.gz'
+    storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:
     tuple val(meta), path(reads)
@@ -89,8 +89,8 @@ process BBDUK_TRIM {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
-    storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
+    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'symlink', pattern: '*.fq.gz'
+    storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:
     tuple val(meta), path(reads)
@@ -123,8 +123,8 @@ process BBDUK_FILTER {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
-    storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
+    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'symlink', pattern: '*.fq.gz'
+    storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:
     tuple val(meta), path(reads)
@@ -156,8 +156,8 @@ process REMOVE_HUMAN {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'symlink', pattern: '*.fq.gz'
-    storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
+    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'symlink', pattern: '*.fq.gz'
+    storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:
     tuple val(meta), path(reads)
@@ -187,8 +187,8 @@ process FASTQC {
     tag "${meta.id}"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir "${params.outdir}/preprocess/${meta.id}/fastqc", mode: 'copy'
-    storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}/fastqc" : null
+    publishDir { "${params.outdir}/preprocess/${meta.id}/fastqc" }, mode: 'copy'
+    storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}/fastqc" : null }
 
     input:
     tuple val(meta), path(reads)

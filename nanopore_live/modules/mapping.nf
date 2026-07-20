@@ -15,8 +15,8 @@ process MAP_REFERENCE {
     tag "${meta.id}_${refname}"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-tools"
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/map", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/map" : null
+    publishDir { "${params.outdir}/${meta.flowcell}/${meta.barcode}/map" }, mode: 'copy', enabled: !params.store_dir
+    storeDir { params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/map" : null }
 
     input:
     tuple val(meta), path(fastq), val(refname), path(ref_idx)

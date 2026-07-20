@@ -6,8 +6,8 @@ process REMOVE_RRNA {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-rnaseq"
-    publishDir "${params.outdir}/preprocess/${meta.id}", mode: 'copy', pattern: '*.{fq.gz,log}'
-    storeDir params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null
+    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.{fq.gz,log}'
+    storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:
     tuple val(meta), path(reads)

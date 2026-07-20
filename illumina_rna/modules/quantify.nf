@@ -5,9 +5,9 @@ process FEATURECOUNTS {
     tag "${meta.id}_vs_${ref.name}"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-illumina-rna-rnaseq"
-    publishDir "${params.outdir}/quantify/${meta.id}/${ref.name}", mode: 'copy',
+    publishDir { "${params.outdir}/quantify/${meta.id}/${ref.name}" }, mode: 'copy',
         pattern: '*.{tsv,summary}'
-    storeDir params.store_dir ? "${params.store_dir}/quantify/${meta.id}/${ref.name}" : null
+    storeDir { params.store_dir ? "${params.store_dir}/quantify/${meta.id}/${ref.name}" : null }
 
     input:
     tuple val(meta), val(ref), path(bam), path(bai), path(gff)

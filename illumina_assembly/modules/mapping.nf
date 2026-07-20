@@ -4,8 +4,8 @@ process MAP_READS_BBMAP {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
-    publishDir "${params.outdir}/mapping/${meta.id}", mode: 'copy', pattern: '*.{bam,bai,txt}'
-    storeDir params.store_dir ? "${params.store_dir}/mapping/${meta.id}" : null
+    publishDir { "${params.outdir}/mapping/${meta.id}" }, mode: 'copy', pattern: '*.{bam,bai,txt}'
+    storeDir { params.store_dir ? "${params.store_dir}/mapping/${meta.id}" : null }
 
     input:
     tuple val(meta), path(reads), path(assembly)
@@ -58,8 +58,8 @@ process CALCULATE_DEPTHS {
     tag "${meta.id}"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-illumina-mag-binning"
-    publishDir "${params.outdir}/mapping/${meta.id}", mode: 'copy'
-    storeDir params.store_dir ? "${params.store_dir}/mapping/${meta.id}" : null
+    publishDir { "${params.outdir}/mapping/${meta.id}" }, mode: 'copy'
+    storeDir { params.store_dir ? "${params.store_dir}/mapping/${meta.id}" : null }
 
     input:
     tuple val(meta), path(bams), path(assembly)

@@ -60,8 +60,8 @@ process CONVERT_TO_FASTA {
     label 'process_low'
     // Same as QC_FASTQ_FILTER: empty FASTA exits 64 and is skipped, not fatal.
     errorStrategy { task.exitStatus == 64 ? 'ignore' : 'terminate' }
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/fa", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/fa" : null
+    publishDir { "${params.outdir}/${meta.flowcell}/${meta.barcode}/fa" }, mode: 'copy', enabled: !params.store_dir
+    storeDir { params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/fa" : null }
 
     input:
     tuple val(meta), path(fastq)

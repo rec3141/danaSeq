@@ -13,8 +13,8 @@ process SENDSKETCH {
     tag "${meta.id}"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-bbmap"
-    publishDir "${params.outdir}/${meta.flowcell}/${meta.barcode}/sketch", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/sketch" : null
+    publishDir { "${params.outdir}/${meta.flowcell}/${meta.barcode}/sketch" }, mode: 'copy', enabled: !params.store_dir
+    storeDir { params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/sketch" : null }
 
     input:
     tuple val(meta), path(fasta)
