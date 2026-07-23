@@ -455,6 +455,40 @@ download_human_ref() {
     fi
     echo "[SUCCESS] BBTools human reference built at ${db_path}"
 
+    # ── Pre-cache the Bloom filter into the index (bloom.serial) ──────────────
+    # removehuman.sh runs bbmap with `bloomfilter`, which builds a ~11 GB k-mer
+    # Bloom filter and serializes it to ref/index/1/bloom.serial. At runtime the
+    # index is bind-mounted READ-ONLY, so that write fails; bbmap's async writer
+    # thread crashes on the read-only FS and bbmap's shutdown then blocks on it
+    # forever — every REMOVE_HUMAN task livelocks (it maps fine, writes output,
+    # then never exits). Build bloom.serial now, while the index is still
+    # writable, so runtime just loads it (~6 s) instead of rebuilding+writing.
+    # Uses the exact bbmap flags removehuman.sh uses so the cache is a match.
+    if [ -f "${db_path}/ref/index/1/bloom.serial" ]; then
+        echo "[INFO] Bloom filter already cached at ${db_path}/ref/index/1/bloom.serial"
+    else
+        echo "  Pre-caching Bloom filter (bloom.serial) for read-only runtime use..."
+        local seed_fq="${db_path}/.bloomseed.fq"
+        : > "${seed_fq}"
+        for _i in $(seq 1 20); do
+            printf '@seed%d/1\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n@seed%d/2\nTGCATGCATGCATGCATGCATGCATGCATGCATGCATGCA\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n' "$_i" "$_i" >> "${seed_fq}"
+        done
+        container_run bbmap.sh -Xmx${xmx}g \
+            path="/data/db/human_ref" \
+            in="/data/db/human_ref/.bloomseed.fq" \
+            outu="/data/db/human_ref/.bloomtmp.fq.gz" outm=/dev/null \
+            minratio=0.9 maxindel=3 bwr=0.16 bw=12 quickmatch fast minhits=2 \
+            pigz unpigz zl=6 qtrim=r trimq=10 untrim idtag usemodulo \
+            printunmappedcount ztd=2 kfilter=25 maxsites=1 k=14 bloomfilter 2>&1 \
+            | grep -iE "Bloom|serial" | head
+        rm -f "${seed_fq}" "${db_path}/.bloomtmp.fq.gz"
+        if [ -f "${db_path}/ref/index/1/bloom.serial" ]; then
+            echo "[SUCCESS] Bloom filter cached ($(du -h "${db_path}/ref/index/1/bloom.serial" | cut -f1)) — REMOVE_HUMAN won't rebuild at runtime"
+        else
+            echo "[WARNING] bloom.serial not created — REMOVE_HUMAN may hang on a read-only index at runtime" >&2
+        fi
+    fi
+
     # Also download GRCh38 FASTA for minimap2 (nanopore pipeline).
     # minimap2 will auto-index from the FASTA on first use.
     local human_fa="${db_path}/GRCh38_noalt_as.fa.gz"
