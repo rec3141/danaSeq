@@ -50,7 +50,7 @@ ILLUMINA_ENV_DIR="${SCRIPT_DIR}/illumina_mag/conda-envs"
 ENV_DIR="${NANOPORE_ENV_DIR}"
 USE_CONTAINER=false
 CONTAINER_RUNTIME=""   # docker, apptainer, or singularity (set by --docker/--apptainer/--container)
-CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag:latest"
+CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag-analysis:latest"
 SIF_PATH=""            # resolved path to .sif file (apptainer/singularity only)
 
 # Container helper — runs a command inside Docker or Apptainer with DB_DIR mounted at /data/db
