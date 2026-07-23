@@ -431,10 +431,15 @@ download_human_ref() {
         echo "          Attempting anyway with -Xmx${xmx}g — expect failure if it's too small." >&2
     fi
 
-    echo "  Building bbmap index at ${db_path} (build=1, -Xmx${xmx}g)..."
+    # k=14 usemodulo match what BBTools' removehuman.sh uses at runtime. With the
+    # default k (13) / no usemodulo, removehuman.sh doesn't find a matching index
+    # and tries to REBUILD it at runtime — into a read-only bind-mounted DB, which
+    # fails and deadlocks bbmap (all threads futex-wait forever). Building the
+    # index in the format removehuman.sh expects avoids that entirely.
+    echo "  Building bbmap index at ${db_path} (k=14 usemodulo, -Xmx${xmx}g)..."
     if ! container_run bbmap.sh -Xmx${xmx}g \
             ref="/data/db/human_ref/$(basename "${masked_fa}")" \
-            path="/data/db/human_ref" build=1 2>&1 | tail -8; then
+            path="/data/db/human_ref" k=14 usemodulo build=1 2>&1 | tail -8; then
         echo "[ERROR] bbmap indexing failed — most likely out of memory (needs ~26 GB)." >&2
         echo "        Re-run --human on a machine/allocation with >=32 GB RAM." >&2
         echo "        The downloaded reference is kept at ${masked_fa}, so the retry" >&2
