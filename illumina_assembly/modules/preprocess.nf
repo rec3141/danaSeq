@@ -1,9 +1,21 @@
 // Preprocessing: optical deduplication, tile filtering, adapter trimming, artifact removal,
 // human decontamination, and QC reporting
 
+// ── Input-size-scaled resources ──────────────────────────────────────────────
+// The per-sample preprocessing steps run under Nextflow's local executor inside
+// one SLURM allocation, so cpus/memory here govern how many samples run at once.
+// Reserving the full assembly allocation (24 CPU / 250 GB) for a 20 MB SRA file
+// serialises the whole preprocessing stage and hands 100+ GB heaps to trivial
+// jobs. Scale to the input instead: small base + growth per GB, capped at the
+// assembly allocation so multi-GB samples still get real resources.
+def _sizeGb(f)  { (f instanceof Collection ? (f.sum { it.size() } ?: 0L) : f.size()) / 1073741824.0 }
+def cpusFor(f, int base, int perGb, cap) { Math.min(base + (int)(_sizeGb(f) * perGb), cap as int) }
+def memFor(f, int base, int perGb)       { "${base + (int)Math.ceil(_sizeGb(f) * perGb)} GB" }
+
 process CLUMPIFY {
     tag "${meta.id}"
-    label 'process_high'
+    cpus   { cpusFor([r1, r2], 4, 2, params.assembly_cpus) }
+    memory { memFor([r1, r2], 8, 16) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
@@ -17,11 +29,24 @@ process CLUMPIFY {
     script:
     def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    # Optical dedup requires Illumina tile coordinates in read headers.
-    # SRA-downloaded data has stripped headers, causing clumpify to crash
-    # on both `dedupe optical` and `dedupe` modes (IlluminaHeaderParser).
-    # Clumpify can also hang after thread errors, so use timeout (5 min per GB input, min 120s).
-    # Fall back to simple interleaving (reformat.sh) on failure.
+    # Optical dedup requires native Illumina flowcell coordinates in the read
+    # header. SRA reformats headers (accession.N prefix), which clumpify's
+    # optical-coordinate parser chokes on and then hangs (IlluminaHeaderParser2
+    # AssertionError in fetch threads → main thread waits until the timeout).
+    # Detect the header style from the first read: a native Illumina header's
+    # first whitespace-token is instr:run:fc:lane:tile:x:y (>= 6 colons); SRA's
+    # is the bare accession (0 colons). Use optical only when native, else plain
+    # dedupe (fast, correct, no crash). timeout remains a safety net.
+    first_tok=\$(zcat "${r1}" 2>/dev/null | head -1 | awk '{print \$1}')
+    ncolons=\$(printf '%s' "\$first_tok" | tr -cd ':' | wc -c | tr -d ' ')
+    if [ "\${ncolons:-0}" -ge 6 ]; then
+        dedupe_opt="optical"
+        echo "[INFO] Native Illumina headers detected — clumpify optical dedup" >&2
+    else
+        dedupe_opt=""
+        echo "[INFO] Non-native/SRA headers — clumpify plain dedupe (no optical)" >&2
+    fi
+
     input_size=\$(stat -c%s "${r1}" 2>/dev/null || echo 0)
     timeout_sec=\$(( input_size / 1073741824 * 300 + 120 ))
 
@@ -30,7 +55,7 @@ process CLUMPIFY {
         in1="${r1}" \\
         in2="${r2}" \\
         out="${meta.id}.clumped.fq.gz" \\
-        dedupe optical \\
+        dedupe \$dedupe_opt \\
         ow=t \\
         t=${task.cpus}
     clump_exit=\$?
@@ -54,7 +79,8 @@ process CLUMPIFY {
 
 process FILTER_BY_TILE {
     tag "${meta.id}"
-    label 'process_high'
+    cpus   { cpusFor(reads, 4, 2, params.assembly_cpus) }
+    memory { memFor(reads, 8, 16) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
@@ -68,23 +94,32 @@ process FILTER_BY_TILE {
     script:
     def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    # filterbytile requires Illumina tile coordinates in read headers.
-    # SRA-downloaded data has stripped headers — can crash and hang.
-    # Use timeout to kill hung Java processes, then fall back to passthrough.
-    input_size=\$(stat -c%s "${reads}" 2>/dev/null || echo 0)
-    timeout_sec=\$(( input_size / 1073741824 * 300 + 120 ))
+    # filterbytile requires native Illumina tile coordinates in read headers.
+    # SRA-reformatted headers lack a parseable coordinate token in the first
+    # field, so filterbytile crashes/hangs the same way clumpify optical does.
+    # Detect header style (native = first token has >= 6 colons) and only run
+    # filterbytile on native data; otherwise pass through immediately instead of
+    # burning the timeout on a doomed attempt. timeout remains a safety net.
+    first_tok=\$(zcat "${reads}" 2>/dev/null | head -1 | awk '{print \$1}')
+    ncolons=\$(printf '%s' "\$first_tok" | tr -cd ':' | wc -c | tr -d ' ')
 
-    set +e
-    timeout \${timeout_sec} filterbytile.sh ${xmx} \\
-        in="${reads}" \\
-        out="${meta.id}.filtered_by_tile.fq.gz" \\
-        ow=t \\
-        t=${task.cpus}
-    fbt_exit=\$?
-    set -e
-
-    if [ \$fbt_exit -ne 0 ] || [ ! -s "${meta.id}.filtered_by_tile.fq.gz" ]; then
-        echo "[WARNING] filterbytile failed (exit \$fbt_exit) — passing through (SRA headers?)" >&2
+    if [ "\${ncolons:-0}" -ge 6 ]; then
+        input_size=\$(stat -c%s "${reads}" 2>/dev/null || echo 0)
+        timeout_sec=\$(( input_size / 1073741824 * 300 + 120 ))
+        set +e
+        timeout \${timeout_sec} filterbytile.sh ${xmx} \\
+            in="${reads}" \\
+            out="${meta.id}.filtered_by_tile.fq.gz" \\
+            ow=t \\
+            t=${task.cpus}
+        fbt_exit=\$?
+        set -e
+        if [ \$fbt_exit -ne 0 ] || [ ! -s "${meta.id}.filtered_by_tile.fq.gz" ]; then
+            echo "[WARNING] filterbytile failed (exit \$fbt_exit) — passing through" >&2
+            cp "${reads}" "${meta.id}.filtered_by_tile.fq.gz"
+        fi
+    else
+        echo "[INFO] Non-native/SRA headers — skipping tile filter (passthrough)" >&2
         cp "${reads}" "${meta.id}.filtered_by_tile.fq.gz"
     fi
     """
@@ -92,7 +127,8 @@ process FILTER_BY_TILE {
 
 process BBDUK_TRIM {
     tag "${meta.id}"
-    label 'process_high'
+    cpus   { cpusFor(reads, 4, 2, params.assembly_cpus) }
+    memory { memFor(reads, 8, 8) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
@@ -126,7 +162,8 @@ process BBDUK_TRIM {
 
 process BBDUK_FILTER {
     tag "${meta.id}"
-    label 'process_high'
+    cpus   { cpusFor(reads, 4, 2, params.assembly_cpus) }
+    memory { memFor(reads, 8, 8) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
@@ -159,7 +196,10 @@ process BBDUK_FILTER {
 
 process REMOVE_HUMAN {
     tag "${meta.id}"
-    label 'process_high'
+    // Higher memory floor than the other steps: bbmap must load the masked
+    // human reference index into memory before mapping.
+    cpus   { cpusFor(reads, 8, 2, params.assembly_cpus) }
+    memory { memFor(reads, 32, 8) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
