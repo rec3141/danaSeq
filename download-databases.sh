@@ -50,8 +50,26 @@ ILLUMINA_ENV_DIR="${SCRIPT_DIR}/illumina_mag/conda-envs"
 ENV_DIR="${NANOPORE_ENV_DIR}"
 USE_CONTAINER=false
 CONTAINER_RUNTIME=""   # docker, apptainer, or singularity (set by --docker/--apptainer/--container)
-CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag:latest"
+CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag-analysis:latest"
 SIF_PATH=""            # resolved path to .sif file (apptainer/singularity only)
+
+# Usable memory in whole GB — the smaller of physical RAM and any cgroup cap.
+# HPC login nodes advertise hundreds of GB via `free` but cap each user far
+# lower via cgroups, which is what silently OOM-kills a naive bbmap build.
+_avail_mem_gb() {
+    local phys=0 cap=999999 v
+    v=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null)   # KB
+    [ -n "$v" ] && phys=$(( v / 1024 / 1024 ))
+    for f in "/sys/fs/cgroup/memory.max" \
+             "/sys/fs/cgroup/user.slice/user-$(id -u 2>/dev/null).slice/memory.max" \
+             "/sys/fs/cgroup/memory/memory.limit_in_bytes"; do
+        [ -r "$f" ] || continue
+        v=$(cat "$f" 2>/dev/null)
+        [[ "$v" =~ ^[0-9]+$ ]] && { local g=$(( v / 1024 / 1024 / 1024 )); [ "$g" -lt "$cap" ] && cap=$g; }
+    done
+    local m=$phys; [ "$cap" -lt "$m" ] && m=$cap
+    echo "$m"
+}
 
 # Container helper — runs a command inside Docker or Apptainer with DB_DIR mounted at /data/db
 container_run() {
@@ -377,35 +395,60 @@ download_human_ref() {
 
     mkdir -p "${db_path}"
 
-    # Find removehuman.sh from the illumina_mag bbmap env, or fall back to PATH
-    local removehuman_bin=""
-    if [ -x "${ILLUMINA_ENV_DIR}/dana-illumina-mag-bbmap/bin/removehuman.sh" ]; then
-        removehuman_bin="${ILLUMINA_ENV_DIR}/dana-illumina-mag-bbmap/bin/removehuman.sh"
-    elif [ -x "${NANOPORE_ENV_DIR}/dana-mag-assembly/bin/removehuman.sh" ]; then
-        removehuman_bin="${NANOPORE_ENV_DIR}/dana-mag-assembly/bin/removehuman.sh"
-    elif command -v removehuman.sh &>/dev/null; then
-        removehuman_bin="removehuman.sh"
+    # BBTools' removehuman.sh does NOT download anything — it hard-codes an
+    # internal NERSC path (/global/projectb/.../hg19) and only runs on NERSC.
+    # The masked reference (ribosomal + animal/plant/fungal regions masked so
+    # microbial reads aren't falsely stripped) lives on Zenodo. Download it and
+    # build the bbmap index ourselves, into a dedicated folder under databases/
+    # (path= keeps it out of bbmap's ephemeral ./ref default, and because the
+    # dir is human_ref-only nothing else re-indexes over ref/genome/1).
+    local masked_fa="${db_path}/hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz"
+    local masked_url="https://zenodo.org/records/1208052/files/hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz"
+    if [ ! -s "${masked_fa}" ]; then
+        echo "  Downloading masked hg19 from Zenodo (~0.9 GB)..."
+        if ! wget -q --show-progress -O "${masked_fa}" "${masked_url}"; then
+            echo "  wget failed, retrying with curl..."
+            curl -fSL --retry 3 -o "${masked_fa}" "${masked_url}" || {
+                echo "[ERROR] Could not download masked human reference from Zenodo" >&2
+                rm -f "${masked_fa}"; return 1; }
+        fi
     fi
 
-    if [ -z "${removehuman_bin}" ]; then
-        echo "[ERROR] removehuman.sh not found. Install illumina_mag conda envs first:" >&2
-        echo "  cd illumina_mag/nextflow && ./install.sh" >&2
+    # Indexing masked hg19 is the ONLY heavy step in this script — bbmap needs
+    # ~26 GB RAM (measured MaxRSS 25.6 GB). Everything else is light. Check the
+    # machine's real memory ceiling (physical AND any cgroup cap — HPC login
+    # nodes cap far below their physical RAM) and warn clearly before we OOM.
+    local avail_gb; avail_gb="$(_avail_mem_gb)"
+    local need_gb=28
+    local xmx=$(( avail_gb > 34 ? 30 : avail_gb - 4 )); [ "$xmx" -lt 8 ] && xmx=8
+    if [ "$avail_gb" -lt "$need_gb" ]; then
+        echo "[WARNING] Building the human bbmap index needs ~26 GB RAM, but this" >&2
+        echo "          machine offers only ~${avail_gb} GB. The build will very likely be" >&2
+        echo "          killed. Options:" >&2
+        echo "            • run --human on a machine with >=32 GB RAM, or" >&2
+        echo "            • submit it as a compute job:  sbatch --mem=32G --wrap='...--human...'" >&2
+        echo "          (Only this step is memory-heavy; other databases are fine here.)" >&2
+        echo "          Attempting anyway with -Xmx${xmx}g — expect failure if it's too small." >&2
+    fi
+
+    echo "  Building bbmap index at ${db_path} (build=1, -Xmx${xmx}g)..."
+    if ! container_run bbmap.sh -Xmx${xmx}g \
+            ref="/data/db/human_ref/$(basename "${masked_fa}")" \
+            path="/data/db/human_ref" build=1 2>&1 | tail -8; then
+        echo "[ERROR] bbmap indexing failed — most likely out of memory (needs ~26 GB)." >&2
+        echo "        Re-run --human on a machine/allocation with >=32 GB RAM." >&2
+        echo "        The downloaded reference is kept at ${masked_fa}, so the retry" >&2
+        echo "        won't re-download." >&2
         return 1
     fi
-
-    # removehuman.sh auto-downloads the masked hg19 reference on first run.
-    # We run it with empty input to trigger the download without processing reads.
-    echo "  Using: ${removehuman_bin}"
-    echo "  This will download and index the masked human genome (hg19)..."
-    "${removehuman_bin}" path="${db_path}" build=1 2>&1 | tail -5 || true
 
     # Verify the BBTools index was built
     if ! [ -d "${db_path}/ref" ] || ! [ -f "${db_path}/ref/genome/1/summary.txt" ]; then
-        echo "[ERROR] Human reference download/build may have failed" >&2
+        echo "[ERROR] Human reference build failed — no ref/genome/1/summary.txt" >&2
         echo "  Check ${db_path} for partial files" >&2
         return 1
     fi
-    echo "[SUCCESS] BBTools human reference downloaded to ${db_path}"
+    echo "[SUCCESS] BBTools human reference built at ${db_path}"
 
     # Also download GRCh38 FASTA for minimap2 (nanopore pipeline).
     # minimap2 will auto-index from the FASTA on first use.
