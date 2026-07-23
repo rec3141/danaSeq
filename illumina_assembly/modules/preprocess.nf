@@ -9,8 +9,8 @@
 // jobs. Scale to the input instead: small base + growth per GB, capped at the
 // assembly allocation so multi-GB samples still get real resources.
 def _sizeGb(f)  { (f instanceof Collection ? (f.sum { it.size() } ?: 0L) : f.size()) / 1073741824.0 }
-def cpusFor(f, int base, int perGb, cap) { Math.min(base + (int)(_sizeGb(f) * perGb), cap as int) }
-def memFor(f, int base, int perGb)       { "${base + (int)Math.ceil(_sizeGb(f) * perGb)} GB" }
+def cpusFor(f, base, perGb, cap) { Math.min((base + _sizeGb(f) * perGb) as int, cap as int) }
+def memFor(f, base, perGb)       { def gb = (base + Math.ceil(_sizeGb(f) * perGb)) as int; "${gb} GB" }
 
 process CLUMPIFY {
     tag "${meta.id}"
