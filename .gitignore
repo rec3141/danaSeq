@@ -14,3 +14,7 @@ viz/public/data/
 
 # OS
 .DS_Store
+
+# Python bytecode from bin/ helpers
+__pycache__/
+*.pyc
