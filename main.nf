@@ -37,6 +37,7 @@ def helpMessage() {
       --primers_fwd PATH   Forward primer FASTA (overrides auto-selection)
       --primers_rev PATH   Reverse primer FASTA (overrides auto-selection)
       --primer_error_rate  Cutadapt error rate [default: 0.12]
+      --primer_detect_reads N  Reads sampled for primer detection [default: 500]
 
     Demultiplexing (optional):
       --run_demultiplex    Enable demultiplexing with Mr_Demuxy [default: false]
@@ -248,9 +249,8 @@ workflow {
                 [new_meta, r1, r2]
             }
     } else {
-        // Auto-detect best primer pair per sample
-        ch_primer_files = Channel.fromPath("${projectDir}/primers/primers-*.fa").collect()
-        DETECT_PRIMERS(ch_demuxed, ch_primer_files)
+        // Detect the primer pair per sample from the reads themselves
+        DETECT_PRIMERS(ch_demuxed)
         REMOVE_PRIMERS(DETECT_PRIMERS.out.detected)
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads

@@ -8,12 +8,15 @@ submitter's label, which is wrong often enough to matter (PRJNA1473294 labels al
 84 runs "16S" when 40 are eukaryotic 18S). Nothing read those logs, so the answer
 was computed and thrown away on every run.
 
-This emits one row per sample. It deliberately reports only what cutadapt
-observed — the primer *name* that matched and the read counts. It does not say
-which gene that primer targets: a primer FASTA carries nothing but a name, and
-cutadapt truncates headers at whitespace, so there is no room to annotate one.
-Interpreting `341Fv3` as bacterial/archaeal 16S rRNA needs a curated primer table
-and belongs to whoever holds one (in OMC, `portal/app/primers.py::describe_pair`).
+This emits one row per sample: the primer names cutadapt actually matched, the
+read counts, and — resolved through the curated table in primer_db.py — which
+gene those primers target and whose lineage it belongs to. The gene matters more
+than the region, and naming it precisely matters more still: "16S" alone is the
+prokaryotic SSU rRNA to a microbial ecologist and the mitochondrial LSU rRNA to a
+zoologist, so a record that just says "16S" cannot be read safely.
+
+Names that resolve to no table entry keep their counts and simply carry no gene,
+rather than being dropped or guessed at.
 
 Usage:
     parse_primer_assignment.py OUT.tsv LOG [LOG ...]
@@ -21,6 +24,12 @@ Usage:
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from primer_db import describe_pair
+except ImportError:  # table unavailable — still report what was observed
+    describe_pair = lambda *_a, **_k: None
 
 # "=== First read: Adapter 341Fv3 ===" / "=== Second read: Adapter Bakt_805R ==="
 # and the single-end form "=== Adapter 341Fv3 ===".
@@ -30,6 +39,9 @@ _TOTAL_RE = re.compile(r"^Total read(?: pair)?s processed:\s*([\d,]+)", re.M)
 
 COLUMNS = [
     "sample",
+    "assay_gene",
+    "assay_gene_lineage",
+    "assay_region",
     "assay_primer_fwd",
     "assay_primer_rev",
     "assay_reads_in",
@@ -112,6 +124,10 @@ def main(argv):
         except OSError as e:
             print(f"[WARN] unreadable log {path}: {e}", file=sys.stderr)
             continue
+        described = describe_pair(rec["assay_primer_fwd"], rec["assay_primer_rev"]) or {}
+        rec["assay_gene"] = described.get("gene")
+        rec["assay_gene_lineage"] = described.get("lineage")
+        rec["assay_region"] = described.get("region")
         rec["sample"] = sample_id(path)
         rows.append(rec)
 
@@ -123,8 +139,9 @@ def main(argv):
                                for c in COLUMNS) + "\n")
 
     resolved = sum(1 for r in rows if r["assay_primer_fwd"])
-    print(f"[INFO] primer assignment: {resolved}/{len(rows)} samples resolved "
-          f"-> {out_path}", file=sys.stderr)
+    named = sum(1 for r in rows if r.get("assay_gene"))
+    print(f"[INFO] primer assignment: {resolved}/{len(rows)} samples matched a "
+          f"primer, {named} resolved to a gene -> {out_path}", file=sys.stderr)
     return 0
 
 

@@ -1,5 +1,10 @@
 // Primer removal with cutadapt, and a record of what it actually matched.
 //
+// DETECT_PRIMERS samples reads and matches their 5' ends against the curated
+// table in bin/primer_db.py. It used to run a full cutadapt pass per candidate
+// primer file per sample — 17 passes over every sample, to /dev/null, just to
+// count survivors — and reported only the winning filename.
+//
 // PRIMER_ASSIGNMENT turns cutadapt's own per-adapter counts into one row per
 // sample, so which assay a sample really carries is reported rather than
 // recomputed downstream from taxonomy. It states only what was observed — the
@@ -13,38 +18,26 @@
 
 process DETECT_PRIMERS {
     tag "${meta.id}"
-    cpus 1
+    label 'process_low'
     conda "${projectDir}/envs/python.yml"
+    publishDir "${params.outdir}/trimmed/detected", mode: 'copy', pattern: "*.json"
 
     input:
     tuple val(meta), path(r1), path(r2)
-    path(primer_files)
 
     output:
-    tuple val(meta), path(r1), path(r2), env(BEST_PRIMER), emit: detected
+    tuple val(meta), path(r1), path(r2), path("detected_primers.fa"), emit: detected
+    path("${meta.id}_detected.json"), emit: report, optional: true
 
     script:
     """
-    # Run cutadapt with each primer file, count passing reads
-    BEST_PRIMER=""
-    BEST_COUNT=0
-
-    for pf in ${primer_files}; do
-        COUNT=\$(cutadapt -g file:\$pf -G file:\$pf --discard-untrimmed \
-            -j ${task.cpus} -e ${params.primer_error_rate} \
-            -o /dev/null -p /dev/null \
-            ${r1} ${r2} 2>&1 | grep "Pairs written" | grep -oP '[\\d,]+' | head -1 | tr -d ',')
-        COUNT=\${COUNT:-0}
-        echo "\$pf: \$COUNT pairs"
-        if [ "\$COUNT" -gt "\$BEST_COUNT" ]; then
-            BEST_COUNT=\$COUNT
-            BEST_PRIMER=\$pf
-        fi
-    done
-
-    echo "Best: \$BEST_PRIMER (\$BEST_COUNT pairs)"
+    detect_primers.py "${r1}" "${r2}" \
+        -o detected_primers.fa \
+        --json "${meta.id}_detected.json" \
+        -n ${params.primer_detect_reads}
     """
 }
+
 
 process REMOVE_PRIMERS {
     tag "${meta.id}"
@@ -54,7 +47,7 @@ process REMOVE_PRIMERS {
     storeDir params.store_dir ? "${params.store_dir}/trimmed" : null
 
     input:
-    tuple val(meta), path(r1), path(r2), val(primer_file)
+    tuple val(meta), path(r1), path(r2), path(primer_file)
 
     output:
     tuple val(meta), path("${meta.id}_R1.trimmed.fastq.gz"), path("${meta.id}_R2.trimmed.fastq.gz"), emit: reads
