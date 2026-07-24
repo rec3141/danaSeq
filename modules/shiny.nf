@@ -20,6 +20,7 @@ process BUILD_VIZ {
     path(sample_tsne)
     path(seq_tsne)
     path(network)
+    path(primer_assignment)
 
     output:
     path("*.json"),    emit: json, optional: true
@@ -37,7 +38,8 @@ process BUILD_VIZ {
         "${metadata}" \
         "${sample_tsne}" \
         "${seq_tsne}" \
-        "${network}"
+        "${network}" \
+        "${primer_assignment}"
     """
     else
     """

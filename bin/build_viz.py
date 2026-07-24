@@ -85,8 +85,14 @@ def round_float(val, decimals=4):
 # Build samples.json
 # ---------------------------------------------------------------------------
 
-def build_samples(seqtab, sample_tsne, metadata):
+def build_samples(seqtab, sample_tsne, metadata, primer_assignment=None):
     """Build the samples array with t-SNE coordinates and metadata.
+
+    `primer_assignment` is the per-sample record of what cutadapt actually
+    matched (see parse_primer_assignment.py). It merges exactly like metadata
+    does, and is optional in both directions: absent for pre-trimmed input, and
+    absent entirely for pipelines with no amplification step, so consumers must
+    treat missing assay_* fields as normal.
 
     Returns:
         list of dicts, one per sample
@@ -133,6 +139,18 @@ def build_samples(seqtab, sample_tsne, metadata):
                 }
             log_info(f"Metadata: {len(meta_lookup)} samples, fields: {meta_fields}")
 
+    # Observed primer assignment, keyed by the same sample ids
+    assay_lookup = {}
+    if primer_assignment is not None and not primer_assignment.empty:
+        id_col = "sample" if "sample" in primer_assignment.columns else primer_assignment.columns[0]
+        cols = [c for c in primer_assignment.columns if c != id_col]
+        for _, row in primer_assignment.iterrows():
+            assay_lookup[str(row[id_col])] = {
+                c: _safe_json_value(row[c]) for c in cols
+                if row[c] is not None and str(row[c]) != "" and not pd.isna(row[c])
+            }
+        log_info(f"Primer assignment: {len(assay_lookup)} samples, fields: {cols}")
+
     # Assemble sample records
     records = []
     for _, row in sample_stats.iterrows():
@@ -148,6 +166,9 @@ def build_samples(seqtab, sample_tsne, metadata):
         # Merge metadata fields
         if sid in meta_lookup:
             rec.update(meta_lookup[sid])
+        # …then the observed assay, same mechanism, different source
+        if sid in assay_lookup:
+            rec.update(assay_lookup[sid])
         records.append(rec)
 
     log_info(f"samples.json: {len(records)} samples")
@@ -731,7 +752,8 @@ def main():
     if len(sys.argv) < 8:
         log_error(
             "Usage: build_viz.py <seqtab.pkl> <renorm.pkl> <taxonomy_dir> "
-            "<metadata.pkl_or_NONE> <sample_tsne.pkl> <seq_tsne.pkl> <network.pkl>"
+            "<metadata.pkl_or_NONE> <sample_tsne.pkl> <seq_tsne.pkl> <network.pkl> "
+            "[primer_assignment.tsv_or_NONE]"
         )
         sys.exit(1)
 
@@ -742,6 +764,8 @@ def main():
     sample_tsne_path = sys.argv[5]
     seq_tsne_path = sys.argv[6]
     network_path = sys.argv[7]
+    # Optional 8th arg so older callers keep working.
+    assignment_path = sys.argv[8] if len(sys.argv) > 8 else None
 
     # --- Load data ---
     seqtab = load_pickle(seqtab_path)
@@ -820,10 +844,22 @@ def main():
     else:
         log_warn(f"No network ({os.path.basename(network_path)}) — ASV network will be empty")
 
+    # Observed primer assignment (optional — absent when input was pre-trimmed,
+    # and absent by nature for pipelines with no amplification step).
+    primer_assignment = None
+    if (assignment_path and os.path.isfile(assignment_path)
+            and not os.path.basename(assignment_path).startswith("NO_")):
+        try:
+            primer_assignment = pd.read_csv(assignment_path, sep="\t")
+            log_info(f"Primer assignment: {len(primer_assignment)} rows "
+                     f"from {os.path.basename(assignment_path)}")
+        except (OSError, ValueError) as e:
+            log_warn(f"Could not read primer assignment: {e}")
+
     # --- Build outputs ---
 
     # samples.json
-    samples = build_samples(seqtab, sample_tsne, metadata)
+    samples = build_samples(seqtab, sample_tsne, metadata, primer_assignment)
     write_json(samples, "samples.json")
 
     # asvs.json.gz

@@ -1,4 +1,9 @@
-// Primer removal with cutadapt.
+// Primer removal with cutadapt, and a record of what it actually matched.
+//
+// PRIMER_ASSIGNMENT turns cutadapt's own per-adapter counts into one row per
+// sample, so which assay a sample really carries is reported rather than
+// recomputed downstream from taxonomy. It states only what was observed — the
+// primer name and read counts — because a primer FASTA carries nothing else.
 //
 // Two-pass approach:
 //   1. DETECT_PRIMERS: runs all primer pairs on each sample, picks the best match
@@ -70,5 +75,23 @@ process REMOVE_PRIMERS {
         > ${meta.id}_cutadapt.log 2>&1
 
     echo "[INFO] ${meta.id}: primer removal complete (${primer_file})" >&2
+    """
+}
+
+process PRIMER_ASSIGNMENT {
+    tag "primer_assignment"
+    label 'process_low'
+    conda "${projectDir}/envs/python.yml"
+    publishDir "${params.outdir}/trimmed", mode: 'copy'
+
+    input:
+    path(cutadapt_logs)
+
+    output:
+    path("primer_assignment.tsv"), emit: tsv
+
+    script:
+    """
+    parse_primer_assignment.py primer_assignment.tsv ${cutadapt_logs}
     """
 }

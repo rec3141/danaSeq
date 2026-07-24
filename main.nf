@@ -110,6 +110,7 @@ if (params.run_demultiplex && (!params.forward_bcs || !params.reverse_bcs)) {
 include { DEMULTIPLEX }       from './modules/demultiplex'
 include { DETECT_PRIMERS }    from './modules/primers'
 include { REMOVE_PRIMERS }    from './modules/primers'
+include { PRIMER_ASSIGNMENT } from './modules/primers'
 include { AUTO_TRIM }         from './modules/denoise'
 include { FILTER_TRIM }       from './modules/denoise'
 include { LEARN_ERRORS }      from './modules/denoise'
@@ -200,6 +201,10 @@ workflow {
     }
 
     // 3. Remove primers with cutadapt (skip if input is already trimmed)
+    // Cutadapt's own per-adapter counts are the record of which assay each sample
+    // really carries, so collect the logs from whichever branch ran. Stays empty
+    // when primer removal is skipped, and BUILD_VIZ handles that.
+    ch_cutadapt_logs = Channel.empty()
     if (params.skip_primer_removal || params.samplesheet) {
         // Samplesheet mode: primer removal happens per primer_pair, or data is pre-trimmed
         ch_trimmed = ch_demuxed
@@ -220,6 +225,7 @@ workflow {
                 }
 
             REMOVE_PRIMERS(ch_with_primers)
+            ch_cutadapt_logs = REMOVE_PRIMERS.out.log
             ch_trimmed = REMOVE_PRIMERS.out.reads
                 .map { meta, r1, r2 -> [meta, r1, r2] }
         }
@@ -234,6 +240,7 @@ workflow {
             .collectFile(name: 'primers_combined.fa')
         ch_with_primers = ch_demuxed.combine(ch_primers_combined)
         REMOVE_PRIMERS(ch_with_primers)
+        ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads
             .map { meta, r1, r2 ->
                 def parts = meta.id.split('_'); def plate = parts.size() > 2 ? parts[0..1].join('_') : parts[0]
@@ -245,6 +252,7 @@ workflow {
         ch_primer_files = Channel.fromPath("${projectDir}/primers/primers-*.fa").collect()
         DETECT_PRIMERS(ch_demuxed, ch_primer_files)
         REMOVE_PRIMERS(DETECT_PRIMERS.out.detected)
+        ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads
             .map { meta, r1, r2 ->
                 def parts = meta.id.split('_'); def plate = parts.size() > 2 ? parts[0..1].join('_') : parts[0]
@@ -307,6 +315,11 @@ workflow {
         }
 
     DENOISE(ch_denoise_input)
+
+
+    // One row per sample: which primer actually matched, and how many reads.
+    PRIMER_ASSIGNMENT(ch_cutadapt_logs.collect())
+    ch_primer_assignment = PRIMER_ASSIGNMENT.out.tsv
 
     // 5. Merge all sequence tables and remove chimeras
     ch_all_seqtabs = DENOISE.out.seqtab.map { meta, rds -> rds }.collect()
@@ -391,7 +404,8 @@ workflow {
             ch_metadata.ifEmpty(file('NO_METADATA')),
             CLUSTER_TSNE.out.sample_tsne.ifEmpty(file('NO_SAMPLE_TSNE')),
             CLUSTER_TSNE.out.seq_tsne.ifEmpty(file('NO_SEQ_TSNE')),
-            NETWORK_SPARCC.out.correlations.ifEmpty(file('NO_NETWORK'))
+            NETWORK_SPARCC.out.correlations.ifEmpty(file('NO_NETWORK')),
+            ch_primer_assignment.ifEmpty(file('NO_PRIMER_ASSIGNMENT'))
         )
 
         // 13. Optional: bundle static viz site (requires Node.js)
