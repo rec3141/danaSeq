@@ -524,14 +524,15 @@ for r in rows:
 // ============================================================================
 // ECOSSDB — Ecosystem Services Profiling
 // ============================================================================
-
-def ecossdb_bin = "${projectDir}/ecossdb/bin"
+// NB: ecossdb's bin dir is inlined into each beforeScript below rather than a
+// top-level `def` — Nextflow 26's strict parser rejects bare top-level
+// statements ("Statements cannot be mixed with script declarations").
 
 process ECOSSDB_MAP {
     tag "ecossdb_map"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-classify"
-    beforeScript "export PATH=${ecossdb_bin}:\$PATH"
+    beforeScript "export PATH=${projectDir}/ecossdb/bin:\$PATH"
     publishDir "${params.outdir}/metabolism/ecossdb", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb" : null
 
@@ -583,7 +584,7 @@ process ECOSSDB_SCORE {
     tag "ecossdb_score"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-classify"
-    beforeScript "export PATH=${ecossdb_bin}:\$PATH"
+    beforeScript "export PATH=${projectDir}/ecossdb/bin:\$PATH"
     publishDir "${params.outdir}/metabolism/ecossdb", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb_score" : null
 
@@ -611,7 +612,7 @@ process ECOSSDB_SDG {
     tag "ecossdb_sdg"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-classify"
-    beforeScript "export PATH=${ecossdb_bin}:\$PATH"
+    beforeScript "export PATH=${projectDir}/ecossdb/bin:\$PATH"
     publishDir "${params.outdir}/metabolism/ecossdb/sdg", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb_sdg" : null
 
@@ -641,7 +642,7 @@ process ECOSSDB_VIZ {
     tag "ecossdb_viz"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-classify"
-    beforeScript "export PATH=${ecossdb_bin}:\$PATH"
+    beforeScript "export PATH=${projectDir}/ecossdb/bin:\$PATH"
     publishDir "${params.outdir}/metabolism/ecossdb", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb_viz" : null
 
