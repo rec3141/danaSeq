@@ -265,6 +265,37 @@ workflow {
               --bam_dir  ${params.outdir}/mapping/
             """.stripIndent()
         println msg
+
+        // Run manifest — record pipeline version, resolved parameters, and per-process tool
+        // images so downstream reporting (omc-platform Methods drafting + agents) can state
+        // what actually ran instead of "not specified in the outputs". (danaSeq #24)
+        try {
+            def outDir = new File("${params.outdir}")
+            if (outDir.exists()) {
+                def safeParams = params.collectEntries { k, v ->
+                    [k, (v == null || v instanceof Number || v instanceof Boolean || v instanceof String || v instanceof List || v instanceof Map) ? v : "${v}"]
+                }
+                def manifest = [
+                    pipeline        : "${workflow.manifest.name ?: 'danaSeq'} v${workflow.manifest.version ?: 'dev'}",
+                    revision        : (workflow.revision ?: workflow.commitId ?: null),
+                    commit_id       : workflow.commitId,
+                    nextflow_version: "${nextflow.version}",
+                    command_line    : workflow.commandLine,
+                    started         : "${workflow.start}",
+                    completed       : "${workflow.complete}",
+                    duration        : "${workflow.duration}",
+                    success         : workflow.success,
+                    containers      : workflow.container,
+                    parameters      : safeParams,
+                ]
+                new File(outDir, 'run_manifest.json').text =
+                    groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest))
+                println "[INFO] Wrote run manifest: ${params.outdir}/run_manifest.json"
+            }
+        } catch (Exception e) {
+            println "[WARN] Could not write run_manifest.json: ${e.message}"
+        }
+
         if (!workflow.success) {
             println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
         }
