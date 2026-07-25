@@ -38,6 +38,7 @@ def helpMessage() {
       --primers_rev PATH   Reverse primer FASTA (overrides auto-selection)
       --primer_error_rate  Cutadapt error rate [default: 0.12]
       --primer_detect_reads N  Reads sampled for primer detection [default: 500]
+      --min_group_samples N    Min samples before a run/assay group is pooled [default: 3]
 
     Demultiplexing (optional):
       --run_demultiplex    Enable demultiplexing with Mr_Demuxy [default: false]
@@ -178,12 +179,24 @@ def runIdFromReads(reads) {
     }
 }
 
-// Sequencing run when we can recover it, else the historical accession/plate split.
-def plateFor(meta, reads) {
+// Grouping key for AUTO_TRIM and LEARN_ERRORS: the sequencing run when we can
+// recover it, else the historical accession/plate split.
+//
+// The assay is part of the key because one flowcell can carry more than one
+// amplicon, and those differ in both length and error structure — a 16S V3-V4
+// product and an 18S V4 product on the same run want their own truncation and
+// their own error model. Where a run carries a single assay this is a no-op.
+def plateFor(meta, reads, assay = null) {
     def runId = runIdFromReads(reads)
-    if (runId) return runId
-    def parts = meta.id.split('_')
-    return parts.size() > 2 ? parts[0..1].join('_') : parts[0]
+    def base = runId
+    if (!base) {
+        def parts = meta.id.split('_')
+        base = parts.size() > 2 ? parts[0..1].join('_') : parts[0]
+    }
+    if (assay && assay != 'none') {
+        base = "${base}__${assay}".replaceAll(/[^A-Za-z0-9._-]/, '_')
+    }
+    return base
 }
 
 workflow {
@@ -277,7 +290,9 @@ workflow {
             REMOVE_PRIMERS(ch_with_primers)
             ch_cutadapt_logs = REMOVE_PRIMERS.out.log
             ch_trimmed = REMOVE_PRIMERS.out.reads
-                .map { meta, r1, r2 -> [meta, r1, r2] }
+                .map { meta, r1, r2, assay ->
+                    [meta + [plate: plateFor(meta, r1, assay)], r1, r2]
+                }
         }
     } else if (params.primers_fwd && params.primers_rev) {
         // REMOVE_PRIMERS applies one primer file to both reads (cutadapt -g/-G
@@ -292,9 +307,8 @@ workflow {
         REMOVE_PRIMERS(ch_with_primers)
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads
-            .map { meta, r1, r2 ->
-                def new_meta = meta + [plate: plateFor(meta, r1)]
-                [new_meta, r1, r2]
+            .map { meta, r1, r2, assay ->
+                [meta + [plate: plateFor(meta, r1, assay)], r1, r2]
             }
     } else {
         // Detect the primer pair per sample from the reads themselves
@@ -302,11 +316,28 @@ workflow {
         REMOVE_PRIMERS(DETECT_PRIMERS.out.detected)
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads
-            .map { meta, r1, r2 ->
-                def new_meta = meta + [plate: plateFor(meta, r1)]
-                [new_meta, r1, r2]
+            .map { meta, r1, r2, assay ->
+                [meta + [plate: plateFor(meta, r1, assay)], r1, r2]
             }
     }
+
+    // A group too small to fit an error model is pooled rather than fitted alone.
+    // DADA2 fits a parametric model over quality bins; below a few samples most
+    // bins are noise, and a noisy model is worse than a slightly mismatched one
+    // shared with neighbours. Pool and say so, rather than fit in silence (#7).
+    ch_trimmed = ch_trimmed
+        .map { meta, r1, r2 -> [meta.plate, meta, r1, r2] }
+        .groupTuple(by: 0)
+        .flatMap { plate, metas, r1s, r2s ->
+            def pooled = metas.size() < params.min_group_samples
+            if (pooled) {
+                log.warn "Group '${plate}' has only ${metas.size()} sample(s) — " +
+                         "pooling it for truncation and error learning " +
+                         "(--min_group_samples ${params.min_group_samples})"
+            }
+            def key = pooled ? 'pooled' : plate
+            (0..<metas.size()).collect { i -> [metas[i] + [plate: key], r1s[i], r2s[i]] }
+        }
 
     // 4a. Auto-detect truncation lengths per plate (or use explicit params)
     if (params.auto_trim && params.truncLen_fwd == 0 && params.truncLen_rev == 0) {

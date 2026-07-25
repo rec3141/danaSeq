@@ -50,7 +50,11 @@ process REMOVE_PRIMERS {
     tuple val(meta), path(r1), path(r2), path(primer_file)
 
     output:
-    tuple val(meta), path("${meta.id}_R1.trimmed.fastq.gz"), path("${meta.id}_R2.trimmed.fastq.gz"), emit: reads
+    // ASSAY is the adapter cutadapt matched most often — the sample's amplicon,
+    // as observed rather than declared. It rides along with the reads so error
+    // models and truncation can be grouped per assay without a second pass over
+    // the logs (issue #7).
+    tuple val(meta), path("${meta.id}_R1.trimmed.fastq.gz"), path("${meta.id}_R2.trimmed.fastq.gz"), env(ASSAY), emit: reads
     path("${meta.id}_cutadapt.log"), emit: log
 
     script:
@@ -67,7 +71,20 @@ process REMOVE_PRIMERS {
         ${r1} ${r2} \\
         > ${meta.id}_cutadapt.log 2>&1
 
-    echo "[INFO] ${meta.id}: primer removal complete (${primer_file})" >&2
+    # Winning 5' adapter, straight out of cutadapt's own per-adapter counts.
+    # "none" when nothing matched — a sample with no assay must not silently
+    # join whichever group happens to be first.
+    ASSAY=\$(awk '/^=== First read: Adapter/{n=\$5}
+                  /Trimmed: [0-9]+ times/{
+                      if (match(\$0, /Trimmed: [0-9]+/)) {
+                          v = substr(\$0, RSTART+9, RLENGTH-9) + 0
+                          if (v > best) { best = v; bn = n }
+                      }
+                  }
+                  END { print (bn == "" ? "none" : bn) }' "${meta.id}_cutadapt.log")
+    export ASSAY
+
+    echo "[INFO] ${meta.id}: primer removal complete (${primer_file}), assay=\$ASSAY" >&2
     """
 }
 
