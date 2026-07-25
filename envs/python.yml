@@ -14,4 +14,4 @@ dependencies:
   - pip
   - pip:
     - git+https://github.com/rec3141/papa2.git
-    - git+https://github.com/rec3141/microscape.git@01a8ee3
+    - git+https://github.com/rec3141/microscape.git@d9b4645
