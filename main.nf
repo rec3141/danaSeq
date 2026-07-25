@@ -136,6 +136,56 @@ include { BUNDLE_VIZ_SITE }  from './modules/shiny'
 // Main workflow
 // ============================================================================
 
+
+// ── Sequencing-run recovery ──────────────────────────────────────────────────
+//
+// `plate` groups samples for AUTO_TRIM (pooled quality profile) and LEARN_ERRORS
+// (one DADA2 error model per group). For SRA input it used to collapse to the
+// run accession, so every sample became its own group — a parametric error model
+// fitted on as few as ~1.4k reads, and a truncation length chosen from one
+// sample's ragged length distribution.
+//
+// The grouping is recoverable. SRA rewrites the read identifier, but
+// fasterq-dump keeps the submitter's original name in field 2:
+//
+//   @SRR38958117.1 M04437:232:000000000-BNWCH:1:1101:16513:1933 length=251
+//                  └── instrument:run:flowcell:lane ──┘
+//
+// which is exactly the unit DADA2 wants an error model for. Present in 822/822
+// runs across every dataset checked (NCBI and DDBJ), but it depends on the
+// submitter having uploaded original names, so this always falls back.
+def runIdFromReads(reads) {
+    try {
+        def first = (reads instanceof List || reads instanceof Object[]) ? reads[0] : reads
+        def path = first as java.nio.file.Path
+        def raw = java.nio.file.Files.newInputStream(path)
+        def stream = path.toString().endsWith('.gz') ? new java.util.zip.GZIPInputStream(raw) : raw
+        def line = new BufferedReader(new InputStreamReader(stream)).readLine()
+        stream.close()
+        if (!line) return null
+        def fields = line.trim().split(/\s+/)
+        if (fields.size() < 2) return null
+        def parts = fields[1].split(':')
+        // instrument:run:flowcell:lane — anything shorter isn't an Illumina header
+        if (parts.size() < 4) return null
+        // The group name becomes part of a filename (e.g. <plate>_errF.pkl), and
+        // Nextflow escapes colons in paths, which then don't resolve. Keep it
+        // filesystem-safe while still readable as instrument_run_flowcell_lane.
+        return parts[0..3].join(':').replaceAll(/[^A-Za-z0-9._-]/, '_')
+    }
+    catch (Exception e) {
+        return null
+    }
+}
+
+// Sequencing run when we can recover it, else the historical accession/plate split.
+def plateFor(meta, reads) {
+    def runId = runIdFromReads(reads)
+    if (runId) return runId
+    def parts = meta.id.split('_')
+    return parts.size() > 2 ? parts[0..1].join('_') : parts[0]
+}
+
 workflow {
 
     // 1. Discover input reads
@@ -211,8 +261,7 @@ workflow {
         ch_trimmed = ch_demuxed
             .map { meta, r1, r2 ->
                 if (!meta.plate) {
-                    def parts = meta.id.split('_'); def plate = parts.size() > 2 ? parts[0..1].join('_') : parts[0]
-                    meta = meta + [plate: plate]
+                    meta = meta + [plate: plateFor(meta, r1)]
                 }
                 [meta, r1, r2]
             }
@@ -244,8 +293,7 @@ workflow {
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads
             .map { meta, r1, r2 ->
-                def parts = meta.id.split('_'); def plate = parts.size() > 2 ? parts[0..1].join('_') : parts[0]
-                def new_meta = meta + [plate: plate]
+                def new_meta = meta + [plate: plateFor(meta, r1)]
                 [new_meta, r1, r2]
             }
     } else {
@@ -255,8 +303,7 @@ workflow {
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads
             .map { meta, r1, r2 ->
-                def parts = meta.id.split('_'); def plate = parts.size() > 2 ? parts[0..1].join('_') : parts[0]
-                def new_meta = meta + [plate: plate]
+                def new_meta = meta + [plate: plateFor(meta, r1)]
                 [new_meta, r1, r2]
             }
     }
