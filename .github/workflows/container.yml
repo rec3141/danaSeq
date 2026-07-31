@@ -81,6 +81,18 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=
 
+      # Resolve the two git dependencies' HEADs so the pip layer's cache key moves when
+      # they do. Without this an unpinned URL leaves the layer valid forever and the
+      # image silently keeps whatever it first installed.
+      - name: Resolve upstream dependency HEADs
+        id: deps
+        run: |
+          for r in microscape papa2; do
+            sha=$(git ls-remote https://github.com/rec3141/$r.git HEAD | cut -f1)
+            echo "${r}_sha=${sha}" >> "$GITHUB_OUTPUT"
+            echo "  $r -> $sha"
+          done
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -92,6 +104,8 @@ jobs:
           # The image tag already carries the SHA, but nothing inside could read it, so
           # every run recorded a null commit.
           build-args: |
+            MICROSCAPE_SHA=${{ steps.deps.outputs.microscape_sha }}
+            PAPA2_SHA=${{ steps.deps.outputs.papa2_sha }}
             GIT_SHA=${{ github.sha }}
             GIT_REF=${{ github.ref_name }}
             BUILD_DATE=${{ github.event.repository.updated_at }}

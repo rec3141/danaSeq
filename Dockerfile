@@ -15,8 +15,13 @@ LABEL org.opencontainers.image.description="Microscape amplicon sequencing pipel
 #   -version below) and runtime; the miniforge3 base ships no Java.
 # - build-essential + zlib1g-dev: papa2 compiles a C lib (`make libpapa2.so`)
 #   during its wheel build; it needs make + gcc/g++ and the zlib dev headers.
+# - which: GNU which. The base image defines a `which` shell FUNCTION that passes
+#   --tty-only --read-alias --read-functions, but Debian 12+ ships debianutils' which,
+#   which accepts only [-as]. Every `which java` in nextflow's launcher therefore printed
+#   "Illegal option --" ahead of its real output — harmless to runs, but it polluted every
+#   invocation and made the version probe record the error as the version.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        procps curl default-jre-headless build-essential zlib1g-dev \
+        procps curl default-jre-headless build-essential zlib1g-dev which \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js (NodeSource LTS) for BUNDLE_VIZ_SITE, which builds the static viz SPA
@@ -44,12 +49,26 @@ RUN curl -fsSL https://get.nextflow.io | bash \
 # Copy environment specs
 COPY envs/ /tmp/envs/
 
+# Upstream HEADs of the two git dependencies, resolved by CI at build time.
+#
+# envs/python.yml installs papa2 and microscape unpinned, which is right while both are
+# in active development — but an unpinned URL does not change, so Docker restores the
+# cached layer and pip never re-fetches. papa2's version PR merged three minutes before
+# a build and the image still shipped a four-month-old commit.
+#
+# Naming the SHAs here changes the layer key whenever upstream moves, so "unpinned"
+# actually means latest. They are recorded rather than enforced: what was really
+# installed is read back from pip's direct_url.json by bin/tool_versions.sh.
+ARG MICROSCAPE_SHA=main
+ARG PAPA2_SHA=main
+
 # Create Python environment (papa2 + microscape from bioconda)
 # No `mamba clean` here: /opt/conda/pkgs is a BuildKit cache mount (already
 # excluded from the image layer), and cleaning it fails with "Device or
 # resource busy" because it's a live mount point.
 RUN --mount=type=cache,target=/opt/conda/pkgs \
-    mamba env create -y -p /opt/conda/envs/microscape-python \
+    echo "upstream: microscape=${MICROSCAPE_SHA} papa2=${PAPA2_SHA}" \
+    && mamba env create -y -p /opt/conda/envs/microscape-python \
         -f /tmp/envs/python.yml
 
 # Create R environment (dada2, DECIPHER from bioconda)

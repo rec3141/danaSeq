@@ -10,7 +10,13 @@
 # manifest that is missing is worse than one with a hole in it.
 set -uo pipefail
 
-first_line() { head -n1 2>/dev/null | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+version_line() {
+    # First line containing something version-shaped, not simply the first line.
+    # This container's nextflow prints "Illegal option --" ahead of its real output —
+    # for BOTH -v and -version, so it is not the flag — and that error was being
+    # recorded as the version. `-v` gives the terser single line of the two.
+    tr -d '\r' | grep -m1 -E '[0-9]+\.[0-9]+' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
 # Most tools print to stdout; a few (FastTree, mafft) use stderr.
 probe() {
     # `bin` is the first word of the command; if the shell cannot find it the tool is
@@ -18,7 +24,7 @@ probe() {
     # Merging stderr made "command not found" look like a version banner.
     local bin=${1%% *}
     command -v "$bin" >/dev/null 2>&1 || { printf '__ABSENT__'; return; }
-    { eval "$1"; } 2>&1 | first_line
+    { eval "$1"; } 2>&1 | version_line
 }
 
 # tool -> command, and a regex to pull the bare version out of a chatty banner
@@ -73,7 +79,7 @@ for spec in \
     "fasttree|FastTree -expert" \
     "python|python --version" \
     "R|R --version" \
-    "nextflow|nextflow -version" \
+    "nextflow|nextflow -v" \
     "dada2|Rscript -e 'cat(as.character(packageVersion(\"dada2\")))'" \
     "decipher|Rscript -e 'cat(as.character(packageVersion(\"DECIPHER\")))'" \
     "ape|Rscript -e 'cat(as.character(packageVersion(\"ape\")))'" \
