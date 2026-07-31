@@ -60,9 +60,26 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 # Put both envs on PATH so tools are available without conda activate
 ENV PATH="/opt/conda/envs/microscape-python/bin:/opt/conda/envs/microscape-r/bin:${PATH}"
 
+# Provenance, baked at build time.
+#
+# There is no git repository inside the image, so `workflow.commitId` is null for every
+# run launched from the .sif — which is how this pipeline actually runs. Three different
+# main.nf versions were once in play at once (the one that produced a dataset, the one
+# shipped in the container, and the one in git) with no way to tell them apart. CI
+# already tags the image with the SHA; this puts it somewhere the pipeline can read.
+ARG GIT_SHA=unknown
+ARG GIT_REF=unknown
+ARG BUILD_DATE=unknown
+ENV MICROSCAPE_GIT_SHA=${GIT_SHA} \
+    MICROSCAPE_GIT_REF=${GIT_REF} \
+    MICROSCAPE_BUILD_DATE=${BUILD_DATE}
+LABEL org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.version="${GIT_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
 # Copy pipeline code
 COPY . /pipeline/
-RUN chmod +x /pipeline/bin/*.R /pipeline/entrypoint.sh
+RUN chmod +x /pipeline/bin/*.R /pipeline/bin/*.sh /pipeline/entrypoint.sh
 
 # Pre-install the viz app's node_modules so BUNDLE_VIZ_SITE's `npm install
 # --prefer-offline` + `vite build` succeed on offline compute nodes.
