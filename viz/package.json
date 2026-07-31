@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@fontsource/inter": "^5.0.0",
+    "@phylocanvas/phylocanvas.gl": "^1.62.0",
     "plotly.js-dist-min": "^3.7.0",
     "regl-scatterplot": "^1.10.0"
   }

@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
   import {
     store, countsBySample,
@@ -12,6 +12,20 @@
 
   let plotDiv;
   let hasPlot = false;
+  let lastPoints = null;   // point sizes for the scale-only restyle path
+
+  // The table recomputed these for EVERY row. They depend only on the filters, so
+  // derive them once — buildTaxColorMap walks every ASV assignment per call.
+  let tableColorLevel = $derived(
+    filters.colorMode === 'group'
+      ? 'group'
+      : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter)
+  );
+  let tableColorMap = $derived.by(() =>
+    tableColorLevel !== 'group'
+      ? buildTaxColorMap(tableColorLevel, filters.taxonFilter).colorMap
+      : null
+  );
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
@@ -81,6 +95,14 @@
 
   // ── Build plotly traces ───────────────────────────────────────────────────
 
+  // Point scale alone does not change the data, only marker size — restyle instead of
+  // rebuilding every trace.
+  $effect(() => {
+    const scale = filters.pointScale ?? 1;
+    if (!plotDiv || !hasPlot || !lastPoints) return;
+    Plotly.restyle(plotDiv, { 'marker.size': [lastPoints.map(sz => Math.min(60, sz * scale))] }, [0]);
+  });
+
   $effect(() => {
     if (!plotDiv) return;
     if (filteredSamples.length === 0) {
@@ -90,6 +112,7 @@
         annotations: [{ text: 'No samples match filters', showarrow: false,
           font: { color: '#64748b', size: 14 }, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
       });
+      lastPoints = null;
       return;
     }
 
@@ -97,7 +120,9 @@
     const cmap = colorLevel !== 'group' ? buildTaxColorMap(colorLevel, filters.taxonFilter).colorMap : null;
     const re = taxonRe();
     const gf = filters.groupFlags || {};
-    const scale = filters.pointScale ?? 1;
+    // untracked: a scale change is handled by the restyle effect below, which does not
+    // rebuild the plot. Reading it reactively here would defeat that.
+    const scale = untrack(() => filters.pointScale ?? 1);
 
     // Use pre-aggregated counts if available, otherwise fall back to on-the-fly
     const isAsvLevel = colorLevel === '_asv';
@@ -197,13 +222,18 @@
     allPoints.sort((a, b) => b.proportion - a.proportion);
     const totalPoints = allPoints.length;
 
+    // Base sizes, unscaled AND uncapped. The cap is applied after scaling in both the
+    // build and the restyle, so the two paths cannot drift: capping first would let a
+    // scale > 1 push points past the 60 limit main enforces.
+    lastPoints = allPoints.map(p => p.size * 0.3);
+
     const overlayTraces = [{
       x: allPoints.map(p => p.x),
       y: allPoints.map(p => p.y),
       mode: 'markers',
       type: 'scattergl',
       marker: {
-        size: allPoints.map(p => Math.min(60, p.size * scale * 0.3)),
+        size: lastPoints.map(sz => Math.min(60, sz * scale)),
         color: allPoints.map(p => p.color),
         opacity: 0.7,
         line: { width: 0 },
@@ -338,8 +368,8 @@
             </thead>
             <tbody class="text-slate-300">
               {#each topTaxa as row}
-                {@const colorLevel = filters.colorMode === 'group' ? 'group' : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter)}
-                {@const cmap = colorLevel !== 'group' ? buildTaxColorMap(colorLevel, filters.taxonFilter).colorMap : null}
+                {@const colorLevel = tableColorLevel}
+                {@const cmap = tableColorMap}
                 {@const rowColor = cmap ? getAsvColor(row.asv.id, colorLevel, cmap) : (GROUP_HEX[row.asv.group] ?? GROUP_HEX.prokaryote)}
                 <tr class="border-t border-slate-800/50 hover:bg-slate-800/30">
                   <td class="py-1 pr-4 font-mono">

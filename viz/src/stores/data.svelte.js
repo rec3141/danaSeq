@@ -101,7 +101,14 @@ export function taxaMatchingFilter(level, taxonFilter = '') {
 }
 
 
+// Memo for buildTaxColorMap. It is called many times with the same arguments in one
+// render cycle, and each call walks every ASV assignment.
+let _taxColorCache = { key: '', result: { colorMap: {}, ranked: [] } };
+
 export function buildTaxColorMap(level, taxonFilter = '') {
+  const cacheKey = `${level}|${taxonFilter}`;
+  if (_taxColorCache.key === cacheKey) return _taxColorCache.result;
+
   const db = Object.keys(store.taxonomy)[0];
   if (!db || !store.taxonomy[db]) return { colorMap: {}, ranked: [] };
 
@@ -132,13 +139,16 @@ export function buildTaxColorMap(level, taxonFilter = '') {
       .filter(id => id && (!filteredAsvIds || filteredAsvIds.has(id)));
     const palette = generatePalette(asvIds.length);
     const colorMap = {};
+    // Map, not .find() per element — this ran O(n^2) over every ASV.
+    const asvLookup = new Map(store.asvs.map(a => [a.id, a]));
     const ranked = asvIds.map((id, i) => {
       colorMap[id] = palette[i];
-      const asv = store.asvs.find(a => a.id === id);
-      return { name: id, count: asv?.total_reads ?? 0, color: palette[i] };
+      return { name: id, count: asvLookup.get(id)?.total_reads ?? 0, color: palette[i] };
     });
     ranked.sort((a, b) => b.count - a.count);
-    return { colorMap, ranked };
+    const result = { colorMap, ranked };
+    _taxColorCache = { key: cacheKey, result };
+    return result;
   }
 
   const levelIdx = levels.indexOf(level);
@@ -164,7 +174,9 @@ export function buildTaxColorMap(level, taxonFilter = '') {
     colorMap[ranked[i].name] = palette[i];
   }
 
-  return { colorMap, ranked };
+  const result = { colorMap, ranked };
+  _taxColorCache = { key: cacheKey, result };
+  return result;
 }
 
 /**
@@ -362,6 +374,7 @@ export async function loadData() {
 
     store.samples = samples;
     store.asvs = asvs;
+    _taxColorCache = { key: '', result: { colorMap: {}, ranked: [] } };  // memo depends on these
     store.counts = counts;
     store.network = network;
     store.taxonomy = taxonomy;
