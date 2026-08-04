@@ -11,14 +11,16 @@ MERGE were impossible to attribute. Stages tracked:
     raw      Raw read pairs                 (cutadapt logs)
     primer   After primer removal           (cutadapt logs)
     filter   After DADA2 quality filter      (*_filt_stats.tsv)
-    denoise  After denoise + merge pairs     (seqtabs/*.seqtab.tsv, per sample)
+    denoise  After denoise + merge pairs     (seqtabs/*.seqtab.tsv, per ROW)
     merge    After combining seqtabs         (merge_sample_reads.tsv)
     chimera  After chimera removal           (chimera_sample_reads.tsv)
     final    Final filtered table            (final_sample_reads.tsv)
 
-Comparing `denoise` (every published per-sample seqtab) against `merge` is what
-exposes any sample dropped between the two — the failure mode that silently lost
-~75% of samples before DENOISE was hardened against crashing.
+Comparing `denoise` (every published seqtab) against `merge` is what exposes any
+sample dropped between the two — the failure mode that silently lost ~75% of
+samples before DENOISE was hardened against crashing. A seqtab file is NOT one
+sample: since error models are keyed on (run, assay), one file holds every sample
+in its group, so samples are read off the row labels.
 
 Usage: read_tracking.py <out.tsv> [cutadapt_logs...] [filt_stats...]
 
@@ -52,21 +54,38 @@ def _num(m):
     return int(m.group(1).replace(",", "")) if m else 0
 
 
-def _sum_seqtab_tsv(path):
-    """Total reads in a per-sample wide seqtab TSV (row = sample, cols = ASVs)."""
+def _seqtab_row_totals(path):
+    """Per-sample read totals from a wide seqtab TSV (row = sample, cols = ASVs).
+
+    Keyed on the ROW LABEL, never the filename. DENOISE used to publish one seqtab
+    per sample, so the filename WAS the sample; since error models are keyed on
+    (run, assay) it publishes one seqtab per GROUP, whose name is not a sample at
+    all. Reading the filename credited a whole group's reads to a fictitious
+    sample and left every real sample at 0 — which silently disabled the
+    denoise-vs-merge comparison this table exists to make, the check that caught
+    ~75% of samples vanishing before DENOISE was hardened.
+
+    Row labels are correct under both layouts, so this needs no knowledge of which
+    one produced the file.
+    """
+    totals = {}
     try:
         with open(path) as fh:
-            next(fh, None)  # header
-            total = 0
+            next(fh, None)  # header: sample, then one column per ASV
             for line in fh:
-                for cell in line.rstrip("\n").split("\t")[1:]:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 2:
+                    continue
+                n = 0
+                for cell in parts[1:]:
                     try:
-                        total += int(float(cell))
+                        n += int(float(cell))
                     except ValueError:
                         pass
-            return total
+                totals[parts[0]] = totals.get(parts[0], 0) + n
     except OSError:
-        return 0
+        pass
+    return totals
 
 
 def _read_sample_reads_tsv(path, samples, col):
@@ -127,11 +146,15 @@ def main():
             except ValueError:
                 pass
 
-    # 4: denoise — sum every published per-sample seqtab (all of them, so a
-    # sample present here but missing from `merge` reveals a DENOISE->MERGE loss)
+    # 4: denoise — every published seqtab, attributed row by row (all of them, so
+    # a sample present here but missing from `merge` reveals a DENOISE->MERGE loss).
+    # Accumulated rather than assigned: one seqtab per group means a sample could
+    # in principle appear in more than one file, and a silent overwrite there would
+    # under-report exactly the loss this comparison is looking for.
     for f in sorted(glob.glob(os.path.join(seqtabs_dir, "*.seqtab.tsv"))):
-        acc = os.path.basename(f)[: -len(".seqtab.tsv")]
-        samples.setdefault(acc, {})["reads_after_denoise"] = _sum_seqtab_tsv(f)
+        for acc, total in _seqtab_row_totals(f).items():
+            d = samples.setdefault(acc, {})
+            d["reads_after_denoise"] = d.get("reads_after_denoise", 0) + total
 
     # 5-7: merge / chimera / final per-sample read TSVs
     _read_sample_reads_tsv(os.path.join(seqtab_final_dir, "merge_sample_reads.tsv"),
