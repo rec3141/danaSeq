@@ -91,6 +91,31 @@ _DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
                          "primers", "tables")
 
 
+def _insert_from_expected(expected, fwd: str, rev: str) -> int | None:
+    """Insert length after primer removal, or None if not usable.
+
+    Rejects values that cannot be a real amplicon: non-numeric, or an insert
+    outside 50..2000bp once the primers come off. A wrong length here would
+    silence a genuine overlap warning or raise a false one, so a missing value is
+    better than a bad one.
+    """
+    try:
+        total = int(float(str(expected).strip()))
+    except (TypeError, ValueError):
+        return None
+    insert = total - len(fwd) - len(rev)
+    return insert if 50 <= insert <= 2000 else None
+
+
+def insert_length_for(fwd: str, rev: str) -> int | None:
+    """Expected merged-fragment length for a primer pair, by exact sequence match."""
+    f, r = fwd.strip().upper(), rev.strip().upper()
+    for rec in PRIMER_DB:
+        if rec.get("insert_length") and rec["fwd"] == f and rec["rev"] == r:
+            return rec["insert_length"]
+    return None
+
+
 def _load_vendored_primers() -> list[dict]:
     """Parse the vendored FoodMicrobionet primer tables (16S + ITS).
 
@@ -127,12 +152,19 @@ def _load_vendored_primers() -> list[dict]:
                         label = f"{marker} {region}"
                     else:
                         label = marker
-                    out.append({
+                    rec = {
                         "name": (row.get("primer_f_name") or "?").strip(),
                         "rev_name": (row.get("primer_r_name") or "?").strip(),
                         "region": label,
                         "fwd": fwd, "rev": rev,
-                    })
+                    }
+                    # expected_length is the amplicon INCLUDING both primers, so
+                    # the insert a merged pair has to span is that minus the two
+                    # primers cutadapt removed. Only the 16S table carries it.
+                    ins = _insert_from_expected(row.get("expected_length"), fwd, rev)
+                    if ins:
+                        rec["insert_length"] = ins
+                    out.append(rec)
         except OSError as e:
             logging.getLogger(__name__).warning("primer table %s unreadable: %s", fname, e)
     return out
@@ -185,13 +217,20 @@ def _enrich(entry: dict) -> dict:
 def _build_primer_db() -> list[dict]:
     """Core (canonical, verified) primers first, then vendored ones deduped by
     sequence — so a pair we curated keeps its clean name over any FMBN variant."""
-    db, seen = [], set()
+    db, seen = [], {}
     for p in _CORE_PRIMER_DB + _load_vendored_primers():
         key = (p["fwd"], p["rev"])
         if key in seen:
+            # Same pair already held. Keep the curated name, but take an
+            # insert_length the duplicate has and the winner lacks — only the
+            # vendored 16S table carries lengths, so otherwise a curated pair
+            # would silently lose the one field it cannot supply itself.
+            if p.get("insert_length") and not seen[key].get("insert_length"):
+                seen[key]["insert_length"] = p["insert_length"]
             continue
-        seen.add(key)
-        db.append(_enrich(p))
+        rec = _enrich(p)
+        seen[key] = rec
+        db.append(rec)
     return db
 
 

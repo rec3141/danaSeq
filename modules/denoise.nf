@@ -18,22 +18,12 @@ def denoiseEngine() { return params.denoise_engine ?: params.lang }
 def errExt() { return denoiseEngine() == 'python' ? 'pkl' : 'rds' }
 def seqExt() { return params.lang == 'python' ? 'pkl' : 'rds' }
 
-// PER-SAMPLE auto-trim. Every sample is profiled on its own reads; the group's
-// value is then chosen from those by TRUNC_POLICY.
+// Per-sample auto-trim: each sample is profiled on its own reads and gets its own
+// *_auto_trim.tsv. TRUNC_POLICY then chooses the group's value from these.
 //
-// This used to run once per plate over every read in the group pooled into one
-// directory. That did not produce a group consensus — the profiler samples the
-// first `n_reads_sampled` reads it encounters, which all come from whichever
-// sample sorts first, so the group's truncation was set by ONE arbitrary sample
-// chosen by filename order. Measured on 492f42d0: the group value equalled the
-// alphabetically-first sample's value in 12 of 14 groups, versus 6 of 14 for the
-// group max and 6 of 14 for the median. On 2d9fa6af it looked like a deliberate
-// "take the max" only because the first-sorting sample also happened to have the
-// highest value — a coincidence that hid the real behaviour.
-//
-// Profiling per sample also restores the per-sample *_auto_trim.tsv files, which
-// silently stopped existing when this went per-plate, taking with them the only
-// record of what each sample would have chosen for itself.
+// Profile per sample, never over a group's reads pooled together: the profiler
+// only reads the first `n_reads_sampled` reads it is given, so a pooled directory
+// yields the first sample's answer rather than the group's.
 process AUTO_TRIM {
     tag "${meta.id}"
     label 'process_low'
@@ -81,34 +71,27 @@ process AUTO_TRIM {
     """
 }
 
-// Collapse a group's per-sample truncation lengths into the one pair the group
-// will actually use, by an EXPLICIT policy, and record what was collapsed.
+// Collapse a group's per-sample truncation lengths into the single pair the group
+// will use, by --trunc_policy, and record what was collapsed.
 //
-// There is no free choice here, only a trade. DADA2 discards any read shorter
-// than truncLen, so a long value silently drops reads from every sample whose
-// quality falls off earlier; a short one keeps them but spends overlap, and if
-// overlap runs out mergePairs discards ~100% and the sample vanishes instead.
-// Measured on 2d9fa6af (one group, 12 samples): min recovered +51% final reads
-// and +26% ASVs over the longest value, at no cost in ASV length. Measured on
-// 492f42d0 (14 groups): a few degraded samples bottom out near 22bp, so `min`
-// there is set by the worst library in the group — which is why the default is a
-// low quantile rather than the minimum, and why the floor below still applies.
-//
-// Whatever is chosen, the per-sample values and the resulting loss are written
-// out. A truncation that discards half a sample's reads should never be silent.
+// The choice is a trade with a cliff on each side. DADA2 discards reads shorter
+// than truncLen, so a long value drops reads from every sample whose quality
+// falls off earlier. A short value keeps them but spends the overlap mergePairs
+// needs: once fwd + rev drops below the amplicon length plus min_overlap, pairs
+// stop merging and samples fall under min_reads instead. Both losses are silent
+// in the final table, which is why the per-sample values and the resulting loss
+// are written out here.
 process TRUNC_POLICY {
     tag "${plate_id}"
     label 'process_low'
-    // Echo this process's stdout to the run log. Without it Nextflow files process
-    // output in .command.out inside the work dir, where nobody looks — which is
-    // why AUTO_TRIM's existing [WARN] lines have never appeared in a single run
-    // log. A warning that a group is discarding half a sample's reads is worth
-    // nothing if it is only readable by someone who already suspects it.
+    // Echo stdout to the run log; without this the warnings below reach only
+    // .command.out in the work dir.
     debug true
     publishDir "${params.outdir}/quality_check", mode: 'copy', pattern: "*_trunc_policy.tsv"
 
     input:
     tuple val(plate_id), val(sample_ids), val(fwds), val(revs)
+    path primer_files    // fwd/rev fasta when --primers_* were given, else empty
 
     output:
     tuple val(plate_id), env(TRUNC_FWD), env(TRUNC_REV), emit: trim_params
@@ -126,6 +109,40 @@ SAMPLES_EOF
 policy  = "${params.trunc_policy}"
 min_len = int("${params.auto_trim_min_length}")
 plate   = "${plate_id}"
+min_overlap = int("${params.min_overlap}")
+min_seq_len = int("${params.min_seq_length}")
+expected    = int("${params.expected_amplicon_length}")
+
+# Fall back to the primer database when no length was given: expected_length in
+# the vendored 16S table minus the two primers cutadapt removed. 18S and ITS
+# tables carry no lengths, and de-novo inferred primers are in no table, so this
+# resolves for some runs and not others — say which, never guess.
+expected_src = "--expected_amplicon_length"
+if expected <= 0:
+    import glob as _glob, sys as _sys
+    _sys.path.insert(0, "${projectDir}/bin")
+    seqs = []
+    for fa in sorted(_glob.glob("*.fa")) + sorted(_glob.glob("*.fasta")):
+        cur = []
+        for line in open(fa):
+            line = line.strip()
+            if line.startswith(">"):
+                if cur: seqs.append("".join(cur)); cur = []
+            elif line:
+                cur.append(line.upper())
+        if cur: seqs.append("".join(cur))
+    try:
+        from primer_db import insert_length_for
+        for i in range(len(seqs)):
+            for j in range(len(seqs)):
+                if i == j: continue
+                hit = insert_length_for(seqs[i], seqs[j])
+                if hit:
+                    expected, expected_src = hit, "primer database"
+                    break
+            if expected > 0: break
+    except Exception as e:
+        print("[INFO] Trunc policy: primer database unavailable (%s)" % e)
 
 rows = []
 for line in open("samples.tsv"):
@@ -135,7 +152,8 @@ for line in open("samples.tsv"):
 if not rows:
     raise SystemExit("TRUNC_POLICY: no per-sample truncation values for " + plate)
 
-QUANTILES = {"q10": 0.10, "q25": 0.25, "median": 0.50, "q75": 0.75}
+# Percentiles of the group's per-sample truncation LENGTHS — not Phred scores.
+PERCENTILES = {"p10": 0.10, "p25": 0.25, "p50": 0.50, "p75": 0.75}
 
 def pick(vals):
     v = sorted(vals)
@@ -143,10 +161,16 @@ def pick(vals):
         return v[0]
     if policy == "max":
         return v[-1]
-    if policy not in QUANTILES:
+    if policy not in PERCENTILES:
+        hint = ""
+        if policy.startswith("q") and policy[1:].isdigit():
+            hint = (" — did you mean 'p" + policy[1:] + "'? These are percentiles of "
+                    "read length, not Phred quality scores")
+        elif policy == "median":
+            hint = " — the median is 'p50'"
         raise SystemExit("TRUNC_POLICY: unknown --trunc_policy '" + policy +
-                         "' (min, q10, q25, median, q75, max)")
-    i = QUANTILES[policy] * (len(v) - 1)
+                         "' (min, p10, p25, p50, p75, max)" + hint)
+    i = PERCENTILES[policy] * (len(v) - 1)
     lo = int(i); hi = min(lo + 1, len(v) - 1)
     return int(round(v[lo] + (i - lo) * (v[hi] - v[lo])))
 
@@ -159,6 +183,24 @@ fwd, rev = max(raw_fwd, min_len), max(raw_rev, min_len)
 # lose reads purely because of the group they landed in.
 past = [r[0] for r in rows if r[1] < fwd or r[2] < rev]
 
+# Can a merged fragment still exist? mergePairs needs fwd + rev to cover the
+# fragment plus min_overlap. Too little does not raise — pairs quietly fail to
+# merge, samples fall under min_reads, and the run returns a smaller table that
+# looks fine. Check it here, before denoising, not by counting missing samples
+# afterwards.
+span = fwd + rev
+floor_need = min_seq_len + min_overlap      # structural: shorter cannot merge at all
+frag_need = (expected + min_overlap) if expected > 0 else 0
+frag_warn = ""
+if span < floor_need:
+    frag_warn = ("span %d < min_seq_length %d + min_overlap %d = %d: no pair can merge "
+                 "into a sequence this pipeline would keep"
+                 % (span, min_seq_len, min_overlap, floor_need))
+elif frag_need and span < frag_need:
+    frag_warn = ("span %d < expected_amplicon_length %d + min_overlap %d = %d: pairs "
+                 "will fail to merge and samples will drop out under min_reads"
+                 % (span, expected, min_overlap, frag_need))
+
 with open(plate + "_trunc_policy.tsv", "w") as out:
     out.write("key\\tvalue\\n")
     out.write("policy\\t%s\\n" % policy)
@@ -167,13 +209,26 @@ with open(plate + "_trunc_policy.tsv", "w") as out:
     out.write("trunc_len_rev_applied\\t%d\\n" % rev)
     out.write("floored\\t%s\\n" % str(fwd != raw_fwd or rev != raw_rev).lower())
     out.write("samples_truncated_past_own\\t%d\\n" % len(past))
+    out.write("span_fwd_plus_rev\\t%d\\n" % span)
+    out.write("span_required\\t%d\\n" % max(floor_need, frag_need))
+    out.write("span_sufficient\\t%s\\n" % str(not frag_warn).lower())
+    out.write("expected_amplicon_length\\t%s\\n" % (expected if expected > 0 else ""))
+    out.write("expected_amplicon_source\\t%s\\n" % (expected_src if expected > 0 else "unknown"))
     out.write("#\\tper-sample values follow\\n")
     out.write("#sample\\ttrunc_fwd\\ttrunc_rev\\ttruncated_past_own\\n")
     for s, f, r in sorted(rows):
         out.write("%s\\t%d\\t%d\\t%s\\n" % (s, f, r, str(f < fwd or r < rev).lower()))
 
-print("[INFO] Trunc policy %s for %s: fwd=%d rev=%d from %d samples" %
-      (policy, plate, fwd, rev, len(rows)))
+print("[INFO] Trunc policy %s for %s: fwd=%d rev=%d from %d samples (span %d)" %
+      (policy, plate, fwd, rev, len(rows), span))
+if frag_warn:
+    print("[WARN] Trunc policy %s for %s: %s" % (policy, plate, frag_warn))
+elif expected > 0:
+    print("[INFO] Trunc policy %s for %s: span %d covers the %dbp fragment (%s) "
+          "plus %dbp overlap" % (policy, plate, span, expected, expected_src, min_overlap))
+else:
+    print("[INFO] Trunc policy %s for %s: overlap unchecked — no amplicon length for "
+          "these primers (set --expected_amplicon_length)" % (policy, plate))
 if past:
     print("[WARN] Trunc policy %s for %s: %d of %d samples truncated past their own "
           "quality cliff and will lose reads at the filter: %s"

@@ -3,10 +3,9 @@
 
 Builds one table tracing each sample's reads from the raw FASTQ all the way to
 the final ASV table, so where (and why) a sample loses reads — or drops out
-entirely — is visible at a glance. Every stage after primer removal used to be
-invisible (the stats files start post-cutadapt), which is why a sample discarded
-by cutadapt looked merely "shallow", and why samples lost between DENOISE and
-MERGE were impossible to attribute. Stages tracked:
+entirely — is visible at a glance. Counting starts at the raw FASTQ rather than
+at the stats files, which begin post-cutadapt: without that, a sample cutadapt
+discarded is indistinguishable from a shallow one. Stages tracked:
 
     raw      Raw read pairs                 (cutadapt logs)
     primer   After primer removal           (cutadapt logs)
@@ -16,11 +15,10 @@ MERGE were impossible to attribute. Stages tracked:
     chimera  After chimera removal           (chimera_sample_reads.tsv)
     final    Final filtered table            (final_sample_reads.tsv)
 
-Comparing `denoise` (every published seqtab) against `merge` is what exposes any
-sample dropped between the two — the failure mode that silently lost ~75% of
-samples before DENOISE was hardened against crashing. A seqtab file is NOT one
-sample: since error models are keyed on (run, assay), one file holds every sample
-in its group, so samples are read off the row labels.
+Comparing `denoise` (every published seqtab) against `merge` exposes any sample
+dropped between the two. A seqtab file is NOT one sample: error models are keyed
+on (run, assay), so one file holds every sample in its group and samples are read
+off the row labels.
 
 Usage: read_tracking.py <out.tsv> [cutadapt_logs...] [filt_stats...]
 
@@ -57,16 +55,8 @@ def _num(m):
 def _seqtab_row_totals(path):
     """Per-sample read totals from a wide seqtab TSV (row = sample, cols = ASVs).
 
-    Keyed on the ROW LABEL, never the filename. DENOISE used to publish one seqtab
-    per sample, so the filename WAS the sample; since error models are keyed on
-    (run, assay) it publishes one seqtab per GROUP, whose name is not a sample at
-    all. Reading the filename credited a whole group's reads to a fictitious
-    sample and left every real sample at 0 — which silently disabled the
-    denoise-vs-merge comparison this table exists to make, the check that caught
-    ~75% of samples vanishing before DENOISE was hardened.
-
-    Row labels are correct under both layouts, so this needs no knowledge of which
-    one produced the file.
+    Keyed on the ROW LABEL, never the filename: DENOISE publishes one seqtab per
+    (run, assay) GROUP, whose name is not a sample at all.
     """
     totals = {}
     try:
@@ -148,9 +138,8 @@ def main():
 
     # 4: denoise — every published seqtab, attributed row by row (all of them, so
     # a sample present here but missing from `merge` reveals a DENOISE->MERGE loss).
-    # Accumulated rather than assigned: one seqtab per group means a sample could
-    # in principle appear in more than one file, and a silent overwrite there would
-    # under-report exactly the loss this comparison is looking for.
+    # Accumulate rather than assign: a sample appearing in two groups must not
+    # overwrite itself, which would under-report that same loss.
     for f in sorted(glob.glob(os.path.join(seqtabs_dir, "*.seqtab.tsv"))):
         for acc, total in _seqtab_row_totals(f).items():
             d = samples.setdefault(acc, {})

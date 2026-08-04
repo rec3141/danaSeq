@@ -343,21 +343,24 @@ workflow {
 
     // 4a. Auto-detect truncation lengths (or use explicit params)
     if (params.auto_trim && params.truncLen_fwd == 0 && params.truncLen_rev == 0) {
-        // Profile every sample on its OWN reads. Pooling the group's reads into
-        // one directory and profiling that did not yield a group consensus — the
-        // profiler reads the first n_reads_sampled it finds, so the answer came
-        // from whichever sample sorted first (12/14 groups on 492f42d0).
         AUTO_TRIM(ch_trimmed)
 
-        // Collapse each group's per-sample values by an explicit --trunc_policy,
-        // which also writes down what it collapsed and who pays for it.
+        // Collapse each group's per-sample values by --trunc_policy.
         ch_trunc_policy_in = AUTO_TRIM.out.trim_params
             .map { meta, trunc_fwd, trunc_rev ->
                 [meta.plate, meta.id, trunc_fwd as Integer, trunc_rev as Integer]
             }
             .groupTuple(by: 0)
 
-        TRUNC_POLICY(ch_trunc_policy_in)
+        // Primer sequences let TRUNC_POLICY resolve the expected fragment length
+        // from the primer database. Only the explicit --primers_* path can supply
+        // them here; without them the overlap check falls back to the structural
+        // floor and says it is unchecked.
+        ch_trunc_primers = (params.primers_fwd && params.primers_rev)
+            ? Channel.fromPath([params.primers_fwd, params.primers_rev]).collect()
+            : Channel.value([])
+
+        TRUNC_POLICY(ch_trunc_policy_in, ch_trunc_primers)
 
         // Join trim params back to individual samples by plate
         ch_filter_input = ch_trimmed
