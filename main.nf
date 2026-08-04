@@ -114,6 +114,7 @@ include { DETECT_PRIMERS }    from './modules/primers'
 include { REMOVE_PRIMERS }    from './modules/primers'
 include { PRIMER_ASSIGNMENT } from './modules/primers'
 include { AUTO_TRIM }         from './modules/denoise'
+include { TRUNC_POLICY }      from './modules/denoise'
 include { FILTER_TRIM }       from './modules/denoise'
 include { LEARN_ERRORS }      from './modules/denoise'
 include { DENOISE }           from './modules/denoise'
@@ -140,7 +141,8 @@ include { BUNDLE_VIZ_SITE }  from './modules/shiny'
 
 // ── Sequencing-run recovery ──────────────────────────────────────────────────
 //
-// `plate` groups samples for AUTO_TRIM (pooled quality profile) and LEARN_ERRORS
+// `plate` groups samples for TRUNC_POLICY (which collapses the group's per-sample
+// truncation lengths by an explicit policy) and LEARN_ERRORS
 // (one DADA2 error model per group). For SRA input it used to collapse to the
 // run accession, so every sample became its own group — a parametric error model
 // fitted on as few as ~1.4k reads, and a truncation length chosen from one
@@ -339,20 +341,28 @@ workflow {
             (0..<metas.size()).collect { i -> [metas[i] + [plate: key], r1s[i], r2s[i]] }
         }
 
-    // 4a. Auto-detect truncation lengths per plate (or use explicit params)
+    // 4a. Auto-detect truncation lengths (or use explicit params)
     if (params.auto_trim && params.truncLen_fwd == 0 && params.truncLen_rev == 0) {
-        // Group trimmed reads by plate for per-plate quality profiling
-        ch_plate_reads_for_trim = ch_trimmed
-            .map { meta, r1, r2 -> [meta.plate, r1, r2] }
-            .groupTuple(by: 0)
-            .map { plate, r1s, r2s -> [plate, r1s.flatten() + r2s.flatten()] }
+        // Profile every sample on its OWN reads. Pooling the group's reads into
+        // one directory and profiling that did not yield a group consensus — the
+        // profiler reads the first n_reads_sampled it finds, so the answer came
+        // from whichever sample sorted first (12/14 groups on 492f42d0).
+        AUTO_TRIM(ch_trimmed)
 
-        AUTO_TRIM(ch_plate_reads_for_trim)
+        // Collapse each group's per-sample values by an explicit --trunc_policy,
+        // which also writes down what it collapsed and who pays for it.
+        ch_trunc_policy_in = AUTO_TRIM.out.trim_params
+            .map { meta, trunc_fwd, trunc_rev ->
+                [meta.plate, meta.id, trunc_fwd as Integer, trunc_rev as Integer]
+            }
+            .groupTuple(by: 0)
+
+        TRUNC_POLICY(ch_trunc_policy_in)
 
         // Join trim params back to individual samples by plate
         ch_filter_input = ch_trimmed
             .map { meta, r1, r2 -> [meta.plate, meta, r1, r2] }
-            .combine(AUTO_TRIM.out.trim_params, by: 0)
+            .combine(TRUNC_POLICY.out.trim_params, by: 0)
             .map { plate, meta, r1, r2, trunc_fwd, trunc_rev ->
                 [meta, r1, r2, trunc_fwd, trunc_rev]
             }
@@ -578,6 +588,7 @@ workflow.onComplete {
                     maxN                 : params.maxN,
                     truncLen_fwd         : params.truncLen_fwd,
                     truncLen_rev         : params.truncLen_rev,
+                    trunc_policy         : params.trunc_policy,
                     min_overlap          : params.min_overlap,
                     min_seq_length       : params.min_seq_length,
                     min_reads            : params.min_reads,

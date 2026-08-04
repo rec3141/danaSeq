@@ -18,22 +18,37 @@ def denoiseEngine() { return params.denoise_engine ?: params.lang }
 def errExt() { return denoiseEngine() == 'python' ? 'pkl' : 'rds' }
 def seqExt() { return params.lang == 'python' ? 'pkl' : 'rds' }
 
-// Per-plate auto-trim: computes truncation lengths from quality profiles
-// for each plate separately, so plates with different quality get different params.
+// PER-SAMPLE auto-trim. Every sample is profiled on its own reads; the group's
+// value is then chosen from those by TRUNC_POLICY.
+//
+// This used to run once per plate over every read in the group pooled into one
+// directory. That did not produce a group consensus — the profiler samples the
+// first `n_reads_sampled` reads it encounters, which all come from whichever
+// sample sorts first, so the group's truncation was set by ONE arbitrary sample
+// chosen by filename order. Measured on 492f42d0: the group value equalled the
+// alphabetically-first sample's value in 12 of 14 groups, versus 6 of 14 for the
+// group max and 6 of 14 for the median. On 2d9fa6af it looked like a deliberate
+// "take the max" only because the first-sorting sample also happened to have the
+// highest value — a coincidence that hid the real behaviour.
+//
+// Profiling per sample also restores the per-sample *_auto_trim.tsv files, which
+// silently stopped existing when this went per-plate, taking with them the only
+// record of what each sample would have chosen for itself.
 process AUTO_TRIM {
-    tag "${plate_id}"
+    tag "${meta.id}"
     label 'process_low'
     conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
     publishDir "${params.outdir}/quality_check", mode: 'copy', pattern: "*_auto_trim.tsv"
 
     input:
-    tuple val(plate_id), path(trimmed_reads)
+    tuple val(meta), path(r1), path(r2)
 
     output:
-    tuple val(plate_id), env(TRUNC_FWD), env(TRUNC_REV), emit: trim_params
-    path("${plate_id}_auto_trim.tsv"), emit: params_tsv
+    tuple val(meta), env(TRUNC_FWD), env(TRUNC_REV), emit: trim_params
+    path("${meta.id}_auto_trim.tsv"), emit: params_tsv
 
     script:
+    def plate_id = meta.id
     """
     microscape auto-trim "." \
         --min-quality ${params.auto_trim_min_quality} \
@@ -63,6 +78,111 @@ process AUTO_TRIM {
         echo "[WARN] Auto-trim ${plate_id}: floored trunc fwd \$RAW_FWD->\$TRUNC_FWD rev \$RAW_REV->\$TRUNC_REV (min \$MIN_LEN) — degraded library, expect loss at the quality filter"
     fi
     echo "[INFO] Auto-trim ${plate_id}: fwd=\$TRUNC_FWD rev=\$TRUNC_REV"
+    """
+}
+
+// Collapse a group's per-sample truncation lengths into the one pair the group
+// will actually use, by an EXPLICIT policy, and record what was collapsed.
+//
+// There is no free choice here, only a trade. DADA2 discards any read shorter
+// than truncLen, so a long value silently drops reads from every sample whose
+// quality falls off earlier; a short one keeps them but spends overlap, and if
+// overlap runs out mergePairs discards ~100% and the sample vanishes instead.
+// Measured on 2d9fa6af (one group, 12 samples): min recovered +51% final reads
+// and +26% ASVs over the longest value, at no cost in ASV length. Measured on
+// 492f42d0 (14 groups): a few degraded samples bottom out near 22bp, so `min`
+// there is set by the worst library in the group — which is why the default is a
+// low quantile rather than the minimum, and why the floor below still applies.
+//
+// Whatever is chosen, the per-sample values and the resulting loss are written
+// out. A truncation that discards half a sample's reads should never be silent.
+process TRUNC_POLICY {
+    tag "${plate_id}"
+    label 'process_low'
+    // Echo this process's stdout to the run log. Without it Nextflow files process
+    // output in .command.out inside the work dir, where nobody looks — which is
+    // why AUTO_TRIM's existing [WARN] lines have never appeared in a single run
+    // log. A warning that a group is discarding half a sample's reads is worth
+    // nothing if it is only readable by someone who already suspects it.
+    debug true
+    publishDir "${params.outdir}/quality_check", mode: 'copy', pattern: "*_trunc_policy.tsv"
+
+    input:
+    tuple val(plate_id), val(sample_ids), val(fwds), val(revs)
+
+    output:
+    tuple val(plate_id), env(TRUNC_FWD), env(TRUNC_REV), emit: trim_params
+    path("${plate_id}_trunc_policy.tsv"), emit: policy_tsv
+
+    script:
+    def rows = [sample_ids, fwds, revs].transpose()
+                   .collect { s, f, r -> "${s}\t${f}\t${r}" }.join('\n')
+    """
+    cat > samples.tsv <<'SAMPLES_EOF'
+${rows}
+SAMPLES_EOF
+
+    python3 <<'PYEOF'
+policy  = "${params.trunc_policy}"
+min_len = int("${params.auto_trim_min_length}")
+plate   = "${plate_id}"
+
+rows = []
+for line in open("samples.tsv"):
+    p = line.rstrip("\\n").split("\\t")
+    if len(p) >= 3 and p[1].isdigit() and p[2].isdigit():
+        rows.append((p[0], int(p[1]), int(p[2])))
+if not rows:
+    raise SystemExit("TRUNC_POLICY: no per-sample truncation values for " + plate)
+
+QUANTILES = {"q10": 0.10, "q25": 0.25, "median": 0.50, "q75": 0.75}
+
+def pick(vals):
+    v = sorted(vals)
+    if policy == "min":
+        return v[0]
+    if policy == "max":
+        return v[-1]
+    if policy not in QUANTILES:
+        raise SystemExit("TRUNC_POLICY: unknown --trunc_policy '" + policy +
+                         "' (min, q10, q25, median, q75, max)")
+    i = QUANTILES[policy] * (len(v) - 1)
+    lo = int(i); hi = min(lo + 1, len(v) - 1)
+    return int(round(v[lo] + (i - lo) * (v[hi] - v[lo])))
+
+raw_fwd, raw_rev = pick([r[1] for r in rows]), pick([r[2] for r in rows])
+# Same floor AUTO_TRIM applies per sample: a quality-driven short truncation
+# leaves reads unable to overlap and the sample vanishes at DENOISE (issue #4).
+fwd, rev = max(raw_fwd, min_len), max(raw_rev, min_len)
+
+# How many samples are being truncated PAST their own quality cliff, and so will
+# lose reads purely because of the group they landed in.
+past = [r[0] for r in rows if r[1] < fwd or r[2] < rev]
+
+with open(plate + "_trunc_policy.tsv", "w") as out:
+    out.write("key\\tvalue\\n")
+    out.write("policy\\t%s\\n" % policy)
+    out.write("n_samples\\t%d\\n" % len(rows))
+    out.write("trunc_len_fwd_applied\\t%d\\n" % fwd)
+    out.write("trunc_len_rev_applied\\t%d\\n" % rev)
+    out.write("floored\\t%s\\n" % str(fwd != raw_fwd or rev != raw_rev).lower())
+    out.write("samples_truncated_past_own\\t%d\\n" % len(past))
+    out.write("#\\tper-sample values follow\\n")
+    out.write("#sample\\ttrunc_fwd\\ttrunc_rev\\ttruncated_past_own\\n")
+    for s, f, r in sorted(rows):
+        out.write("%s\\t%d\\t%d\\t%s\\n" % (s, f, r, str(f < fwd or r < rev).lower()))
+
+print("[INFO] Trunc policy %s for %s: fwd=%d rev=%d from %d samples" %
+      (policy, plate, fwd, rev, len(rows)))
+if past:
+    print("[WARN] Trunc policy %s for %s: %d of %d samples truncated past their own "
+          "quality cliff and will lose reads at the filter: %s"
+          % (policy, plate, len(past), len(rows), ", ".join(sorted(past)[:10])
+             + (" ..." if len(past) > 10 else "")))
+PYEOF
+
+    export TRUNC_FWD=\$(awk -F'\\t' '\$1=="trunc_len_fwd_applied"{print \$2}' ${plate_id}_trunc_policy.tsv)
+    export TRUNC_REV=\$(awk -F'\\t' '\$1=="trunc_len_rev_applied"{print \$2}' ${plate_id}_trunc_policy.tsv)
     """
 }
 
