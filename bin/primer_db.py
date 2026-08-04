@@ -107,13 +107,45 @@ def _insert_from_expected(expected, fwd: str, rev: str) -> int | None:
     return insert if 50 <= insert <= 2000 else None
 
 
+_MIN_PRIMER_OVERLAP = 15
+
+
+def _same_primer(a: str, b: str) -> bool:
+    """Do these two strings denote the same primer?
+
+    Exact match, or one is the other with bases trimmed off an end. The same
+    primer is routinely written both ways: 341F is published as CCTACGGGNGGCWGCAG
+    but is carried in submissions, and written into primer fastas, as the 16bp
+    CTACGGGNGGCWGCAG. Requiring exact equality means the commonest 16S V3-V4
+    primer on earth misses its own database entry.
+
+    Floored at _MIN_PRIMER_OVERLAP so a short fragment cannot match half the table.
+    """
+    if a == b:
+        return True
+    if min(len(a), len(b)) < _MIN_PRIMER_OVERLAP:
+        return False
+    return (a.endswith(b) or b.endswith(a) or a.startswith(b) or b.startswith(a))
+
+
 def insert_length_for(fwd: str, rev: str) -> int | None:
-    """Expected merged-fragment length for a primer pair, by exact sequence match."""
+    """Expected merged-fragment length for a primer pair.
+
+    Exact matches win. Failing that, end-trimmed variants are accepted — but only
+    if every such match agrees on the length. Two entries offering different
+    answers means the pair is ambiguous, and a wrong fragment length is worse than
+    none: it would silence a real overlap warning or invent a false one.
+    """
     f, r = fwd.strip().upper(), rev.strip().upper()
-    for rec in PRIMER_DB:
-        if rec.get("insert_length") and rec["fwd"] == f and rec["rev"] == r:
+    with_len = [rec for rec in PRIMER_DB if rec.get("insert_length")]
+
+    for rec in with_len:
+        if rec["fwd"] == f and rec["rev"] == r:
             return rec["insert_length"]
-    return None
+
+    lengths = {rec["insert_length"] for rec in with_len
+               if _same_primer(rec["fwd"], f) and _same_primer(rec["rev"], r)}
+    return lengths.pop() if len(lengths) == 1 else None
 
 
 def _load_vendored_primers() -> list[dict]:
