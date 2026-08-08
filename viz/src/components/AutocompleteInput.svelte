@@ -6,6 +6,7 @@
     candidates = [],
     maxSuggestions = 8,
     onPick = null,
+    onType = null,   // fired on manual edits only — pick() sets the value directly
   } = $props();
 
   let focused = $state(false);
@@ -55,6 +56,7 @@
     bind:value
     bind:this={inputEl}
     {placeholder}
+    oninput={() => onType?.()}
     onfocus={() => focused = true}
     onblur={() => setTimeout(() => focused = false, 150)}
     onkeydown={handleKeydown}

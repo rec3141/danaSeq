@@ -5,7 +5,7 @@
     store, countsBySample,
     GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
-    taxaMatchingFilter,
+    taxaMatchingFilter, makeTaxonMatcher,
   } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
@@ -19,11 +19,11 @@
   let tableColorLevel = $derived(
     filters.colorMode === 'group'
       ? 'group'
-      : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter)
+      : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel)
   );
   let tableColorMap = $derived.by(() =>
     tableColorLevel !== 'group'
-      ? buildTaxColorMap(tableColorLevel, filters.taxonFilter).colorMap
+      ? buildTaxColorMap(tableColorLevel, filters.taxonFilter, filters.taxonFilterLevel).colorMap
       : null
   );
 
@@ -43,13 +43,12 @@
 
   let cMap = $derived.by(() => countsBySample());
 
-  let taxonRe = $derived(() => {
-    try { return filters.taxonFilter ? new RegExp(filters.taxonFilter, 'i') : null; }
-    catch { return null; }
-  });
+  let taxonMatches = $derived.by(() =>
+    makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel)
+  );
 
   let topTaxa = $derived.by(() => {
-    const re = taxonRe();
+    const matches = taxonMatches;
     const gf = filters.groupFlags || {};
 
     // Merge counts: single click > lasso > all filtered
@@ -82,7 +81,7 @@
         if (!e.asv) return false;
         const group = e.asv.group ?? 'prokaryote';
         if (gf[group] === false) return false;
-        if (re && !(re.test(e.asv.taxonomy ?? '') || re.test(e.asv.id ?? ''))) return false;
+        if (matches && !matches(e.asv.id ?? '', e.asv.taxonomy ?? '')) return false;
         return true;
       })
       .sort((a, b) => b.count - a.count)
@@ -116,9 +115,9 @@
       return;
     }
 
-    const colorLevel = filters.colorMode === 'group' ? 'group' : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter);
-    const cmap = colorLevel !== 'group' ? buildTaxColorMap(colorLevel, filters.taxonFilter).colorMap : null;
-    const re = taxonRe();
+    const colorLevel = filters.colorMode === 'group' ? 'group' : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel);
+    const cmap = colorLevel !== 'group' ? buildTaxColorMap(colorLevel, filters.taxonFilter, filters.taxonFilterLevel).colorMap : null;
+    const matches = taxonMatches;
     const gf = filters.groupFlags || {};
     // untracked: a scale change is handled by the restyle effect below, which does not
     // rebuild the plot. Reading it reactively here would defeat that.
@@ -131,7 +130,12 @@
     // Once drilled down, filters.taxonFilter is an ancestor of the aggregated
     // taxa, so it must be resolved to the matching taxa at this level rather
     // than regex-tested against each child name (which matched nothing).
-    const allowedTaxa = taxaMatchingFilter(aggLevel, filters.taxonFilter);
+    const allowedTaxa = taxaMatchingFilter(aggLevel, filters.taxonFilter, filters.taxonFilterLevel);
+
+    let aggNameRe = null;
+    if (filters.taxonFilter && !allowedTaxa) {
+      try { aggNameRe = new RegExp(filters.taxonFilter, 'i'); } catch {}
+    }
 
     const allPoints = [];
 
@@ -164,10 +168,12 @@
         const sample = sampleLookup[sid];
         const taxon = aggTaxa[ti];
 
-        // Apply taxonomy filter (lineage-aware, see allowedTaxa above)
+        // Apply taxonomy filter (lineage-aware, see allowedTaxa above). The
+        // fallback only fires when the level could not be resolved, so all it
+        // can do is test the aggregated taxon name itself.
         if (allowedTaxa) {
           if (!allowedTaxa.has(taxon)) continue;
-        } else if (re && !re.test(taxon)) continue;
+        } else if (aggNameRe && !aggNameRe.test(taxon)) continue;
 
         const proportion = prop || (count / (sampleTotals[sid] || 1));
         const color = cmap ? (taxonColors[taxon] || '#475569') : (GROUP_HEX[taxon] || '#475569');
@@ -194,7 +200,7 @@
           const group = asv.group ?? 'prokaryote';
           if (gf[group] === false) continue;
           if ((asv.n_samples ?? 0) < (filters.minPrevalence || 0)) continue;
-          if (re && !(re.test(asv.taxonomy ?? '') || re.test(asv.id ?? ''))) continue;
+          if (matches && !matches(asv.id ?? '', asv.taxonomy ?? '')) continue;
 
           const proportion = count / totalCount;
           let color;

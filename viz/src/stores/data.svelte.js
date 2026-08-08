@@ -67,14 +67,48 @@ function generatePalette(n) {
  * Returns { colorMap: {name: hex}, ranked: [{name, count, color}] }
  */
 /**
- * Taxon names at `level` whose ASVs' full lineage matches `taxonFilter`.
+ * Predicate over ASVs for the current taxonomy filter: (asvId, lineage?) → bool.
+ * Returns null when there is no filter (caller should not filter at all).
+ *
+ * `filterLevel` is set when the filter came from a drill-down click or an
+ * autocomplete pick, so the filter names a taxon at that exact rank and is
+ * matched against that rank alone. Matching it as a substring of the whole
+ * lineage instead makes "SAR" (the eukaryotic supergroup) also select SAR11,
+ * SAR86 and SAR116, which sit on a different branch entirely. A hand-typed
+ * filter has no level and stays a free regex over the lineage and ASV id.
+ */
+export function makeTaxonMatcher(taxonFilter = '', filterLevel = '') {
+  if (!taxonFilter) return null;
+  const db = Object.keys(store.taxonomy)[0];
+  const levels = db ? (store.taxonomy[db]?.levels || []) : [];
+  const assignments = db ? (store.taxonomy[db]?.assignments || {}) : {};
+  const lower = taxonFilter.toLowerCase();
+
+  const levelIdx = filterLevel ? levels.indexOf(filterLevel) : -1;
+  if (levelIdx >= 0) {
+    return (asvId) => (assignments[asvId]?.[levelIdx] || '').toLowerCase() === lower;
+  }
+
+  let re;
+  try { re = new RegExp(taxonFilter, 'i'); } catch { re = null; }
+  return (asvId, lineage) => {
+    const fullTax = lineage ?? (assignments[asvId]?.filter(Boolean).join(';') || '');
+    const id = asvId ?? '';
+    return re
+      ? (re.test(fullTax) || re.test(id))
+      : (fullTax.toLowerCase().includes(lower) || id.toLowerCase().includes(lower));
+  };
+}
+
+/**
+ * Taxon names at `level` whose ASVs match `taxonFilter`.
  *
  * Needed because a drill-down filter names an ANCESTOR ("Bacteria") while the
  * pre-aggregated counts are keyed by a DESCENDANT ("Pseudomonadota"). Matching
  * the filter against the child name drops every point. Returns null when there
  * is no filter (caller should not filter at all).
  */
-export function taxaMatchingFilter(level, taxonFilter = '') {
+export function taxaMatchingFilter(level, taxonFilter = '', filterLevel = '') {
   if (!taxonFilter || !level || level === '_asv' || level === 'group') return null;
   const db = Object.keys(store.taxonomy)[0];
   if (!db || !store.taxonomy[db]) return null;
@@ -84,18 +118,11 @@ export function taxaMatchingFilter(level, taxonFilter = '') {
   const levelIdx = levels.indexOf(level);
   if (levelIdx < 0) return null;
 
-  let re;
-  try { re = new RegExp(taxonFilter, 'i'); } catch { re = null; }
-  const lower = taxonFilter.toLowerCase();
-
+  const matches = makeTaxonMatcher(taxonFilter, filterLevel);
   const out = new Set();
   for (const asvId in assignments) {
     const vals = assignments[asvId] || [];
-    const fullTax = vals.filter(Boolean).join(';');
-    const match = re
-      ? (re.test(fullTax) || re.test(asvId))
-      : (fullTax.toLowerCase().includes(lower) || asvId.toLowerCase().includes(lower));
-    if (match && vals[levelIdx]) out.add(vals[levelIdx]);
+    if (vals[levelIdx] && matches(asvId)) out.add(vals[levelIdx]);
   }
   return out;
 }
@@ -105,8 +132,8 @@ export function taxaMatchingFilter(level, taxonFilter = '') {
 // render cycle, and each call walks every ASV assignment.
 let _taxColorCache = { key: '', result: { colorMap: {}, ranked: [] } };
 
-export function buildTaxColorMap(level, taxonFilter = '') {
-  const cacheKey = `${level}|${taxonFilter}`;
+export function buildTaxColorMap(level, taxonFilter = '', filterLevel = '') {
+  const cacheKey = `${level}|${taxonFilter}|${filterLevel}`;
   if (_taxColorCache.key === cacheKey) return _taxColorCache.result;
 
   const db = Object.keys(store.taxonomy)[0];
@@ -116,19 +143,12 @@ export function buildTaxColorMap(level, taxonFilter = '') {
   const assignments = store.taxonomy[db].assignments || {};
 
   // Build a set of ASV IDs that pass the taxonomy filter
-  // Filter checks the full taxonomy string (all levels joined)
   let filteredAsvIds = null;
-  if (taxonFilter) {
+  const matches = makeTaxonMatcher(taxonFilter, filterLevel);
+  if (matches) {
     filteredAsvIds = new Set();
-    let re;
-    try { re = new RegExp(taxonFilter, 'i'); } catch { re = null; }
-    const lower = taxonFilter.toLowerCase();
     for (const asvId in assignments) {
-      const fullTax = assignments[asvId].filter(Boolean).join(';');
-      const match = re
-        ? (re.test(fullTax) || re.test(asvId))
-        : (fullTax.toLowerCase().includes(lower) || asvId.toLowerCase().includes(lower));
-      if (match) filteredAsvIds.add(asvId);
+      if (matches(asvId)) filteredAsvIds.add(asvId);
     }
   }
 
@@ -183,7 +203,7 @@ export function buildTaxColorMap(level, taxonFilter = '') {
  * Determine the effective color level: if the taxon filter matches a taxon
  * at the current level, drill down to the next level to show diversity within.
  */
-export function getEffectiveColorLevel(colorByLevel, taxonFilter) {
+export function getEffectiveColorLevel(colorByLevel, taxonFilter, filterLevel = '') {
   if (!taxonFilter || colorByLevel === 'group') return colorByLevel;
 
   const db = Object.keys(store.taxonomy)[0];
@@ -207,8 +227,10 @@ export function getEffectiveColorLevel(colorByLevel, taxonFilter) {
   for (const t of taxaAtLevel) {
     if (t.toLowerCase() === taxonFilter.toLowerCase()) matchCount++;
   }
-  // If no exact match, try as regex
-  if (matchCount === 0) {
+  // If no exact match, try as regex — but only for a hand-typed filter. A picked
+  // taxon is an exact name at filterLevel; matching it loosely here re-opens the
+  // cross-branch bleed the matcher exists to prevent.
+  if (matchCount === 0 && !filterLevel) {
     try {
       const escaped = taxonFilter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const re = new RegExp(`^${escaped}$`, 'i');
@@ -225,17 +247,14 @@ export function getEffectiveColorLevel(colorByLevel, taxonFilter) {
       // Check if the next level down actually has data for the filtered set
       const nextLevel = levels[levelIdx + 1];
       const nextLevelIdx = levelIdx + 1;
+      const matches = makeTaxonMatcher(taxonFilter, filterLevel);
       let hasNextLevelData = false;
-      try {
-        const filterLower = taxonFilter.toLowerCase();
-        for (const asvId in assignments) {
-          const fullTax = assignments[asvId].filter(Boolean).join(';').toLowerCase();
-          if (fullTax.includes(filterLower) && assignments[asvId]?.[nextLevelIdx]) {
-            hasNextLevelData = true;
-            break;
-          }
+      for (const asvId in assignments) {
+        if (assignments[asvId]?.[nextLevelIdx] && matches(asvId)) {
+          hasNextLevelData = true;
+          break;
         }
-      } catch {}
+      }
       if (hasNextLevelData) return nextLevel;
     }
     // At deepest level or next level has no data — color by individual ASV

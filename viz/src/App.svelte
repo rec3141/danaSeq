@@ -16,6 +16,7 @@
   let filters = $state({
     // Taxonomy (shared across all views)
     taxonFilter: '',
+    taxonFilterLevel: '',      // rank the filter names, when picked (not hand-typed)
     colorMode: 'taxonomy',     // 'taxonomy', 'group', 'cluster'
     sampleClusterK: 4,
     asvClusterK: 4,
@@ -49,7 +50,7 @@
     // Phylogeny
     heatmapAsvTree: 'ward',    // 'ward' or 'phylogeny' — ASV ordering on heatmap
     heatmapCellSize: 3,
-    heatmapMinMaxRA: 10.0,    // min(max(RA%)) to include an ASV in heatmap
+    heatmapMinMaxRA: 1.0,     // min(max(RA%)) to include an ASV in heatmap
     treeLayout: 'rc',
     treeMinBootstrap: 0,
     treePrune: false,

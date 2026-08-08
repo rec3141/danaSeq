@@ -300,6 +300,12 @@ process FILTER_TRIM {
     path("${meta.id}_filt_stats.tsv"), emit: stats
 
     script:
+    // An explicit --truncLen_* wins; otherwise use what AUTO_TRIM measured and
+    // TRUNC_POLICY chose for this group. Both engines must be handed the same
+    // number: passing params.truncLen_* straight through leaves the R path on
+    // the default 0, which dada2_filter_trim.R reads as "no truncation", so the
+    // whole auto-trim/policy result is computed, published to quality_check/,
+    // and then silently discarded.
     def eff_trunc_fwd = params.truncLen_fwd > 0 ? params.truncLen_fwd : trunc_fwd
     def eff_trunc_rev = params.truncLen_rev > 0 ? params.truncLen_rev : trunc_rev
     if (params.lang == 'python')
@@ -320,7 +326,7 @@ process FILTER_TRIM {
     dada2_filter_trim.R \
         "${meta.id}" "${r1}" "${r2}" \
         ${params.maxEE} ${params.truncQ} ${params.maxN} \
-        ${params.truncLen_fwd} ${params.truncLen_rev} \
+        ${eff_trunc_fwd} ${eff_trunc_rev} \
         ${task.cpus}
     """
 }

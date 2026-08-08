@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel } from '../stores/data.svelte.js';
+  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
 
@@ -144,6 +144,27 @@
     return node.children.flatMap(getLeaves);
   }
 
+  /**
+   * Drop every leaf outside `keep` and collapse the internal nodes left with a
+   * single child, folding their branch lengths into it.
+   *
+   * The heatmap columns are already filtered down by min max(RA), so drawing the
+   * dendrogram from the unpruned tree gave one leaf per ASV in the whole dataset
+   * above a handful of visible columns. Returns null if nothing is kept.
+   */
+  function pruneTree(node, keep) {
+    if (node.children.length === 0) {
+      return keep.has(node.label) ? { ...node } : null;
+    }
+    const kids = node.children.map(c => pruneTree(c, keep)).filter(Boolean);
+    if (kids.length === 0) return null;
+    if (kids.length === 1) {
+      const only = kids[0];
+      return { ...only, branchLength: only.branchLength + node.branchLength };
+    }
+    return { ...node, children: kids };
+  }
+
   // Convert parsed tree to line segments for SVG rendering
   // Returns { lines: [{x1,y1,x2,y2}, ...], nLeaves }
   function treeToDendroLines(tree) {
@@ -232,8 +253,10 @@
           asvIds = newOrder;
           asvLabels = colMap.map(ci => heatmapData.asvLabels[ci]);
 
-          // Generate dendrogram lines from phylogeny
-          colDendro = { _phyloLines: treeToDendroLines(tree) };
+          // Generate dendrogram lines from the phylogeny, pruned to the columns
+          // actually drawn so its leaves line up with the heatmap.
+          const pruned = pruneTree(tree, new Set(newOrder));
+          if (pruned) colDendro = { _phyloLines: treeToDendroLines(pruned) };
         }
       } catch (e) {
         console.warn('Phylogeny ordering failed:', e);
@@ -305,25 +328,21 @@
 
     // ── Color bar helpers ──
     const colorLevel = (filters.colorMode === 'taxonomy' || filters.colorMode === undefined)
-      ? getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter)
+      ? getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel)
       : null;
     const taxCmap = colorLevel && colorLevel !== 'group'
-      ? buildTaxColorMap(colorLevel, filters.taxonFilter).colorMap
+      ? buildTaxColorMap(colorLevel, filters.taxonFilter, filters.taxonFilterLevel).colorMap
       : null;
 
     // Build filtered set for dimming
     let filteredAsvSet = null;
-    if (filters.taxonFilter) {
+    const taxonMatches = makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel);
+    if (taxonMatches) {
       filteredAsvSet = new Set();
       const db = Object.keys(store.taxonomy)[0];
       const assigns = db ? store.taxonomy[db]?.assignments : {};
-      let re;
-      try { re = new RegExp(filters.taxonFilter, 'i'); } catch { re = null; }
-      const lower = (filters.taxonFilter || '').toLowerCase();
       for (const asvId in assigns) {
-        const fullTax = assigns[asvId].filter(Boolean).join(';');
-        const match = re ? (re.test(fullTax) || re.test(asvId)) : fullTax.toLowerCase().includes(lower);
-        if (match) filteredAsvSet.add(asvId);
+        if (taxonMatches(asvId)) filteredAsvSet.add(asvId);
       }
     }
 

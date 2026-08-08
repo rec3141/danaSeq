@@ -14,12 +14,23 @@
     if (!name || name === 'unclassified' || filters.colorMode !== 'taxonomy') return;
     const level = findTaxonLevel(name);
     if (level) {
-      const stack = [...(filters.navStack || [])];
-      stack.push({ level: filters.colorByLevel, filter: filters.taxonFilter });
-      filters.navStack = stack;
+      pushNav();
       filters.colorByLevel = level;
       filters.taxonFilter = name;
+      filters.taxonFilterLevel = level;
     }
+  }
+
+  // A hand-typed filter is a free regex over the whole lineage, so it has no rank.
+  function clearFilterLevel() {
+    filters.taxonFilterLevel = '';
+  }
+
+  function pushNav() {
+    filters.navStack = [
+      ...(filters.navStack || []),
+      { level: filters.colorByLevel, filter: filters.taxonFilter, filterLevel: filters.taxonFilterLevel },
+    ];
   }
 
   // Collapsible sections
@@ -78,6 +89,7 @@
           placeholder="e.g. Proteobacteria"
           candidates={taxCandidates}
           onPick={navigateToTaxon}
+          onType={clearFilterLevel}
         />
 
         <label class="block">
@@ -90,6 +102,7 @@
                   colorByLevel: filters.colorByLevel,
                   navStack: filters.navStack,
                   taxonFilter: filters.taxonFilter,
+                  taxonFilterLevel: filters.taxonFilterLevel,
                 };
               } else {
                 // Restore taxonomy nav state
@@ -97,6 +110,7 @@
                   filters.colorByLevel = filters._savedTaxNav.colorByLevel;
                   filters.navStack = filters._savedTaxNav.navStack;
                   filters.taxonFilter = filters._savedTaxNav.taxonFilter;
+                  filters.taxonFilterLevel = filters._savedTaxNav.taxonFilterLevel ?? '';
                   filters._savedTaxNav = null;
                 }
               }
@@ -136,8 +150,8 @@
             {/each}
           </fieldset>
         {:else}
-          {@const effectiveLevel = getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter)}
-          {@const taxColors = buildTaxColorMap(effectiveLevel, filters.taxonFilter)}
+          {@const effectiveLevel = getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel)}
+          {@const taxColors = buildTaxColorMap(effectiveLevel, filters.taxonFilter, filters.taxonFilterLevel)}
           <div class="space-y-0.5 max-h-48 overflow-y-auto">
             <p class="text-[10px] text-slate-500 mb-1">
               {effectiveLevel === '_asv' ? 'ASV' : effectiveLevel} ({taxColors.ranked.length})
@@ -152,6 +166,7 @@
                   filters.navStack = stack;
                   filters.colorByLevel = popped.level;
                   filters.taxonFilter = popped.filter;
+                  filters.taxonFilterLevel = popped.filterLevel ?? '';
                 }}
               >
                 &#x25B4; Up{prev.filter ? ` to ${prev.filter}` : ` to ${prev.level}`}
@@ -161,6 +176,7 @@
                 class="flex items-center gap-1.5 w-full text-left text-xs hover:bg-slate-800 rounded px-1 py-1 text-cyan-400 border-b border-slate-700 mb-1"
                 onclick={() => {
                   filters.taxonFilter = '';
+                  filters.taxonFilterLevel = '';
                 }}
               >
                 &#x25B4; Up to {filters.colorByLevel}
@@ -172,11 +188,10 @@
                 onclick={() => {
                   if (effectiveLevel === '_asv') return;
                   if (item.name === 'unclassified') return;
-                  const stack = [...(filters.navStack || [])];
-                  stack.push({ level: filters.colorByLevel, filter: filters.taxonFilter });
-                  filters.navStack = stack;
+                  pushNav();
                   filters.colorByLevel = effectiveLevel;
                   filters.taxonFilter = item.name;
+                  filters.taxonFilterLevel = effectiveLevel;
                 }}
               >
                 <span class="inline-block h-2 w-2 rounded-full shrink-0" style="background:{item.color}"></span>
@@ -373,9 +388,9 @@
       {#if sections.heatmap}
         <div class="space-y-3 px-3 pb-3">
           <label class="block">
-            <span class="text-xs text-slate-400">Min max(RA): {(filters.heatmapMinMaxRA ?? 10).toFixed(1)}%</span>
+            <span class="text-xs text-slate-400">Min max(RA): {(filters.heatmapMinMaxRA ?? 1).toFixed(1)}%</span>
             <input type="range" min="0" max="100" step="1"
-              value={Math.round(Math.log2((filters.heatmapMinMaxRA ?? 10) + 1) / Math.log2(101) * 100)}
+              value={Math.round(Math.log2((filters.heatmapMinMaxRA ?? 1) + 1) / Math.log2(101) * 100)}
               oninput={(e) => { filters.heatmapMinMaxRA = Math.round(10 * (Math.pow(2, +e.target.value / 100 * Math.log2(101)) - 1)) / 10; }}
               class="mt-1 w-full accent-blue-500" />
           </label>

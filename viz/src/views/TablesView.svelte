@@ -1,5 +1,5 @@
 <script>
-  import { store, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor } from '../stores/data.svelte.js';
+  import { store, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor, makeTaxonMatcher } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
 
@@ -16,12 +16,12 @@
 
   let effectiveColorLevel = $derived(
     filters.colorMode === 'taxonomy'
-      ? getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter)
+      ? getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel)
       : null
   );
   let taxCmap = $derived(
     effectiveColorLevel && effectiveColorLevel !== 'group'
-      ? buildTaxColorMap(effectiveColorLevel, filters.taxonFilter).colorMap
+      ? buildTaxColorMap(effectiveColorLevel, filters.taxonFilter, filters.taxonFilterLevel).colorMap
       : null
   );
 
@@ -114,13 +114,8 @@
 
     // Taxonomy filter
     if (filters.taxonFilter && activeTable === 'asvs') {
-      try {
-        const re = new RegExp(filters.taxonFilter, 'i');
-        rows = rows.filter(r => re.test(r.taxonomy ?? '') || re.test(r.id ?? ''));
-      } catch {
-        const lower = filters.taxonFilter.toLowerCase();
-        rows = rows.filter(r => (r.taxonomy ?? '').toLowerCase().includes(lower));
-      }
+      const matches = makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel);
+      rows = rows.filter(r => matches(r.id ?? '', r.taxonomy ?? ''));
     }
 
     // Search filter

@@ -4,6 +4,7 @@
     store,
     GROUP_COLORS, GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor, hexToRgba255,
+    makeTaxonMatcher,
   } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
@@ -104,11 +105,10 @@
     primaryDb && store.taxonomy[primaryDb]?.levels ? store.taxonomy[primaryDb].levels : []
   );
 
-  // ---- Taxonomy regex for filtering ----
-  let taxonRe = $derived(() => {
-    try { return filters.taxonFilter ? new RegExp(filters.taxonFilter, 'i') : null; }
-    catch { return null; }
-  });
+  // ---- Taxonomy filter predicate ----
+  let taxonMatches = $derived.by(() =>
+    makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel)
+  );
 
   // Bootstrap data
   let bootByAsv = $derived.by(() => {
@@ -118,14 +118,14 @@
 
   // ---- Filtered ASV set (by taxonomy, group, bootstrap) ----
   let filteredAsvIds = $derived.by(() => {
-    const re = taxonRe();
+    const matches = taxonMatches;
     const gf = filters.groupFlags || {};
     const minBoot = filters.treeMinBootstrap || 0;
     const ids = new Set();
     for (const asv of store.asvs) {
       const group = asv.group ?? 'unknown';
       if (gf[group] === false) continue;
-      if (re && !(re.test(asv.taxonomy ?? '') || re.test(asv.id ?? ''))) continue;
+      if (matches && !matches(asv.id ?? '', asv.taxonomy ?? '')) continue;
       // Check bootstrap at deepest assigned rank
       if (minBoot > 0) {
         const boot = bootByAsv[asv.id];
@@ -145,12 +145,12 @@
 
   // ---- Node styles using shared color-by ----
   let effectiveColorLevel = $derived(
-    filters.colorMode === 'group' ? 'group' : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter)
+    filters.colorMode === 'group' ? 'group' : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel)
   );
 
   let taxColorMap = $derived.by(() => {
     if (effectiveColorLevel === 'group') return null;
-    return buildTaxColorMap(effectiveColorLevel, filters.taxonFilter);
+    return buildTaxColorMap(effectiveColorLevel, filters.taxonFilter, filters.taxonFilterLevel);
   });
 
   // Build label for an ASV based on selected label levels

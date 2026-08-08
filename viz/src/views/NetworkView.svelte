@@ -5,6 +5,7 @@
     store, countsBySample,
     GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
+    makeTaxonMatcher,
   } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
@@ -12,20 +13,19 @@
   let plotDiv;
   let hasPlot = false;
 
-  let taxonRe = $derived(() => {
-    try { return filters.taxonFilter ? new RegExp(filters.taxonFilter, 'i') : null; }
-    catch { return null; }
-  });
+  let taxonMatches = $derived.by(() =>
+    makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel)
+  );
 
   let filteredAsvs = $derived.by(() => {
-    const re = taxonRe();
+    const matches = taxonMatches;
     const gf = filters.groupFlags || {};
     return store.asvs.filter(a => {
       if ((a.n_samples ?? 0) < (filters.minPrevalence || 0)) return false;
       if ((a.total_reads ?? 0) < (filters.minReads || 0)) return false;
       const group = a.group ?? 'unknown';
       if (gf[group] === false) return false;
-      if (re && !(re.test(a.taxonomy ?? '') || re.test(a.id ?? ''))) return false;
+      if (matches && !matches(a.id ?? '', a.taxonomy ?? '')) return false;
       return true;
     });
   });
@@ -37,8 +37,8 @@
   $effect(() => {
     if (!plotDiv || filteredAsvs.length === 0) return;
 
-    const colorLevel = filters.colorMode === 'group' ? 'group' : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter);
-    const cmap = colorLevel !== 'group' ? buildTaxColorMap(colorLevel, filters.taxonFilter).colorMap : null;
+    const colorLevel = filters.colorMode === 'group' ? 'group' : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel);
+    const cmap = colorLevel !== 'group' ? buildTaxColorMap(colorLevel, filters.taxonFilter, filters.taxonFilterLevel).colorMap : null;
 
     const colors = filteredAsvs.map(a => {
       if (filters.colorMode === 'cluster') return getClusterColor(a.id, 'asvCluster', filters.asvClusterK);
