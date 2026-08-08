@@ -8,7 +8,7 @@
   import HeatmapView from './views/HeatmapView.svelte';
   import TablesView from './views/TablesView.svelte';
   import ProvenanceView from './views/ProvenanceView.svelte';
-  import { store, loadData } from './stores/data.svelte.js';
+  import { store, loadData, asvIdsForAssays } from './stores/data.svelte.js';
 
   let activeTab = $state('samples');
 
@@ -29,6 +29,8 @@
       mitochondria: true,
       unknown: true,
     },
+    // Assay (primer set) — empty Set means "all assays", not "none"
+    assays: new Set(),
     // Samples
     minReads: 0,
     sampleFilter: '',
@@ -55,6 +57,13 @@
     treeMinBootstrap: 0,
     treePrune: false,
     treeLabelLevels: ['Genus', 'id'],
+  });
+
+  // Resolve the assay selection to an ASV set once, here, rather than in each
+  // view — otherwise the sidebar counts and the plots can disagree.
+  $effect(() => {
+    store.assayAsvIds = asvIdsForAssays(filters.assays);
+    store.assayCacheKey = [...(filters.assays || [])].sort().join(';');
   });
 
   function updateTab() {

@@ -17,10 +17,13 @@
     makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel)
   );
 
+  let assayAsvs = $derived(store.assayAsvIds);
+
   let filteredAsvs = $derived.by(() => {
     const matches = taxonMatches;
     const gf = filters.groupFlags || {};
     return store.asvs.filter(a => {
+      if (assayAsvs && !assayAsvs.has(a.id)) return false;
       if ((a.n_samples ?? 0) < (filters.minPrevalence || 0)) return false;
       if ((a.total_reads ?? 0) < (filters.minReads || 0)) return false;
       const group = a.group ?? 'unknown';

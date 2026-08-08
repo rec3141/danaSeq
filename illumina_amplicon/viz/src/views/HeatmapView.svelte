@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher } from '../stores/data.svelte.js';
+  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher, sampleInAssays } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
 
@@ -38,9 +38,13 @@
     return maxes;
   }
 
-  function filterHeatmap(data, minMaxRA) {
+  // An assay filter cuts both axes: its samples are the rows, and the ASVs it
+  // observed are the columns. Either dendrogram is dropped once its axis is
+  // subset, since the stored linkage no longer describes what is drawn.
+  function filterHeatmap(data, minMaxRA, assayAsvs, assaySamples) {
     if (!data?.z?.length) return data;
     const nCols = data.z[0]?.length || 0;
+    const nRows = data.sampleIds?.length ?? data.z.length;
 
     if (!colMaxZ || colMaxZ.length !== nCols) {
       colMaxZ = computeColMax(data);
@@ -49,19 +53,40 @@
     const zThreshold = Math.pow(minMaxRA / 100, 0.25);
     const keepCols = [];
     for (let j = 0; j < nCols; j++) {
-      if (colMaxZ[j] >= zThreshold) keepCols.push(j);
+      if (colMaxZ[j] < zThreshold) continue;
+      if (assayAsvs && !assayAsvs.has(data.asvIds[j])) continue;
+      keepCols.push(j);
     }
 
-    if (keepCols.length === nCols) return data;
+    const keepRows = [];
+    for (let i = 0; i < nRows; i++) {
+      if (assaySamples && !assaySamples.has(data.sampleIds[i])) continue;
+      keepRows.push(i);
+    }
+
+    const colsCut = keepCols.length !== nCols;
+    const rowsCut = keepRows.length !== nRows;
+    if (!colsCut && !rowsCut) return data;
 
     return {
       ...data,
-      z: data.z.map(row => keepCols.map(j => row[j])),
+      z: keepRows.map(i => keepCols.map(j => data.z[i][j])),
+      sampleIds: keepRows.map(i => data.sampleIds[i]),
+      nSamples: keepRows.length,
       asvIds: keepCols.map(j => data.asvIds[j]),
       asvLabels: keepCols.map(j => data.asvLabels[j]),
-      colDendro: { icoord: [], dcoord: [] },
+      colDendro: colsCut ? { icoord: [], dcoord: [] } : data.colDendro,
+      rowDendro: rowsCut ? { icoord: [], dcoord: [] } : data.rowDendro,
     };
   }
+
+  let assayAsvs = $derived(store.assayAsvIds);
+  let assaySamples = $derived.by(() => {
+    if (!filters.assays?.size) return null;
+    const ids = new Set();
+    for (const s of store.samples) if (sampleInAssays(s, filters.assays)) ids.add(s.id);
+    return ids;
+  });
 
   onMount(async () => {
     try {
@@ -69,7 +94,7 @@
       if (!res.ok) res = await fetch('./data/heatmap.json');
       if (res.ok) {
         rawHeatmapData = await res.json();
-        const filtered = filterHeatmap(rawHeatmapData, filters.heatmapMinMaxRA ?? 1.0);
+        const filtered = filterHeatmap(rawHeatmapData, filters.heatmapMinMaxRA ?? 1.0, assayAsvs, assaySamples);
         heatmapData = filtered;
         visibleAsvCount = filtered?.asvIds?.length ?? 0;
       }
@@ -214,10 +239,11 @@
   let filterTimer = null;
   $effect(() => {
     const threshold = filters.heatmapMinMaxRA;
+    const aAsvs = assayAsvs, aSamples = assaySamples;
     if (rawHeatmapData) {
       if (filterTimer) clearTimeout(filterTimer);
       filterTimer = setTimeout(() => {
-        const filtered = filterHeatmap(rawHeatmapData, threshold ?? 1.0);
+        const filtered = filterHeatmap(rawHeatmapData, threshold ?? 1.0, aAsvs, aSamples);
         heatmapData = filtered;
         visibleAsvCount = filtered?.asvIds?.length ?? 0;
       }, 300);
