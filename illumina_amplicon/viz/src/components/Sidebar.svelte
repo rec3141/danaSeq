@@ -1,5 +1,5 @@
 <script>
-  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel } from '../stores/data.svelte.js';
+  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays } from '../stores/data.svelte.js';
   import AutocompleteInput from './AutocompleteInput.svelte';
 
   let { activeTab = 'samples', filters = $bindable({}) } = $props();
@@ -61,8 +61,17 @@
     ];
   }
 
+  let assays = $derived.by(() => listAssays());
+
+  function toggleAssay(key) {
+    const next = new Set(filters.assays || []);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    filters.assays = next;
+  }
+
   // Collapsible sections
   let sections = $state({
+    assay: true,
     taxonomy: true,
     samples: true,
     network: true,
@@ -236,6 +245,44 @@
       </div>
     {/if}
   </div>
+
+  <!-- ══ Assay / primer set (shared) ══ -->
+  {#if assays.length > 0}
+    <div class="border-b border-slate-800">
+      <button class="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200" onclick={() => toggle('assay')}>
+        Assay
+        <span class="text-[10px]">{sections.assay ? '▾' : '▸'}</span>
+      </button>
+      {#if sections.assay}
+        <div class="space-y-2 px-3 pb-3">
+          <p class="text-[10px] text-slate-500">
+            {assays.length} primer set{assays.length === 1 ? '' : 's'}
+            {#if filters.assays?.size}&mdash; {filters.assays.size} selected{:else}&mdash; all shown{/if}
+          </p>
+          {#each assays as a}
+            <label class="flex items-start gap-2 text-xs cursor-pointer hover:bg-slate-800/50 rounded px-1 py-1">
+              <input type="checkbox" class="mt-0.5 accent-blue-500"
+                checked={filters.assays?.has(a.key) ?? false}
+                onchange={() => toggleAssay(a.key)} />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-slate-200">{a.gene || 'unknown'}{a.region ? ` ${a.region}` : ''}</span>
+                <span class="block truncate text-[10px] text-slate-500">
+                  {[a.fwd, a.rev].filter(Boolean).join(' / ') || 'no primers recorded'}
+                </span>
+                <span class="block text-[10px] text-slate-500">
+                  {a.n} sample{a.n === 1 ? '' : 's'}{a.meanMatch != null ? ` · ${(a.meanMatch * 100).toFixed(1)}% matched` : ''}
+                </span>
+              </span>
+            </label>
+          {/each}
+          {#if filters.assays?.size}
+            <button class="text-[11px] text-cyan-400 hover:text-cyan-300"
+              onclick={() => { filters.assays = new Set(); }}>Clear assay filter</button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <!-- ══ Sample Controls ══ -->
   {#if activeTab === 'samples' || activeTab === 'network'}

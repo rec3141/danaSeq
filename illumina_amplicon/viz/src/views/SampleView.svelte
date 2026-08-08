@@ -6,6 +6,7 @@
     GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
     taxaMatchingFilter, makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
+    sampleInAssays, assayKey, listAssays,
   } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
@@ -30,7 +31,9 @@
   // ── Derived data ──────────────────────────────────────────────────────────
 
   let filteredSamples = $derived.by(() => {
-    let s = store.samples.filter(s => (s.total_reads ?? 0) >= (filters.minReads || 0));
+    let s = store.samples.filter(s =>
+      (s.total_reads ?? 0) >= (filters.minReads || 0) && sampleInAssays(s, filters.assays)
+    );
     if (filters.sampleFilter) {
       try {
         const re = new RegExp(filters.sampleFilter, 'i');
@@ -91,6 +94,8 @@
   let selectedSampleObj = $derived(
     store.selectedSample != null ? store.samples[store.selectedSample] : null
   );
+
+  let totalAssayCount = $derived.by(() => listAssays().length);
 
   // ── Build plotly traces ───────────────────────────────────────────────────
 
@@ -359,6 +364,27 @@
             class="text-xs text-slate-500 hover:text-slate-300"
             onclick={() => store.selectedSample = null}
           >Clear selection</button>
+        {/if}
+      </div>
+
+      <div class="mb-2">
+        {#if selectedSampleObj && assayKey(selectedSampleObj)}
+          {@const s = selectedSampleObj}
+          <p class="text-xs text-slate-400">
+            <span class="text-slate-500">Assay:</span>
+            {s.assay_gene ?? '?'}{s.assay_region ? ` ${s.assay_region}` : ''}
+            {#if s.assay_primer_fwd || s.assay_primer_rev}
+              <span class="text-slate-500">·</span> {[s.assay_primer_fwd, s.assay_primer_rev].filter(Boolean).join(' / ')}
+            {/if}
+            {#if Number.isFinite(Number(s.assay_match_fraction))}
+              <span class="text-slate-500">·</span> {(Number(s.assay_match_fraction) * 100).toFixed(1)}% of reads matched
+            {/if}
+            {#if s.assay_source}<span class="text-slate-500"> (via {s.assay_source})</span>{/if}
+          </p>
+        {:else if filters.assays?.size}
+          <p class="text-xs text-slate-500">
+            Assay filter active: {filters.assays.size} of {totalAssayCount} primer set{totalAssayCount === 1 ? '' : 's'}
+          </p>
         {/if}
       </div>
 

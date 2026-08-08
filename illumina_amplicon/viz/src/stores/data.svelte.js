@@ -31,6 +31,13 @@ export const store = $state({
   // once it knows its base marker sizes and consumed by the sidebar sliders.
   maxPointScale: 1,
   maxNetworkPointScale: 1,
+
+  // ASV ids the selected assays observed (null = no assay filter), derived once
+  // in App from filters.assays. Every ASV-level consumer reads it from here so
+  // the taxonomy counts, the plots and the heatmap cannot disagree about what
+  // the filter admits. assayCacheKey identifies the selection for memo keys.
+  assayAsvIds: null,
+  assayCacheKey: '',
 });
 
 /** Group colors as RGBA for regl-scatterplot */
@@ -50,6 +57,95 @@ export const GROUP_HEX = {
   mitochondria: '#33e6e6',
   unknown: '#999999',
 };
+
+// ── Assays (primer sets) ──────────────────────────────────────────────────
+//
+// A run's assay is what cutadapt actually matched, merged into samples.json by
+// build_viz.py. A dataset commonly mixes marker genes — 16S and 18S in one
+// submission — and those ASVs are not comparable, so the assay is worth
+// filtering on rather than just displaying.
+
+/** Stable identity for a sample's assay, or '' when the run was not assigned one. */
+export function assayKey(sample) {
+  if (!sample) return '';
+  const parts = [sample.assay_gene, sample.assay_region, sample.assay_primer_fwd, sample.assay_primer_rev];
+  return parts.some(Boolean) ? parts.map(p => p ?? '').join('|') : '';
+}
+
+/** Human label for an assay key, e.g. "16S rRNA V3-V4 (341Fv3/Bakt_805R)". */
+export function assayLabel(key) {
+  if (!key) return 'unassigned';
+  const [gene, region, fwd, rev] = key.split('|');
+  const head = [gene, region].filter(Boolean).join(' ') || 'unknown';
+  const primers = [fwd, rev].filter(Boolean).join('/');
+  return primers ? `${head} (${primers})` : head;
+}
+
+/**
+ * Assays present, most samples first: [{key, label, gene, region, fwd, rev, n,
+ * meanMatch}]. Empty when no run carries assay fields, which is how the sidebar
+ * knows to hide the section entirely.
+ */
+export function listAssays() {
+  const by = new Map();
+  for (const s of store.samples) {
+    const key = assayKey(s);
+    if (!key) continue;
+    if (!by.has(key)) {
+      const [gene, region, fwd, rev] = key.split('|');
+      by.set(key, { key, label: assayLabel(key), gene, region, fwd, rev, n: 0, _match: [] });
+    }
+    const rec = by.get(key);
+    rec.n++;
+    const m = Number(s.assay_match_fraction);
+    if (Number.isFinite(m)) rec._match.push(m);
+  }
+  const out = [...by.values()].map(a => ({
+    ...a,
+    meanMatch: a._match.length ? a._match.reduce((x, y) => x + y, 0) / a._match.length : null,
+  }));
+  out.forEach(a => delete a._match);
+  out.sort((a, b) => b.n - a.n);
+  return out;
+}
+
+/** True when this sample passes the assay selection (null/empty = no filter). */
+export function sampleInAssays(sample, selected) {
+  if (!selected || selected.size === 0) return true;
+  return selected.has(assayKey(sample));
+}
+
+/**
+ * ASV ids observed in `sampleIds`.
+ *
+ * Needed because the ASV-level views (network, phylogeny, heatmap) have no
+ * sample axis to filter — restricting them to one assay means restricting to
+ * the ASVs that assay actually saw. Returns null when there is nothing to
+ * filter by, so callers can skip the work.
+ */
+export function asvIdsInSamples(sampleIds) {
+  if (!sampleIds || sampleIds.size === 0) return null;
+  const sIdx = store.counts?.samples;
+  const aIdx = store.counts?.asvs;
+  const rows = store.counts?.data;
+  if (!sIdx || !aIdx || !rows) return null;
+
+  const keep = new Set();
+  for (let i = 0; i < sIdx.length; i++) if (sampleIds.has(sIdx[i])) keep.add(i);
+  if (keep.size === 0) return new Set();
+
+  const out = new Set();
+  for (const [si, ai] of rows) if (keep.has(si)) out.add(aIdx[ai]);
+  return out;
+}
+
+/** ASV ids observed by the selected assays; null when no assay filter is set. */
+export function asvIdsForAssays(selected) {
+  if (!selected || selected.size === 0) return null;
+  const ids = new Set();
+  for (const s of store.samples) if (sampleInAssays(s, selected)) ids.add(s.id);
+  return asvIdsInSamples(ids);
+}
 
 // ── Taxonomy coloring ─────────────────────────────────────────────────────
 
@@ -124,10 +220,13 @@ export function taxaMatchingFilter(level, taxonFilter = '', filterLevel = '') {
   if (levelIdx < 0) return null;
 
   const matches = makeTaxonMatcher(taxonFilter, filterLevel);
+  const assayIds = store.assayAsvIds;
   const out = new Set();
   for (const asvId in assignments) {
     const vals = assignments[asvId] || [];
-    if (vals[levelIdx] && matches(asvId)) out.add(vals[levelIdx]);
+    if (!vals[levelIdx] || !matches(asvId)) continue;
+    if (assayIds && !assayIds.has(asvId)) continue;
+    out.add(vals[levelIdx]);
   }
   return out;
 }
@@ -138,7 +237,7 @@ export function taxaMatchingFilter(level, taxonFilter = '', filterLevel = '') {
 let _taxColorCache = { key: '', result: { colorMap: {}, ranked: [] } };
 
 export function buildTaxColorMap(level, taxonFilter = '', filterLevel = '') {
-  const cacheKey = `${level}|${taxonFilter}|${filterLevel}`;
+  const cacheKey = `${level}|${taxonFilter}|${filterLevel}|${store.assayCacheKey}`;
   if (_taxColorCache.key === cacheKey) return _taxColorCache.result;
 
   const db = Object.keys(store.taxonomy)[0];
@@ -147,13 +246,17 @@ export function buildTaxColorMap(level, taxonFilter = '', filterLevel = '') {
   const levels = store.taxonomy[db].levels || [];
   const assignments = store.taxonomy[db].assignments || {};
 
-  // Build a set of ASV IDs that pass the taxonomy filter
+  // ASV IDs passing the taxonomy filter AND the assay restriction. Both narrow
+  // the same set, so the counts shown in the sidebar match the plotted points.
+  const assayIds = store.assayAsvIds;
   let filteredAsvIds = null;
   const matches = makeTaxonMatcher(taxonFilter, filterLevel);
-  if (matches) {
+  if (matches || assayIds) {
     filteredAsvIds = new Set();
     for (const asvId in assignments) {
-      if (matches(asvId)) filteredAsvIds.add(asvId);
+      if (matches && !matches(asvId)) continue;
+      if (assayIds && !assayIds.has(asvId)) continue;
+      filteredAsvIds.add(asvId);
     }
   }
 

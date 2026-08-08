@@ -121,8 +121,10 @@
     const matches = taxonMatches;
     const gf = filters.groupFlags || {};
     const minBoot = filters.treeMinBootstrap || 0;
+    const assayAsvs = store.assayAsvIds;
     const ids = new Set();
     for (const asv of store.asvs) {
+      if (assayAsvs && !assayAsvs.has(asv.id)) continue;
       const group = asv.group ?? 'unknown';
       if (gf[group] === false) continue;
       if (matches && !matches(asv.id ?? '', asv.taxonomy ?? '')) continue;
