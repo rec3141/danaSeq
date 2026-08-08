@@ -90,7 +90,7 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}" \
 
 # Copy pipeline code
 COPY . /pipeline/
-RUN chmod +x /pipeline/bin/*.R /pipeline/bin/*.sh /pipeline/entrypoint.sh
+RUN chmod +x /pipeline/bin/*.py /pipeline/bin/*.sh /pipeline/entrypoint.sh
 
 # Pre-install the viz app's node_modules so BUNDLE_VIZ_SITE's `npm install
 # --prefer-offline` + `vite build` succeed on offline compute nodes.
