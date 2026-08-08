@@ -346,9 +346,12 @@ workflow {
         AUTO_TRIM(ch_trimmed)
 
         // Collapse each group's per-sample values by --trunc_policy.
+        // Read lengths ride along so TRUNC_POLICY can cap the floor at the reads
+        // that exist: a floor above the read length zeroes every sample (issue #4).
         ch_trunc_policy_in = AUTO_TRIM.out.trim_params
-            .map { meta, trunc_fwd, trunc_rev ->
-                [meta.plate, meta.id, trunc_fwd as Integer, trunc_rev as Integer]
+            .map { meta, trunc_fwd, trunc_rev, read_fwd, read_rev ->
+                [meta.plate, meta.id, trunc_fwd as Integer, trunc_rev as Integer,
+                 read_fwd as Integer, read_rev as Integer]
             }
             .groupTuple(by: 0)
 

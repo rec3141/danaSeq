@@ -34,7 +34,7 @@ process AUTO_TRIM {
     tuple val(meta), path(r1), path(r2)
 
     output:
-    tuple val(meta), env(TRUNC_FWD), env(TRUNC_REV), emit: trim_params
+    tuple val(meta), env(TRUNC_FWD), env(TRUNC_REV), env(READ_FWD), env(READ_REV), emit: trim_params
     path("${meta.id}_auto_trim.tsv"), emit: params_tsv
 
     script:
@@ -58,8 +58,10 @@ process AUTO_TRIM {
     # mergePairs discards ~100% of reads and the sample silently vanishes at
     # DENOISE. Floor at MIN_LEN, capped at the actual read length. Issue #4.
     clamp() { v=\$1; lo=\$2; hi=\$3; [ "\$v" -lt "\$lo" ] && v=\$lo; [ "\$v" -gt "\$hi" ] && v=\$hi; echo "\$v"; }
-    export TRUNC_FWD=\$(clamp "\${RAW_FWD:-0}" "\$MIN_LEN" "\${LEN_FWD:-\$MIN_LEN}")
-    export TRUNC_REV=\$(clamp "\${RAW_REV:-0}" "\$MIN_LEN" "\${LEN_REV:-\$MIN_LEN}")
+    export READ_FWD="\${LEN_FWD:-\$MIN_LEN}"
+    export READ_REV="\${LEN_REV:-\$MIN_LEN}"
+    export TRUNC_FWD=\$(clamp "\${RAW_FWD:-0}" "\$MIN_LEN" "\$READ_FWD")
+    export TRUNC_REV=\$(clamp "\${RAW_REV:-0}" "\$MIN_LEN" "\$READ_REV")
 
     # Record the applied values (and whether the floor kicked in) in the tsv so
     # quality_check reflects what was actually used, not just what was detected.
@@ -90,7 +92,7 @@ process TRUNC_POLICY {
     publishDir "${params.outdir}/quality_check", mode: 'copy', pattern: "*_trunc_policy.tsv"
 
     input:
-    tuple val(plate_id), val(sample_ids), val(fwds), val(revs)
+    tuple val(plate_id), val(sample_ids), val(fwds), val(revs), val(len_fwds), val(len_revs)
     path primer_files    // fwd/rev fasta when --primers_* were given, else empty
 
     output:
@@ -98,8 +100,8 @@ process TRUNC_POLICY {
     path("${plate_id}_trunc_policy.tsv"), emit: policy_tsv
 
     script:
-    def rows = [sample_ids, fwds, revs].transpose()
-                   .collect { s, f, r -> "${s}\t${f}\t${r}" }.join('\n')
+    def rows = [sample_ids, fwds, revs, len_fwds, len_revs].transpose()
+                   .collect { s, f, r, lf, lr -> "${s}\t${f}\t${r}\t${lf}\t${lr}" }.join('\n')
     """
     cat > samples.tsv <<'SAMPLES_EOF'
 ${rows}
@@ -147,8 +149,8 @@ if expected <= 0:
 rows = []
 for line in open("samples.tsv"):
     p = line.rstrip("\\n").split("\\t")
-    if len(p) >= 3 and p[1].isdigit() and p[2].isdigit():
-        rows.append((p[0], int(p[1]), int(p[2])))
+    if len(p) >= 5 and all(x.isdigit() for x in p[1:5]):
+        rows.append((p[0], int(p[1]), int(p[2]), int(p[3]), int(p[4])))
 if not rows:
     raise SystemExit("TRUNC_POLICY: no per-sample truncation values for " + plate)
 
@@ -175,13 +177,38 @@ def pick(vals):
     return int(round(v[lo] + (i - lo) * (v[hi] - v[lo])))
 
 raw_fwd, raw_rev = pick([r[1] for r in rows]), pick([r[2] for r in rows])
+
 # Same floor AUTO_TRIM applies per sample: a quality-driven short truncation
 # leaves reads unable to overlap and the sample vanishes at DENOISE (issue #4).
-fwd, rev = max(raw_fwd, min_len), max(raw_rev, min_len)
+# AUTO_TRIM also caps that floor at the read length, and so must this: a floor
+# above the reads truncates every read out of existence, because dada2 discards
+# reads shorter than truncLen. A 2x150 run trimmed to 148bp against a 150bp
+# floor returns zero reads for every sample and reads as "no results".
+# Cap by the same percentile over read lengths that picked the truncation, so
+# the cap tracks the policy instead of letting one short library set it. Each
+# sample's truncation is already <= its own read length, so this only ever
+# constrains the floor -- never the quality-driven choice itself.
+cap_fwd, cap_rev = pick([r[3] for r in rows]), pick([r[4] for r in rows])
+fwd = min(max(raw_fwd, min_len), cap_fwd)
+rev = min(max(raw_rev, min_len), cap_rev)
 
 # How many samples are being truncated PAST their own quality cliff, and so will
 # lose reads purely because of the group they landed in.
 past = [r[0] for r in rows if r[1] < fwd or r[2] < rev]
+
+# Truncating past a sample's own READ LENGTH is a different failure: it is not a
+# trade, it is a guaranteed zero for that sample. Fail loudly when it would take
+# the whole group, rather than emitting an empty table that looks like a primer
+# or metadata problem downstream.
+past_len = [r[0] for r in rows if r[3] < fwd or r[4] < rev]
+if len(past_len) == len(rows):
+    raise SystemExit(
+        "TRUNC_POLICY: %s truncates fwd=%d rev=%d past the read length of all %d "
+        "sample(s) (longest fwd=%d rev=%d) — every read would be discarded at the "
+        "quality filter. Lower --auto_trim_min_length (currently %d) or set "
+        "--truncLen_fwd/--truncLen_rev explicitly."
+        % (plate, fwd, rev, len(rows), max(r[3] for r in rows),
+           max(r[4] for r in rows), min_len))
 
 # Can a merged fragment still exist? mergePairs needs fwd + rev to cover the
 # fragment plus min_overlap. Too little does not raise — pairs quietly fail to
@@ -208,16 +235,24 @@ with open(plate + "_trunc_policy.tsv", "w") as out:
     out.write("trunc_len_fwd_applied\\t%d\\n" % fwd)
     out.write("trunc_len_rev_applied\\t%d\\n" % rev)
     out.write("floored\\t%s\\n" % str(fwd != raw_fwd or rev != raw_rev).lower())
+    out.write("read_len_cap_fwd\\t%d\\n" % cap_fwd)
+    out.write("read_len_cap_rev\\t%d\\n" % cap_rev)
+    out.write("capped_by_read_len\\t%s\\n"
+              % str(max(raw_fwd, min_len) > cap_fwd or max(raw_rev, min_len) > cap_rev).lower())
     out.write("samples_truncated_past_own\\t%d\\n" % len(past))
+    out.write("samples_truncated_past_read_len\\t%d\\n" % len(past_len))
     out.write("span_fwd_plus_rev\\t%d\\n" % span)
     out.write("span_required\\t%d\\n" % max(floor_need, frag_need))
     out.write("span_sufficient\\t%s\\n" % str(not frag_warn).lower())
     out.write("expected_amplicon_length\\t%s\\n" % (expected if expected > 0 else ""))
     out.write("expected_amplicon_source\\t%s\\n" % (expected_src if expected > 0 else "unknown"))
     out.write("#\\tper-sample values follow\\n")
-    out.write("#sample\\ttrunc_fwd\\ttrunc_rev\\ttruncated_past_own\\n")
-    for s, f, r in sorted(rows):
-        out.write("%s\\t%d\\t%d\\t%s\\n" % (s, f, r, str(f < fwd or r < rev).lower()))
+    out.write("#sample\\ttrunc_fwd\\ttrunc_rev\\tread_len_fwd\\tread_len_rev"
+              "\\ttruncated_past_own\\ttruncated_past_read_len\\n")
+    for s, f, r, lf, lr in sorted(rows):
+        out.write("%s\\t%d\\t%d\\t%d\\t%d\\t%s\\t%s\\n"
+                  % (s, f, r, lf, lr, str(f < fwd or r < rev).lower(),
+                     str(lf < fwd or lr < rev).lower()))
 
 print("[INFO] Trunc policy %s for %s: fwd=%d rev=%d from %d samples (span %d)" %
       (policy, plate, fwd, rev, len(rows), span))
@@ -229,11 +264,20 @@ elif expected > 0:
 else:
     print("[INFO] Trunc policy %s for %s: overlap unchecked — no amplicon length for "
           "these primers (set --expected_amplicon_length)" % (policy, plate))
+if max(raw_fwd, min_len) > cap_fwd or max(raw_rev, min_len) > cap_rev:
+    print("[INFO] Trunc policy %s for %s: floor --auto_trim_min_length %d capped to "
+          "the reads actually present (fwd=%d rev=%d)"
+          % (policy, plate, min_len, cap_fwd, cap_rev))
 if past:
     print("[WARN] Trunc policy %s for %s: %d of %d samples truncated past their own "
           "quality cliff and will lose reads at the filter: %s"
           % (policy, plate, len(past), len(rows), ", ".join(sorted(past)[:10])
              + (" ..." if len(past) > 10 else "")))
+if past_len:
+    print("[WARN] Trunc policy %s for %s: %d of %d samples are shorter than fwd=%d "
+          "rev=%d and will return ZERO reads at the filter: %s"
+          % (policy, plate, len(past_len), len(rows), fwd, rev,
+             ", ".join(sorted(past_len)[:10]) + (" ..." if len(past_len) > 10 else "")))
 PYEOF
 
     export TRUNC_FWD=\$(awk -F'\\t' '\$1=="trunc_len_fwd_applied"{print \$2}' ${plate_id}_trunc_policy.tsv)
