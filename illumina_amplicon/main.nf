@@ -75,9 +75,6 @@ def helpMessage() {
     Network:
       --min_prevalence N   Min samples per ASV for SparCC [default: 5]
 
-    Language:
-      --lang STR           'R' or 'python' [default: python]
-
     Resources:
       --threads N          General thread count [default: 8]
       --denoise_cpus N     CPUs for denoising processes [default: 8]
@@ -420,15 +417,10 @@ workflow {
 
     MERGE_SEQTABS(ch_all_seqtabs)
 
-    // Per-plate chimera removal already happens in DENOISE (both R and Python).
-    // Post-merge chimera pass catches cross-plate chimeras.
-    def effectiveEngine = params.denoise_engine ?: params.lang
-    if (effectiveEngine == 'python') {
-        REMOVE_CHIMERAS(MERGE_SEQTABS.out.seqtab)
-        FILTER_SEQTAB(REMOVE_CHIMERAS.out.seqtab)
-    } else {
-        FILTER_SEQTAB(MERGE_SEQTABS.out.seqtab)
-    }
+    // Per-plate chimera removal already happens in DENOISE; the post-merge pass
+    // catches cross-plate chimeras.
+    REMOVE_CHIMERAS(MERGE_SEQTABS.out.seqtab)
+    FILTER_SEQTAB(REMOVE_CHIMERAS.out.seqtab)
 
     // ======================================================================
     // Stage B: Taxonomy, phylogeny, renormalization
@@ -577,10 +569,8 @@ workflow.onComplete {
                 // process -> container image; image tags give tool versions
                 containers          : workflow.container,
                 reference_databases : params.ref_databases,
-                denoise             : (params.denoise_engine ?: params.lang) == 'python' ? 'papa2 (DADA2-compatible)' : 'DADA2 (R)',
+                denoise             : 'papa2 (DADA2-compatible)',
                 parameters          : [
-                    lang                 : params.lang,
-                    denoise_engine       : params.denoise_engine,
                     skip_primer_removal  : params.skip_primer_removal,
                     primer_error_rate    : params.primer_error_rate,
                     // added on main while this branch was open — a manifest that omits

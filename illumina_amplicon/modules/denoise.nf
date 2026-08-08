@@ -1,22 +1,14 @@
 // Amplicon denoising processes.
 //
 // Three-step workflow:
-//   1. FILTER_TRIM    — per-sample quality filtering (uses --lang)
-//   2. LEARN_ERRORS   — per-plate error model learning (uses --denoise_engine)
-//   3. DENOISE        — per-plate denoising + pair merging (uses --denoise_engine)
+//   1. FILTER_TRIM    — per-sample quality filtering
+//   2. LEARN_ERRORS   — per-plate error model learning
+//   3. DENOISE        — per-plate denoising + pair merging
 //
-// --denoise_engine controls which implementation to use:
-//   'python' (default) = papa2 (byte-identical to R dada2, no R dependency)
-//   'R' = R dada2 package (reference implementation)
-//
-// --lang controls filter_trim and downstream scripts independently.
+// Denoising is papa2 (byte-identical to R dada2, no R dependency).
 
-// Resolve effective denoise engine: explicit param > lang fallback
-def denoiseEngine() { return params.denoise_engine ?: params.lang }
-
-// Output extensions: denoise steps always output .rds when engine=R
-def errExt() { return denoiseEngine() == 'python' ? 'pkl' : 'rds' }
-def seqExt() { return params.lang == 'python' ? 'pkl' : 'rds' }
+def errExt() { return 'pkl' }
+def seqExt() { return 'pkl' }
 
 // Per-sample auto-trim: each sample is profiled on its own reads and gets its own
 // *_auto_trim.tsv. TRUNC_POLICY then chooses the group's value from these.
@@ -27,7 +19,7 @@ def seqExt() { return params.lang == 'python' ? 'pkl' : 'rds' }
 process AUTO_TRIM {
     tag "${meta.id}"
     label 'process_low'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
     publishDir "${params.outdir}/quality_check", mode: 'copy', pattern: "*_auto_trim.tsv"
 
     input:
@@ -39,21 +31,15 @@ process AUTO_TRIM {
 
     script:
     def plate_id = meta.id
-    // Each engine profiles with its own implementation, so --lang R does not
-    // need the Python microscape package (which envs/r.yml does not carry).
-    // Both write the same keys to the same TSV, which the shell below reads.
-    def profile_cmd = params.lang == 'python'
-        ? """microscape auto-trim "." \\
+    // bin/auto_trim.py, vendored from the microscape package's quality.py when
+    // that package was retired. It was the only command the pipeline used from
+    // it, and keeping it here means the truncation logic lives in one place.
+    """
+    auto_trim.py "." \\
         --min-quality ${params.auto_trim_min_quality} \\
         --min-length ${params.auto_trim_min_length} \\
         --output ${plate_id}_auto_trim.tsv \\
-        --verbose"""
-        : """dada2_auto_trim.R "." \\
-        ${params.auto_trim_min_quality} \\
-        ${params.auto_trim_min_length} \\
-        ${plate_id}_auto_trim.tsv"""
-    """
-    ${profile_cmd}
+        --verbose
 
     # Read the auto-detected values (exact key match, before we append anything).
     RAW_FWD=\$(awk -F'\\t' '\$1=="trunc_len_fwd"{print \$2}' ${plate_id}_auto_trim.tsv)
@@ -298,7 +284,7 @@ PYEOF
 process FILTER_TRIM {
     tag "${meta.id}"
     label 'process_low'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
     publishDir "${params.outdir}/filtered", mode: 'copy', pattern: "*_filt_stats.tsv", enabled: !params.store_dir
 
     input:
@@ -310,14 +296,9 @@ process FILTER_TRIM {
 
     script:
     // An explicit --truncLen_* wins; otherwise use what AUTO_TRIM measured and
-    // TRUNC_POLICY chose for this group. Both engines must be handed the same
-    // number: passing params.truncLen_* straight through leaves the R path on
-    // the default 0, which dada2_filter_trim.R reads as "no truncation", so the
-    // whole auto-trim/policy result is computed, published to quality_check/,
-    // and then silently discarded.
+    // TRUNC_POLICY chose for this group.
     def eff_trunc_fwd = params.truncLen_fwd > 0 ? params.truncLen_fwd : trunc_fwd
     def eff_trunc_rev = params.truncLen_rev > 0 ? params.truncLen_rev : trunc_rev
-    if (params.lang == 'python')
     """
     papa2 filter-trim \
         "${r1}" "${meta.id}_R1.filt.fastq.gz" \
@@ -330,21 +311,13 @@ process FILTER_TRIM {
         --stats "${meta.id}_filt_stats.tsv" \
         --sample-id "${meta.id}"
     """
-    else
-    """
-    dada2_filter_trim.R \
-        "${meta.id}" "${r1}" "${r2}" \
-        ${params.maxEE} ${params.truncQ} ${params.maxN} \
-        ${eff_trunc_fwd} ${eff_trunc_rev} \
-        ${task.cpus}
-    """
 }
 
-// Learn error rates — uses denoise_engine (R or python/papa2)
+// Learn error rates (papa2)
 process LEARN_ERRORS {
     tag "${meta.id}"
     label 'process_high'
-    conda ((params.denoise_engine ?: params.lang) == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml")
+    conda "${projectDir}/envs/python.yml")
     publishDir "${params.outdir}/error_models", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/error_models" : null
 
@@ -356,22 +329,17 @@ process LEARN_ERRORS {
     path("${meta.id}_error_rates.pdf"), emit: error_plots
 
     script:
-    if (denoiseEngine() == 'python')
     """
     learn_errors.py "${meta.id}" ${task.cpus}
     """
-    else
-    """
-    dada2_learn_errors.R "${meta.id}" ${task.cpus}
-    """
 }
 
-// Per-plate denoising — uses denoise_engine (R or python/papa2)
+// Per-plate denoising (papa2)
 // Output is always .pkl when lang=python (converted from .rds by wrapper if needed)
 process DENOISE {
     tag "${meta.id}"
     label 'process_high'
-    conda ((params.denoise_engine ?: params.lang) == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml")
+    conda "${projectDir}/envs/python.yml")
     publishDir "${params.outdir}/seqtabs", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/seqtabs" : null
 
@@ -383,24 +351,8 @@ process DENOISE {
     path("${meta.id}.seqtab.tsv"), emit: seqtab_tsv
 
     script:
-    if (denoiseEngine() == 'python')
     """
     denoise.py \
-        "${meta.id}" "${errF}" "${errR}" \
-        ${params.min_overlap} ${task.cpus}
-    """
-    else if (params.lang == 'python')
-    // R dada2 engine but Python downstream: run R, then convert .rds to .pkl
-    """
-    dada2_denoise.R \
-        "${meta.id}" "${errF}" "${errR}" \
-        ${params.min_overlap} ${task.cpus}
-
-    rds_to_pkl.py "${meta.id}.seqtab.rds" "${meta.id}.seqtab.pkl"
-    """
-    else
-    """
-    dada2_denoise.R \
         "${meta.id}" "${errF}" "${errR}" \
         ${params.min_overlap} ${task.cpus}
     """

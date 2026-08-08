@@ -4,12 +4,12 @@
 // R uses DECIPHER; Python uses MAFFT + BioPython/scipy.
 // Optional — only needed for UniFrac and phylogeny-aware ordinations.
 
-def phyloExt() { return params.lang == 'python' ? 'pkl' : 'rds' }
+def phyloExt() { return 'pkl' }
 
 process BUILD_PHYLOGENY {
     tag "phylogeny"
     label 'process_high'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
     publishDir "${params.outdir}/phylogeny", mode: 'copy'
     // Also publish the Newick tree into viz/ as tree.nwk. The viz app fetches
     // data/tree.nwk for its Phylogeny view, and viz/ is what gets deployed as
@@ -23,18 +23,13 @@ process BUILD_PHYLOGENY {
     path(seqtab)
 
     output:
-    path("phylo_tree.${params.lang == 'python' ? 'nwk' : 'rds'}"), emit: tree
+    path("phylo_tree.${'nwk'}"), emit: tree
     path("phylo_distances.${phyloExt()}"), emit: distances
     path("phylo_seq_map.${phyloExt()}"), emit: seq_map
     path("phylo_alignment.fasta"), emit: alignment
 
     script:
-    if (params.lang == 'python')
     """
     build_phylogeny.py "${seqtab}" ${task.cpus}
-    """
-    else
-    """
-    build_phylogeny.R "${seqtab}" ${task.cpus}
     """
 }

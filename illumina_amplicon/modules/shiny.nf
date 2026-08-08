@@ -9,7 +9,7 @@
 process BUILD_VIZ {
     tag "build_viz"
     label 'process_low'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
     publishDir "${params.outdir}/viz", mode: 'copy'
 
     input:
@@ -29,7 +29,6 @@ process BUILD_VIZ {
     path("app.R"),        emit: app_script, optional: true
 
     script:
-    if (params.lang == 'python')
     """
     build_viz.py \
         "${seqtab}" \
@@ -40,17 +39,6 @@ process BUILD_VIZ {
         "${seq_tsne}" \
         "${network}" \
         "${primer_assignment}"
-    """
-    else
-    """
-    build_shiny.R \
-        "${seqtab}" \
-        "${renorm}" \
-        "." \
-        "${metadata}" \
-        "${sample_tsne}" \
-        "${seq_tsne}" \
-        "${network}"
     """
 }
 

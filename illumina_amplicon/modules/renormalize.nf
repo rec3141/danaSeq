@@ -5,12 +5,12 @@
 // taxonomic assignment, then normalizes counts to proportions within
 // each group.
 
-def renormExt() { return params.lang == 'python' ? 'pkl' : 'rds' }
+def renormExt() { return 'pkl' }
 
 process RENORMALIZE {
     tag "renormalize"
     label 'process_medium'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
     publishDir "${params.outdir}/renormalized", mode: 'copy'
 
     input:
@@ -24,12 +24,7 @@ process RENORMALIZE {
     path("renorm_stats.tsv"), emit: stats
 
     script:
-    if (params.lang == 'python')
     """
     renormalize.py "${seqtab}" "${taxonomy}" "${db_name}"
-    """
-    else
-    """
-    renormalize.R "${seqtab}" "${taxonomy}" "${db_name}"
     """
 }

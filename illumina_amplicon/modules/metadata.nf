@@ -1,11 +1,11 @@
 // Load sample metadata and merge with sequence data.
 
-def metaExt() { return params.lang == 'python' ? 'pkl' : 'rds' }
+def metaExt() { return 'pkl' }
 
 process LOAD_METADATA {
     tag "metadata"
     label 'process_low'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
 
     input:
     path(seqtab)
@@ -17,12 +17,7 @@ process LOAD_METADATA {
     path("match_stats.tsv"), emit: stats
 
     script:
-    if (params.lang == 'python')
     """
     load_metadata.py "${seqtab}" "${metadata_file}" "${sample_id_column}"
-    """
-    else
-    """
-    load_metadata.R "${seqtab}" "${metadata_file}" "${sample_id_column}"
     """
 }

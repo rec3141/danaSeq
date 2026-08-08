@@ -28,10 +28,6 @@ The pipeline pulls its tools from [bioconda](https://bioconda.github.io/):
 - **[cutadapt](https://cutadapt.readthedocs.io/)** — Primer removal
 - **[MAFFT](https://mafft.cbrc.jp/alignment/software/)** — Multiple sequence alignment
 
-For R users, the pipeline also supports `--lang R` which uses:
-- **[dada2](https://bioconductor.org/packages/dada2/)** — R/Bioconductor
-- **[microscapeR](https://github.com/rec3141/microscapeR)** — R companion package
-
 ## Pipeline Stages
 
 | Stage | Process | Description |
@@ -62,7 +58,6 @@ nextflow run rec3141/microscape-nf --help
 | `--input` | required | Directory of paired-end `*.fastq.gz` files |
 | `--ref_databases` | required | Reference DBs (`"name:path:Levels;..."`) |
 | `--outdir` | `results` | Output directory |
-| `--lang` | `python` | Language: `python` (papa2) or `R` (dada2) |
 | `--maxEE` | `2` | Max expected errors per read |
 | `--truncQ` | `11` | Truncate at first base with quality <= Q |
 | `--min_overlap` | `10` | Min overlap for pair merging |

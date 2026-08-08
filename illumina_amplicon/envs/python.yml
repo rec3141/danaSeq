@@ -11,18 +11,12 @@ dependencies:
   - scikit-learn
   - matplotlib
   - scipy
+  - numpy
   - pip
   - pip:
-    # Pinned, and bumped deliberately — these two decide what the numbers are.
-    #
-    # microscape has always been pinned, and its commits change analysis behaviour
-    # (auto-trim moved truncation 150 -> 230 bp on one 18S library). A rebuild must not
-    # alter trimming silently, so each bump is its own commit saying what it picks up.
-    # This one carries only the setuptools-scm change — no behaviour difference.
-    #
-    # papa2 was NOT pinned, which is the anomaly: it does the denoising. Unpinned also
-    # means the Docker layer never invalidates, so pip did not re-fetch — its version PR
-    # merged at 20:39Z, the image built at 20:42Z, and the image still held the
-    # 2026-04-01 commit. Pinning fixes the reproducibility and the caching together.
+    # Pinned, and bumped deliberately — papa2 does the denoising, so its commit
+    # decides what the numbers are. microscape used to be pinned here too, for
+    # the single `auto-trim` command; that now lives in bin/auto_trim.py next to
+    # the R engine's copy, so the pipeline no longer tracks a second repo to get
+    # one function.
     - git+https://github.com/rec3141/papa2.git@fd3cb5aa56898cb7ae73e1674ac19453057f6141
-    - git+https://github.com/rec3141/microscape.git@3e98989c482d752eb03b7e423d0650bec105289b

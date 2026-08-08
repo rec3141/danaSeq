@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 
 # ============================================================
-# microscape-nf container
-# Pre-installs both Python (papa2 + microscape) and R (dada2)
+# danaSeq illumina_amplicon container
+# Pre-installs the Python engine (papa2, byte-identical to R dada2)
 # environments so the pipeline runs without conda env creation.
 # ============================================================
 FROM condaforge/miniforge3:latest
 
-LABEL org.opencontainers.image.source="https://github.com/rec3141/microscape-nf"
+LABEL org.opencontainers.image.source="https://github.com/rec3141/danaSeq"
 LABEL org.opencontainers.image.description="Microscape amplicon sequencing pipeline"
 
 # System dependencies
@@ -49,35 +49,27 @@ RUN curl -fsSL https://get.nextflow.io | bash \
 # Copy environment specs
 COPY envs/ /tmp/envs/
 
-# Upstream HEADs of the two git dependencies, resolved by CI at build time.
+# Upstream HEAD of the remaining git dependency, resolved by CI at build time.
 #
-# envs/python.yml installs papa2 and microscape unpinned, which is right while both are
-# in active development — but an unpinned URL does not change, so Docker restores the
-# cached layer and pip never re-fetches. papa2's version PR merged three minutes before
-# a build and the image still shipped a four-month-old commit.
-#
-# Naming the SHAs here changes the layer key whenever upstream moves, so "unpinned"
-# actually means latest. They are recorded rather than enforced: what was really
-# installed is read back from pip's direct_url.json by bin/tool_versions.sh.
-ARG MICROSCAPE_SHA=main
+# An unpinned URL does not change, so Docker restores the cached layer and pip
+# never re-fetches: papa2's version PR merged three minutes before a build and
+# the image still shipped a four-month-old commit. Naming the SHA here changes
+# the layer key whenever upstream moves, so "unpinned" actually means latest.
+# It is recorded rather than enforced: what was really installed is read back
+# from pip's direct_url.json by bin/tool_versions.sh.
 ARG PAPA2_SHA=main
 
-# Create Python environment (papa2 + microscape from bioconda)
+# Create Python environment (papa2 from git, everything else from conda)
 # No `mamba clean` here: /opt/conda/pkgs is a BuildKit cache mount (already
 # excluded from the image layer), and cleaning it fails with "Device or
 # resource busy" because it's a live mount point.
 RUN --mount=type=cache,target=/opt/conda/pkgs \
-    echo "upstream: microscape=${MICROSCAPE_SHA} papa2=${PAPA2_SHA}" \
+    echo "upstream: papa2=${PAPA2_SHA}" \
     && mamba env create -y -p /opt/conda/envs/microscape-python \
         -f /tmp/envs/python.yml
 
-# Create R environment (dada2, DECIPHER from bioconda)
-RUN --mount=type=cache,target=/opt/conda/pkgs \
-    mamba env create -y -p /opt/conda/envs/microscape-r \
-        -f /tmp/envs/r.yml
-
 # Put both envs on PATH so tools are available without conda activate
-ENV PATH="/opt/conda/envs/microscape-python/bin:/opt/conda/envs/microscape-r/bin:${PATH}"
+ENV PATH="/opt/conda/envs/microscape-python/bin:${PATH}"
 
 # Provenance, baked at build time.
 #
@@ -114,8 +106,9 @@ RUN find /opt/conda -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null ||
 
 # Smoke test
 RUN python3 -c "import papa2; print('papa2', papa2.__version__)" \
-    && python3 -c "import microscape; print('microscape', microscape.__version__)" \
-    && cutadapt --version
+    && python3 -c "import numpy; print('numpy', numpy.__version__)" \
+    && cutadapt --version \
+    && /pipeline/bin/auto_trim.py --help > /dev/null
 
 # Writable home for non-root users (HPC)
 RUN mkdir -p /home/microscape && chmod 777 /home/microscape

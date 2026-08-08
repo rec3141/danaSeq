@@ -1,12 +1,12 @@
 // t-SNE ordination of samples and ASVs via Bray-Curtis distances.
-// Supports --lang R (parallelDist + Rtsne) or --lang python (scipy + sklearn).
+// Uses scipy + scikit-learn.
 
-def clusterExt() { return params.lang == 'python' ? 'pkl' : 'rds' }
+def clusterExt() { return 'pkl' }
 
 process CLUSTER_TSNE {
     tag "tsne"
     label 'process_high'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
     publishDir "${params.outdir}/clustering", mode: 'copy'
 
     input:
@@ -19,12 +19,7 @@ process CLUSTER_TSNE {
     path("seq_bray_dist.${clusterExt()}"), emit: seq_dist
 
     script:
-    if (params.lang == 'python')
     """
     cluster_tsne.py "${seqtab}" ${task.cpus}
-    """
-    else
-    """
-    cluster_tsne.R "${seqtab}" ${task.cpus}
     """
 }

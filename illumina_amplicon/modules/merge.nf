@@ -5,14 +5,13 @@
 //   2. REMOVE_CHIMERAS — sparse consensus chimera removal (long-format I/O)
 //   3. FILTER_SEQTAB   — length, prevalence, abundance filtering (long → long + wide)
 //
-// Supports --lang R or --lang python.
 
-def seqExt() { return params.lang == 'python' ? 'pkl' : 'rds' }
+def seqExt() { return 'pkl' }
 
 process MERGE_SEQTABS {
     tag "merge-all"
     label 'process_medium'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
     // Publish the stats: without them the read/sample attrition between
     // denoising and the final table is invisible in the results, which made
     // a 218k -> 51k read drop impossible to attribute after the fact.
@@ -27,13 +26,8 @@ process MERGE_SEQTABS {
     path("merge_sample_reads.tsv"), emit: sample_reads, optional: true
 
     script:
-    if (params.lang == 'python')
     """
     merge_seqtabs.py
-    """
-    else
-    """
-    merge_seqtabs.R
     """
 }
 
@@ -41,7 +35,7 @@ process MERGE_SEQTABS {
 process REMOVE_CHIMERAS {
     tag "chimera-removal"
     label 'process_high'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
     // Publish the stats: without them the read/sample attrition between
     // denoising and the final table is invisible in the results, which made
     // a 218k -> 51k read drop impossible to attribute after the fact.
@@ -56,13 +50,8 @@ process REMOVE_CHIMERAS {
     path("chimera_sample_reads.tsv"), emit: sample_reads, optional: true
 
     script:
-    if (params.lang == 'python')
     """
     remove_chimeras.py "${seqtab}" ${task.cpus}
-    """
-    else
-    """
-    remove_chimeras.R "${seqtab}" ${task.cpus}
     """
 }
 
@@ -70,7 +59,7 @@ process REMOVE_CHIMERAS {
 process FILTER_SEQTAB {
     tag "filter-qc"
     label 'process_medium'
-    conda params.lang == 'python' ? "${projectDir}/envs/python.yml" : "${projectDir}/envs/r.yml"
+    conda "${projectDir}/envs/python.yml"
     publishDir "${params.outdir}/seqtab_final", mode: 'copy'
 
     input:
@@ -86,16 +75,8 @@ process FILTER_SEQTAB {
     path("sequence_summaries.pdf"), emit: plots
 
     script:
-    if (params.lang == 'python')
     """
     filter_seqtab.py \
-        "${seqtab}" \
-        ${params.min_seq_length} ${params.min_samples} \
-        ${params.min_seqs} ${params.min_reads}
-    """
-    else
-    """
-    filter_seqtab.R \
         "${seqtab}" \
         ${params.min_seq_length} ${params.min_samples} \
         ${params.min_seqs} ${params.min_reads}
