@@ -26,6 +26,11 @@ export const store = $state({
   // UI
   loading: true,
   error: null,
+
+  // Largest point scale that still changes anything, published by each explorer
+  // once it knows its base marker sizes and consumed by the sidebar sliders.
+  maxPointScale: 1,
+  maxNetworkPointScale: 1,
 });
 
 /** Group colors as RGBA for regl-scatterplot */
@@ -305,6 +310,38 @@ export function getAsvColor(asvId, level, colorMap) {
 
   const val = assignments[asvId]?.[levelIdx] || 'unclassified';
   return colorMap[val] || '#475569';
+}
+
+/**
+ * Hard ceiling for a scattergl marker, in px.
+ *
+ * regl-scatter2d's shader packs the size as a byte fraction of `maxSize = 100.`,
+ * so anything above it overflows and wraps modulo 100 — a 102px marker draws at
+ * 2px. Not a value we get to choose; raising it means leaving scattergl.
+ */
+export const MAX_MARKER_PX = 100;
+
+/**
+ * The scale factor at which the largest of `base` reaches MAX_MARKER_PX — i.e.
+ * the largest scale that still does anything. The sidebar sliders use it as their
+ * top end so the whole track stays live whatever data is loaded.
+ */
+export function maxUsefulScale(base) {
+  let maxBase = 0;
+  for (const b of base) if (b > maxBase) maxBase = b;
+  return maxBase > 0 ? MAX_MARKER_PX / maxBase : 1;
+}
+
+/**
+ * Scale marker sizes, holding the largest at MAX_MARKER_PX.
+ *
+ * Clamps the scale factor rather than each size: a per-point clamp pins the big
+ * markers while the small ones keep growing into them, so the size differences
+ * that carry the signal flatten out as you drag the slider up.
+ */
+export function scaleMarkerSizes(base, scale) {
+  const eff = Math.min(scale, maxUsefulScale(base));
+  return base.map(b => b * eff);
 }
 
 /** Convert hex to regl-scatterplot RGBA [0-1] */

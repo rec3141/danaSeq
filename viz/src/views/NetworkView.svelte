@@ -5,7 +5,7 @@
     store, countsBySample,
     GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
-    makeTaxonMatcher,
+    makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
   } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
@@ -34,11 +34,51 @@
     store.selectedAsv != null ? store.asvs[store.selectedAsv] : null
   );
 
+  /**
+   * Mean relative abundance per ASV, keyed by ASV id.
+   *
+   * The stored proportion is already the ASV's share of its own sample, so the
+   * mean is over ALL samples (absences counted as zero) rather than only the
+   * samples it appears in — otherwise a one-sample bloom outranks a taxon that
+   * is abundant everywhere. Falls back to pooled RA when the count matrix has
+   * not loaded, so markers stay meaningful instead of collapsing to zero.
+   */
+  let meanRaById = $derived.by(() => {
+    const out = new Map();
+    const ids = store.counts?.asvs || [];
+    const rows = store.counts?.data || [];
+    const nSamples = store.samples.length || 1;
+
+    if (rows.length && ids.length) {
+      for (const [, ai, , prop] of rows) {
+        const id = ids[ai];
+        if (id != null) out.set(id, (out.get(id) || 0) + (prop || 0));
+      }
+      for (const [id, sum] of out) out.set(id, sum / nSamples);
+      return out;
+    }
+
+    let totalReads = 0;
+    for (const a of store.asvs) totalReads += a.total_reads ?? 0;
+    if (totalReads > 0) {
+      for (const a of store.asvs) out.set(a.id, (a.total_reads ?? 0) / totalReads);
+    }
+    return out;
+  });
+
   $effect(() => {
     if (!plotDiv || filteredAsvs.length === 0) return;
 
     const colorLevel = filters.colorMode === 'group' ? 'group' : getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel);
     const cmap = colorLevel !== 'group' ? buildTaxColorMap(colorLevel, filters.taxonFilter, filters.taxonFilterLevel).colorMap : null;
+
+    // Area tracks mean relative abundance. Same base convention as the sample
+    // explorer (sqrt of a 0..1 fraction, times 6) so a marker means the same
+    // thing in both views.
+    const baseSizes = filteredAsvs.map(a =>
+      Math.sqrt(meanRaById.get(a.id) ?? 0) * 6
+    );
+    store.maxNetworkPointScale = maxUsefulScale(baseSizes);
 
     const colors = filteredAsvs.map(a => {
       if (filters.colorMode === 'cluster') return getClusterColor(a.id, 'asvCluster', filters.asvClusterK);
@@ -52,20 +92,14 @@
       mode: 'markers',
       type: 'scattergl',
       marker: {
-        size: (() => {
-          const s = filters.networkPointScale ?? 10;
-          const nSamples = store.samples.length || 1;
-          return filteredAsvs.map(a => {
-            const meanRA = (a.total_reads ?? 0) / nSamples;
-            return Math.min(60, Math.sqrt(meanRA) * s * 0.3);
-          });
-        })(),
+        size: scaleMarkerSizes(baseSizes, filters.networkPointScale ?? 10),
         color: colors,
         opacity: 0.7,
         line: { width: 0 },
       },
       text: filteredAsvs.map(a =>
         `${a.id}<br>${a.taxonomy ?? ''}<br>${(a.total_reads ?? 0).toLocaleString()} reads<br>${a.n_samples ?? 0} samples`
+        + `<br>mean RA: ${((meanRaById.get(a.id) ?? 0) * 100).toFixed(3)}%`
       ),
       hoverinfo: 'text',
       showlegend: false,
