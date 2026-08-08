@@ -39,6 +39,12 @@ nav:
   - Nanopore Assembly: nanopore-assembly.md
   - Illumina Assembly: illumina-assembly.md
   - Illumina RNA: illumina-rna.md
+  - Illumina Amplicon:
+      - Overview: illumina-amplicon.md
+      - Quick Start: amplicon/quickstart.md
+      - Pipeline: amplicon/pipeline.md
+      - Parameters: amplicon/parameters.md
+      - Container: amplicon/container.md
   - MAG Analysis: mag-analysis.md
   - Reference Mapping (AIS): mapping-references.md
 

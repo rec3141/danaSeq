@@ -11,7 +11,7 @@
 No installation needed — Nextflow pulls the pipeline automatically:
 
 ```bash
-nextflow run rec3141/microscape-nf \
+nextflow run rec3141/danaSeq -entry illumina_amplicon \
     --input /path/to/reads \
     --ref_databases "silva:/path/to/silva_train_set.fasta:Domain,Phylum,Class,Order,Family,Genus" \
     -profile conda \
@@ -22,25 +22,25 @@ nextflow run rec3141/microscape-nf \
 
 ```bash
 # Docker
-nextflow run rec3141/microscape-nf \
+nextflow run rec3141/danaSeq -entry illumina_amplicon \
     --input /path/to/reads \
     --ref_databases "silva:/path/to/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
-    -with-docker ghcr.io/rec3141/microscape-nf:latest \
+    -with-docker ghcr.io/rec3141/danaseq-illumina-amplicon:latest \
     -resume
 
 # Apptainer (HPC)
-nextflow run rec3141/microscape-nf \
+nextflow run rec3141/danaSeq -entry illumina_amplicon \
     --input /path/to/reads \
     --ref_databases "silva:/path/to/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
-    -with-singularity docker://ghcr.io/rec3141/microscape-nf:latest \
+    -with-singularity docker://ghcr.io/rec3141/danaseq-illumina-amplicon:latest \
     -resume
 ```
 
 ## Run from Local Clone
 
 ```bash
-git clone https://github.com/rec3141/microscape-nf.git
-cd microscape-nf
+git clone https://github.com/rec3141/danaSeq.git
+cd danaSeq/illumina_amplicon
 
 nextflow run main.nf \
     --input /path/to/reads \
@@ -53,7 +53,7 @@ nextflow run main.nf \
 Classify against multiple reference databases in parallel:
 
 ```bash
-nextflow run rec3141/microscape-nf \
+nextflow run rec3141/danaSeq -entry illumina_amplicon \
     --input /path/to/reads \
     --ref_databases "silva:/db/silva.fasta:Domain,Phylum,Class,Order,Family,Genus;pr2:/db/pr2.fasta:Domain,Supergroup,Division,Class,Order,Family,Genus,Species" \
     --run_phylogeny \
@@ -65,7 +65,7 @@ nextflow run rec3141/microscape-nf \
 For large projects, use `--store_dir` to skip completed steps across runs:
 
 ```bash
-nextflow run rec3141/microscape-nf \
+nextflow run rec3141/danaSeq -entry illumina_amplicon \
     --input /path/to/reads \
     --ref_databases "silva:/db/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
     --store_dir /scratch/microscape_cache \

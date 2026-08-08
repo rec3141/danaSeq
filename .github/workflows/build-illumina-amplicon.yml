@@ -6,8 +6,7 @@ on:
     paths:
       - 'illumina_amplicon/**'
       # envs/ IS a build input here: python.yml pins papa2 by SHA, so an env
-      # change must rebuild. Only docs are excluded.
-      - '!illumina_amplicon/docs/**'
+      # change must rebuild. Prose lives in the site's docs/, not in the stage.
       - '!illumina_amplicon/README.md'
       - '.github/workflows/build-illumina-amplicon.yml'
   workflow_dispatch:

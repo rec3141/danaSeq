@@ -317,7 +317,7 @@ process FILTER_TRIM {
 process LEARN_ERRORS {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/envs/python.yml")
+    conda "${projectDir}/envs/python.yml"
     publishDir "${params.outdir}/error_models", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/error_models" : null
 
@@ -339,7 +339,7 @@ process LEARN_ERRORS {
 process DENOISE {
     tag "${meta.id}"
     label 'process_high'
-    conda "${projectDir}/envs/python.yml")
+    conda "${projectDir}/envs/python.yml"
     publishDir "${params.outdir}/seqtabs", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/seqtabs" : null
 
