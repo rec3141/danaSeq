@@ -5,7 +5,7 @@
     store, countsBySample,
     GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
-    taxaMatchingFilter, makeTaxonMatcher,
+    taxaMatchingFilter, makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
   } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
@@ -99,7 +99,7 @@
   $effect(() => {
     const scale = filters.pointScale ?? 1;
     if (!plotDiv || !hasPlot || !lastPoints) return;
-    Plotly.restyle(plotDiv, { 'marker.size': [lastPoints.map(sz => Math.min(60, sz * scale))] }, [0]);
+    Plotly.restyle(plotDiv, { 'marker.size': [scaleMarkerSizes(lastPoints, scale)] }, [0]);
   });
 
   $effect(() => {
@@ -228,10 +228,10 @@
     allPoints.sort((a, b) => b.proportion - a.proportion);
     const totalPoints = allPoints.length;
 
-    // Base sizes, unscaled AND uncapped. The cap is applied after scaling in both the
-    // build and the restyle, so the two paths cannot drift: capping first would let a
-    // scale > 1 push points past the 60 limit main enforces.
+    // Base sizes, unscaled. Both this path and the restyle effect run them through
+    // scaleMarkerSizes so the two cannot drift.
     lastPoints = allPoints.map(p => p.size * 0.3);
+    store.maxPointScale = maxUsefulScale(lastPoints);
 
     const overlayTraces = [{
       x: allPoints.map(p => p.x),
@@ -239,7 +239,7 @@
       mode: 'markers',
       type: 'scattergl',
       marker: {
-        size: lastPoints.map(sz => Math.min(60, sz * scale)),
+        size: scaleMarkerSizes(lastPoints, scale),
         color: allPoints.map(p => p.color),
         opacity: 0.7,
         line: { width: 0 },

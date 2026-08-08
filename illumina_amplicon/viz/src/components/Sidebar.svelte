@@ -26,6 +26,34 @@
     filters.taxonFilterLevel = '';
   }
 
+  // ── Point-scale sliders ───────────────────────────────────────────────────
+  // The track runs 1x .. the scale at which the biggest marker hits the 100px
+  // renderer ceiling, log-spaced so the small end (where the plot actually
+  // changes) gets as much travel as the large end.
+
+  /** Top of the track. Guarded above 1 so log(topScale) can't be 0. */
+  function topScale(max) {
+    return Math.max(1.0001, max || 1);
+  }
+
+  /** Scale actually in force — the stored value can outrun a newly-lowered top. */
+  function effScale(value, max) {
+    return Math.min(value ?? 1, topScale(max));
+  }
+
+  function scaleToSlider(value, max) {
+    const top = topScale(max);
+    return Math.round(Math.log(effScale(value, max)) / Math.log(top) * 100);
+  }
+
+  function sliderToScale(pos, max) {
+    return Math.pow(topScale(max), +pos / 100);
+  }
+
+  function fmtScale(v) {
+    return v >= 10 ? Math.round(v) : v.toFixed(1);
+  }
+
   function pushNav() {
     filters.navStack = [
       ...(filters.navStack || []),
@@ -186,12 +214,16 @@
               <button
                 class="flex items-center gap-1.5 w-full text-left text-xs hover:bg-slate-800 rounded px-1 py-0.5"
                 onclick={() => {
-                  if (effectiveLevel === '_asv') return;
+                  // Read once up front: {@const} is a reactive derived, so after
+                  // the assignments below it re-evaluates to the level we just
+                  // drilled INTO rather than the one this row belongs to.
+                  const level = effectiveLevel;
+                  if (level === '_asv') return;
                   if (item.name === 'unclassified') return;
                   pushNav();
-                  filters.colorByLevel = effectiveLevel;
+                  filters.colorByLevel = level;
                   filters.taxonFilter = item.name;
-                  filters.taxonFilterLevel = effectiveLevel;
+                  filters.taxonFilterLevel = level;
                 }}
               >
                 <span class="inline-block h-2 w-2 rounded-full shrink-0" style="background:{item.color}"></span>
@@ -231,10 +263,10 @@
 
           {#if activeTab === 'samples'}
             <label class="block">
-              <span class="text-xs text-slate-400">Point scale: {Math.round(filters.pointScale ?? 20)}x</span>
+              <span class="text-xs text-slate-400">Point scale: {fmtScale(effScale(filters.pointScale, store.maxPointScale))}x</span>
               <input type="range" min="0" max="100" step="1"
-                value={Math.round(Math.log(filters.pointScale ?? 20) / Math.log(200) * 100)}
-                oninput={(e) => { filters.pointScale = Math.pow(200, +e.target.value / 100); }}
+                value={scaleToSlider(filters.pointScale, store.maxPointScale)}
+                oninput={(e) => { filters.pointScale = sliderToScale(e.target.value, store.maxPointScale); }}
                 class="mt-1 w-full accent-blue-500" />
             </label>
           {/if}
@@ -274,10 +306,10 @@
 
           {#if activeTab === 'network'}
             <label class="block">
-              <span class="text-xs text-slate-400">ASV point scale: {Math.round(filters.networkPointScale ?? 10)}x</span>
+              <span class="text-xs text-slate-400">ASV point scale: {fmtScale(effScale(filters.networkPointScale, store.maxNetworkPointScale))}x</span>
               <input type="range" min="0" max="100" step="1"
-                value={Math.round(Math.log(filters.networkPointScale ?? 10) / Math.log(200) * 100)}
-                oninput={(e) => { filters.networkPointScale = Math.pow(200, +e.target.value / 100); }}
+                value={scaleToSlider(filters.networkPointScale, store.maxNetworkPointScale)}
+                oninput={(e) => { filters.networkPointScale = sliderToScale(e.target.value, store.maxNetworkPointScale); }}
                 class="mt-1 w-full accent-blue-500" />
             </label>
           {/if}
