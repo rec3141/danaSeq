@@ -25,4 +25,4 @@ dependencies:
     # merged at 20:39Z, the image built at 20:42Z, and the image still held the
     # 2026-04-01 commit. Pinning fixes the reproducibility and the caching together.
     - git+https://github.com/rec3141/papa2.git@fd3cb5aa56898cb7ae73e1674ac19453057f6141
-    - git+https://github.com/rec3141/microscape.git@adda342e6ff2d19e22da765280d50352f08e1865
+    - git+https://github.com/rec3141/microscape.git@3e98989c482d752eb03b7e423d0650bec105289b

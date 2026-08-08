@@ -53,21 +53,23 @@ process AUTO_TRIM {
     LEN_REV=\$(awk -F'\\t' '\$1=="rev_read_len"{print \$2}' ${plate_id}_auto_trim.tsv)
     MIN_LEN=${params.auto_trim_min_length}
 
-    # Enforce a minimum truncation length. A quality-driven short truncation
-    # (e.g. ~30bp on a degraded library) leaves reads unable to overlap, so
-    # mergePairs discards ~100% of reads and the sample silently vanishes at
-    # DENOISE. Floor at MIN_LEN, capped at the actual read length. Issue #4.
-    clamp() { v=\$1; lo=\$2; hi=\$3; [ "\$v" -lt "\$lo" ] && v=\$lo; [ "\$v" -gt "\$hi" ] && v=\$hi; echo "\$v"; }
+    # The MIN_LEN floor (issue #4: a quality dip at ~30bp leaves reads unable to
+    # overlap) is applied by auto-trim itself, against the quality position and
+    # under the length cap. Do NOT re-apply it here: auto-trim reports the
+    # truncation the reads can actually support, and flooring that a second time
+    # asks for bases that were never sequenced — dada2 then discards every read.
+    # Cap at the read length only, as a backstop.
+    cap() { v=\$1; hi=\$2; [ "\$v" -gt "\$hi" ] && v=\$hi; echo "\$v"; }
     export READ_FWD="\${LEN_FWD:-\$MIN_LEN}"
     export READ_REV="\${LEN_REV:-\$MIN_LEN}"
-    export TRUNC_FWD=\$(clamp "\${RAW_FWD:-0}" "\$MIN_LEN" "\$READ_FWD")
-    export TRUNC_REV=\$(clamp "\${RAW_REV:-0}" "\$MIN_LEN" "\$READ_REV")
+    export TRUNC_FWD=\$(cap "\${RAW_FWD:-0}" "\$READ_FWD")
+    export TRUNC_REV=\$(cap "\${RAW_REV:-0}" "\$READ_REV")
 
-    # Record the applied values (and whether the floor kicked in) in the tsv so
+    # Record the applied values (and whether the cap kicked in) in the tsv so
     # quality_check reflects what was actually used, not just what was detected.
     if [ "\$TRUNC_FWD" != "\$RAW_FWD" ] || [ "\$TRUNC_REV" != "\$RAW_REV" ]; then
-        printf 'floored\\ttrue\\ntrunc_len_fwd_applied\\t%s\\ntrunc_len_rev_applied\\t%s\\n' "\$TRUNC_FWD" "\$TRUNC_REV" >> ${plate_id}_auto_trim.tsv
-        echo "[WARN] Auto-trim ${plate_id}: floored trunc fwd \$RAW_FWD->\$TRUNC_FWD rev \$RAW_REV->\$TRUNC_REV (min \$MIN_LEN) — degraded library, expect loss at the quality filter"
+        printf 'capped_by_read_len\\ttrue\\ntrunc_len_fwd_applied\\t%s\\ntrunc_len_rev_applied\\t%s\\n' "\$TRUNC_FWD" "\$TRUNC_REV" >> ${plate_id}_auto_trim.tsv
+        echo "[WARN] Auto-trim ${plate_id}: capped trunc fwd \$RAW_FWD->\$TRUNC_FWD rev \$RAW_REV->\$TRUNC_REV at the read length — auto-trim asked for more bases than the reads carry"
     fi
     echo "[INFO] Auto-trim ${plate_id}: fwd=\$TRUNC_FWD rev=\$TRUNC_REV"
     """
@@ -178,19 +180,18 @@ def pick(vals):
 
 raw_fwd, raw_rev = pick([r[1] for r in rows]), pick([r[2] for r in rows])
 
-# Same floor AUTO_TRIM applies per sample: a quality-driven short truncation
-# leaves reads unable to overlap and the sample vanishes at DENOISE (issue #4).
-# AUTO_TRIM also caps that floor at the read length, and so must this: a floor
-# above the reads truncates every read out of existence, because dada2 discards
-# reads shorter than truncLen. A 2x150 run trimmed to 148bp against a 150bp
-# floor returns zero reads for every sample and reads as "no results".
-# Cap by the same percentile over read lengths that picked the truncation, so
-# the cap tracks the policy instead of letting one short library set it. Each
-# sample's truncation is already <= its own read length, so this only ever
-# constrains the floor -- never the quality-driven choice itself.
+# The --auto_trim_min_length floor (issue #4) is applied once, by auto-trim,
+# against the quality position and under that sample's length cap. It is
+# deliberately NOT re-applied here. Every value picked above is a truncation
+# some sample's reads can actually support; flooring the group's choice back up
+# would ask for bases that were never sequenced, and dada2 discards reads
+# shorter than truncLen — a 2x150 run whose reads are 126bp after primer
+# removal gets truncated to 150 and returns zero reads for every sample.
+# Cap by the same percentile over read lengths that picked the truncation, as a
+# backstop against a group whose reads cannot carry the pooled choice.
 cap_fwd, cap_rev = pick([r[3] for r in rows]), pick([r[4] for r in rows])
-fwd = min(max(raw_fwd, min_len), cap_fwd)
-rev = min(max(raw_rev, min_len), cap_rev)
+fwd = min(raw_fwd, cap_fwd)
+rev = min(raw_rev, cap_rev)
 
 # How many samples are being truncated PAST their own quality cliff, and so will
 # lose reads purely because of the group they landed in.
@@ -205,10 +206,11 @@ if len(past_len) == len(rows):
     raise SystemExit(
         "TRUNC_POLICY: %s truncates fwd=%d rev=%d past the read length of all %d "
         "sample(s) (longest fwd=%d rev=%d) — every read would be discarded at the "
-        "quality filter. Lower --auto_trim_min_length (currently %d) or set "
-        "--truncLen_fwd/--truncLen_rev explicitly."
+        "quality filter. The group mixes read lengths that cannot share one "
+        "truncation: split it by sequencing run, or set --truncLen_fwd/"
+        "--truncLen_rev explicitly."
         % (plate, fwd, rev, len(rows), max(r[3] for r in rows),
-           max(r[4] for r in rows), min_len))
+           max(r[4] for r in rows)))
 
 # Can a merged fragment still exist? mergePairs needs fwd + rev to cover the
 # fragment plus min_overlap. Too little does not raise — pairs quietly fail to
@@ -234,11 +236,10 @@ with open(plate + "_trunc_policy.tsv", "w") as out:
     out.write("n_samples\\t%d\\n" % len(rows))
     out.write("trunc_len_fwd_applied\\t%d\\n" % fwd)
     out.write("trunc_len_rev_applied\\t%d\\n" % rev)
-    out.write("floored\\t%s\\n" % str(fwd != raw_fwd or rev != raw_rev).lower())
     out.write("read_len_cap_fwd\\t%d\\n" % cap_fwd)
     out.write("read_len_cap_rev\\t%d\\n" % cap_rev)
     out.write("capped_by_read_len\\t%s\\n"
-              % str(max(raw_fwd, min_len) > cap_fwd or max(raw_rev, min_len) > cap_rev).lower())
+              % str(raw_fwd > cap_fwd or raw_rev > cap_rev).lower())
     out.write("samples_truncated_past_own\\t%d\\n" % len(past))
     out.write("samples_truncated_past_read_len\\t%d\\n" % len(past_len))
     out.write("span_fwd_plus_rev\\t%d\\n" % span)
@@ -264,10 +265,10 @@ elif expected > 0:
 else:
     print("[INFO] Trunc policy %s for %s: overlap unchecked — no amplicon length for "
           "these primers (set --expected_amplicon_length)" % (policy, plate))
-if max(raw_fwd, min_len) > cap_fwd or max(raw_rev, min_len) > cap_rev:
-    print("[INFO] Trunc policy %s for %s: floor --auto_trim_min_length %d capped to "
-          "the reads actually present (fwd=%d rev=%d)"
-          % (policy, plate, min_len, cap_fwd, cap_rev))
+if raw_fwd > cap_fwd or raw_rev > cap_rev:
+    print("[INFO] Trunc policy %s for %s: pooled choice fwd=%d rev=%d capped to the "
+          "reads actually present (fwd=%d rev=%d)"
+          % (policy, plate, raw_fwd, raw_rev, cap_fwd, cap_rev))
 if past:
     print("[WARN] Trunc policy %s for %s: %d of %d samples truncated past their own "
           "quality cliff and will lose reads at the filter: %s"
