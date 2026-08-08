@@ -39,12 +39,21 @@ process AUTO_TRIM {
 
     script:
     def plate_id = meta.id
+    // Each engine profiles with its own implementation, so --lang R does not
+    // need the Python microscape package (which envs/r.yml does not carry).
+    // Both write the same keys to the same TSV, which the shell below reads.
+    def profile_cmd = params.lang == 'python'
+        ? """microscape auto-trim "." \\
+        --min-quality ${params.auto_trim_min_quality} \\
+        --min-length ${params.auto_trim_min_length} \\
+        --output ${plate_id}_auto_trim.tsv \\
+        --verbose"""
+        : """dada2_auto_trim.R "." \\
+        ${params.auto_trim_min_quality} \\
+        ${params.auto_trim_min_length} \\
+        ${plate_id}_auto_trim.tsv"""
     """
-    microscape auto-trim "." \
-        --min-quality ${params.auto_trim_min_quality} \
-        --min-length ${params.auto_trim_min_length} \
-        --output ${plate_id}_auto_trim.tsv \
-        --verbose
+    ${profile_cmd}
 
     # Read the auto-detected values (exact key match, before we append anything).
     RAW_FWD=\$(awk -F'\\t' '\$1=="trunc_len_fwd"{print \$2}' ${plate_id}_auto_trim.tsv)
