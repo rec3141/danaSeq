@@ -15,6 +15,7 @@ Metagenomic analysis pipelines and data visualization dashboards for Oxford Nano
 | **[nanopore_assembly](nanopore_assembly/)** | Long-read assembly + mapping + depth | Flye, metaMDBG, myloasm, minimap2, CoverM |
 | **[illumina_assembly](illumina_assembly/)** | Multi-assembler consensus assembly | Tadpole, Megahit, SPAdes, metaSPAdes, BBMap |
 | **[illumina_rna](illumina_rna/)** | Metatranscriptomic RNA-seq vs references | SortMeRNA, BBmap, subread/featureCounts |
+| **[illumina_amplicon](illumina_amplicon/)** | 16S/18S/ITS amplicon denoising to ASVs | cutadapt, papa2 (DADA2), MAFFT, SparCC |
 | **[mag_analysis](mag_analysis/)** | Downstream MAG analysis | 7-binner consensus, DAS Tool, Binette, 50+ processes |
 
 ## Quick Start

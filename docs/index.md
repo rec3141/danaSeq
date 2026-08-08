@@ -1,6 +1,6 @@
 # danaSeq
 
-Metagenomic analysis pipelines for Oxford Nanopore and Illumina sequencing data. Five independent Nextflow DSL2 pipelines cover real-time read classification, long-read and short-read assembly, metatranscriptomic RNA-seq, and downstream MAG analysis including binning, annotation, taxonomy, and metabolic profiling. Assembly pipelines produce a FASTA + depth table that feeds directly into `mag_analysis`; `illumina_rna` consumes those same assembly/MAG FASTAs as mapping references.
+Metagenomic and amplicon analysis pipelines for Oxford Nanopore and Illumina sequencing data. Six independent Nextflow DSL2 pipelines cover real-time read classification, long-read and short-read assembly, metatranscriptomic RNA-seq, 16S/18S/ITS amplicon denoising, and downstream MAG analysis including binning, annotation, taxonomy, and metabolic profiling. Assembly pipelines produce a FASTA + depth table that feeds directly into `mag_analysis`; `illumina_rna` consumes those same assembly/MAG FASTAs as mapping references.
 
 ## Architecture
 

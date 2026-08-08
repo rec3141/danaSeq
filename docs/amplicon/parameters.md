@@ -3,7 +3,7 @@
 All parameters can be set via command line (`--param value`) or in a params file.
 
 ```bash
-nextflow run rec3141/microscape-nf --help
+nextflow run rec3141/danaSeq -entry illumina_amplicon --help
 ```
 
 ---
@@ -22,8 +22,6 @@ nextflow run rec3141/microscape-nf --help
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--lang` | `python` | Script language: `python` (papa2 + microscape) or `R` (dada2 + microscapeR) |
-| `--dada_engine` | follows `--lang` | Override DADA2 engine independently: `python` or `R` |
 
 ---
 

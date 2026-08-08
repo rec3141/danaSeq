@@ -61,24 +61,6 @@ memory for large datasets (4K+ samples, 100K+ ASVs).
 
 ---
 
-## R Alternative
-
-All stages support an R alternative via `--lang R`:
-
-- DADA2 steps use `bioconductor-dada2`
-- Downstream steps use `microscapeR`
-- R scripts in `bin/*.R` mirror the Python functionality
-
-```bash
-nextflow run rec3141/microscape-nf \
-    --input /path/to/reads \
-    --lang R \
-    --ref_databases "silva:/db/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
-    -profile conda -resume
-```
-
----
-
 ## Profiles
 
 | Profile | Description |

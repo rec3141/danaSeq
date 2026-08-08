@@ -8,10 +8,10 @@ installing dependencies.
 
 ```bash
 # Pull the image
-docker pull ghcr.io/rec3141/microscape-nf:latest
+docker pull ghcr.io/rec3141/danaseq-illumina-amplicon:latest
 
 # Run the pipeline
-docker run --rm -v $(pwd):/data ghcr.io/rec3141/microscape-nf \
+docker run --rm -v $(pwd):/data ghcr.io/rec3141/danaseq-illumina-amplicon \
     run /pipeline/main.nf \
     --input /data/reads \
     --ref_databases "silva:/data/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
@@ -23,10 +23,10 @@ docker run --rm -v $(pwd):/data ghcr.io/rec3141/microscape-nf \
 
 ```bash
 # Pull and convert to SIF
-apptainer pull microscape-nf.sif docker://ghcr.io/rec3141/microscape-nf:latest
+apptainer pull danaseq-illumina-amplicon.sif docker://ghcr.io/rec3141/danaseq-illumina-amplicon:latest
 
 # Run the pipeline
-apptainer exec microscape-nf.sif nextflow run /pipeline/main.nf \
+apptainer exec danaseq-illumina-amplicon.sif nextflow run /pipeline/main.nf \
     --input /path/to/reads \
     --ref_databases "silva:/path/to/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
     --outdir results \
@@ -39,17 +39,17 @@ Nextflow can pull and manage the container automatically:
 
 ```bash
 # Docker
-nextflow run rec3141/microscape-nf \
+nextflow run rec3141/danaSeq -entry illumina_amplicon \
     --input /path/to/reads \
     --ref_databases "silva:/path/to/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
-    -with-docker ghcr.io/rec3141/microscape-nf:latest \
+    -with-docker ghcr.io/rec3141/danaseq-illumina-amplicon:latest \
     -resume
 
 # Singularity/Apptainer
-nextflow run rec3141/microscape-nf \
+nextflow run rec3141/danaSeq -entry illumina_amplicon \
     --input /path/to/reads \
     --ref_databases "silva:/path/to/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
-    -with-singularity docker://ghcr.io/rec3141/microscape-nf:latest \
+    -with-singularity docker://ghcr.io/rec3141/danaseq-illumina-amplicon:latest \
     -resume
 ```
 
@@ -61,16 +61,14 @@ The container includes both Python and R environments:
 |-----------|---------|--------|
 | Nextflow | latest | nextflow.io |
 | papa2 | 0.1.0 | bioconda |
-| microscape | 0.1.0 | bioconda |
 | cutadapt | latest | bioconda |
 | MAFFT | latest | bioconda |
 | R + dada2 | 4.x + 1.36 | bioconda |
-| microscapeR | 0.99.0 | GitHub |
 
 ## Building Locally
 
 ```bash
-git clone https://github.com/rec3141/microscape-nf.git
-cd microscape-nf
-docker build -t microscape-nf .
+git clone https://github.com/rec3141/danaSeq.git
+cd danaSeq/illumina_amplicon
+docker build -t danaseq-illumina-amplicon illumina_amplicon
 ```

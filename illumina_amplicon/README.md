@@ -1,4 +1,4 @@
-# microscape-nf
+# danaSeq illumina_amplicon
 
 **Amplicon sequencing analysis pipeline — from raw reads to interactive visualization**
 
@@ -12,7 +12,7 @@ and correlation networks.
 ## Quick Start
 
 ```bash
-nextflow run rec3141/microscape-nf \
+nextflow run rec3141/danaSeq -entry illumina_amplicon \
     --input /path/to/reads \
     --ref_databases "silva:/path/to/silva_train_set.fasta:Domain,Phylum,Class,Order,Family,Genus" \
     -profile conda \
@@ -24,7 +24,6 @@ nextflow run rec3141/microscape-nf \
 The pipeline pulls its tools from [bioconda](https://bioconda.github.io/):
 
 - **[papa2](https://github.com/rec3141/papa2)** — DADA2 denoising (Python, `conda install -c bioconda papa2`)
-- **[microscape](https://github.com/rec3141/microscape)** — Downstream analysis (Python, `conda install -c bioconda microscape`)
 - **[cutadapt](https://cutadapt.readthedocs.io/)** — Primer removal
 - **[MAFFT](https://mafft.cbrc.jp/alignment/software/)** — Multiple sequence alignment
 
@@ -48,7 +47,7 @@ The pipeline pulls its tools from [bioconda](https://bioconda.github.io/):
 ## Parameters
 
 ```bash
-nextflow run rec3141/microscape-nf --help
+nextflow run rec3141/danaSeq -entry illumina_amplicon --help
 ```
 
 ### Key Parameters
@@ -74,11 +73,11 @@ nextflow run rec3141/microscape-nf --help
 -profile test       # Reduced resources for testing
 ```
 
-## Related Packages
+## Related
 
 - **[papa2](https://github.com/rec3141/papa2)** — Python DADA2 port (bioconda)
-- **[microscape](https://github.com/rec3141/microscape)** — Python downstream analysis (bioconda)
-- **[microscapeR](https://github.com/rec3141/microscapeR)** — R downstream analysis (Bioconductor)
+- **[danaSeq](https://github.com/rec3141/danaSeq)** — this pipeline's home, alongside the metagenomics stages
+- **[microscape.app](https://microscape.app)** — hosting and sharing the interactive viz
 
 ## Citation
 
