@@ -1,0 +1,113 @@
+name: Build and push container
+
+on:
+  push:
+    branches: [main]
+    # The image does `COPY . /pipeline/`, so pipeline code and the entrypoint are
+    # baked in — a change to any of them must rebuild, not just Dockerfile/envs.
+    paths:
+      - 'Dockerfile'
+      - 'entrypoint.sh'
+      - 'main.nf'
+      - 'nextflow.config'
+      - 'modules/**'
+      - 'bin/**'
+      - 'primers/**'
+      - 'viz/**'
+      - 'envs/**'
+      - '.github/workflows/container.yml'
+      # `COPY . /pipeline/` puts these IN the image, so a change to them changes the
+      # container — but the build did not trigger on them. That is how the shipped .sif
+      # came to hold a main.nf matching no commit while git moved on without it.
+      - 'main.nf'
+      - 'bin/**'
+      - 'nextflow.config'
+      - 'modules/**'
+      - 'workflows/**'
+      - 'subworkflows/**'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/microscape-nf
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      # Free disk space IN PLACE on the root filesystem. easimon/maximize-build-space
+      # reclaims space into a separate mount, which does NOT help the Docker Buildx
+      # setup step — it writes multi-arch QEMU layers to /usr/bin on the root FS and
+      # was failing with "no space left on device". jlumbroso/free-disk-space frees
+      # the root FS itself (~30GB), fixing that.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=
+
+      # Resolve the two git dependencies' HEADs so the pip layer's cache key moves when
+      # they do. Without this an unpinned URL leaves the layer valid forever and the
+      # image silently keeps whatever it first installed.
+      - name: Resolve upstream dependency HEADs
+        id: deps
+        run: |
+          for r in microscape papa2; do
+            sha=$(git ls-remote https://github.com/rec3141/$r.git HEAD | cut -f1)
+            echo "${r}_sha=${sha}" >> "$GITHUB_OUTPUT"
+            echo "  $r -> $sha"
+          done
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Baked into the image so a run launched from the .sif can report what it is.
+          # The image tag already carries the SHA, but nothing inside could read it, so
+          # every run recorded a null commit.
+          build-args: |
+            MICROSCAPE_SHA=${{ steps.deps.outputs.microscape_sha }}
+            PAPA2_SHA=${{ steps.deps.outputs.papa2_sha }}
+            GIT_SHA=${{ github.sha }}
+            GIT_REF=${{ github.ref_name }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max

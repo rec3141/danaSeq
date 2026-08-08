@@ -1,0 +1,7 @@
+conda-envs/
+work/
+results/
+test_results/
+.nextflow/
+.nextflow.log*
+*.sif

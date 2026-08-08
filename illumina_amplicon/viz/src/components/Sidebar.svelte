@@ -1,0 +1,428 @@
+<script>
+  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel } from '../stores/data.svelte.js';
+  import AutocompleteInput from './AutocompleteInput.svelte';
+
+  let { activeTab = 'samples', filters = $bindable({}) } = $props();
+
+  function generateClusterColor(id, total) {
+    const hue = ((id - 1) * 137.508) % 360;
+    return `hsl(${hue}, 70%, 55%)`;
+  }
+
+  // When user picks from autocomplete, navigate to that taxon's level
+  function navigateToTaxon(name) {
+    if (!name || name === 'unclassified' || filters.colorMode !== 'taxonomy') return;
+    const level = findTaxonLevel(name);
+    if (level) {
+      pushNav();
+      filters.colorByLevel = level;
+      filters.taxonFilter = name;
+      filters.taxonFilterLevel = level;
+    }
+  }
+
+  // A hand-typed filter is a free regex over the whole lineage, so it has no rank.
+  function clearFilterLevel() {
+    filters.taxonFilterLevel = '';
+  }
+
+  function pushNav() {
+    filters.navStack = [
+      ...(filters.navStack || []),
+      { level: filters.colorByLevel, filter: filters.taxonFilter, filterLevel: filters.taxonFilterLevel },
+    ];
+  }
+
+  // Collapsible sections
+  let sections = $state({
+    taxonomy: true,
+    samples: true,
+    network: true,
+    phylogeny: true,
+    heatmap: true,
+  });
+
+  function toggle(section) {
+    sections[section] = !sections[section];
+  }
+
+  // Taxonomy levels from data
+  let taxLevels = $derived(
+    store.taxonomy[Object.keys(store.taxonomy)[0]]?.levels || []
+  );
+
+  // Autocomplete candidates
+  let taxCandidates = $derived.by(() => {
+    const db = Object.keys(store.taxonomy)[0];
+    if (!db || !store.taxonomy[db]?.assignments) return [];
+    const terms = new Set();
+    for (const asvId in store.taxonomy[db].assignments) {
+      const vals = store.taxonomy[db].assignments[asvId];
+      for (const v of vals) {
+        if (v && v !== 'unclassified') terms.add(v);
+      }
+    }
+    return [...terms].sort();
+  });
+
+  let sampleCandidates = $derived(
+    store.samples.map(s => s.id).filter(Boolean).sort()
+  );
+</script>
+
+<aside class="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-slate-800 bg-slate-900/60">
+  <div class="p-3 border-b border-slate-800">
+    <p class="text-xs text-slate-500">{store.samples.length} samples | {store.asvs.length} ASVs</p>
+  </div>
+
+  <!-- ══ Taxonomy Filters (shared) ══ -->
+  <div class="border-b border-slate-800">
+    <button class="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200" onclick={() => toggle('taxonomy')}>
+      Taxonomy
+      <span class="text-[10px]">{sections.taxonomy ? '▾' : '▸'}</span>
+    </button>
+    {#if sections.taxonomy}
+      <div class="space-y-3 px-3 pb-3">
+        <AutocompleteInput
+          bind:value={filters.taxonFilter}
+          label="Filter (regex)"
+          placeholder="e.g. Proteobacteria"
+          candidates={taxCandidates}
+          onPick={navigateToTaxon}
+          onType={clearFilterLevel}
+        />
+
+        <label class="block">
+          <span class="text-xs text-slate-400">Color by</span>
+          <select bind:value={filters.colorMode} class="mt-1 w-full rounded border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-200"
+            onchange={(e) => {
+              if (e.target.value !== 'taxonomy') {
+                // Save taxonomy nav state
+                filters._savedTaxNav = {
+                  colorByLevel: filters.colorByLevel,
+                  navStack: filters.navStack,
+                  taxonFilter: filters.taxonFilter,
+                  taxonFilterLevel: filters.taxonFilterLevel,
+                };
+              } else {
+                // Restore taxonomy nav state
+                if (filters._savedTaxNav) {
+                  filters.colorByLevel = filters._savedTaxNav.colorByLevel;
+                  filters.navStack = filters._savedTaxNav.navStack;
+                  filters.taxonFilter = filters._savedTaxNav.taxonFilter;
+                  filters.taxonFilterLevel = filters._savedTaxNav.taxonFilterLevel ?? '';
+                  filters._savedTaxNav = null;
+                }
+              }
+            }}>
+            <option value="taxonomy">Taxonomy</option>
+            <option value="group">Group (broad)</option>
+            {#if store.heatmap?.sampleClusters || store.heatmap?.asvClusters}
+              <option value="cluster">Cluster</option>
+            {/if}
+          </select>
+        </label>
+
+        {#if filters.colorMode === 'cluster'}
+          {#if store.heatmap?.sampleClusters && (activeTab === 'samples' || activeTab === 'heatmap')}
+            <label class="block">
+              <span class="text-xs text-slate-400">Sample clusters (k): {filters.sampleClusterK}</span>
+              <input type="range" min="2" max={Math.max(2, ...Object.keys(store.heatmap.sampleClusters).map(Number))}
+                step="1" bind:value={filters.sampleClusterK} class="mt-1 w-full accent-blue-500" />
+            </label>
+          {/if}
+          {#if store.heatmap?.asvClusters && (activeTab === 'network' || activeTab === 'phylogeny' || activeTab === 'heatmap')}
+            <label class="block">
+              <span class="text-xs text-slate-400">ASV clusters (k): {filters.asvClusterK}</span>
+              <input type="range" min="2" max={Math.max(2, ...Object.keys(store.heatmap.asvClusters).map(Number))}
+                step="1" bind:value={filters.asvClusterK} class="mt-1 w-full accent-blue-500" />
+            </label>
+          {/if}
+        {:else if filters.colorMode === 'group'}
+          <fieldset class="space-y-1">
+            <legend class="text-xs text-slate-400">Groups</legend>
+            {#each Object.keys(filters.groupFlags || {}) as group}
+              <label class="flex items-center gap-2 text-sm capitalize">
+                <input type="checkbox" bind:checked={filters.groupFlags[group]} class="accent-blue-500" />
+                <span class="inline-block h-2.5 w-2.5 rounded-full" style="background:{GROUP_HEX[group]}"></span>
+                {group}
+              </label>
+            {/each}
+          </fieldset>
+        {:else}
+          {@const effectiveLevel = getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel)}
+          {@const taxColors = buildTaxColorMap(effectiveLevel, filters.taxonFilter, filters.taxonFilterLevel)}
+          <div class="space-y-0.5 max-h-48 overflow-y-auto">
+            <p class="text-[10px] text-slate-500 mb-1">
+              {effectiveLevel === '_asv' ? 'ASV' : effectiveLevel} ({taxColors.ranked.length})
+            </p>
+            {#if filters.navStack?.length > 0}
+              {@const prev = filters.navStack[filters.navStack.length - 1]}
+              <button
+                class="flex items-center gap-1.5 w-full text-left text-xs hover:bg-slate-800 rounded px-1 py-1 text-cyan-400 border-b border-slate-700 mb-1"
+                onclick={() => {
+                  const stack = [...filters.navStack];
+                  const popped = stack.pop();
+                  filters.navStack = stack;
+                  filters.colorByLevel = popped.level;
+                  filters.taxonFilter = popped.filter;
+                  filters.taxonFilterLevel = popped.filterLevel ?? '';
+                }}
+              >
+                &#x25B4; Up{prev.filter ? ` to ${prev.filter}` : ` to ${prev.level}`}
+              </button>
+            {:else if filters.taxonFilter}
+              <button
+                class="flex items-center gap-1.5 w-full text-left text-xs hover:bg-slate-800 rounded px-1 py-1 text-cyan-400 border-b border-slate-700 mb-1"
+                onclick={() => {
+                  filters.taxonFilter = '';
+                  filters.taxonFilterLevel = '';
+                }}
+              >
+                &#x25B4; Up to {filters.colorByLevel}
+              </button>
+            {/if}
+            {#each taxColors.ranked as item}
+              <button
+                class="flex items-center gap-1.5 w-full text-left text-xs hover:bg-slate-800 rounded px-1 py-0.5"
+                onclick={() => {
+                  if (effectiveLevel === '_asv') return;
+                  if (item.name === 'unclassified') return;
+                  pushNav();
+                  filters.colorByLevel = effectiveLevel;
+                  filters.taxonFilter = item.name;
+                  filters.taxonFilterLevel = effectiveLevel;
+                }}
+              >
+                <span class="inline-block h-2 w-2 rounded-full shrink-0" style="background:{item.color}"></span>
+                <span class="truncate">{item.name}</span>
+                <span class="ml-auto text-slate-500 shrink-0">{item.count}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+  </div>
+
+  <!-- ══ Sample Controls ══ -->
+  {#if activeTab === 'samples' || activeTab === 'network'}
+    <div class="border-b border-slate-800">
+      <button class="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200" onclick={() => toggle('samples')}>
+        Sample Filters
+        <span class="text-[10px]">{sections.samples ? '▾' : '▸'}</span>
+      </button>
+      {#if sections.samples}
+        <div class="space-y-3 px-3 pb-3">
+          <label class="block">
+            <span class="text-xs text-slate-400">Min reads: {(filters.minReads || 0).toLocaleString()}</span>
+            <input type="range" min="0" max="100" step="1"
+              value={Math.round(Math.log2((filters.minReads || 0) + 1) / Math.log2(Math.max(...store.samples.map(s => s.total_reads || 0), 1) + 1) * 100)}
+              oninput={(e) => { const mx = Math.max(...store.samples.map(s => s.total_reads || 0), 1); filters.minReads = Math.round(Math.pow(2, +e.target.value / 100 * Math.log2(mx + 1)) - 1); }}
+              class="mt-1 w-full accent-blue-500" />
+          </label>
+
+          <AutocompleteInput
+            bind:value={filters.sampleFilter}
+            label="Sample filter (regex)"
+            placeholder="e.g. Plate1"
+            candidates={sampleCandidates}
+          />
+
+          {#if activeTab === 'samples'}
+            <label class="block">
+              <span class="text-xs text-slate-400">Point scale: {Math.round(filters.pointScale ?? 20)}x</span>
+              <input type="range" min="0" max="100" step="1"
+                value={Math.round(Math.log(filters.pointScale ?? 20) / Math.log(200) * 100)}
+                oninput={(e) => { filters.pointScale = Math.pow(200, +e.target.value / 100); }}
+                class="mt-1 w-full accent-blue-500" />
+            </label>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- ══ Network Controls ══ -->
+  {#if activeTab === 'network' || activeTab === 'samples'}
+    <div class="border-b border-slate-800">
+      <button class="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200" onclick={() => toggle('network')}>
+        Network Filters
+        <span class="text-[10px]">{sections.network ? '▾' : '▸'}</span>
+      </button>
+      {#if sections.network}
+        <div class="space-y-3 px-3 pb-3">
+          <label class="block">
+            <span class="text-xs text-slate-400">Min prevalence: {filters.minPrevalence || 0}</span>
+            <input type="range" min="0" max="100" step="1"
+              value={Math.round(Math.log2((filters.minPrevalence || 0) + 1) / Math.log2(Math.max(...store.asvs.map(a => a.n_samples || 0), 1) + 1) * 100)}
+              oninput={(e) => { const mx = Math.max(...store.asvs.map(a => a.n_samples || 0), 1); filters.minPrevalence = Math.round(Math.pow(2, +e.target.value / 100 * Math.log2(mx + 1)) - 1); }}
+              class="mt-1 w-full accent-blue-500" />
+          </label>
+
+          {#if store.network?.edges?.length > 0}
+            <label class="block">
+              <span class="text-xs text-slate-400">Correlation threshold: {(filters.corrThreshold || 0.3).toFixed(2)}</span>
+              <input type="range" min="0" max="1" step="0.01" bind:value={filters.corrThreshold} class="mt-1 w-full accent-blue-500" />
+            </label>
+
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" bind:checked={filters.showEdges} class="accent-blue-500" />
+              Show edges
+            </label>
+          {/if}
+
+          {#if activeTab === 'network'}
+            <label class="block">
+              <span class="text-xs text-slate-400">ASV point scale: {Math.round(filters.networkPointScale ?? 10)}x</span>
+              <input type="range" min="0" max="100" step="1"
+                value={Math.round(Math.log(filters.networkPointScale ?? 10) / Math.log(200) * 100)}
+                oninput={(e) => { filters.networkPointScale = Math.pow(200, +e.target.value / 100); }}
+                class="mt-1 w-full accent-blue-500" />
+            </label>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- ══ Phylogeny Controls ══ -->
+  {#if activeTab === 'phylogeny'}
+    <div class="border-b border-slate-800">
+      <button class="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200" onclick={() => toggle('phylogeny')}>
+        Phylogeny
+        <span class="text-[10px]">{sections.phylogeny ? '▾' : '▸'}</span>
+      </button>
+      {#if sections.phylogeny}
+        <div class="space-y-3 px-3 pb-3">
+          <label class="block">
+            <span class="text-xs text-slate-400">Layout</span>
+            <select bind:value={filters.treeLayout} class="mt-1 w-full rounded border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-200">
+              <option value="rc">Rectangular</option>
+              <option value="rd">Radial</option>
+              <option value="cr">Circular</option>
+              <option value="dg">Diagonal</option>
+              <option value="hr">Hierarchical</option>
+            </select>
+          </label>
+
+          <fieldset class="space-y-1">
+            <legend class="text-xs text-slate-400">Tip labels</legend>
+            <label class="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={filters.treeLabelLevels?.includes('id')}
+                onchange={(e) => {
+                  const levels = [...(filters.treeLabelLevels || [])];
+                  if (e.target.checked) levels.push('id');
+                  else levels.splice(levels.indexOf('id'), 1);
+                  filters.treeLabelLevels = levels;
+                }} class="accent-blue-500" />
+              ASV ID
+            </label>
+            {#each taxLevels as level}
+              <label class="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={filters.treeLabelLevels?.includes(level)}
+                  onchange={(e) => {
+                    const levels = [...(filters.treeLabelLevels || [])];
+                    if (e.target.checked) levels.push(level);
+                    else levels.splice(levels.indexOf(level), 1);
+                    filters.treeLabelLevels = levels;
+                  }} class="accent-blue-500" />
+                {level}
+              </label>
+            {/each}
+            <label class="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={filters.treeLabelLevels?.includes('bootstrap')}
+                onchange={(e) => {
+                  const levels = [...(filters.treeLabelLevels || [])];
+                  if (e.target.checked) levels.push('bootstrap');
+                  else levels.splice(levels.indexOf('bootstrap'), 1);
+                  filters.treeLabelLevels = levels;
+                }} class="accent-blue-500" />
+              Bootstrap
+            </label>
+          </fieldset>
+
+          <label class="block">
+            <span class="text-xs text-slate-400">Min bootstrap: {filters.treeMinBootstrap || 0}%</span>
+            <input type="range" min="0" max="100" step="5" bind:value={filters.treeMinBootstrap} class="mt-1 w-full accent-blue-500" />
+          </label>
+
+          <label class="flex items-center gap-2 text-xs">
+            <input type="checkbox" bind:checked={filters.treePrune} class="accent-blue-500" />
+            Prune filtered tips
+          </label>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- ══ Cluster Sliders (tables tab) ══ -->
+  {#if activeTab === 'tables' && filters.colorMode === 'cluster'}
+    <div class="border-b border-slate-800">
+      <div class="space-y-3 px-3 py-3">
+        {#if store.heatmap?.sampleClusters}
+          <label class="block">
+            <span class="text-xs text-slate-400">Sample clusters (k): {filters.sampleClusterK}</span>
+            <input type="range" min="2" max={Math.max(2, ...Object.keys(store.heatmap.sampleClusters).map(Number))}
+              step="1" bind:value={filters.sampleClusterK} class="mt-1 w-full accent-blue-500" />
+          </label>
+        {/if}
+        {#if store.heatmap?.asvClusters}
+          <label class="block">
+            <span class="text-xs text-slate-400">ASV clusters (k): {filters.asvClusterK}</span>
+            <input type="range" min="2" max={Math.max(2, ...Object.keys(store.heatmap.asvClusters).map(Number))}
+              step="1" bind:value={filters.asvClusterK} class="mt-1 w-full accent-blue-500" />
+          </label>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
+  <!-- ══ Heatmap Controls ══ -->
+  {#if activeTab === 'heatmap'}
+    <div class="border-b border-slate-800">
+      <button class="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200" onclick={() => toggle('heatmap')}>
+        Heatmap
+        <span class="text-[10px]">{sections.heatmap ? '▾' : '▸'}</span>
+      </button>
+      {#if sections.heatmap}
+        <div class="space-y-3 px-3 pb-3">
+          <label class="block">
+            <span class="text-xs text-slate-400">Min max(RA): {(filters.heatmapMinMaxRA ?? 1).toFixed(1)}%</span>
+            <input type="range" min="0" max="100" step="1"
+              value={Math.round(Math.log2((filters.heatmapMinMaxRA ?? 1) + 1) / Math.log2(101) * 100)}
+              oninput={(e) => { filters.heatmapMinMaxRA = Math.round(10 * (Math.pow(2, +e.target.value / 100 * Math.log2(101)) - 1)) / 10; }}
+              class="mt-1 w-full accent-blue-500" />
+          </label>
+
+          <label class="block">
+            <span class="text-xs text-slate-400">Cell size: {filters.heatmapCellSize}px</span>
+            <input type="range" min="1" max="20" step="1" bind:value={filters.heatmapCellSize} class="mt-1 w-full accent-blue-500" />
+          </label>
+
+          <label class="block">
+            <span class="text-xs text-slate-400">ASV ordering</span>
+            <select bind:value={filters.heatmapAsvTree} class="mt-1 w-full rounded border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-200">
+              <option value="ward">Ward Clustering</option>
+              {#if store.treeNewick}
+                <option value="phylogeny">Phylogeny (NJ)</option>
+              {/if}
+            </select>
+          </label>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- ══ Selection info ══ -->
+  <div class="mt-auto border-t border-slate-800 p-3">
+    {#if store.selectedSample != null}
+      <p class="text-xs text-slate-400">Selected: {store.samples[store.selectedSample]?.id || ''}</p>
+    {:else if store.selectedAsv != null}
+      <p class="text-xs text-slate-400">Selected: {store.asvs[store.selectedAsv]?.id || ''}</p>
+    {:else}
+      <p class="text-xs text-slate-500">Click to select, Shift+drag to lasso</p>
+      <p class="text-xs text-slate-500">Shift+double-click to deselect</p>
+    {/if}
+  </div>
+</aside>

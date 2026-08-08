@@ -1,0 +1,20 @@
+# Nextflow
+work/
+.nextflow*
+conda-envs/
+trace-*.txt
+timeline-*.html
+report-*.html
+
+# Build
+viz/node_modules/
+viz/dist/
+viz/.vite/
+viz/public/data/
+
+# OS
+.DS_Store
+
+# Python bytecode from bin/ helpers
+__pycache__/
+*.pyc
