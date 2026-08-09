@@ -81,11 +81,28 @@ export function assayKey(sample) {
   return parts.some(meaningful) ? parts.map(p => p ?? '').join('|') : '';
 }
 
+/**
+ * True for a name the pipeline derived from the reads (`inf-3f9a2c`) rather than
+ * recognised in its catalogue. Worth marking: the name identifies the primer and
+ * is stable across runs, but says nothing about what it targets, so it should not
+ * read like a citable primer. primer_db.derived_primer_name mints these.
+ */
+export function isDerivedPrimer(name) {
+  return /^inf-[0-9a-f]{6,}$/i.test(String(name || '').trim());
+}
+
+/** Heading for an assay: the gene/region when known, else how we got the primers. */
+export function assayHeading(gene, region, fwd, rev) {
+  const named = [gene, region].filter(Boolean).join(' ');
+  if (named) return named;
+  return (isDerivedPrimer(fwd) || isDerivedPrimer(rev)) ? 'de novo primers' : 'unknown';
+}
+
 /** Human label for an assay key, e.g. "16S rRNA V3-V4 (341Fv3/Bakt_805R)". */
 export function assayLabel(key) {
   if (!key) return 'unassigned';
   const [gene, region, fwd, rev] = key.split('|');
-  const head = [gene, region].filter(Boolean).join(' ') || 'unknown';
+  const head = assayHeading(gene, region, fwd, rev);
   const primers = [fwd, rev].filter(Boolean).join('/');
   return primers ? `${head} (${primers})` : head;
 }
