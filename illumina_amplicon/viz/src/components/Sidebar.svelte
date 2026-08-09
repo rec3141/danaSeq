@@ -1,5 +1,5 @@
 <script>
-  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays } from '../stores/data.svelte.js';
+  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays, assayHeading } from '../stores/data.svelte.js';
   import AutocompleteInput from './AutocompleteInput.svelte';
 
   let { activeTab = 'samples', filters = $bindable({}) } = $props();
@@ -252,7 +252,7 @@
   {#if assays.length === 1}
     <div class="border-b border-slate-800 px-3 py-2">
       <p class="text-[10px] uppercase tracking-wider text-slate-500">Assay</p>
-      <p class="text-xs text-slate-300">{assays[0].gene || 'unknown'}{assays[0].region ? ` ${assays[0].region}` : ''}</p>
+      <p class="text-xs text-slate-300">{assayHeading(assays[0].gene, assays[0].region, assays[0].fwd, assays[0].rev)}</p>
       {#if assays[0].fwd || assays[0].rev}
         <p class="text-[10px] text-slate-500">{[assays[0].fwd, assays[0].rev].filter(Boolean).join(' / ')}</p>
       {/if}
@@ -278,7 +278,7 @@
                 checked={filters.assays?.has(a.key) ?? false}
                 onchange={() => toggleAssay(a.key)} />
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-slate-200">{a.gene || 'unknown'}{a.region ? ` ${a.region}` : ''}</span>
+                <span class="block truncate text-slate-200">{assayHeading(a.gene, a.region, a.fwd, a.rev)}</span>
                 <span class="block truncate text-[10px] text-slate-500">
                   {[a.fwd, a.rev].filter(Boolean).join(' / ') || 'no primers recorded'}
                 </span>

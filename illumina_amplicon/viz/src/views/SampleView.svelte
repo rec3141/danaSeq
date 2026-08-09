@@ -6,7 +6,7 @@
     GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
     taxaMatchingFilter, makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
-    sampleInAssays, assayKey, listAssays,
+    sampleInAssays, assayKey, listAssays, assayHeading,
   } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
@@ -372,7 +372,7 @@
           {@const s = selectedSampleObj}
           <p class="text-xs text-slate-400">
             <span class="text-slate-500">Assay:</span>
-            {s.assay_gene ?? '?'}{s.assay_region ? ` ${s.assay_region}` : ''}
+            {assayHeading(s.assay_gene, s.assay_region, s.assay_primer_fwd, s.assay_primer_rev)}
             {#if s.assay_primer_fwd || s.assay_primer_rev}
               <span class="text-slate-500">·</span> {[s.assay_primer_fwd, s.assay_primer_rev].filter(Boolean).join(' / ')}
             {/if}

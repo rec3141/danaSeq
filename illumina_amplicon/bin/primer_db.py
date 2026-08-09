@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import hashlib
 import logging
 import math
 import os
@@ -355,6 +356,34 @@ def _match_fraction(reads: list[str], primer: str, max_offset: int = 3) -> float
     return hits / len(reads)
 
 
+DERIVED_NAME_PREFIX = "inf"
+# 8 hex = 32 bits. A collision silently merges two distinct assays into one, which
+# is both costly and near-invisible, and two extra characters buy ~256x the room:
+# at 6 the birthday maths already predicts ~12 collisions per 20k distinct primers.
+DERIVED_NAME_HEXLEN = 8
+
+
+def derived_primer_name(seq: str) -> str:
+    """Stable short name for a primer we inferred rather than recognised.
+
+    A de-novo primer has no name, and calling every one of them "inferred" threw
+    away the only thing that distinguishes them: two datasets, or two amplicons
+    in one dataset, became the same unnameable assay. The name is the only field
+    that survives the trip to samples.json — cutadapt reports the FASTA header it
+    matched and nothing else — so the identity has to live in the name itself.
+
+    Hashing the sequence rather than carrying it keeps that name short and keeps
+    the primer out of the UI, while staying reproducible: the same consensus
+    always yields the same name, in any run, on any machine. Resolve one back to
+    its sequence via trimmed/detected/<sample>_detected.json, which records both.
+    """
+    norm = re.sub(r"\s+", "", (seq or "")).upper()
+    if not norm:
+        return ""
+    digest = hashlib.sha256(norm.encode("ascii", "replace")).hexdigest()
+    return f"{DERIVED_NAME_PREFIX}-{digest[:DERIVED_NAME_HEXLEN]}"
+
+
 def _consensus_primer(reads: list[str], length: int = 25, cover: float = 0.9) -> str:
     """De-novo degenerate consensus of the first `length` bp across `reads`.
 
@@ -427,6 +456,8 @@ def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict |
     if len(fwd) < 8:
         return None
     return {
-        "fwd": fwd, "rev": rev, "fwd_name": "inferred", "rev_name": "inferred",
+        "fwd": fwd, "rev": rev,
+        "fwd_name": derived_primer_name(fwd),
+        "rev_name": derived_primer_name(rev),
         "region": "unknown", "source": "inferred-denovo", "confidence": None,
     }
