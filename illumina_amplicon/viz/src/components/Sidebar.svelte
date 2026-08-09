@@ -246,8 +246,21 @@
     {/if}
   </div>
 
-  <!-- ══ Assay / primer set (shared) ══ -->
-  {#if assays.length > 0}
+  <!-- ══ Assay / primer set (shared) ══
+       One assay is worth stating but not worth a checkbox: selecting the only
+       option cannot change anything. Filtering appears from two up. -->
+  {#if assays.length === 1}
+    <div class="border-b border-slate-800 px-3 py-2">
+      <p class="text-[10px] uppercase tracking-wider text-slate-500">Assay</p>
+      <p class="text-xs text-slate-300">{assays[0].gene || 'unknown'}{assays[0].region ? ` ${assays[0].region}` : ''}</p>
+      {#if assays[0].fwd || assays[0].rev}
+        <p class="text-[10px] text-slate-500">{[assays[0].fwd, assays[0].rev].filter(Boolean).join(' / ')}</p>
+      {/if}
+      <p class="text-[10px] text-slate-500">
+        all {assays[0].n} sample{assays[0].n === 1 ? '' : 's'}{assays[0].meanMatch != null ? ` · ${(assays[0].meanMatch * 100).toFixed(1)}% matched` : ''}
+      </p>
+    </div>
+  {:else if assays.length > 1}
     <div class="border-b border-slate-800">
       <button class="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200" onclick={() => toggle('assay')}>
         Assay

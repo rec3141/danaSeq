@@ -65,11 +65,20 @@ export const GROUP_HEX = {
 // submission — and those ASVs are not comparable, so the assay is worth
 // filtering on rather than just displaying.
 
+// Values that occupy the field without naming anything. A run trimmed with
+// detected rather than declared primers records "inferred" for both ends, which
+// is not an assay identity — it is the absence of one.
+const PLACEHOLDER_ASSAY = new Set(['', 'inferred', 'unknown', 'na', 'n/a', 'none', 'null']);
+
+function meaningful(v) {
+  return v != null && !PLACEHOLDER_ASSAY.has(String(v).trim().toLowerCase());
+}
+
 /** Stable identity for a sample's assay, or '' when the run was not assigned one. */
 export function assayKey(sample) {
   if (!sample) return '';
   const parts = [sample.assay_gene, sample.assay_region, sample.assay_primer_fwd, sample.assay_primer_rev];
-  return parts.some(Boolean) ? parts.map(p => p ?? '').join('|') : '';
+  return parts.some(meaningful) ? parts.map(p => p ?? '').join('|') : '';
 }
 
 /** Human label for an assay key, e.g. "16S rRNA V3-V4 (341Fv3/Bakt_805R)". */
