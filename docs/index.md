@@ -19,20 +19,26 @@ danaSeq/
 │   │                       merge_reads, assembly, dedupe, mapping
 │   │                       Output: assembly.fasta + depths.txt + BAMs
 │
+├── illumina_amplicon/      Amplicon (16S/18S/ITS) denoising to ASVs
+│   │                       11 modules: primers, demultiplex, denoise, merge,
+│   │                       taxonomy, phylogeny, renormalize, metadata,
+│   │                       cluster, network, shiny
+│   │                       cutadapt -> papa2 (DADA2) -> MAFFT/FastTree
+│   ├── viz/                Interactive Svelte dashboard (ASV explorer)
+│   └── bin/                Pipeline scripts
+│
 ├── illumina_rna/           Metatranscriptomic RNA-seq vs references
 │   │                       5 modules: preprocess, rrna, alignment, quantify, summarize
 │   │                       SortMeRNA -> BBmap -> featureCounts
 │   │                       Output: gene_counts.tsv per reference + viz JSONs
 │   ├── viz/                Interactive Svelte dashboard (gene-expression heatmap)
 │
-├── mag_analysis/           Technology-agnostic downstream analysis
-│   │                       10 modules: binning, annotation, taxonomy, rrna,
-│   │                       metabolism, mge, eukaryotic, gene_depths,
-│   │                       phylogeny, viz
-│   ├── viz/                Interactive Svelte dashboard
-│   └── bin/                Pipeline scripts
-│
-└── tests/                  Pipeline tests
+└── mag_analysis/           Technology-agnostic downstream analysis
+    │                       10 modules: binning, annotation, taxonomy, rrna,
+    │                       metabolism, mge, eukaryotic, gene_depths,
+    │                       phylogeny, viz
+    ├── viz/                Interactive Svelte dashboard
+    └── bin/                Pipeline scripts
 ```
 
 ## Pipelines
