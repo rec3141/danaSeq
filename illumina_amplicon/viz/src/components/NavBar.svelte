@@ -14,7 +14,7 @@
 <nav class="flex items-center gap-1 border-b border-slate-800 bg-slate-900/80 px-4 backdrop-blur">
   <a href="#" class="mr-4 flex items-center gap-2 py-3 text-sm font-bold tracking-wide text-slate-100">
     <span class="text-blue-400">&#x25C8;</span>
-    Microscape
+    dānaSeq Amplicon
   </a>
 
   {#each tabs as tab}

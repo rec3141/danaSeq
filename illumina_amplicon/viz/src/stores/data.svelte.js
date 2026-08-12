@@ -1,5 +1,5 @@
 /**
- * Reactive data stores for microscape visualization.
+ * Reactive data stores for the amplicon visualization.
  *
  * Svelte 5 module-level $state can't be exported AND reassigned.
  * Solution: wrap all state in a single exported object whose
@@ -584,7 +584,7 @@ export async function loadData() {
       .catch(() => {});
   } catch (e) {
     store.error = e.message;
-    console.error('[microscape] Data load failed:', e);
+    console.error('[danaseq-amplicon] Data load failed:', e);
   }
 
   store.loading = false;

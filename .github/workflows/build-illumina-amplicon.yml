@@ -46,6 +46,17 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=
 
+      # Resolve papa2's HEAD so the pip layer's cache key moves when it does.
+      # envs/python.yml installs papa2 from a git URL; without a build arg that
+      # changes, the layer stays valid forever and the image silently keeps
+      # whatever it first installed.
+      - name: Resolve upstream dependency HEAD
+        id: deps
+        run: |
+          sha=$(git ls-remote https://github.com/rec3141/papa2.git HEAD | cut -f1)
+          echo "papa2_sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "  papa2 -> $sha"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -54,5 +65,14 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Baked into the image so a run launched from the .sif can report what
+          # it is. The image tag already carries the SHA, but nothing inside can
+          # read it — without these the Dockerfile's ARG defaults win and every
+          # run records commit_id "unknown".
+          build-args: |
+            PAPA2_SHA=${{ steps.deps.outputs.papa2_sha }}
+            GIT_SHA=${{ github.sha }}
+            GIT_REF=${{ github.ref_name }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

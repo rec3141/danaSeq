@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# run-microscape.sh — Run the Microscape amplicon pipeline
+# run-illumina-amplicon.sh — Run the dānaSeq Illumina amplicon pipeline
 #
 # Auto-detects container runtime (Apptainer > Singularity > Docker) or
 # falls back to local conda execution. Handles bind mounts, CA certificates,
 # and user permissions transparently.
 #
 # Usage:
-#   ./run-microscape.sh --input /path/to/reads [pipeline options]
+#   ./run-illumina-amplicon.sh --input /path/to/reads [pipeline options]
 #
 # Container options:
 #   --runtime docker|apptainer|singularity|conda   Force a specific runtime
-#   --image IMAGE       Override container image [default: ghcr.io/rec3141/microscape-nf:latest]
+#   --image IMAGE       Override container image [default: ghcr.io/rec3141/danaseq-illumina-amplicon:latest]
 #   --pull              Pull/update the container image before running
 #   --sif PATH          Use a pre-built .sif file (Apptainer/Singularity)
 #
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONTAINER_IMAGE="ghcr.io/rec3141/microscape-nf:latest"
+CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-illumina-amplicon:latest"
 CONTAINER_RUNTIME="auto"
 SIF_PATH=""
 DO_PULL=false
@@ -110,7 +110,7 @@ case "$CONTAINER_RUNTIME" in
 
         # Pull .sif if not provided
         if [[ -z "$SIF_PATH" ]]; then
-            SIF_PATH="${OUTDIR}/microscape.sif"
+            SIF_PATH="${OUTDIR}/danaseq-illumina-amplicon.sif"
         fi
 
         if $DO_PULL || [[ ! -f "$SIF_PATH" ]]; then
