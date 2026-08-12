@@ -31,9 +31,11 @@ set -uo pipefail
 # SLURM may not), otherwise a private dir under /tmp — which is correct on a
 # compute node and is exactly the trap described above on a login node.
 #
-# Portability: needs bash 4+, apptainer or singularity, and — only for the
-# SLURM path — sbatch. A host with just Docker needs none of this; the wrappers
-# take --runtime docker and pull the image themselves.
+# Portability: bash 3.2+ (no associative arrays, no GNU-only coreutils flags),
+# apptainer or singularity, and — only for the SLURM path — sbatch. A host with
+# just Docker needs none of this; the wrappers take --runtime docker and pull
+# the image themselves. Which two images need SLURM is tuned to their size
+# against a login node's memory cap; --local overrides if yours is roomier.
 #
 # SLURM account:  --account, or $DANASEQ_SLURM_ACCOUNT; otherwise asked of
 #                 SLURM (sacctmgr, then sshare). Never guessed.
