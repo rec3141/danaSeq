@@ -24,11 +24,20 @@ set -uo pipefail
 # mag_analysis) fail that way every time on a login node while the smaller
 # four build there in ~2 minutes each.
 #
-# So by default the large ones are submitted to SLURM, where $SLURM_TMPDIR is
-# real local disk (not memory-charged, not a shared filesystem) and the job
-# holds actual RAM. Override with --local or --slurm if you know better.
+# So by default the large ones are submitted to SLURM, where the job holds real
+# RAM and staging goes to node-local disk. Override with --local or --slurm.
 #
-# SLURM account: --account, or $DANASEQ_SLURM_ACCOUNT, default def-rec3141.
+# Staging: $SLURM_TMPDIR when the site defines it (Compute Canada does; plain
+# SLURM may not), otherwise a private dir under /tmp — which is correct on a
+# compute node and is exactly the trap described above on a login node.
+#
+# Portability: needs bash 4+, apptainer or singularity, and — only for the
+# SLURM path — sbatch. A host with just Docker needs none of this; the wrappers
+# take --runtime docker and pull the image themselves.
+#
+# SLURM account:  --account, or $DANASEQ_SLURM_ACCOUNT; otherwise asked of
+#                 SLURM (sacctmgr, then sshare). Never guessed.
+# Job resources:  --time / --mem / --cpus, or $DANASEQ_SIFBUILD_{TIME,MEM,CPUS}.
 # SLURM job log:  --log-dir, or $DANASEQ_SIFBUILD_LOGDIR, default $HOME. It must
 # be on a shared filesystem — SLURM resolves --output on the compute node, so a
 # log under /tmp lands on node-local disk and cannot be read afterwards.
@@ -36,7 +45,14 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REGISTRY="ghcr.io/rec3141"
-ACCOUNT="${DANASEQ_SLURM_ACCOUNT:-def-rec3141}"
+
+# Left empty on purpose: hardcoding one person's allocation into a shared repo
+# means it silently charges the wrong account, or fails, for everyone else.
+# Resolved from SLURM itself at submit time unless given.
+ACCOUNT="${DANASEQ_SLURM_ACCOUNT:-}"
+JOB_TIME="${DANASEQ_SIFBUILD_TIME:-03:00:00}"
+JOB_MEM="${DANASEQ_SIFBUILD_MEM:-32G}"
+JOB_CPUS="${DANASEQ_SIFBUILD_CPUS:-8}"
 
 # name | image | component dir | sif basename | needs_slurm
 IMAGES=(
@@ -58,6 +74,9 @@ while (( $# )); do
         --slurm)   MODE="slurm"; shift ;;
         --account) ACCOUNT="$2"; shift 2 ;;
         --log-dir) LOG_DIR="$2"; shift 2 ;;
+        --time)    JOB_TIME="$2"; shift 2 ;;
+        --mem)     JOB_MEM="$2"; shift 2 ;;
+        --cpus)    JOB_CPUS="$2"; shift 2 ;;
         --list)    MODE="list"; shift ;;
         -h|--help) sed -n '/^# ===/,/^# ===$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)        echo "[ERROR] Unknown option: $1" >&2; exit 1 ;;
@@ -169,17 +188,28 @@ submit_slurm() {
     # written there is unreachable from the login node you submitted from. Use a
     # shared filesystem so the job's output can actually be read.
     local log="$LOG_DIR/danaseq-sifbuild-%j.log"
+
+    # Ask SLURM for the account rather than assuming one.
+    if [[ -z "$ACCOUNT" ]]; then
+        ACCOUNT=$(sacctmgr -nP show user "$USER" format=DefaultAccount 2>/dev/null | head -1)
+        [[ -n "$ACCOUNT" ]] || ACCOUNT=$(sshare -nP -U -o Account 2>/dev/null | head -1)
+    fi
+    if [[ -z "$ACCOUNT" ]]; then
+        echo "[ERROR] No SLURM account found. Pass --account, or set \$DANASEQ_SLURM_ACCOUNT." >&2
+        rc=1; return 1
+    fi
+
     local jid
     jid=$(sbatch --parsable \
             --job-name=danaseq-sifbuild \
             --account="$ACCOUNT" \
-            --time=03:00:00 \
-            --cpus-per-task=8 \
-            --mem=32G \
+            --time="$JOB_TIME" \
+            --cpus-per-task="$JOB_CPUS" \
+            --mem="$JOB_MEM" \
             --output="$log" \
             --wrap="bash '$REPO/tools/rebuild-sifs.sh' --local ${names[*]}")
     if [[ -n "$jid" ]]; then
-        echo "[INFO] Submitted ${names[*]} as SLURM job $jid (32G, \$SLURM_TMPDIR staging)"
+        echo "[INFO] Submitted ${names[*]} as SLURM job $jid (account $ACCOUNT, $JOB_MEM)"
         echo "[INFO] Log: ${log/\%j/$jid}"
     else
         echo "[ERROR] sbatch failed for: ${names[*]}" >&2; rc=1
