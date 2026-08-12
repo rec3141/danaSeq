@@ -29,6 +29,9 @@ set -uo pipefail
 # holds actual RAM. Override with --local or --slurm if you know better.
 #
 # SLURM account: --account, or $DANASEQ_SLURM_ACCOUNT, default def-rec3141.
+# SLURM job log:  --log-dir, or $DANASEQ_SIFBUILD_LOGDIR, default $HOME. It must
+# be on a shared filesystem — SLURM resolves --output on the compute node, so a
+# log under /tmp lands on node-local disk and cannot be read afterwards.
 # ============================================================================
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -46,6 +49,7 @@ IMAGES=(
 )
 
 MODE="auto"       # auto | local | slurm
+LOG_DIR="${DANASEQ_SIFBUILD_LOGDIR:-$HOME}"
 SELECTED=()
 
 while (( $# )); do
@@ -53,6 +57,7 @@ while (( $# )); do
         --local)   MODE="local"; shift ;;
         --slurm)   MODE="slurm"; shift ;;
         --account) ACCOUNT="$2"; shift 2 ;;
+        --log-dir) LOG_DIR="$2"; shift 2 ;;
         --list)    MODE="list"; shift ;;
         -h|--help) sed -n '/^# ===/,/^# ===$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)        echo "[ERROR] Unknown option: $1" >&2; exit 1 ;;
@@ -160,7 +165,10 @@ submit_slurm() {
         return
     }
 
-    local log="${TMPDIR:-/tmp}/danaseq-sifbuild-%j.log"
+    # --output is resolved on the COMPUTE node, where /tmp is node-local — a log
+    # written there is unreachable from the login node you submitted from. Use a
+    # shared filesystem so the job's output can actually be read.
+    local log="$LOG_DIR/danaseq-sifbuild-%j.log"
     local jid
     jid=$(sbatch --parsable \
             --job-name=danaseq-sifbuild \
