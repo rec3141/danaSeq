@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # ============================================================================
-# Illumina MAG Pipeline - Conda Environment Installer
+# Illumina Assembly Pipeline - Conda Environment Installer
 # ============================================================================
 #
-# Creates isolated conda environments for the illumina_mag pipeline.
+# Creates isolated conda environments for the illumina_assembly pipeline.
 # All envs are prefix-installed under ./conda-envs/.
 #
 # Four environments are needed:
@@ -157,7 +157,7 @@ do_install() {
         echo "[SUCCESS] All ${total} environments installed to: ${ENV_DIR}"
         echo ""
         echo "Run the pipeline:"
-        echo "  ./run-illumina-mag.sh --input /path/to/reads --outdir /path/to/output --human_ref /path/to/ref"
+        echo "  ./run-illumina-assembly.sh --input /path/to/reads --outdir /path/to/output --human_ref /path/to/ref"
     fi
 }
 
