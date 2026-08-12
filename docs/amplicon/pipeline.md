@@ -11,7 +11,7 @@
 | 5 | `DADA2_DENOISE` | papa2 | Denoising, pair merging, per-plate chimera removal |
 | 6 | `MERGE_SEQTABS` | papa2 | Merge per-plate tables (long-format) |
 | 7 | `REMOVE_CHIMERAS` | papa2 | Consensus chimera removal on merged data |
-| 8 | `FILTER_SEQTAB` | microscape | Length, prevalence, abundance, and depth filtering |
+| 8 | `FILTER_SEQTAB` | `filter_seqtab.py` | Length, prevalence, abundance, and depth filtering |
 
 !!! note "Per-plate processing"
     Steps 3–5 run independently per plate (samples sharing PCR history).
@@ -24,8 +24,8 @@
 | Step | Process | Tool | Description |
 |------|---------|------|-------------|
 | 9 | `ASSIGN_TAXONOMY` | papa2 | Naive Bayesian classification (parallel per ref DB) |
-| 10 | `BUILD_PHYLOGENY` | microscape + MAFFT | MSA + NJ tree (optional, `--run_phylogeny`) |
-| 11 | `RENORMALIZE` | microscape | Group ASVs by taxonomy, normalize within groups |
+| 10 | `BUILD_PHYLOGENY` | `build_phylogeny.py` + MAFFT | MSA + NJ tree (optional, `--run_phylogeny`) |
+| 11 | `RENORMALIZE` | `renormalize.py` | Group ASVs by taxonomy, normalize within groups |
 
 !!! tip "Multiple databases"
     Supply multiple reference databases with `--ref_databases` and taxonomy
@@ -37,10 +37,10 @@
 
 | Step | Process | Tool | Description |
 |------|---------|------|-------------|
-| 12 | `LOAD_METADATA` | microscape | Sample metadata integration (MIMARKS) |
-| 13 | `CLUSTER_TSNE` | microscape | Bray-Curtis + t-SNE ordination (samples and ASVs) |
-| 14 | `NETWORK_ANALYSIS` | microscape | SparCC-style CLR correlation networks |
-| 15 | `EXPORT_VIZ` | microscape | JSON export for Svelte web viewer |
+| 12 | `LOAD_METADATA` | `load_metadata.py` | Sample metadata integration (MIMARKS) |
+| 13 | `CLUSTER_TSNE` | `cluster_tsne.py` | Bray-Curtis + t-SNE ordination (samples and ASVs) |
+| 14 | `NETWORK_SPARCC` | `network_sparcc.py` | SparCC-style CLR correlation networks |
+| 15 | `BUILD_VIZ` | `build_viz.py` | JSON export for Svelte web viewer |
 
 ---
 

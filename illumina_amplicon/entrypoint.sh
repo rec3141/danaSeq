@@ -1,5 +1,5 @@
 #!/bin/sh
-# Microscape container entrypoint
+# dānaSeq Illumina amplicon container entrypoint
 #
 # Validates the output directory is writable (important when running with
 # docker --user) then launches Nextflow with the container config that

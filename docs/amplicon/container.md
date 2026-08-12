@@ -1,7 +1,7 @@
 # Container
 
-Pre-built container images include Nextflow, papa2, microscape, cutadapt,
-MAFFT, and R/dada2 — everything needed to run the full pipeline without
+Pre-built container images include Nextflow, papa2, cutadapt, MAFFT,
+and FastTree — everything needed to run the full pipeline without
 installing dependencies.
 
 ## Docker

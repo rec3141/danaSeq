@@ -2,7 +2,7 @@
 nextflow.enable.dsl = 2
 
 // ============================================================================
-// Microscape Amplicon Pipeline - Nextflow DSL2
+// dānaSeq Illumina Amplicon Pipeline - Nextflow DSL2
 // ============================================================================
 //
 // Amplicon sequencing analysis pipeline: demultiplexing, primer removal,
@@ -21,8 +21,8 @@ nextflow.enable.dsl = 2
 def helpMessage() {
     log.info """
     =========================================
-     Microscape Amplicon Pipeline
-     https://github.com/rec3141/microscape
+     dānaSeq Illumina Amplicon Pipeline
+     https://github.com/rec3141/danaSeq
     =========================================
 
     Usage:
@@ -522,7 +522,7 @@ workflow.onComplete {
     // Run manifest — record what was actually run (pipeline version, resolved parameters,
     // per-process tool images, reference databases) so downstream reporting (omc-platform
     // Methods drafting + agents) can state it instead of "not specified in the outputs".
-    // Published into viz/ alongside provenance.json. (microscape-nf #5)
+    // Published into viz/ alongside provenance.json.
     try {
         def vizDir = new File("${params.outdir}/viz")
         if (vizDir.exists()) {
@@ -532,7 +532,7 @@ workflow.onComplete {
             // build time. scriptId is the MD5 of main.nf and pins the source even when
             // both of those are missing.
             def sysEnv = System.getenv()
-            def bakedSha = sysEnv['MICROSCAPE_GIT_SHA']
+            def bakedSha = sysEnv['DANASEQ_GIT_SHA']
             def toolVersions = null
             try {
                 def probe = new File("${workflow.projectDir}/bin/tool_versions.sh")
@@ -554,8 +554,8 @@ workflow.onComplete {
                 commit_id           : (workflow.commitId ?: bakedSha),
                 commit_source       : (workflow.commitId ? 'git checkout'
                                        : (bakedSha ? 'baked into container at build' : 'UNKNOWN')),
-                container_git_ref   : sysEnv['MICROSCAPE_GIT_REF'],
-                container_built     : sysEnv['MICROSCAPE_BUILD_DATE'],
+                container_git_ref   : sysEnv['DANASEQ_GIT_REF'],
+                container_built     : sysEnv['DANASEQ_BUILD_DATE'],
                 // MD5 of main.nf — identifies the source even with no git and no build arg.
                 script_id           : workflow.scriptId,
                 // What each tool actually reported, not what the env spec asked for.

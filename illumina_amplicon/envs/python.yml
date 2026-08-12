@@ -1,4 +1,4 @@
-name: microscape-python
+name: danaseq-amplicon-python
 channels:
   - conda-forge
   - bioconda

@@ -41,9 +41,9 @@ emit() {
 }
 
 # Python packages installed from a git URL report a version string that never changes —
-# microscape has said "0.1.0" across every commit — but PEP 610 writes the actual commit
-# into direct_url.json. That commit is the only real answer for papa2 and microscape,
-# which are the two tools most likely to change the numbers.
+# papa2 has said "0.1.0" across every commit — but PEP 610 writes the actual commit
+# into direct_url.json. That commit is the only real answer for papa2, which is the
+# tool most likely to change the numbers.
 python_packages() {
     python - <<'PYEOF' 2>/dev/null || printf 'null'
 import json
@@ -52,7 +52,7 @@ try:
 except ImportError:
     print("null"); raise SystemExit
 out = {}
-for name in ("microscape", "papa2", "biopython", "scikit-learn", "scipy",
+for name in ("papa2", "biopython", "scikit-learn", "scipy",
              "numpy", "pandas", "cutadapt", "matplotlib"):
     try:
         d = md.distribution(name)
@@ -87,7 +87,6 @@ for spec in \
     "scikit_learn|python -c 'import sklearn;print(sklearn.__version__)'" \
     "scipy|python -c 'import scipy;print(scipy.__version__)'" \
     "papa2|python -c 'import papa2;print(getattr(papa2,\"__version__\",\"unknown\"))'" \
-    "microscape|python -c 'import microscape;print(getattr(microscape,\"__version__\",\"unknown\"))'" \
 ; do
     name="${spec%%|*}"; cmd="${spec#*|}"
     printf '%s' "$sep"; emit "$name" "$(probe "$cmd")"; sep=$',\n'

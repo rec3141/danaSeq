@@ -68,7 +68,7 @@ For large projects, use `--store_dir` to skip completed steps across runs:
 nextflow run rec3141/danaSeq -entry illumina_amplicon \
     --input /path/to/reads \
     --ref_databases "silva:/db/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
-    --store_dir /scratch/microscape_cache \
+    --store_dir /scratch/danaseq_amplicon_cache \
     -profile conda -resume
 ```
 

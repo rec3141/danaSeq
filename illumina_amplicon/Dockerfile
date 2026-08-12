@@ -8,7 +8,7 @@
 FROM condaforge/miniforge3:latest
 
 LABEL org.opencontainers.image.source="https://github.com/rec3141/danaSeq"
-LABEL org.opencontainers.image.description="Microscape amplicon sequencing pipeline"
+LABEL org.opencontainers.image.description="dānaSeq Illumina amplicon sequencing pipeline"
 
 # System dependencies
 # - default-jre-headless: Nextflow needs a JVM at both build time (nextflow
@@ -65,11 +65,11 @@ ARG PAPA2_SHA=main
 # resource busy" because it's a live mount point.
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     echo "upstream: papa2=${PAPA2_SHA}" \
-    && mamba env create -y -p /opt/conda/envs/microscape-python \
+    && mamba env create -y -p /opt/conda/envs/danaseq-amplicon-python \
         -f /tmp/envs/python.yml
 
 # Put both envs on PATH so tools are available without conda activate
-ENV PATH="/opt/conda/envs/microscape-python/bin:${PATH}"
+ENV PATH="/opt/conda/envs/danaseq-amplicon-python/bin:${PATH}"
 
 # Provenance, baked at build time.
 #
@@ -81,9 +81,9 @@ ENV PATH="/opt/conda/envs/microscape-python/bin:${PATH}"
 ARG GIT_SHA=unknown
 ARG GIT_REF=unknown
 ARG BUILD_DATE=unknown
-ENV MICROSCAPE_GIT_SHA=${GIT_SHA} \
-    MICROSCAPE_GIT_REF=${GIT_REF} \
-    MICROSCAPE_BUILD_DATE=${BUILD_DATE}
+ENV DANASEQ_GIT_SHA=${GIT_SHA} \
+    DANASEQ_GIT_REF=${GIT_REF} \
+    DANASEQ_BUILD_DATE=${BUILD_DATE}
 LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.version="${GIT_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}"
@@ -111,8 +111,8 @@ RUN python3 -c "import papa2; print('papa2', papa2.__version__)" \
     && /pipeline/bin/auto_trim.py --help > /dev/null
 
 # Writable home for non-root users (HPC)
-RUN mkdir -p /home/microscape && chmod 777 /home/microscape
-ENV HOME=/home/microscape
+RUN mkdir -p /home/danaseq && chmod 777 /home/danaseq
+ENV HOME=/home/danaseq
 
 WORKDIR /data
 ENTRYPOINT ["/pipeline/entrypoint.sh"]
