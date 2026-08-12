@@ -50,12 +50,16 @@ jobs:
       # envs/python.yml installs papa2 from a git URL; without a build arg that
       # changes, the layer stays valid forever and the image silently keeps
       # whatever it first installed.
-      - name: Resolve upstream dependency HEAD
+      - name: Resolve upstream dependency HEAD and stamp build time
         id: deps
         run: |
           sha=$(git ls-remote https://github.com/rec3141/papa2.git HEAD | cut -f1)
           echo "papa2_sha=${sha}" >> "$GITHUB_OUTPUT"
           echo "  papa2 -> $sha"
+          # Stamp the clock, not github.event.repository.updated_at — that is
+          # repo metadata and lags the build by days, so it was recording a
+          # build date the image never had.
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -73,6 +77,6 @@ jobs:
             PAPA2_SHA=${{ steps.deps.outputs.papa2_sha }}
             GIT_SHA=${{ github.sha }}
             GIT_REF=${{ github.ref_name }}
-            BUILD_DATE=${{ github.event.repository.updated_at }}
+            BUILD_DATE=${{ steps.deps.outputs.build_date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
