@@ -14,6 +14,8 @@
 #   --image IMAGE       Override container image [default: ghcr.io/rec3141/danaseq-illumina-amplicon:latest]
 #   --pull              Pull/update the container image before running
 #   --sif PATH          Use a pre-built .sif file (Apptainer/Singularity)
+#                       [default: .danaseq-illumina-amplicon.sif beside this
+#                        script; falls back to pulling into --outdir]
 #
 # All other arguments are passed through to Nextflow.
 
@@ -108,14 +110,22 @@ case "$CONTAINER_RUNTIME" in
     apptainer|singularity)
         RUNTIME_CMD="$CONTAINER_RUNTIME"
 
-        # Pull .sif if not provided
+        # Resolve the .sif the same way every other danaSeq wrapper does: the
+        # dot-file beside this script, which is what the rebuild scripts write.
+        # Only when that is absent (a fresh checkout, or a read-only/over-quota
+        # /project) do we fall back to pulling into the outdir — otherwise each
+        # new outdir re-downloaded its own ~900 MB copy.
         if [[ -z "$SIF_PATH" ]]; then
-            SIF_PATH="${OUTDIR}/danaseq-illumina-amplicon.sif"
+            if [[ -f "${SCRIPT_DIR}/.danaseq-illumina-amplicon.sif" ]]; then
+                SIF_PATH="${SCRIPT_DIR}/.danaseq-illumina-amplicon.sif"
+            else
+                SIF_PATH="${OUTDIR}/danaseq-illumina-amplicon.sif"
+            fi
         fi
 
         if $DO_PULL || [[ ! -f "$SIF_PATH" ]]; then
             echo "[INFO] Pulling $CONTAINER_IMAGE -> $SIF_PATH"
-            "$RUNTIME_CMD" pull "$SIF_PATH" "docker://${CONTAINER_IMAGE}"
+            "$RUNTIME_CMD" pull --force "$SIF_PATH" "docker://${CONTAINER_IMAGE}"
         fi
 
         BIND_ARGS="--bind ${OUTDIR}:${OUTDIR}"
