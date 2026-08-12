@@ -5,14 +5,14 @@ set -euo pipefail
 # danaSeq - Database Downloader
 # ============================================================================
 #
-# Downloads reference databases required by the nanopore_mag and illumina_mag
+# Downloads reference databases required by the mag_analysis, nanopore_assembly, and illumina_assembly
 # pipelines. Databases are large (1-10 GB each) and are NOT included in the
 # conda environments. Run this script once before using the tools that need them.
 #
 # Usage:
 #   ./download-databases.sh                    # Interactive: choose databases
 #   ./download-databases.sh --all              # Download all databases
-#   ./download-databases.sh --human            # Download BBTools human reference (~4 GB, for illumina_mag)
+#   ./download-databases.sh --human            # Download BBTools human reference (~4 GB, for illumina_assembly)
 #   ./download-databases.sh --genomad          # Download geNomad database only
 #   ./download-databases.sh --checkv           # Download CheckV database only
 #   ./download-databases.sh --checkm            # Download CheckM v1 data (needed by dRep/COMEBin)
@@ -43,11 +43,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_DIR="${SCRIPT_DIR}/databases"
-# Conda envs may live under either pipeline's directory
-NANOPORE_ENV_DIR="${SCRIPT_DIR}/nanopore_mag/conda-envs"
-ILLUMINA_ENV_DIR="${SCRIPT_DIR}/illumina_mag/conda-envs"
-# Legacy default — nanopore_mag envs (used by most download functions)
-ENV_DIR="${NANOPORE_ENV_DIR}"
+# Each pipeline's install.sh prefix-installs its envs under its own conda-envs/.
+# Every tool this script feeds a database to (geNomad, CheckV, CheckM2, Bakta,
+# eggNOG, dbCAN, MetaEuk, antiSMASH, MacSyFinder, GTDB-Tk) comes from the
+# dana-mag-* envs, which mag_analysis and nanopore_assembly both build. Prefer
+# mag_analysis; fall back so a host that only installed the nanopore side still
+# resolves. These pointed at nanopore_mag/ and illumina_mag/, which have not
+# existed since those pipelines were renamed — so every lookup below missed and
+# fell through to the "not installed" branch.
+ENV_DIR="${SCRIPT_DIR}/mag_analysis/conda-envs"
+if [ ! -d "${ENV_DIR}" ] && [ -d "${SCRIPT_DIR}/nanopore_assembly/conda-envs" ]; then
+    ENV_DIR="${SCRIPT_DIR}/nanopore_assembly/conda-envs"
+fi
 USE_CONTAINER=false
 CONTAINER_RUNTIME=""   # docker, apptainer, or singularity (set by --docker/--apptainer/--container)
 CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag-analysis:latest"
@@ -240,7 +247,7 @@ show_databases() {
     echo ""
     printf "  %-12s %-8s  %s\n" "Database" "Size" "Description"
     printf "  %-12s %-8s  %s\n" "--------" "----" "-----------"
-    printf "  %-12s %-8s  %s\n" "human"   "~4 GB"  "BBTools masked human reference (illumina_mag decontamination)"
+    printf "  %-12s %-8s  %s\n" "human"   "~4 GB"  "BBTools masked human reference (illumina_assembly decontamination)"
     printf "  %-12s %-8s  %s\n" "genomad"  "~3.5 GB" "geNomad marker profiles + MMseqs2 (virus + plasmid detection)"
     printf "  %-12s %-8s  %s\n" "checkv"   "~1.4 GB" "CheckV reference genomes (viral quality assessment)"
     printf "  %-12s %-8s  %s\n" "checkm"   "~280 MB" "CheckM v1 reference data (needed by dRep + COMEBin)"
@@ -267,7 +274,7 @@ show_databases() {
     echo "Default download directory: ${DB_DIR}"
     echo ""
     echo "After downloading, pass database paths to the pipeline:"
-    echo "  --human_ref  ${DB_DIR}/human_ref   (illumina_mag pipeline)"
+    echo "  --human_ref  ${DB_DIR}/human_ref   (illumina_assembly pipeline)"
     echo "  --genomad_db ${DB_DIR}/genomad_db"
     echo "  --checkv_db  ${DB_DIR}/checkv_db"
     echo "  --checkm_data ${DB_DIR}/checkm_data"
@@ -301,7 +308,7 @@ fi
 if $INTERACTIVE; then
     show_databases
     echo "Select databases to download (space-separated, or 'all'):"
-    echo "  1) human     - BBTools masked human reference (illumina_mag, ~4 GB)"
+    echo "  1) human     - BBTools masked human reference (illumina_assembly, ~4 GB)"
     echo "  2) genomad   - geNomad (virus + plasmid detection)"
     echo "  3) checkv    - CheckV (viral quality assessment)"
     echo "  4) checkm    - CheckM v1 reference data (needed by dRep + COMEBin, ~280 MB)"
@@ -505,8 +512,8 @@ download_human_ref() {
         fi
     fi
 
-    echo "  illumina_mag: --human_ref ${db_path}"
-    echo "  nanopore_mag: --human_ref ${human_fa}"
+    echo "  illumina_assembly: --human_ref ${db_path}"
+    echo "  nanopore_assembly: --human_ref ${human_fa}"
 }
 
 download_genomad() {
@@ -1313,7 +1320,7 @@ else
     echo "[SUCCESS] All selected databases downloaded to: ${DB_DIR}"
     echo ""
     echo "Run the pipeline with database paths:"
-    ! $DOWNLOAD_HUMAN  || echo "  --human_ref  ${DB_DIR}/human_ref   (illumina_mag)"
+    ! $DOWNLOAD_HUMAN  || echo "  --human_ref  ${DB_DIR}/human_ref   (illumina_assembly)"
     ! $DOWNLOAD_GENOMAD || echo "  --genomad_db ${DB_DIR}/genomad_db"
     ! $DOWNLOAD_CHECKV  || echo "  --checkv_db  ${DB_DIR}/checkv_db"
     ! $DOWNLOAD_CHECKM  || echo "  --checkm_data ${DB_DIR}/checkm_data"
