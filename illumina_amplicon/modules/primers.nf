@@ -1,18 +1,16 @@
 // Primer removal with cutadapt, and a record of what it actually matched.
 //
-// DETECT_PRIMERS samples reads and matches their 5' ends against the curated
-// table in bin/primer_db.py. It used to run a full cutadapt pass per candidate
-// primer file per sample — 17 passes over every sample, to /dev/null, just to
-// count survivors — and reported only the winning filename.
-//
 // PRIMER_ASSIGNMENT turns cutadapt's own per-adapter counts into one row per
 // sample, so which assay a sample really carries is reported rather than
 // recomputed downstream from taxonomy. It states only what was observed — the
 // primer name and read counts — because a primer FASTA carries nothing else.
 //
-// Two-pass approach:
-//   1. DETECT_PRIMERS: runs all primer pairs on each sample, picks the best match
-//   2. REMOVE_PRIMERS: runs the selected primer pair with --discard-untrimmed
+// Two stages:
+//   1. DETECT_PRIMERS: samples reads once and matches their 5' ends against the
+//      curated table in bin/primer_db.py, falling back to a de-novo consensus,
+//      and writes what it found as detected_primers.fa
+//   2. REMOVE_PRIMERS: one cutadapt pass with -g file:, so cutadapt picks the
+//      best-matching adapter per read, with --discard-untrimmed
 //
 // If metadata provides a primer_pair column, DETECT_PRIMERS is skipped.
 
