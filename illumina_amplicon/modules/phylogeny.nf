@@ -4,7 +4,6 @@
 // R uses DECIPHER; Python uses MAFFT + BioPython/scipy.
 // Optional — only needed for UniFrac and phylogeny-aware ordinations.
 
-def phyloExt() { return 'pkl' }
 
 process BUILD_PHYLOGENY {
     tag "phylogeny"
@@ -24,8 +23,8 @@ process BUILD_PHYLOGENY {
 
     output:
     path("phylo_tree.${'nwk'}"), emit: tree
-    path("phylo_distances.${phyloExt()}"), emit: distances
-    path("phylo_seq_map.${phyloExt()}"), emit: seq_map
+    path("phylo_distances.pkl"), emit: distances
+    path("phylo_seq_map.pkl"), emit: seq_map
     path("phylo_alignment.fasta"), emit: alignment
 
     script:

@@ -82,13 +82,16 @@ export function assayKey(sample) {
 }
 
 /**
- * True for a name the pipeline derived from the reads (`inf-3f9a2c`) rather than
- * recognised in its catalogue. Worth marking: the name identifies the primer and
- * is stable across runs, but says nothing about what it targets, so it should not
- * read like a citable primer. primer_db.derived_primer_name mints these.
+ * True for a name the pipeline derived from the reads rather than recognised in
+ * its catalogue. Such a name is the primer's own sequence, so it is a run of
+ * IUPAC codes; catalogue names all carry digits or lower case (27F, 515F,
+ * TAReuk454FWD1) and cannot be mistaken for one at this length. Worth marking:
+ * the sequence identifies the primer and is stable across runs, but says nothing
+ * about what it targets, so it should not read like a citable primer.
+ * primer_db.derived_primer_name mints these.
  */
 export function isDerivedPrimer(name) {
-  return /^inf-[0-9a-f]{6,}$/i.test(String(name || '').trim());
+  return /^[ACGTRYSWKMBDHVN]{14,}$/.test(String(name || '').trim());
 }
 
 /** Heading for an assay: the gene/region when known, else how we got the primers. */

@@ -38,6 +38,11 @@ data/
 *.cram
 *.bai
 
+# Reference sequences the pipelines ship with: primer tables and the SSU genes
+# primer coordinates are quoted against. Small, versioned, and part of the code
+# rather than someone's data.
+!illumina_amplicon/primers/**/*.fa
+
 # Database files
 *.duckdb
 *.duckdb.wal

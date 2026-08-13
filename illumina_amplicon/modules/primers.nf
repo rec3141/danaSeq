@@ -37,6 +37,33 @@ process DETECT_PRIMERS {
 }
 
 
+// Reduce the per-sample detections to the one set the whole run is trimmed with.
+// Handing cutadapt one adapter per sample lets it pick a different winner in each
+// one, and plateFor() keys the AUTO_TRIM and LEARN_ERRORS groups on which it
+// picked — so a single assay would be split into as many error models as there
+// are samples. The set still holds several primers where a run really carries
+// several assays; cutadapt chooses per read.
+process RESOLVE_PRIMER_SET {
+    label 'process_low'
+    conda "${projectDir}/envs/python.yml"
+    publishDir "${params.outdir}/trimmed", mode: 'copy', pattern: "primer_set.json"
+
+    input:
+    path(detections)
+
+    output:
+    path("primer_set.fa"),   emit: primers
+    path("primer_set.json"), emit: report
+
+    script:
+    """
+    resolve_primer_set.py ${detections} \
+        -o primer_set.fa \
+        --json primer_set.json
+    """
+}
+
+
 process REMOVE_PRIMERS {
     tag "${meta.id}"
     cpus 1
@@ -52,7 +79,7 @@ process REMOVE_PRIMERS {
     // as observed rather than declared. It rides along with the reads so error
     // models and truncation can be grouped per assay without a second pass over
     // the logs (issue #7).
-    tuple val(meta), path("${meta.id}_R1.trimmed.fastq.gz"), path("${meta.id}_R2.trimmed.fastq.gz"), env(ASSAY), emit: reads
+    tuple val(meta), path("${meta.id}_R1.trimmed.fastq.gz"), path("${meta.id}_R2.trimmed.fastq.gz"), env('ASSAY'), emit: reads
     path("${meta.id}_cutadapt.log"), emit: log
 
     script:

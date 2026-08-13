@@ -1,6 +1,5 @@
 // Load sample metadata and merge with sequence data.
 
-def metaExt() { return 'pkl' }
 
 process LOAD_METADATA {
     tag "metadata"
@@ -13,7 +12,7 @@ process LOAD_METADATA {
     val(sample_id_column)
 
     output:
-    path("metadata.${metaExt()}"), emit: metadata
+    path("metadata.pkl"), emit: metadata
     path("match_stats.tsv"), emit: stats
 
     script:

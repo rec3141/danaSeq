@@ -4,7 +4,6 @@
 // classification across databases (custom Wang et al. 2007 implementation
 // with multiprocessing).
 
-def taxExt() { return 'pkl' }
 
 process ASSIGN_TAXONOMY {
     tag "${db_name}"
@@ -18,7 +17,7 @@ process ASSIGN_TAXONOMY {
     path(seqtab)
 
     output:
-    tuple val(db_name), path("${db_name}_taxonomy.${taxExt()}"), path("${db_name}_bootstrap.${taxExt()}"), emit: taxonomy
+    tuple val(db_name), path("${db_name}_taxonomy.pkl"), path("${db_name}_bootstrap.pkl"), emit: taxonomy
     path("${db_name}_taxonomy.tsv"), emit: taxonomy_tsv
 
     script:

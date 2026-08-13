@@ -15,8 +15,5 @@ dependencies:
   - pip
   - pip:
     # Pinned, and bumped deliberately — papa2 does the denoising, so its commit
-    # decides what the numbers are. microscape used to be pinned here too, for
-    # the single `auto-trim` command; that now lives in bin/auto_trim.py next to
-    # the R engine's copy, so the pipeline no longer tracks a second repo to get
-    # one function.
+    # decides what the numbers are.
     - git+https://github.com/rec3141/papa2.git@fd3cb5aa56898cb7ae73e1674ac19453057f6141

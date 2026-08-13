@@ -7,8 +7,6 @@
 //
 // Denoising is papa2 (byte-identical to R dada2, no R dependency).
 
-def errExt() { return 'pkl' }
-def seqExt() { return 'pkl' }
 
 // Per-sample auto-trim: each sample is profiled on its own reads and gets its own
 // *_auto_trim.tsv. TRUNC_POLICY then chooses the group's value from these.
@@ -26,7 +24,7 @@ process AUTO_TRIM {
     tuple val(meta), path(r1), path(r2)
 
     output:
-    tuple val(meta), env(TRUNC_FWD), env(TRUNC_REV), env(READ_FWD), env(READ_REV), emit: trim_params
+    tuple val(meta), env('TRUNC_FWD'), env('TRUNC_REV'), env('READ_FWD'), env('READ_REV'), emit: trim_params
     path("${meta.id}_auto_trim.tsv"), emit: params_tsv
 
     script:
@@ -93,7 +91,7 @@ process TRUNC_POLICY {
     path primer_files    // fwd/rev fasta when --primers_* were given, else empty
 
     output:
-    tuple val(plate_id), env(TRUNC_FWD), env(TRUNC_REV), emit: trim_params
+    tuple val(plate_id), env('TRUNC_FWD'), env('TRUNC_REV'), emit: trim_params
     path("${plate_id}_trunc_policy.tsv"), emit: policy_tsv
 
     script:
@@ -325,7 +323,7 @@ process LEARN_ERRORS {
     tuple val(meta), path(r1_files), path(r2_files)
 
     output:
-    tuple val(meta.plate), val(meta), path("${meta.id}_errF.${errExt()}"), path("${meta.id}_errR.${errExt()}"), emit: error_models
+    tuple val(meta.plate), val(meta), path("${meta.id}_errF.pkl"), path("${meta.id}_errR.pkl"), emit: error_models
     path("${meta.id}_error_rates.pdf"), emit: error_plots
 
     script:
@@ -347,7 +345,7 @@ process DENOISE {
     tuple val(meta), path(r1_files), path(r2_files), path(errF), path(errR)
 
     output:
-    tuple val(meta), path("${meta.id}.seqtab.${seqExt()}"), emit: seqtab
+    tuple val(meta), path("${meta.id}.seqtab.pkl"), emit: seqtab
     path("${meta.id}.seqtab.tsv"), emit: seqtab_tsv
 
     script:
