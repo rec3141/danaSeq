@@ -107,8 +107,9 @@ if (params.run_demultiplex && (!params.forward_bcs || !params.reverse_bcs)) {
 
 // Stage A: Preprocessing and denoising
 include { DEMULTIPLEX }       from './modules/demultiplex'
-include { DETECT_PRIMERS }    from './modules/primers'
-include { REMOVE_PRIMERS }    from './modules/primers'
+include { DETECT_PRIMERS }      from './modules/primers'
+include { RESOLVE_PRIMER_SET }  from './modules/primers'
+include { REMOVE_PRIMERS }      from './modules/primers'
 include { PRIMER_ASSIGNMENT } from './modules/primers'
 include { AUTO_TRIM }         from './modules/denoise'
 include { TRUNC_POLICY }      from './modules/denoise'
@@ -309,9 +310,21 @@ workflow {
                 [meta + [plate: plateFor(meta, r1, assay)], r1, r2]
             }
     } else {
-        // Detect the primer pair per sample from the reads themselves
+        // Detect per sample, then trim every sample with the same resolved set,
+        // so which assay a sample belongs to is decided by what cutadapt matches
+        // rather than by which sample's own detection it happened to be given.
         DETECT_PRIMERS(ch_demuxed)
-        REMOVE_PRIMERS(DETECT_PRIMERS.out.detected)
+        // report is optional, so an all-samples-failed detection would leave this
+        // empty, RESOLVE_PRIMER_SET would never run, and the pipeline would end
+        // with no output and no error. Say so instead.
+        ch_detections = DETECT_PRIMERS.out.report
+            .collect(sort: true)
+            .ifEmpty { error "no primers were detected in any sample — nothing to trim with" }
+        RESOLVE_PRIMER_SET(ch_detections)
+        ch_with_primers = DETECT_PRIMERS.out.detected
+            .map { meta, r1, r2, _detected -> [meta, r1, r2] }
+            .combine(RESOLVE_PRIMER_SET.out.primers)
+        REMOVE_PRIMERS(ch_with_primers)
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads
             .map { meta, r1, r2, assay ->

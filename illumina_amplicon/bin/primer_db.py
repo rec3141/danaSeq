@@ -595,6 +595,68 @@ def detect_from_reads(r1_path: str, r2_path: str | None = None, n: int = 500) ->
     return detect_from_read_lists(r1, r2)
 
 
+def shared_region(a: str, b: str, min_id: float = 0.90,
+                  min_len: int = MIN_PRIMER_LEN) -> str:
+    """The longest stretch two primers agree on, over every relative placement.
+
+    Records of the same primer differ at the 5' end and agree after it, because
+    what varies between samples is the barcode or spacer in front rather than the
+    primer itself. Scanning every placement — not just a common prefix — finds
+    the agreed stretch, and returning it is what drops the barcode.
+    """
+    best = ""
+    for ai in range(len(a) - min_len + 1):
+        for bi in range(len(b) - min_len + 1):
+            n = min(len(a) - ai, len(b) - bi)
+            if n < min_len or n <= len(best):
+                continue
+            ok = sum(1 for k in range(n)
+                     if _SETS.get(a[ai + k], _SETS["N"]) & _SETS.get(b[bi + k], _SETS["N"]))
+            if ok / n >= min_id:
+                best = a[ai:ai + n]
+    return best
+
+
+def collapse_primers(primers: list[str]) -> list[tuple[str, int]]:
+    """Reduce per-sample primers to the smallest set that still separates assays.
+
+    Every extra entry in the FASTA is another adapter cutadapt can pick per
+    sample, and plateFor() keys the error-model groups on which one it picked —
+    so one entry per sample splits a single assay into as many groups as there
+    are samples. Compatible primers are merged and each group keeps only what all
+    its members share.
+    """
+    groups: list[list] = []          # [core, member count]
+    for seq in primers:
+        if not seq:
+            continue
+        for g in groups:
+            core = shared_region(seq, g[0])
+            if core:
+                g[0] = core
+                g[1] += 1
+                break
+        else:
+            groups.append([seq, 1])
+    # Merging shrinks a core, which can bring two groups within reach of each
+    # other, so keep merging until nothing more comes together.
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(groups)):
+            for j in range(i + 1, len(groups)):
+                core = shared_region(groups[i][0], groups[j][0])
+                if core:
+                    groups[i][0] = core
+                    groups[i][1] += groups[j][1]
+                    del groups[j]
+                    merged = True
+                    break
+            if merged:
+                break
+    return sorted(((g[0], g[1]) for g in groups), key=lambda t: -t[1])
+
+
 @lru_cache(maxsize=1)
 def _ssu_references() -> dict[str, str]:
     """The E. coli 16S and yeast 18S sequences primer coordinates are quoted in."""
@@ -614,6 +676,18 @@ def _ssu_references() -> dict[str, str]:
     return {k: "".join(v) for k, v in refs.items()}
 
 
+_COMPLEMENT = {
+    "A": "T", "C": "G", "G": "C", "T": "A",
+    "R": "Y", "Y": "R", "S": "S", "W": "W", "K": "M", "M": "K",
+    "B": "V", "V": "B", "D": "H", "H": "D", "N": "N",
+}
+
+
+def reverse_complement(seq: str) -> str:
+    """Reverse complement, preserving IUPAC degeneracy."""
+    return "".join(_COMPLEMENT.get(b, "N") for b in reversed(seq.upper()))
+
+
 def locate_on_ssu(primer: str, min_id: float = 0.80) -> list[dict]:
     """Where `primer` sits on the SSU references, best match first.
 
@@ -630,19 +704,25 @@ def locate_on_ssu(primer: str, min_id: float = 0.80) -> list[dict]:
     """
     if not primer:
         return []
+    length = len(primer)
+    # A reverse primer is written as the reverse complement of the strand the
+    # reference is on, so searching it as given can never match. Try both and
+    # report which orientation placed it.
+    forms = (("+", primer), ("-", reverse_complement(primer)))
     out = []
     for ref_name, ref in _ssu_references().items():
-        length = len(primer)
-        best = (0.0, None)
-        for i in range(len(ref) - length + 1):
-            ok = sum(1 for k in range(length)
-                     if ref[i + k] in _SETS.get(primer[k], _SETS["N"]))
-            score = ok / length
-            if score > best[0]:
-                best = (score, i + 1)
+        best = (0.0, None, "+")
+        for strand, seq in forms:
+            for i in range(len(ref) - length + 1):
+                ok = sum(1 for k in range(length)
+                         if ref[i + k] in _SETS.get(seq[k], _SETS["N"]))
+                score = ok / length
+                if score > best[0]:
+                    best = (score, i + 1, strand)
         if best[0] >= min_id:
             out.append({"reference": ref_name, "identity": round(best[0], 3),
-                        "start": best[1], "end": best[1] + length - 1})
+                        "start": best[1], "end": best[1] + length - 1,
+                        "strand": best[2]})
     return sorted(out, key=lambda d: -d["identity"])
 
 
