@@ -48,21 +48,30 @@ def main(argv=None):
     described = primer_db.describe_pair(hit.get("fwd_name"), hit.get("rev_name")) or {}
     record = {**hit, **{f"assay_{k}": v for k, v in described.items()}}
 
+    # The FASTA header is the primer's own sequence, because it is the only field
+    # that survives the trip downstream — cutadapt reports the header it matched
+    # and nothing else — and because plateFor() keys the AUTO_TRIM and
+    # LEARN_ERRORS groups on it. Keying on a sequence groups samples by what was
+    # actually trimmed; keying on a name splits them whenever two synonyms in the
+    # catalogue describe the same primer.
     with open(args.out, "w") as fh:
-        fh.write(f">{hit.get('fwd_name') or 'fwd'}\n{hit['fwd']}\n")
+        fh.write(f">{hit['fwd']}\n{hit['fwd']}\n")
         if hit.get("rev"):
-            fh.write(f">{hit.get('rev_name') or 'rev'}\n{hit['rev']}\n")
+            fh.write(f">{hit['rev']}\n{hit['rev']}\n")
 
     if args.json_out:
         with open(args.json_out, "w") as fh:
             json.dump(record, fh, indent=2)
 
-    gene = described.get("gene", "unknown gene")
-    lineage = described.get("lineage")
-    print(f"[INFO] detected {hit.get('fwd_name')}/{hit.get('rev_name')} "
-          f"({gene}{', ' + lineage if lineage else ''}) "
-          f"via {hit.get('source')} confidence={hit.get('confidence')}",
-          file=sys.stderr)
+    def _where(locs):
+        return ", ".join(f"{l['reference']}@{l['start']}" for l in locs) or "no SSU match"
+
+    print(f"[INFO] {hit['fwd']}/{hit.get('rev') or '-'} via {hit.get('source')}, "
+          f"fwd {_where(hit.get('fwd_location') or [])}", file=sys.stderr)
+    if not hit.get("ribosomal", True):
+        print("[WARN] primers match neither the 16S nor the 18S reference — this "
+              "assay is not ribosomal, so an rRNA taxonomy database would return "
+              "confident nonsense for it", file=sys.stderr)
     return 0
 
 

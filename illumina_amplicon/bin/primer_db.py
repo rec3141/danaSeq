@@ -23,12 +23,14 @@ from __future__ import annotations
 
 import csv
 import gzip
-import hashlib
 import logging
 import math
 import os
 import re
+import subprocess
+import tempfile
 from collections import Counter
+from functools import lru_cache
 
 # IUPAC nucleotide codes → the set of bases each represents.
 IUPAC = {
@@ -38,6 +40,13 @@ IUPAC = {
 }
 # Reverse map: frozenset of bases → the tightest IUPAC code.
 _IUPAC_REV = {frozenset(v): k for k, v in IUPAC.items()}
+# Set form, for testing whether two IUPAC codes can encode a common base.
+_SETS = {k: frozenset(v) for k, v in IUPAC.items()}
+
+# Bases of each read the consensus is built from. Long enough to hold any
+# catalogue primer plus a barcode or spacer in front of it, short enough that the
+# alignment is dominated by the primer rather than by the amplicon behind it.
+_CONSENSUS_READ_LEN = 50
 
 # Curated primer database — common 16S/18S/ITS amplicon primers (5'->3'),
 # mirroring microscape's bundled sets plus a few widely used pairs. Sequences
@@ -315,88 +324,150 @@ def describe_pair(fwd_name: str | None, rev_name: str | None = None) -> dict | N
         out["region"] = subs.pop()
     return out
 
-_DB_MATCH_MIN = 0.6   # min fraction of reads whose 5' matches a DB forward primer
-_CONSENSUS_STOP_ENTROPY = 1.7  # bits; above this a column is "biological", stop
+# A primer we infer must look like one the field actually uses, so the bounds
+# come from the catalogue rather than from taste.
+_DEGENERATE = set("RYSWKMBDHVN")
+MIN_PRIMER_LEN = min(len(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
+MAX_PRIMER_LEN = max(len(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
+MAX_PRIMER_DEGENERACY = max(
+    sum(1 for c in s if c in _DEGENERATE) / len(s)
+    for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
+
+# A candidate is accepted on the evidence of the reads, not on its alignment
+# score, so the score only has to be loose enough not to miss the real primer.
+_CANDIDATE_MIN_ANCHORS = 10   # unambiguous consensus positions a candidate must span
+_CANDIDATE_MIN_ID = 0.90      # agreement across those positions
+_VERIFY_MIN = 0.30            # fraction of reads that must carry it to accept it
+_PRIMER_MAX_START = 20        # a primer sits at the 5' end, behind at most a barcode
+
+# Reads at the head of a FASTQ come from one corner of one tile and run roughly a
+# Phred below the body of the file; the difference is gone by ~1000 reads.
+_SAMPLE_SKIP = 1000
+_SAMPLE_MIN_MEAN_Q = 30
+_SAMPLE_MIN_BASE_Q = 15
 
 
-def _iupac_regex(seq: str) -> re.Pattern:
-    """Compile an IUPAC-aware regex matching `seq` against plain-ACGT reads."""
-    return re.compile("".join(f"[{IUPAC.get(b, b)}]" for b in seq.upper()))
+def _degeneracy(seq: str) -> float:
+    return sum(1 for c in seq if c in _DEGENERATE) / len(seq) if seq else 1.0
 
 
-def sample_reads(fastq_path: str, n: int = 500) -> list[str]:
-    """Return up to `n` sequence lines from a (optionally gzipped) FASTQ."""
+def sample_reads(fastq_path: str, n: int = 500, trim: int | None = None,
+                 skip: int = _SAMPLE_SKIP, min_mean_q: int = _SAMPLE_MIN_MEAN_Q,
+                 min_base_q: int = _SAMPLE_MIN_BASE_Q) -> list[str]:
+    """Return up to `n` good reads from a (optionally gzipped) FASTQ.
+
+    Skips the first `skip` reads and drops any read carrying an N, a mean quality
+    below `min_mean_q`, or any base below `min_base_q`, so the consensus is built
+    from the body of the file rather than its weakest corner. Falls back to
+    whatever it found if the file is too small to satisfy the filters.
+    """
     reads: list[str] = []
+    fallback: list[str] = []
     opener = gzip.open if str(fastq_path).endswith(".gz") else open
     try:
         with opener(fastq_path, "rt") as f:
-            for i, line in enumerate(f):
-                if i % 4 == 1:
-                    reads.append(line.strip().upper())
-                    if len(reads) >= n:
-                        break
+            seen = 0
+            while len(reads) < n:
+                if not f.readline():
+                    break
+                seq = f.readline().strip().upper()
+                f.readline()
+                qual = f.readline().strip()
+                if not seq or not qual:
+                    break
+                seen += 1
+                if trim:
+                    seq, qual = seq[:trim], qual[:trim]
+                    if len(seq) < trim:
+                        continue
+                if len(fallback) < n:
+                    fallback.append(seq)
+                if seen <= skip or "N" in seq:
+                    continue
+                phred = [ord(c) - 33 for c in qual]
+                if not phred or sum(phred) / len(phred) < min_mean_q:
+                    continue
+                if min(phred) < min_base_q:
+                    continue
+                reads.append(seq)
     except (OSError, EOFError):
         pass
-    return reads
-
-
-def _match_fraction(reads: list[str], primer: str, max_offset: int = 3) -> float:
-    """Fraction of reads whose 5' end matches `primer` (small offset allowed)."""
-    if not reads:
-        return 0.0
-    rx = _iupac_regex(primer)
-    L = len(primer)
-    hits = 0
-    for r in reads:
-        for off in range(max_offset + 1):
-            seg = r[off:off + L]
-            if len(seg) == L and rx.match(seg):
-                hits += 1
-                break
-    return hits / len(reads)
-
-
-DERIVED_NAME_PREFIX = "inf"
-# 8 hex = 32 bits. A collision silently merges two distinct assays into one, which
-# is both costly and near-invisible, and two extra characters buy ~256x the room:
-# at 6 the birthday maths already predicts ~12 collisions per 20k distinct primers.
-DERIVED_NAME_HEXLEN = 8
+    return reads if len(reads) >= 20 else fallback
 
 
 def derived_primer_name(seq: str) -> str:
-    """Stable short name for a primer we inferred rather than recognised.
+    """Name for a primer we inferred rather than recognised: its own sequence.
 
-    A de-novo primer has no name, and calling every one of them "inferred" threw
-    away the only thing that distinguishes them: two datasets, or two amplicons
-    in one dataset, became the same unnameable assay. The name is the only field
-    that survives the trip to samples.json — cutadapt reports the FASTA header it
-    matched and nothing else — so the identity has to live in the name itself.
+    The name is the only field that survives the trip to samples.json — cutadapt
+    reports the FASTA header it matched and nothing else — so whatever identity a
+    de-novo primer has must live in the name. The sequence is that identity, and
+    carrying it directly means a reader can see what was trimmed without
+    resolving anything, while two runs of the same primer still line up because
+    identical sequences give identical names.
 
-    Hashing the sequence rather than carrying it keeps that name short and keeps
-    the primer out of the UI, while staying reproducible: the same consensus
-    always yields the same name, in any run, on any machine. Resolve one back to
-    its sequence via trimmed/detected/<sample>_detected.json, which records both.
+    The name is also the grouping key: plateFor() folds it into the key for
+    AUTO_TRIM and LEARN_ERRORS, so samples trimmed with the same sequence share
+    an error model and samples trimmed with different ones do not.
     """
-    norm = re.sub(r"\s+", "", (seq or "")).upper()
-    if not norm:
+    return re.sub(r"\s+", "", (seq or "")).upper()
+
+
+def _mafft(seqs: list[str], timeout: int = 120) -> list[str]:
+    """Align `seqs` with mafft, or return [] if it is unavailable or fails."""
+    with tempfile.NamedTemporaryFile("w", suffix=".fa", delete=False) as fh:
+        for i, s in enumerate(seqs):
+            fh.write(f">r{i}\n{s}\n")
+        path = fh.name
+    try:
+        proc = subprocess.run(["mafft", "--quiet", "--retree", "1", path],
+                              capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    finally:
+        os.unlink(path)
+    if proc.returncode != 0:
+        return []
+    aln, cur = [], []
+    for line in proc.stdout.splitlines():
+        if line.startswith(">"):
+            if cur:
+                aln.append("".join(cur))
+                cur = []
+        else:
+            cur.append(line.strip().upper())
+    if cur:
+        aln.append("".join(cur))
+    return aln
+
+
+def _consensus_primer(reads: list[str], cover: float = 0.9,
+                      min_mean_info: float = 1.2) -> str:
+    """De-novo degenerate consensus of the conserved 5' block across `reads`.
+
+    Aligns the reads to each other first. A positional consensus assumes every
+    read begins at the primer, which heterogeneity spacers and untrimmed inline
+    barcodes both violate — out-of-phase reads then average into a string of
+    degenerate codes that matches nothing. Under an alignment the conserved block
+    finds its own frame, so the primer survives whatever precedes it.
+
+    Scores a window by total information rather than mean: a barcode is short and
+    perfectly conserved, and mean information prefers it to the longer primer
+    behind it. The window must also start near the 5' end, since adapter
+    read-through is every bit as conserved as a primer and lands mid-read on
+    short inserts.
+    """
+    aln = _mafft(reads)
+    if not aln:
         return ""
-    digest = hashlib.sha256(norm.encode("ascii", "replace")).hexdigest()
-    return f"{DERIVED_NAME_PREFIX}-{digest[:DERIVED_NAME_HEXLEN]}"
-
-
-def _consensus_primer(reads: list[str], length: int = 25, cover: float = 0.9) -> str:
-    """De-novo degenerate consensus of the first `length` bp across `reads`.
-
-    At each position, pick the smallest set of bases covering `cover` of the
-    reads and emit its IUPAC code. Stop at the first high-entropy column — that
-    is where the conserved primer ends and the biological (variable) region
-    begins.
-    """
-    out: list[str] = []
-    for i in range(length):
-        col = [r[i] for r in reads if len(r) > i and r[i] in "ACGT"]
-        if len(col) < max(10, 0.5 * len(reads)):
-            break
+    width = len(aln[0])
+    cons: list[str] = []
+    info: list[float] = []
+    for i in range(width):
+        col = [s[i] for s in aln if s[i] in "ACGT"]
+        if len(col) < 0.5 * len(aln):
+            cons.append("-")
+            info.append(-1.0)
+            continue
         counts = Counter(col)
         tot = len(col)
         ent = -sum((c / tot) * math.log2(c / tot) for c in counts.values())
@@ -407,57 +478,206 @@ def _consensus_primer(reads: list[str], length: int = 25, cover: float = 0.9) ->
             acc += c
             if acc / tot >= cover:
                 break
-        if ent > _CONSENSUS_STOP_ENTROPY and len(bases) >= 3:
-            break
-        out.append(_IUPAC_REV.get(frozenset(bases), "N"))
-    return "".join(out)
+        cons.append(_IUPAC_REV.get(frozenset(bases), "N"))
+        info.append(2.0 - ent)
+
+    best = None
+    for length in range(MIN_PRIMER_LEN, MAX_PRIMER_LEN + 1):
+        for start in range(min(_PRIMER_MAX_START, len(info) - length) + 1):
+            window = info[start:start + length]
+            if any(x < 0 for x in window):
+                continue
+            if sum(window) / length < min_mean_info:
+                continue
+            if best is None or sum(window) > best[0]:
+                best = (sum(window), start, length)
+    if not best:
+        return ""
+    return "".join(cons[best[1]:best[1] + best[2]])
+
+
+def read_support(reads: list[str], primer: str, max_offset: int = _PRIMER_MAX_START,
+                 min_id: float = 0.90) -> float:
+    """Fraction of `reads` carrying `primer` within the 5' window."""
+    if not reads or not primer:
+        return 0.0
+    length = len(primer)
+    hits = 0
+    for r in reads:
+        for off in range(max_offset + 1):
+            seg = r[off:off + length]
+            if len(seg) < length:
+                break
+            ok = sum(1 for a, b in zip(seg, primer)
+                     if _SETS.get(a, _SETS["N"]) & _SETS.get(b, _SETS["N"]))
+            if ok / length >= min_id:
+                hits += 1
+                break
+    return hits / len(reads)
+
+
+def catalogue_candidates(seq: str) -> list[tuple[str, str, int, float]]:
+    """Catalogue primers compatible with `seq`, best first.
+
+    Scores only the positions where the consensus commits to a single base. A
+    degenerate code is compatible with almost anything, so counting it as
+    agreement lets a mostly-degenerate consensus match the whole catalogue.
+
+    Deliberately permissive: every candidate is checked against the reads before
+    it is accepted, so the cost of a loose score here is a wasted check, while the
+    cost of a tight one is missing the primer that was actually used.
+    """
+    best: dict[tuple[str, str], tuple[int, float]] = {}
+    for p in PRIMER_DB:
+        for key, name in (("fwd", p["name"]), ("rev", p["rev_name"])):
+            ref = p[key]
+            if not ref or not name:
+                continue
+            for si in range(len(seq) - _CANDIDATE_MIN_ANCHORS + 1):
+                for ri in range(len(ref) - _CANDIDATE_MIN_ANCHORS + 1):
+                    n = min(len(seq) - si, len(ref) - ri)
+                    idx = [k for k in range(n) if seq[si + k] not in _DEGENERATE]
+                    if len(idx) < _CANDIDATE_MIN_ANCHORS:
+                        continue
+                    ok = sum(1 for k in idx
+                             if seq[si + k] in IUPAC.get(ref[ri + k], ""))
+                    score = ok / len(idx)
+                    if score < _CANDIDATE_MIN_ID:
+                        continue
+                    cur = best.get((name, ref))
+                    if cur is None or (len(idx), score) > cur:
+                        best[(name, ref)] = (len(idx), score)
+    return sorted(((name, ref, a, s) for (name, ref), (a, s) in best.items()),
+                  key=lambda t: (-t[2], -t[3]))
+
+
+def resolve_primer(consensus: str, reads: list[str]) -> tuple[str, str, dict]:
+    """Settle on the sequence to trim with: (sequence, source, detail).
+
+    The catalogue comes first — a recognised primer carries the right ends,
+    whereas a consensus runs on into conserved amplicon and would trim real
+    sequence away — but a name is not evidence. Candidates are tried best-first
+    and the first the reads confirm wins; a primer that is not in the data would
+    otherwise reach cutadapt, and with --discard-untrimmed that empties the run.
+
+    Only when nothing in the catalogue survives is a primer invented, and then it
+    must be at least as long and no more degenerate than the catalogue allows.
+    """
+    if not consensus:
+        return "", "none", {"reason": "no conserved 5' block"}
+    tried = []
+    for name, ref, anchors, score in catalogue_candidates(consensus):
+        obs = read_support(reads, ref)
+        tried.append({"name": name, "anchors": anchors,
+                      "id": round(score, 3), "read_support": round(obs, 3)})
+        if obs >= _VERIFY_MIN:
+            return ref, "catalogue", {"name": name, "anchors": anchors,
+                                      "id": round(score, 3),
+                                      "read_support": round(obs, 3),
+                                      "rejected": tried[:-1]}
+    if len(consensus) < MIN_PRIMER_LEN:
+        return "", "none", {"reason": f"consensus {len(consensus)}bp is shorter than "
+                                      f"the shortest catalogue primer ({MIN_PRIMER_LEN}bp)",
+                            "rejected": tried}
+    degen = _degeneracy(consensus)
+    if degen > MAX_PRIMER_DEGENERACY:
+        return "", "none", {"reason": f"consensus degeneracy {degen:.2f} exceeds the "
+                                      f"most degenerate catalogue primer "
+                                      f"({MAX_PRIMER_DEGENERACY:.2f})",
+                            "rejected": tried}
+    return consensus, "de-novo", {"degeneracy": round(degen, 3), "rejected": tried}
 
 
 def detect_from_reads(r1_path: str, r2_path: str | None = None, n: int = 500) -> dict | None:
-    """Tier 3. Infer primers from a sample of reads (given FASTQ paths)."""
-    r1 = sample_reads(r1_path, n)
-    r2 = sample_reads(r2_path, n) if r2_path else []
+    """Infer the primers a sample carries, from the reads themselves."""
+    r1 = sample_reads(r1_path, n, trim=_CONSENSUS_READ_LEN)
+    r2 = sample_reads(r2_path, n, trim=_CONSENSUS_READ_LEN) if r2_path else []
     return detect_from_read_lists(r1, r2)
 
 
+@lru_cache(maxsize=1)
+def _ssu_references() -> dict[str, str]:
+    """The E. coli 16S and yeast 18S sequences primer coordinates are quoted in."""
+    path = os.path.join(_DATA_DIR, "ssu_references.fa")
+    refs: dict[str, list[str]] = {}
+    name = None
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if line.startswith(">"):
+                    name = line[1:].split()[0]
+                    refs[name] = []
+                elif name:
+                    refs[name].append(line.strip().upper())
+    except OSError:
+        return {}
+    return {k: "".join(v) for k, v in refs.items()}
+
+
+def locate_on_ssu(primer: str, min_id: float = 0.80) -> list[dict]:
+    """Where `primer` sits on the SSU references, best match first.
+
+    A primer's name already is its coordinate — 515F is the forward primer at
+    E. coli position 515 — so the position is the identity the catalogue only
+    approximates, and it is derived rather than looked up. Matching both
+    references also lets a universal primer say so instead of being forced into
+    one gene: the SSU V4 region is homologous across domains, which is why one
+    sequence is catalogued as 515F for 16S and V4_1f for 18S.
+
+    An empty result is the useful case: a primer that lands on neither gene is
+    not a ribosomal primer, and the run should not be handed an rRNA reference
+    database.
+    """
+    if not primer:
+        return []
+    out = []
+    for ref_name, ref in _ssu_references().items():
+        length = len(primer)
+        best = (0.0, None)
+        for i in range(len(ref) - length + 1):
+            ok = sum(1 for k in range(length)
+                     if ref[i + k] in _SETS.get(primer[k], _SETS["N"]))
+            score = ok / length
+            if score > best[0]:
+                best = (score, i + 1)
+        if best[0] >= min_id:
+            out.append({"reference": ref_name, "identity": round(best[0], 3),
+                        "start": best[1], "end": best[1] + length - 1})
+    return sorted(out, key=lambda d: -d["identity"])
+
+
 def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict | None:
-    """Tier 3 core, operating on already-sampled reads.
+    """Infer a sample's primers from reads already in hand.
 
-    Split out from detect_from_reads so callers that have reads in hand (e.g.
-    detect_primer_sets, which re-probes the same sample against several
-    candidate sets) don't re-read the FASTQ each time.
-
-    Returns a primer dict, or None if there aren't enough reads to try.
+    Split out from detect_from_reads so callers holding reads don't re-read the
+    FASTQ. Returns a primer dict, or None when the reads yield nothing usable.
     """
     r2 = r2 or []
     if len(r1) < 20:
         return None
 
-    # 3a — database match: score each pair by forward match on R1 (and, if we
-    # have R2, reverse match on R2), keep the best.
-    best = None
-    for p in PRIMER_DB:
-        fwd_frac = _match_fraction(r1, p["fwd"])
-        rev_frac = _match_fraction(r2, p["rev"]) if r2 else None
-        score = fwd_frac if rev_frac is None else (fwd_frac + rev_frac) / 2
-        if best is None or score > best["score"]:
-            best = {**p, "score": score, "fwd_frac": fwd_frac, "rev_frac": rev_frac}
-    if best and best["fwd_frac"] >= _DB_MATCH_MIN:
-        return {
-            "fwd": best["fwd"], "rev": best["rev"],
-            "fwd_name": best["name"], "rev_name": best["rev_name"],
-            "region": best["region"], "source": "inferred-db",
-            "confidence": round(best["score"], 2),
-        }
-
-    # 3b — de-novo consensus of the conserved 5' prefix.
-    fwd = _consensus_primer(r1)
-    rev = _consensus_primer(r2) if r2 else ""
-    if len(fwd) < 8:
+    fwd, fwd_src, fwd_detail = resolve_primer(_consensus_primer(r1), r1)
+    if not fwd:
         return None
+    rev, rev_src, rev_detail = ("", "none", {})
+    if r2:
+        rev, rev_src, rev_detail = resolve_primer(_consensus_primer(r2), r2)
+
+    fwd_loc = locate_on_ssu(fwd)
+    rev_loc = locate_on_ssu(rev) if rev else []
+    # Both ends landing nowhere on either SSU gene means the assay is not
+    # ribosomal, whatever the reads denoise into. Taxonomy against an rRNA
+    # database would still return confident labels, and they would be noise.
+    ribosomal = bool(fwd_loc or rev_loc)
+
     return {
         "fwd": fwd, "rev": rev,
-        "fwd_name": derived_primer_name(fwd),
-        "rev_name": derived_primer_name(rev),
-        "region": "unknown", "source": "inferred-denovo", "confidence": None,
+        "fwd_name": fwd if fwd_src == "de-novo" else fwd_detail.get("name", fwd),
+        "rev_name": rev if rev_src == "de-novo" else rev_detail.get("name", rev),
+        "region": "unknown",
+        "source": f"inferred-{fwd_src}",
+        "confidence": fwd_detail.get("read_support"),
+        "ribosomal": ribosomal,
+        "fwd_detail": fwd_detail, "rev_detail": rev_detail,
+        "fwd_location": fwd_loc, "rev_location": rev_loc,
     }
