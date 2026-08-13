@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """Detect the primer pair a sample carries, from the reads themselves.
 
-Replaces the brute-force DETECT_PRIMERS, which ran a **full cutadapt pass per
-candidate primer file per sample** — 17 passes over every sample's reads, writing
-to /dev/null, purely to count survivors — and then reported only the winning
-filename, so nothing about the decision survived.
-
-This samples a few hundred reads once and matches their 5' ends against the
-curated table (bin/primer_db.py), falling back to a de-novo degenerate consensus
-when nothing scores well. It writes the primers it found as a FASTA for
-REMOVE_PRIMERS to use, so trimming is no longer limited to the pairs that happen
-to have a file in primers/.
+Samples a few hundred reads once and matches their 5' ends against the curated
+table (bin/primer_db.py), falling back to a de-novo degenerate consensus when
+nothing scores well. Writes the primers it found as a FASTA for REMOVE_PRIMERS,
+so trimming is not limited to the pairs that happen to have a file in primers/.
 
 Because the table travels with the pipeline, the result names the gene and the
 lineage it belongs to — "16S" alone is the prokaryotic SSU rRNA to one field and
