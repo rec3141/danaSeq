@@ -1,7 +1,6 @@
 // SparCC / CLR co-occurrence network analysis.
 // R uses SpiecEasi::sparcc(); Python uses CLR + Pearson correlation.
 
-def netExt() { return 'pkl' }
 
 process NETWORK_SPARCC {
     tag "sparcc"
@@ -14,7 +13,7 @@ process NETWORK_SPARCC {
     val(min_prevalence)
 
     output:
-    path("sparcc_correlations.${netExt()}"), emit: correlations
+    path("sparcc_correlations.pkl"), emit: correlations
     path("sparcc_stats.tsv"), emit: stats
 
     script:

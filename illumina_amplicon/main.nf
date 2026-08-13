@@ -82,23 +82,19 @@ def helpMessage() {
     """.stripIndent()
 }
 
-if (params.help) {
-    helpMessage()
-    System.exit(0)
-}
-
 // ============================================================================
 // Parameter validation
 // ============================================================================
 
-if (!params.input && !params.samplesheet) {
-    log.error "ERROR: --input or --samplesheet is required. Run with --help for usage."
-    System.exit(1)
-}
-
-if (params.run_demultiplex && (!params.forward_bcs || !params.reverse_bcs)) {
-    log.error "ERROR: --forward_bcs and --reverse_bcs are required when --run_demultiplex is enabled."
-    System.exit(1)
+def validateParams() {
+    if (!params.input && !params.samplesheet) {
+        log.error "ERROR: --input or --samplesheet is required. Run with --help for usage."
+        System.exit(1)
+    }
+    if (params.run_demultiplex && (!params.forward_bcs || !params.reverse_bcs)) {
+        log.error "ERROR: --forward_bcs and --reverse_bcs are required when --run_demultiplex is enabled."
+        System.exit(1)
+    }
 }
 
 // ============================================================================
@@ -156,7 +152,10 @@ include { BUNDLE_VIZ_SITE }  from './modules/shiny'
 // submitter having uploaded original names, so this always falls back.
 def runIdFromReads(reads) {
     try {
-        def first = (reads instanceof List || reads instanceof Object[]) ? reads[0] : reads
+        // Indexable unless it is a single path: asking "is it an array?" needs
+        // Object[], which the strict parser rejects, so ask the other way round.
+        def single = reads instanceof CharSequence || reads instanceof java.nio.file.Path
+        def first = single ? reads : reads[0]
         def path = first as java.nio.file.Path
         def raw = java.nio.file.Files.newInputStream(path)
         def stream = path.toString().endsWith('.gz') ? new java.util.zip.GZIPInputStream(raw) : raw
@@ -199,6 +198,14 @@ def plateFor(meta, reads, assay = null) {
 }
 
 workflow {
+
+    // --help lives here rather than at the top of the file: a statement outside
+    // a process, workflow or function is not script-level syntax any more.
+    if (params.help) {
+        helpMessage()
+        System.exit(0)
+    }
+    validateParams()
 
     // 1. Discover input reads
     if (params.samplesheet) {
@@ -514,109 +521,110 @@ workflow {
             )
         }
     }
-}
 
-// ============================================================================
-// Pipeline completion handler
-// ============================================================================
+    // ============================================================================
+    // Pipeline completion handler
+    // ============================================================================
 
-workflow.onComplete {
-    def msg = """\
-        Pipeline completed at : ${workflow.complete}
-        Duration              : ${workflow.duration}
-        Success               : ${workflow.success}
-        Exit status           : ${workflow.exitStatus}
-        Output directory      : ${params.outdir}
-        """.stripIndent()
+    workflow.onComplete = {
+        def msg = """\
+            Pipeline completed at : ${workflow.complete}
+            Duration              : ${workflow.duration}
+            Success               : ${workflow.success}
+            Exit status           : ${workflow.exitStatus}
+            Output directory      : ${params.outdir}
+            """.stripIndent()
 
-    println msg
+        println msg
 
-    // Run manifest — record what was actually run (pipeline version, resolved parameters,
-    // per-process tool images, reference databases) so downstream reporting (omc-platform
-    // Methods drafting + agents) can state it instead of "not specified in the outputs".
-    // Published into viz/ alongside provenance.json.
-    try {
-        def vizDir = new File("${params.outdir}/viz")
-        if (vizDir.exists()) {
-            // Provenance that survives the container. workflow.commitId is null for
-            // every run launched from the .sif (there is no git repo inside), which is
-            // how this pipeline actually runs — so fall back to the SHA baked in at
-            // build time. scriptId is the MD5 of main.nf and pins the source even when
-            // both of those are missing.
-            def sysEnv = System.getenv()
-            def bakedSha = sysEnv['DANASEQ_GIT_SHA']
-            def toolVersions = null
-            try {
-                def probe = new File("${workflow.projectDir}/bin/tool_versions.sh")
-                if (probe.exists()) {
-                    def proc = ["bash", probe.absolutePath].execute()
-                    def out = new StringBuffer(), err = new StringBuffer()
-                    proc.consumeProcessOutput(out, err)
-                    proc.waitForOrKill(120000)
-                    toolVersions = new groovy.json.JsonSlurper().parseText(out.toString())
+        // Run manifest — record what was actually run (pipeline version, resolved parameters,
+        // per-process tool images, reference databases) so downstream reporting (omc-platform
+        // Methods drafting + agents) can state it instead of "not specified in the outputs".
+        // Published into viz/ alongside provenance.json.
+        try {
+            def vizDir = new File("${params.outdir}/viz")
+            if (vizDir.exists()) {
+                // Provenance that survives the container. workflow.commitId is null for
+                // every run launched from the .sif (there is no git repo inside), which is
+                // how this pipeline actually runs — so fall back to the SHA baked in at
+                // build time. scriptId is the MD5 of main.nf and pins the source even when
+                // both of those are missing.
+                def sysEnv = System.getenv()
+                def bakedSha = sysEnv['DANASEQ_GIT_SHA']
+                def toolVersions = null
+                try {
+                    def probe = new File("${workflow.projectDir}/bin/tool_versions.sh")
+                    if (probe.exists()) {
+                        def proc = ["bash", probe.absolutePath].execute()
+                        def out = new StringBuffer()
+                        def err = new StringBuffer()
+                        proc.consumeProcessOutput(out, err)
+                        proc.waitForOrKill(120000)
+                        toolVersions = new groovy.json.JsonSlurper().parseText(out.toString())
+                    }
+                } catch (Exception e) {
+                    println "[WARN] tool version probe failed: ${e.message}"
                 }
-            } catch (Exception e) {
-                println "[WARN] tool version probe failed: ${e.message}"
+
+                def manifest = [
+                    pipeline            : "${workflow.manifest.name} v${workflow.manifest.version}",
+                    // Null when run from the .sif; bakedSha is then the only real answer.
+                    revision            : (workflow.revision ?: workflow.commitId ?: null),
+                    commit_id           : (workflow.commitId ?: bakedSha),
+                    commit_source       : (workflow.commitId ? 'git checkout'
+                                           : (bakedSha ? 'baked into container at build' : 'UNKNOWN')),
+                    container_git_ref   : sysEnv['DANASEQ_GIT_REF'],
+                    container_built     : sysEnv['DANASEQ_BUILD_DATE'],
+                    // MD5 of main.nf — identifies the source even with no git and no build arg.
+                    script_id           : workflow.scriptId,
+                    // What each tool actually reported, not what the env spec asked for.
+                    tool_versions       : toolVersions,
+                    nextflow_version    : "${nextflow.version}",
+                    command_line        : workflow.commandLine,
+                    started             : "${workflow.start}",
+                    completed           : "${workflow.complete}",
+                    duration            : "${workflow.duration}",
+                    success             : workflow.success,
+                    // process -> container image; image tags give tool versions
+                    containers          : workflow.container,
+                    reference_databases : params.ref_databases,
+                    denoise             : 'papa2 (DADA2-compatible)',
+                    parameters          : [
+                        skip_primer_removal  : params.skip_primer_removal,
+                        primer_error_rate    : params.primer_error_rate,
+                        // added on main while this branch was open — a manifest that omits
+                        // a parameter is the same failure as one that reports a stale version
+                        primer_detect_reads  : params.primer_detect_reads,
+                        min_group_samples    : params.min_group_samples,
+                        auto_trim            : params.auto_trim,
+                        auto_trim_min_quality: params.auto_trim_min_quality,
+                        maxEE                : params.maxEE,
+                        truncQ               : params.truncQ,
+                        maxN                 : params.maxN,
+                        truncLen_fwd         : params.truncLen_fwd,
+                        truncLen_rev         : params.truncLen_rev,
+                        trunc_policy         : params.trunc_policy,
+                        min_overlap          : params.min_overlap,
+                        min_seq_length       : params.min_seq_length,
+                        min_reads            : params.min_reads,
+                        min_samples          : params.min_samples,
+                        min_seqs             : params.min_seqs,
+                    ],
+                ]
+                new File(vizDir, 'run_manifest.json').text =
+                    groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest))
+                println "[INFO] Wrote run manifest: ${params.outdir}/viz/run_manifest.json"
             }
-
-            def manifest = [
-                pipeline            : "${workflow.manifest.name} v${workflow.manifest.version}",
-                // Null when run from the .sif; bakedSha is then the only real answer.
-                revision            : (workflow.revision ?: workflow.commitId ?: null),
-                commit_id           : (workflow.commitId ?: bakedSha),
-                commit_source       : (workflow.commitId ? 'git checkout'
-                                       : (bakedSha ? 'baked into container at build' : 'UNKNOWN')),
-                container_git_ref   : sysEnv['DANASEQ_GIT_REF'],
-                container_built     : sysEnv['DANASEQ_BUILD_DATE'],
-                // MD5 of main.nf — identifies the source even with no git and no build arg.
-                script_id           : workflow.scriptId,
-                // What each tool actually reported, not what the env spec asked for.
-                tool_versions       : toolVersions,
-                nextflow_version    : "${nextflow.version}",
-                command_line        : workflow.commandLine,
-                started             : "${workflow.start}",
-                completed           : "${workflow.complete}",
-                duration            : "${workflow.duration}",
-                success             : workflow.success,
-                // process -> container image; image tags give tool versions
-                containers          : workflow.container,
-                reference_databases : params.ref_databases,
-                denoise             : 'papa2 (DADA2-compatible)',
-                parameters          : [
-                    skip_primer_removal  : params.skip_primer_removal,
-                    primer_error_rate    : params.primer_error_rate,
-                    // added on main while this branch was open — a manifest that omits
-                    // a parameter is the same failure as one that reports a stale version
-                    primer_detect_reads  : params.primer_detect_reads,
-                    min_group_samples    : params.min_group_samples,
-                    auto_trim            : params.auto_trim,
-                    auto_trim_min_quality: params.auto_trim_min_quality,
-                    maxEE                : params.maxEE,
-                    truncQ               : params.truncQ,
-                    maxN                 : params.maxN,
-                    truncLen_fwd         : params.truncLen_fwd,
-                    truncLen_rev         : params.truncLen_rev,
-                    trunc_policy         : params.trunc_policy,
-                    min_overlap          : params.min_overlap,
-                    min_seq_length       : params.min_seq_length,
-                    min_reads            : params.min_reads,
-                    min_samples          : params.min_samples,
-                    min_seqs             : params.min_seqs,
-                ],
-            ]
-            new File(vizDir, 'run_manifest.json').text =
-                groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest))
-            println "[INFO] Wrote run manifest: ${params.outdir}/viz/run_manifest.json"
+        } catch (Exception e) {
+            println "[WARN] Could not write run_manifest.json: ${e.message}"
         }
-    } catch (Exception e) {
-        println "[WARN] Could not write run_manifest.json: ${e.message}"
+
+        if (!workflow.success) {
+            println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+        }
     }
 
-    if (!workflow.success) {
-        println "[WARNING] Pipeline completed with errors. Check .nextflow.log for details."
+    workflow.onError = {
+        println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
     }
-}
-
-workflow.onError {
-    println "[ERROR] Pipeline failed: ${workflow.errorMessage}"
 }

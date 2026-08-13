@@ -79,7 +79,7 @@ process REMOVE_PRIMERS {
     // as observed rather than declared. It rides along with the reads so error
     // models and truncation can be grouped per assay without a second pass over
     // the logs (issue #7).
-    tuple val(meta), path("${meta.id}_R1.trimmed.fastq.gz"), path("${meta.id}_R2.trimmed.fastq.gz"), env(ASSAY), emit: reads
+    tuple val(meta), path("${meta.id}_R1.trimmed.fastq.gz"), path("${meta.id}_R2.trimmed.fastq.gz"), env('ASSAY'), emit: reads
     path("${meta.id}_cutadapt.log"), emit: log
 
     script:

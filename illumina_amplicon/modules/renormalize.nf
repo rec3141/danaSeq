@@ -5,7 +5,6 @@
 // taxonomic assignment, then normalizes counts to proportions within
 // each group.
 
-def renormExt() { return 'pkl' }
 
 process RENORMALIZE {
     tag "renormalize"
@@ -18,9 +17,9 @@ process RENORMALIZE {
     tuple val(db_name), path(taxonomy), path(bootstrap)
 
     output:
-    path("renorm_by_group.${renormExt()}"), emit: by_group
-    path("renorm_merged.${renormExt()}"), emit: merged
-    path("renorm_table_list.${renormExt()}"), emit: table_list
+    path("renorm_by_group.pkl"), emit: by_group
+    path("renorm_merged.pkl"), emit: merged
+    path("renorm_table_list.pkl"), emit: table_list
     path("renorm_stats.tsv"), emit: stats
 
     script:

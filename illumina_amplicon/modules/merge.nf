@@ -6,7 +6,6 @@
 //   3. FILTER_SEQTAB   — length, prevalence, abundance filtering (long → long + wide)
 //
 
-def seqExt() { return 'pkl' }
 
 process MERGE_SEQTABS {
     tag "merge-all"
@@ -21,7 +20,7 @@ process MERGE_SEQTABS {
     path(seqtab_files)
 
     output:
-    path("seqtab_merged.${seqExt()}"), emit: seqtab
+    path("seqtab_merged.pkl"), emit: seqtab
     path("merge_stats.tsv"), emit: stats
     path("merge_sample_reads.tsv"), emit: sample_reads, optional: true
 
@@ -45,7 +44,7 @@ process REMOVE_CHIMERAS {
     path(seqtab)
 
     output:
-    path("seqtab_nochim.${seqExt()}"), emit: seqtab
+    path("seqtab_nochim.pkl"), emit: seqtab
     path("chimera_stats.tsv"), emit: stats
     path("chimera_sample_reads.tsv"), emit: sample_reads, optional: true
 
@@ -66,10 +65,10 @@ process FILTER_SEQTAB {
     path(seqtab)
 
     output:
-    path("seqtab_final.${seqExt()}"), emit: seqtab
-    path("seqtab_final_wide.${seqExt()}"), emit: seqtab_wide
-    path("seqtab_orphans.${seqExt()}"), emit: orphans
-    path("seqtab_small.${seqExt()}"), emit: small_samples
+    path("seqtab_final.pkl"), emit: seqtab
+    path("seqtab_final_wide.pkl"), emit: seqtab_wide
+    path("seqtab_orphans.pkl"), emit: orphans
+    path("seqtab_small.pkl"), emit: small_samples
     path("filter_stats.tsv"), emit: stats
     path("final_sample_reads.tsv"), emit: sample_reads, optional: true
     path("sequence_summaries.pdf"), emit: plots

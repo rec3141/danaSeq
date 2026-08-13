@@ -1,7 +1,6 @@
 // t-SNE ordination of samples and ASVs via Bray-Curtis distances.
 // Uses scipy + scikit-learn.
 
-def clusterExt() { return 'pkl' }
 
 process CLUSTER_TSNE {
     tag "tsne"
@@ -13,10 +12,10 @@ process CLUSTER_TSNE {
     path(seqtab)
 
     output:
-    path("sample_bray_tsne.${clusterExt()}"), emit: sample_tsne
-    path("seq_bray_tsne.${clusterExt()}"), emit: seq_tsne
-    path("sample_bray_dist.${clusterExt()}"), emit: sample_dist
-    path("seq_bray_dist.${clusterExt()}"), emit: seq_dist
+    path("sample_bray_tsne.pkl"), emit: sample_tsne
+    path("seq_bray_tsne.pkl"), emit: seq_tsne
+    path("sample_bray_dist.pkl"), emit: sample_dist
+    path("seq_bray_dist.pkl"), emit: seq_dist
 
     script:
     """
