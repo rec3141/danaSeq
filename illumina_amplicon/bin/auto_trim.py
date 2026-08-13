@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """Quality profiling and automated truncation length selection (Python engine).
 
-Vendored from the microscape package (microscape/quality.py), which this
-pipeline used to install from git purely to get `microscape auto-trim`. That
-package is deprecated; keeping the one function it supplied next to the
-pipeline that runs it removes a cross-repo pin, and removes the failure mode
-that motivated it: the truncation floor lived in this file AND in AUTO_TRIM
-AND in TRUNC_POLICY, so fixing one of them recovered nothing.
+Vendored from the microscape package (microscape/quality.py).
 
 Must stay in step with bin/dada2_auto_trim.R, the R engine's implementation —
 the two are compared byte-for-byte on real and synthetic libraries.

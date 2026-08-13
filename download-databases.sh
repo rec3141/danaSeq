@@ -48,9 +48,7 @@ DB_DIR="${SCRIPT_DIR}/databases"
 # eggNOG, dbCAN, MetaEuk, antiSMASH, MacSyFinder, GTDB-Tk) comes from the
 # dana-mag-* envs, which mag_analysis and nanopore_assembly both build. Prefer
 # mag_analysis; fall back so a host that only installed the nanopore side still
-# resolves. These pointed at nanopore_mag/ and illumina_mag/, which have not
-# existed since those pipelines were renamed — so every lookup below missed and
-# fell through to the "not installed" branch.
+# resolves.
 ENV_DIR="${SCRIPT_DIR}/mag_analysis/conda-envs"
 if [ ! -d "${ENV_DIR}" ] && [ -d "${SCRIPT_DIR}/nanopore_assembly/conda-envs" ]; then
     ENV_DIR="${SCRIPT_DIR}/nanopore_assembly/conda-envs"

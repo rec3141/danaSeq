@@ -140,10 +140,9 @@ include { BUNDLE_VIZ_SITE }  from './modules/shiny'
 //
 // `plate` groups samples for TRUNC_POLICY (which collapses the group's per-sample
 // truncation lengths by an explicit policy) and LEARN_ERRORS
-// (one DADA2 error model per group). For SRA input it used to collapse to the
-// run accession, so every sample became its own group — a parametric error model
-// fitted on as few as ~1.4k reads, and a truncation length chosen from one
-// sample's ragged length distribution.
+// (one DADA2 error model per group). The grouping has to be the sequencing run:
+// one sample per group fits a parametric error model on as few as ~1.4k reads,
+// and picks a truncation length from one sample's ragged length distribution.
 //
 // The grouping is recoverable. SRA rewrites the read identifier, but
 // fasterq-dump keeps the submitter's original name in field 2:
