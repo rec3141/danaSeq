@@ -23,7 +23,7 @@ process BAKTA_CDS {
     // versa) fails with "Directory not empty" / "cannot stat", killing the run.
     // Importer (import_all.py) needs the main .tsv + .gff3; HMM needs the main
     // .faa, which already holds all CDS proteins (.hypotheticals.faa is a
-    // redundant subset). The bakta_dir emit was unused.
+    // redundant subset).
     tuple val(meta), path("${meta.id}/${meta.id}.faa"),  emit: proteins
     tuple val(meta), path("${meta.id}/${meta.id}.tsv"),  emit: tsv
     tuple val(meta), path("${meta.id}/${meta.id}.gff3"), emit: gff

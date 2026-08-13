@@ -478,11 +478,9 @@ workflow {
             DB_SYNC(abs_outdir, params.danadir, sync_secs, cleanup_flag, metadata_path)
 
             // Read-level t-SNE is launched directly by DB_SYNC as a detached
-            // background job (pidfile-guarded for back-pressure). The old
-            // Channel.watchPath(".tsne_pending") trigger was removed because
-            // it never reliably delivered the create event, so READ_TSNE
-            // never ran and read_explorer.json was never produced. See the
-            // t-SNE block in modules/db_integration.nf.
+            // background job (pidfile-guarded for back-pressure) rather than by
+            // a Channel.watchPath trigger, which does not reliably deliver the
+            // create event. See the t-SNE block in modules/db_integration.nf.
         } else {
             // Batch mode: barrier approach — wait for all processes to finish
             // .collect() blocks until ALL mixed channels are drained
