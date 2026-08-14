@@ -610,8 +610,12 @@ workflow {
                     // Null when run from the .sif; bakedSha is then the only real answer.
                     revision            : (workflow.revision ?: workflow.commitId ?: null),
                     commit_id           : (workflow.commitId ?: bakedSha),
-                    commit_source       : (workflow.commitId ? 'git checkout'
-                                           : (bakedSha ? 'baked into container at build' : 'UNKNOWN')),
+                    // Where commit_id came from, as a token rather than a sentence:
+                    // this is a field a reader switches on, and 'git-checkout' /
+                    // 'container-build' / 'unknown' can be matched without parsing
+                    // prose. Absent commit_id, script_id below still pins the source.
+                    commit_source       : (workflow.commitId ? 'git-checkout'
+                                           : (bakedSha ? 'container-build' : 'unknown')),
                     container_git_ref   : sysEnv['DANASEQ_GIT_REF'],
                     container_built     : sysEnv['DANASEQ_BUILD_DATE'],
                     // MD5 of main.nf — identifies the source even with no git and no build arg.
