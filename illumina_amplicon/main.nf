@@ -275,6 +275,10 @@ workflow {
     // really carries, so collect the logs from whichever branch ran. Stays empty
     // when primer removal is skipped, and BUILD_VIZ handles that.
     ch_cutadapt_logs = Channel.empty()
+    // Whether the assay is ribosomal at all. Only primer detection can tell —
+    // when primers are supplied we are not in a position to second-guess them,
+    // so assume they mean what an rRNA reference database expects.
+    ch_ribosomal = Channel.value(true)
     if (params.skip_primer_removal || params.samplesheet) {
         // Samplesheet mode: primer removal happens per primer_pair, or data is pre-trimmed
         ch_trimmed = ch_demuxed
@@ -328,6 +332,9 @@ workflow {
             .collect(sort: true)
             .ifEmpty { error "no primers were detected in any sample — nothing to trim with" }
         RESOLVE_PRIMER_SET(ch_detections)
+        ch_ribosomal = RESOLVE_PRIMER_SET.out.report
+            .map { rep -> new groovy.json.JsonSlurper().parse(rep.toFile()).ribosomal != false }
+            .first()
         // .first() makes the resolved set a value channel, so every sample is
         // paired with it. Combined against the queue channel the process emits,
         // the pairing stops when that single item is consumed and the remaining
@@ -463,8 +470,26 @@ workflow {
             def tax_levels = parts.size() > 2 ? parts[2].trim() : null
             [db_name, db_path, tax_levels]
         }
+        // An rRNA database has nothing to say about a marker that is not rRNA,
+        // but it answers anyway: PRJNA1287210 amplifies a denitrification gene,
+        // and SILVA assigned 1047 of its 1053 ASVs to Eukaryota in a study of
+        // bacteria. Wrong labels that carry confidence are worse than none, so
+        // where the primers match neither SSU reference, skip taxonomy and leave
+        // the ASV table to stand on its own.
+        .combine(ch_ribosomal)
+        .branch { _n, _p, _l, ribosomal ->
+            assign: ribosomal
+            skip:   true
+        }
 
-        ASSIGN_TAXONOMY(ch_databases, FILTER_SEQTAB.out.seqtab)
+        ch_databases.skip.view { n, _p, _l, _r ->
+            "[WARN] skipping taxonomy against ${n}: the detected primers match " +
+            "neither the 16S nor the 18S reference, so this is not a ribosomal " +
+            "assay and an rRNA database would label it confidently and wrongly"
+        }
+
+        ASSIGN_TAXONOMY(ch_databases.assign.map { n, p, l, _r -> [n, p, l] },
+                        FILTER_SEQTAB.out.seqtab)
 
         // 9. Renormalize using the primary taxonomy database
         //    Use the first database as the primary for group classification
