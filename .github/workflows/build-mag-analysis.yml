@@ -48,6 +48,10 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=
 
+      - name: Stamp build time
+        id: stamp
+        run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -56,3 +60,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Baked into the image so a run launched from the .sif can report what
+          # it is. The image tag already carries the SHA, but nothing inside can
+          # read it — without these the Dockerfile's ARG defaults win and every
+          # run records commit_id "unknown".
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_REF=${{ github.ref_name }}
+            BUILD_DATE=${{ steps.stamp.outputs.build_date }}

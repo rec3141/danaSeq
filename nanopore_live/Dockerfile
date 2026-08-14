@@ -96,6 +96,20 @@ ENV HOME=/home/dana
 # Copy pipeline files
 # ============================================================================
 
+# Provenance for runs launched from the .sif. There is no git repository inside the
+# image, so `workflow.commitId` is null and the run manifest would otherwise record
+# no build at all. CI already tags the image with the SHA; this puts it somewhere
+# the pipeline can read.
+ARG GIT_SHA=unknown
+ARG GIT_REF=unknown
+ARG BUILD_DATE=unknown
+ENV DANASEQ_GIT_SHA=${GIT_SHA} \
+    DANASEQ_GIT_REF=${GIT_REF} \
+    DANASEQ_BUILD_DATE=${BUILD_DATE}
+LABEL org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.version="${GIT_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
 COPY . /pipeline/
 
 # Compile C/C++ tools (fastq_filter, tetramer_freqs)

@@ -696,10 +696,21 @@ workflow {
                 def safeParams = params.collectEntries { k, v ->
                     [k, (v == null || v instanceof Number || v instanceof Boolean || v instanceof String || v instanceof List || v instanceof Map) ? v : "${v}"]
                 }
+                def sysEnv = System.getenv()
+                def bakedSha = sysEnv['DANASEQ_GIT_SHA']
                 def manifest = [
                     pipeline        : "${workflow.manifest.name ?: 'danaSeq'} v${workflow.manifest.version ?: 'dev'}",
                     revision        : (workflow.revision ?: workflow.commitId ?: null),
-                    commit_id       : workflow.commitId,
+                    // Null for every run launched from the .sif — there is no git
+                    // repo inside — so fall back to the SHA baked in at image build.
+                    commit_id       : (workflow.commitId ?: bakedSha),
+                    // Where that id came from, as a token a reader can switch on.
+                    commit_source   : (workflow.commitId ? 'git-checkout'
+                                       : (bakedSha ? 'container-build' : 'unknown')),
+                    container_git_ref: sysEnv['DANASEQ_GIT_REF'],
+                    container_built : sysEnv['DANASEQ_BUILD_DATE'],
+                    // MD5 of main.nf — pins the source even with no git and no build arg.
+                    script_id       : workflow.scriptId,
                     nextflow_version: "${nextflow.version}",
                     command_line    : workflow.commandLine,
                     started         : "${workflow.start}",
