@@ -328,9 +328,15 @@ workflow {
             .collect(sort: true)
             .ifEmpty { error "no primers were detected in any sample — nothing to trim with" }
         RESOLVE_PRIMER_SET(ch_detections)
+        // .first() makes the resolved set a value channel, so every sample is
+        // paired with it. Combined against the queue channel the process emits,
+        // the pairing stops when that single item is consumed and the remaining
+        // samples are silently dropped — 57 of 88 in PRJEB25089, none in a
+        // 36-sample run, which reads as a study-specific quirk rather than a
+        // wiring fault.
         ch_with_primers = DETECT_PRIMERS.out.detected
             .map { meta, r1, r2, _detected -> [meta, r1, r2] }
-            .combine(RESOLVE_PRIMER_SET.out.primers)
+            .combine(RESOLVE_PRIMER_SET.out.primers.first())
         REMOVE_PRIMERS(ch_with_primers)
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads
