@@ -33,6 +33,8 @@ def main(argv=None):
     ap.add_argument("--json", dest="json_out", default=None)
     ap.add_argument("-n", "--reads", type=int, default=500,
                     help="reads to sample per file [default: 500]")
+    ap.add_argument("--sample", default=None,
+                    help="sample id to record on the detection")
     args = ap.parse_args(argv)
 
     hit = primer_db.detect_from_reads(args.r1, args.r2, n=args.reads)
@@ -47,7 +49,11 @@ def main(argv=None):
         return 0
 
     described = primer_db.describe_pair(hit.get("fwd_name"), hit.get("rev_name")) or {}
-    record = {**hit, **{f"assay_{k}": v for k, v in described.items()}}
+    # The sample id travels on the record because RESOLVE_PRIMER_SET groups
+    # these detections into the run's assays, and a group is only an assay key
+    # if it can name its members.
+    record = {"sample": args.sample, **hit,
+              **{f"assay_{k}": v for k, v in described.items()}}
 
     # The FASTA header is the primer's own sequence, because it is the only field
     # that survives the trip downstream — cutadapt reports the header it matched

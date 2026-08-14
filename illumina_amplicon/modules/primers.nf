@@ -36,6 +36,7 @@ process DETECT_PRIMERS {
     detect_primers.py "${r1}" "${r2}" \
         -o detected_primers.fa \
         --json "${meta.id}_detected.json" \
+        --sample "${meta.id}" \
         -n ${params.primer_detect_reads}
     """
 }

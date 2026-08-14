@@ -279,8 +279,8 @@ workflow {
     // when primers are supplied we are not in a position to second-guess them,
     // so assume they mean what an rRNA reference database expects.
     ch_ribosomal = Channel.value(true)
-    if (params.skip_primer_removal || params.samplesheet) {
-        // Samplesheet mode: primer removal happens per primer_pair, or data is pre-trimmed
+    if (params.samplesheet) {
+        // Samplesheet mode: primer removal happens per primer_pair
         ch_trimmed = ch_demuxed
             .map { meta, r1, r2 ->
                 if (!meta.plate) {
@@ -321,9 +321,12 @@ workflow {
                 [meta + [plate: plateFor(meta, r1, assay)], r1, r2]
             }
     } else {
-        // Detect per sample, then trim every sample with the same resolved set,
-        // so which assay a sample belongs to is decided by what cutadapt matches
-        // rather than by which sample's own detection it happened to be given.
+        // Detection runs whatever happens to the reads afterwards. It answers two
+        // questions that used to be one: which assay each sample belongs to, and
+        // whether there is a primer on the reads to remove. Only the second can
+        // send a run past cutadapt, and a run that skips cutadapt still needs the
+        // first — reads whose primers were stripped before submission are still
+        // two assays if that is what they are.
         DETECT_PRIMERS(ch_demuxed)
         // report is optional, so an all-samples-failed detection would leave this
         // empty, RESOLVE_PRIMER_SET would never run, and the pipeline would end
@@ -332,25 +335,49 @@ workflow {
             .collect(sort: true)
             .ifEmpty { error "no primers were detected in any sample — nothing to trim with" }
         RESOLVE_PRIMER_SET(ch_detections)
-        ch_ribosomal = RESOLVE_PRIMER_SET.out.report
-            .map { rep -> new groovy.json.JsonSlurper().parse(rep.toFile()).ribosomal != false }
+
+        ch_resolved = RESOLVE_PRIMER_SET.out.report
+            .map { rep -> new groovy.json.JsonSlurper().parse(rep.toFile()) }
             .first()
-        // Trim from ch_demuxed rather than from DETECT_PRIMERS' own output: every
-        // sample is trimmed with the resolved set, so one whose detection found
-        // nothing must still reach cutadapt.
-        //
+        ch_ribosomal = ch_resolved.map { it.ribosomal != false }
+
+        // --skip_primer_removal is the submitter saying so; primer_set.json's
+        // `trim` is the reads saying so. Either is enough to leave them alone:
+        // trimming reads that carry no primer takes the front of the amplicon.
+        ch_do_trim = ch_resolved.map { !params.skip_primer_removal && it.trim != false }
+
+        // The assay key, from the resolved set rather than from cutadapt's
+        // per-adapter counts, so it is the same key whether or not cutadapt runs.
+        ch_assay_of = ch_resolved.map { it.assay_of ?: [:] }
+
         // .first() makes the resolved set a value channel, so every sample is
         // paired with it. Without it the set is a queue channel of one item, the
         // pairing stops as soon as that item is consumed, and every sample after
         // the first is silently dropped.
-        ch_with_primers = ch_demuxed
+        ch_routed = ch_demuxed
+            .combine(ch_do_trim)
+            .combine(ch_assay_of)
+            .branch { _meta, _r1, _r2, do_trim, _assay ->
+                trim: do_trim
+                keep: !do_trim
+            }
+
+        // Trim from ch_demuxed rather than from DETECT_PRIMERS' own output: every
+        // sample is trimmed with the resolved set, so one whose detection found
+        // nothing must still reach cutadapt.
+        ch_with_primers = ch_routed.trim
+            .map { meta, r1, r2, _do_trim, _assay -> [meta, r1, r2] }
             .combine(RESOLVE_PRIMER_SET.out.primers.first())
         REMOVE_PRIMERS(ch_with_primers)
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
+
         ch_trimmed = REMOVE_PRIMERS.out.reads
             .map { meta, r1, r2, assay ->
                 [meta + [plate: plateFor(meta, r1, assay)], r1, r2]
             }
+            .mix(ch_routed.keep.map { meta, r1, r2, _do_trim, assay_of ->
+                [meta + [plate: plateFor(meta, r1, assay_of[meta.id])], r1, r2]
+            })
     }
 
     // A group too small to fit an error model is pooled rather than fitted alone.

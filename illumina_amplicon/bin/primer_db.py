@@ -513,16 +513,26 @@ def _consensus_primer(reads: list[str], cover: float = 0.9,
         info.append(2.0 - ent)
         amb.append(math.log2(len(IUPAC[code])))
 
+    # Earliest workable start first, and only then the most informative length
+    # from it. Ranking by information alone lets the window slide 3', because
+    # trading a degenerate 5' column for a clean one further in always scores
+    # better — and it slides by a different amount in each sample, so the primers
+    # no longer line up and collapse_primers grinds the shared core down to
+    # nothing. Where the start has to move it is the degeneracy bound that moves
+    # it, past a barcode or a heterogeneity spacer, which is the only reason a
+    # primer is not already at the 5' end.
     best = None
-    for length in range(MIN_PRIMER_LEN, MAX_DENOVO_LEN + 1):
-        for start in range(min(_PRIMER_MAX_START, len(info) - length) + 1):
-            window = info[start:start + length]
-            if len(window) < length:
-                continue
+    for start in range(_PRIMER_MAX_START + 1):
+        for length in range(MIN_PRIMER_LEN, MAX_DENOVO_LEN + 1):
+            if start + length > len(info):
+                break
             if sum(amb[start:start + length]) / length > max_mean_ambiguity:
                 continue
-            if best is None or sum(window) > best[0]:
-                best = (sum(window), start, length)
+            total = sum(info[start:start + length])
+            if best is None or total > best[0]:
+                best = (total, start, length)
+        if best:
+            break
     if not best:
         return ""
     return "".join(cons[best[1]:best[1] + best[2]])
@@ -793,6 +803,77 @@ def locate_on_ssu(primer: str, min_id: float = 0.80) -> list[dict]:
     return sorted(out, key=lambda d: -d["identity"])
 
 
+@lru_cache(maxsize=1)
+def _catalogue_spans() -> tuple:
+    """Every catalogue primer's placement on the SSU references.
+
+    (reference, start, end, name), one row per primer per reference it lands on.
+    """
+    rows, seen = [], set()
+    for p in PRIMER_DB:
+        for end in ("fwd", "rev"):
+            seq = p[end]
+            name = p["name"] if end == "fwd" else p["rev_name"]
+            if not seq or seq in seen:
+                continue
+            seen.add(seq)
+            for loc in locate_on_ssu(seq):
+                rows.append((loc["reference"], loc["start"], loc["end"], name or seq))
+    return tuple(rows)
+
+
+def amplicon_boundary(consensus: str, slack: int = 1) -> dict:
+    """Whether a 5' block is a primer, or the cut left where one was removed.
+
+    A primer occupies its own coordinates: a block that begins where catalogue
+    primers begin is one. A block that begins in the base immediately after where
+    they end is not a primer at all — it is the amplicon, delivered with the
+    primer already taken off, and trimming it removes real sequence.
+
+    Which primer was removed is not recoverable and is not guessed: ten
+    catalogued primers end against E. coli 534, and nothing in the reads says
+    which of them made the cut. The boundary is the observation, so the boundary
+    is what is reported.
+
+    Measure this on a sample's own consensus, not on a set collapsed across
+    samples: collapsing keeps only what the members share and moves the edge off
+    the boundary, which is the one coordinate the question turns on.
+
+    Returns state "primer", "pre-trimmed", or "unplaced" — the last for a block
+    that sits on neither reference, which is every non-ribosomal assay, and where
+    there is no gene to measure against and so nothing to conclude.
+    """
+    locs = locate_on_ssu(consensus)
+    if not locs:
+        return {"state": "unplaced", "location": []}
+    spans = _catalogue_spans()
+    starts_on, starts_after = [], []
+    for loc in locs:
+        # The amplicon's outer edge is the 5' end of the read, which is the low
+        # coordinate for a forward block and the high one for a reverse block.
+        forward = loc["strand"] == "+"
+        edge = loc["start"] if forward else loc["end"]
+        for ref, start, end, name in spans:
+            if ref != loc["reference"]:
+                continue
+            own = start if forward else end
+            adjacent = end + 1 if forward else start - 1
+            if abs(own - edge) <= slack:
+                starts_on.append(name)
+            elif abs(adjacent - edge) <= slack:
+                starts_after.append(name)
+    if starts_on:
+        state = "primer"
+    elif starts_after:
+        state = "pre-trimmed"
+    else:
+        # On the gene but at no catalogued boundary: a primer nobody has
+        # catalogued is likelier than a cut nobody makes.
+        state = "primer"
+    return {"state": state, "location": locs,
+            "abuts": sorted(set(starts_after)) if state == "pre-trimmed" else []}
+
+
 def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict | None:
     """Infer a sample's primers from reads already in hand.
 
@@ -810,8 +891,12 @@ def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict |
     if r2:
         rev, rev_src, rev_detail = resolve_primer(_consensus_primer(r2), r2)
 
-    fwd_loc = locate_on_ssu(fwd)
-    rev_loc = locate_on_ssu(rev) if rev else []
+    # Measured on the sample's own consensus, which still carries the edge the
+    # boundary test needs — a set collapsed across samples no longer does.
+    fwd_edge = amplicon_boundary(fwd)
+    rev_edge = amplicon_boundary(rev) if rev else {"state": "unplaced", "location": []}
+    fwd_loc = fwd_edge["location"]
+    rev_loc = rev_edge["location"]
     # Both ends landing nowhere on either SSU gene means the assay is not
     # ribosomal, whatever the reads denoise into. Taxonomy against an rRNA
     # database would still return confident labels, and they would be noise.
@@ -829,6 +914,9 @@ def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict |
         # sequence of the protection that keeps it whole through collapsing.
         "fwd_source": f"inferred-{fwd_src}",
         "rev_source": f"inferred-{rev_src}",
+        "fwd_state": fwd_edge["state"], "rev_state": rev_edge["state"],
+        "fwd_abuts": fwd_edge.get("abuts", []),
+        "rev_abuts": rev_edge.get("abuts", []),
         "confidence": fwd_detail.get("read_support"),
         "ribosomal": ribosomal,
         "fwd_detail": fwd_detail, "rev_detail": rev_detail,
