@@ -31,8 +31,11 @@ def _representatives(records, end):
     seqs = [r.get(end) for r in records if r.get(end)]
     if not seqs:
         return []
+    # Both "catalogue" and "catalogue-scan" hand back a sequence copied from the
+    # table, so both earn the same protection from being shortened by collapsing.
     catalogue = {r[end] for r in records
-                 if r.get(end) and r.get("source") == "inferred-catalogue"}
+                 if r.get(end)
+                 and str(r.get(f"{end}_source", "")).startswith("inferred-catalogue")}
     # Two consensus groups can resolve to the same catalogue primer, so the
     # sequences are merged after substitution rather than before it. Leaving them
     # separate puts the same adapter in the FASTA twice, and plateFor() keys the

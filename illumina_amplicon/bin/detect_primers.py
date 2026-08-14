@@ -67,8 +67,10 @@ def main(argv=None):
     def _where(locs):
         return ", ".join(f"{l['reference']}@{l['start']}" for l in locs) or "no SSU match"
 
-    print(f"[INFO] {hit['fwd']}/{hit.get('rev') or '-'} via {hit.get('source')}, "
-          f"fwd {_where(hit.get('fwd_location') or [])}", file=sys.stderr)
+    print(f"[INFO] {hit['fwd']} ({hit.get('fwd_source')}, "
+          f"{_where(hit.get('fwd_location') or [])}) / "
+          f"{hit.get('rev') or '-'} ({hit.get('rev_source')}, "
+          f"{_where(hit.get('rev_location') or [])})", file=sys.stderr)
     if not hit.get("ribosomal", True):
         print("[WARN] primers match neither the 16S nor the 18S reference — this "
               "assay is not ribosomal, so an rRNA taxonomy database would return "

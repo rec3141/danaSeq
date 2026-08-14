@@ -327,8 +327,18 @@ def describe_pair(fwd_name: str | None, rev_name: str | None = None) -> dict | N
 # A primer we infer must look like one the field actually uses, so the bounds
 # come from the catalogue rather than from taste.
 _DEGENERATE = set("RYSWKMBDHVN")
-MIN_PRIMER_LEN = min(len(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
-MAX_PRIMER_LEN = max(len(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
+_CATALOGUE_LENS = sorted(
+    len(s) for s in {s for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s})
+MIN_PRIMER_LEN = _CATALOGUE_LENS[0]
+
+# How long a primer we are willing to invent, which is not the same as the
+# longest one on file. The catalogue's longest entry is a tagged ITS primer whose
+# tag is counted in that length, and two thirds of the table sits between 17 and
+# 22bp — searching out to the extreme means the window keeps extending past the
+# primer into the amplicon, where the added columns are variable. That inflates
+# the consensus' degeneracy until it is rejected outright, and where it is not,
+# cutadapt trims the extra bases off the front of every read.
+MAX_DENOVO_LEN = _CATALOGUE_LENS[int(0.95 * (len(_CATALOGUE_LENS) - 1))]
 
 # A candidate is accepted on the evidence of the reads, not on its alignment
 # score, so the score only has to be loose enough not to miss the real primer.
@@ -453,7 +463,7 @@ def _mafft(seqs: list[str], timeout: int = 120) -> list[str]:
 
 
 def _consensus_primer(reads: list[str], cover: float = 0.9,
-                      min_mean_info: float = 1.2) -> str:
+                      max_mean_ambiguity: float = MAX_PRIMER_DEGENERACY) -> str:
     """De-novo degenerate consensus of the conserved 5' block across `reads`.
 
     Aligns the reads to each other first. A positional consensus assumes every
@@ -467,6 +477,11 @@ def _consensus_primer(reads: list[str], cover: float = 0.9,
     behind it. The window must also start near the 5' end, since adapter
     read-through is every bit as conserved as a primer and lands mid-read on
     short inserts.
+
+    Total information rises with every column added, so the window is held back
+    by what it may not exceed rather than by what it maximises: the degeneracy of
+    the codes it would emit, measured the way resolve_primer measures it. Past the
+    primer the columns are amplicon and the mean climbs, which is where it stops.
     """
     aln = _mafft(reads)
     if not aln:
@@ -474,6 +489,7 @@ def _consensus_primer(reads: list[str], cover: float = 0.9,
     width = len(aln[0])
     cons: list[str] = []
     info: list[float] = []
+    amb: list[float] = []
     # Columns most reads do not occupy are insertions carried by a few of them,
     # not part of the primer, and they grow with the sample: at 50 reads one
     # falls inside the primer, at 500 half a dozen do. Drop them and close the
@@ -492,14 +508,18 @@ def _consensus_primer(reads: list[str], cover: float = 0.9,
             acc += c
             if acc / tot >= cover:
                 break
-        cons.append(_IUPAC_REV.get(frozenset(bases), "N"))
+        code = _IUPAC_REV.get(frozenset(bases), "N")
+        cons.append(code)
         info.append(2.0 - ent)
+        amb.append(math.log2(len(IUPAC[code])))
 
     best = None
-    for length in range(MIN_PRIMER_LEN, MAX_PRIMER_LEN + 1):
+    for length in range(MIN_PRIMER_LEN, MAX_DENOVO_LEN + 1):
         for start in range(min(_PRIMER_MAX_START, len(info) - length) + 1):
             window = info[start:start + length]
-            if len(window) < length or sum(window) / length < min_mean_info:
+            if len(window) < length:
+                continue
+            if sum(amb[start:start + length]) / length > max_mean_ambiguity:
                 continue
             if best is None or sum(window) > best[0]:
                 best = (sum(window), start, length)
@@ -802,7 +822,13 @@ def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict |
         "fwd_name": fwd if fwd_src == "de-novo" else fwd_detail.get("name", fwd),
         "rev_name": rev if rev_src == "de-novo" else rev_detail.get("name", rev),
         "region": "unknown",
-        "source": f"inferred-{fwd_src}",
+        # Per end, because the ends are resolved independently and routinely
+        # disagree — a de-novo forward primer alongside a catalogue reverse one.
+        # One source for the record can only carry one of those answers, and the
+        # end that loses is then treated as de-novo, which strips a catalogue
+        # sequence of the protection that keeps it whole through collapsing.
+        "fwd_source": f"inferred-{fwd_src}",
+        "rev_source": f"inferred-{rev_src}",
         "confidence": fwd_detail.get("read_support"),
         "ribosomal": ribosomal,
         "fwd_detail": fwd_detail, "rev_detail": rev_detail,
