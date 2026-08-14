@@ -33,18 +33,25 @@ def _representatives(records, end):
         return []
     catalogue = {r[end] for r in records
                  if r.get(end) and r.get("source") == "inferred-catalogue"}
-    out = []
+    # Two consensus groups can resolve to the same catalogue primer, so the
+    # sequences are merged after substitution rather than before it. Leaving them
+    # separate puts the same adapter in the FASTA twice, and plateFor() keys the
+    # error-model groups on the adapter cutadapt matched — so one assay would be
+    # split in two by an entry duplicated against itself.
+    merged: dict[str, dict] = {}
     for core, n in primer_db.collapse_primers(seqs):
-        # Prefer a catalogue sequence from this group over the merged core.
         members = [s for s in seqs if primer_db.shared_region(s, core)]
         hits = [s for s in members if s in catalogue]
         if hits:
             seq, source = Counter(hits).most_common(1)[0][0], "catalogue"
         else:
             seq, source = core, "de-novo"
-        out.append({"sequence": seq, "samples": n, "source": source,
-                    "location": primer_db.locate_on_ssu(seq)})
-    return out
+        if seq in merged:
+            merged[seq]["samples"] += n
+        else:
+            merged[seq] = {"sequence": seq, "samples": n, "source": source,
+                           "location": primer_db.locate_on_ssu(seq)}
+    return sorted(merged.values(), key=lambda e: -e["samples"])
 
 
 def main(argv=None):
