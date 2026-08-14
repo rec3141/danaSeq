@@ -491,9 +491,17 @@ workflow {
         ASSIGN_TAXONOMY(ch_databases.assign.map { n, p, l, _r -> [n, p, l] },
                         FILTER_SEQTAB.out.seqtab)
 
-        // 9. Renormalize using the primary taxonomy database
-        //    Use the first database as the primary for group classification
-        ch_primary_tax = ASSIGN_TAXONOMY.out.taxonomy.first()
+        // 9. Renormalize using the primary taxonomy database: the first one named
+        //    in --ref_databases, selected by that name. Taking whichever task
+        //    emitted first would work only while the process emits in input
+        //    order, which is a scheduler directive set in nextflow.config — so
+        //    which database classified the groups depended on a setting three
+        //    files away, and would silently change to whichever of SILVA or PR2
+        //    finished first without it.
+        def primary_db = db_entries[0].tokenize(':')[0].trim()
+        ch_primary_tax = ASSIGN_TAXONOMY.out.taxonomy
+            .filter { db_name, _tax, _boot -> db_name == primary_db }
+            .first()
         RENORMALIZE(FILTER_SEQTAB.out.seqtab, ch_primary_tax)
     }
 
