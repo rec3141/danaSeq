@@ -462,11 +462,13 @@ def _consensus_primer(reads: list[str], cover: float = 0.9,
     width = len(aln[0])
     cons: list[str] = []
     info: list[float] = []
+    # Columns most reads do not occupy are insertions carried by a few of them,
+    # not part of the primer, and they grow with the sample: at 50 reads one
+    # falls inside the primer, at 500 half a dozen do. Drop them and close the
+    # gap, so the primer stays one run of columns however many reads are read.
     for i in range(width):
         col = [s[i] for s in aln if s[i] in "ACGT"]
         if len(col) < 0.5 * len(aln):
-            cons.append("-")
-            info.append(-1.0)
             continue
         counts = Counter(col)
         tot = len(col)
@@ -485,9 +487,7 @@ def _consensus_primer(reads: list[str], cover: float = 0.9,
     for length in range(MIN_PRIMER_LEN, MAX_PRIMER_LEN + 1):
         for start in range(min(_PRIMER_MAX_START, len(info) - length) + 1):
             window = info[start:start + length]
-            if any(x < 0 for x in window):
-                continue
-            if sum(window) / length < min_mean_info:
+            if len(window) < length or sum(window) / length < min_mean_info:
                 continue
             if best is None or sum(window) > best[0]:
                 best = (sum(window), start, length)
@@ -551,6 +551,30 @@ def catalogue_candidates(seq: str) -> list[tuple[str, str, int, float]]:
                   key=lambda t: (-t[2], -t[3]))
 
 
+def best_supported_catalogue_primer(reads: list[str], end: str = "fwd",
+                                    min_support: float = _VERIFY_MIN) -> tuple[str, str, float]:
+    """Catalogue primer the most reads actually carry: (sequence, name, support).
+
+    A consensus describes the average read, which is only the primer when most
+    reads carry one. A library that is half primer-bearing and half adapter
+    read-through averages into something too degenerate to use, while the primer
+    is still plainly present in half the reads — so ask each catalogue primer
+    directly how many reads carry it, rather than asking what the reads agree on.
+    """
+    best = ("", "", 0.0)
+    seen: set[str] = set()
+    for p in PRIMER_DB:
+        ref = p[end]
+        name = p["name"] if end == "fwd" else p["rev_name"]
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        obs = read_support(reads, ref)
+        if obs > best[2]:
+            best = (ref, name or "", obs)
+    return best if best[2] >= min_support else ("", "", best[2])
+
+
 def resolve_primer(consensus: str, reads: list[str]) -> tuple[str, str, dict]:
     """Settle on the sequence to trim with: (sequence, source, detail).
 
@@ -563,10 +587,8 @@ def resolve_primer(consensus: str, reads: list[str]) -> tuple[str, str, dict]:
     Only when nothing in the catalogue survives is a primer invented, and then it
     must be at least as long and no more degenerate than the catalogue allows.
     """
-    if not consensus:
-        return "", "none", {"reason": "no conserved 5' block"}
     tried = []
-    for name, ref, anchors, score in catalogue_candidates(consensus):
+    for name, ref, anchors, score in catalogue_candidates(consensus) if consensus else []:
         obs = read_support(reads, ref)
         tried.append({"name": name, "anchors": anchors,
                       "id": round(score, 3), "read_support": round(obs, 3)})
@@ -575,6 +597,18 @@ def resolve_primer(consensus: str, reads: list[str]) -> tuple[str, str, dict]:
                                       "id": round(score, 3),
                                       "read_support": round(obs, 3),
                                       "rejected": tried[:-1]}
+
+    # The consensus is the average read, and averages a mixed library into
+    # something no candidate resembles. Ask the catalogue directly instead.
+    seq, name, obs = best_supported_catalogue_primer(reads)
+    if seq:
+        return seq, "catalogue-scan", {"name": name, "read_support": round(obs, 3),
+                                       "consensus": consensus, "rejected": tried}
+
+    if not consensus:
+        return "", "none", {"reason": "no conserved 5' block and no catalogue "
+                                      "primer carried by enough reads",
+                            "rejected": tried}
     if len(consensus) < MIN_PRIMER_LEN:
         return "", "none", {"reason": f"consensus {len(consensus)}bp is shorter than "
                                       f"the shortest catalogue primer ({MIN_PRIMER_LEN}bp)",
