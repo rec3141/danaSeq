@@ -329,9 +329,6 @@ def describe_pair(fwd_name: str | None, rev_name: str | None = None) -> dict | N
 _DEGENERATE = set("RYSWKMBDHVN")
 MIN_PRIMER_LEN = min(len(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
 MAX_PRIMER_LEN = max(len(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
-MAX_PRIMER_DEGENERACY = max(
-    sum(1 for c in s if c in _DEGENERATE) / len(s)
-    for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
 
 # A candidate is accepted on the evidence of the reads, not on its alignment
 # score, so the score only has to be loose enough not to miss the real primer.
@@ -348,7 +345,22 @@ _SAMPLE_MIN_BASE_Q = 15
 
 
 def _degeneracy(seq: str) -> float:
-    return sum(1 for c in seq if c in _DEGENERATE) / len(seq) if seq else 1.0
+    """Bits of ambiguity per base: 0 for a fixed base, 1 for Y, 2 for N.
+
+    Counting degenerate positions instead prices a Y the same as an N, which puts
+    a two-fold 28-mer and a four-fold one on the same side of any cap that
+    separates them by a single position — so which of two samples carrying the
+    same primer is accepted comes down to sampling noise.
+    """
+    if not seq:
+        return 2.0
+    return sum(math.log2(len(IUPAC.get(c, "ACGT"))) for c in seq) / len(seq)
+
+
+# A consensus is only worth trimming with if it is as specific as the primers the
+# field actually uses, so the ceiling is the most ambiguous one in the catalogue.
+MAX_PRIMER_DEGENERACY = max(
+    _degeneracy(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
 
 
 def sample_reads(fastq_path: str, n: int = 500, trim: int | None = None,
@@ -615,8 +627,9 @@ def resolve_primer(consensus: str, reads: list[str]) -> tuple[str, str, dict]:
                             "rejected": tried}
     degen = _degeneracy(consensus)
     if degen > MAX_PRIMER_DEGENERACY:
-        return "", "none", {"reason": f"consensus degeneracy {degen:.2f} exceeds the "
-                                      f"most degenerate catalogue primer "
+        return "", "none", {"reason": f"consensus carries {degen:.2f} bits of "
+                                      f"ambiguity per base, more than the most "
+                                      f"degenerate catalogue primer "
                                       f"({MAX_PRIMER_DEGENERACY:.2f})",
                             "rejected": tried}
     return consensus, "de-novo", {"degeneracy": round(degen, 3), "rejected": tried}

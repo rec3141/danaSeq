@@ -38,12 +38,13 @@ def main(argv=None):
     hit = primer_db.detect_from_reads(args.r1, args.r2, n=args.reads)
 
     if not hit:
-        # Write nothing rather than an empty FASTA: cutadapt with an empty
-        # adapter file and --discard-untrimmed silently drops every read, which
-        # looks like a clean run that produced no data.
+        # Report nothing and succeed. A sample is trimmed with the set resolved
+        # across the whole run, not with its own detection, so one that yields no
+        # consensus still gets the primer its assay-mates supplied; exiting non-
+        # zero here would drop it from the run instead.
         print("[WARN] no primer detected — too few reads, or no usable 5' "
               "consensus", file=sys.stderr)
-        return 1
+        return 0
 
     described = primer_db.describe_pair(hit.get("fwd_name"), hit.get("rev_name")) or {}
     record = {**hit, **{f"assay_{k}": v for k, v in described.items()}}

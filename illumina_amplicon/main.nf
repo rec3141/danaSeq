@@ -335,14 +335,15 @@ workflow {
         ch_ribosomal = RESOLVE_PRIMER_SET.out.report
             .map { rep -> new groovy.json.JsonSlurper().parse(rep.toFile()).ribosomal != false }
             .first()
+        // Trim from ch_demuxed rather than from DETECT_PRIMERS' own output: every
+        // sample is trimmed with the resolved set, so one whose detection found
+        // nothing must still reach cutadapt.
+        //
         // .first() makes the resolved set a value channel, so every sample is
-        // paired with it. Combined against the queue channel the process emits,
-        // the pairing stops when that single item is consumed and the remaining
-        // samples are silently dropped — 57 of 88 in PRJEB25089, none in a
-        // 36-sample run, which reads as a study-specific quirk rather than a
-        // wiring fault.
-        ch_with_primers = DETECT_PRIMERS.out.detected
-            .map { meta, r1, r2, _detected -> [meta, r1, r2] }
+        // paired with it. Without it the set is a queue channel of one item, the
+        // pairing stops as soon as that item is consumed, and every sample after
+        // the first is silently dropped.
+        ch_with_primers = ch_demuxed
             .combine(RESOLVE_PRIMER_SET.out.primers.first())
         REMOVE_PRIMERS(ch_with_primers)
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log

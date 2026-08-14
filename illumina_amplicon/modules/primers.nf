@@ -5,11 +5,13 @@
 // recomputed downstream from taxonomy. It states only what was observed — the
 // primer name and read counts — because a primer FASTA carries nothing else.
 //
-// Two stages:
+// Three stages:
 //   1. DETECT_PRIMERS: samples reads once and matches their 5' ends against the
 //      curated table in bin/primer_db.py, falling back to a de-novo consensus,
-//      and writes what it found as detected_primers.fa
-//   2. REMOVE_PRIMERS: one cutadapt pass with -g file:, so cutadapt picks the
+//      and reports what it found for that one sample
+//   2. RESOLVE_PRIMER_SET: reduces those per-sample reports to the one set the
+//      whole run is trimmed with
+//   3. REMOVE_PRIMERS: one cutadapt pass with -g file:, so cutadapt picks the
 //      best-matching adapter per read, with --discard-untrimmed
 //
 // If metadata provides a primer_pair column, DETECT_PRIMERS is skipped.
@@ -24,7 +26,9 @@ process DETECT_PRIMERS {
     tuple val(meta), path(r1), path(r2)
 
     output:
-    tuple val(meta), path(r1), path(r2), path("detected_primers.fa"), emit: detected
+    // Evidence only. What a sample is trimmed with comes from RESOLVE_PRIMER_SET,
+    // so a sample that yields no consensus reports nothing and still goes on to
+    // REMOVE_PRIMERS with the set its assay-mates resolved.
     path("${meta.id}_detected.json"), emit: report, optional: true
 
     script:
