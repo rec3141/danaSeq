@@ -662,7 +662,12 @@ def resolve_primer(consensus: str, reads: list[str]) -> tuple[str, str, dict]:
                                       f"degenerate catalogue primer "
                                       f"({MAX_PRIMER_DEGENERACY:.2f})",
                             "rejected": tried}
-    return consensus, "de-novo", {"degeneracy": round(degen, 3), "rejected": tried}
+    # read_support on the de-novo branch too: it is what says how many reads
+    # actually carry the block, and a run whose reads are half in one orientation
+    # and half in the other sits near a half on both ends.
+    return consensus, "de-novo", {"degeneracy": round(degen, 3),
+                                  "read_support": round(read_support(reads, consensus), 3),
+                                  "rejected": tried}
 
 
 def detect_from_reads(r1_path: str, r2_path: str | None = None, n: int = 500) -> dict | None:
@@ -914,6 +919,11 @@ def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict |
         # sequence of the protection that keeps it whole through collapsing.
         "fwd_source": f"inferred-{fwd_src}",
         "rev_source": f"inferred-{rev_src}",
+        # Each end's primer looked for in the other end's reads. Reads deposited
+        # in a random orientation put both primers in both files at roughly equal
+        # frequency; correctly oriented reads put each primer in one file only.
+        "fwd_in_r2": round(read_support(r2, fwd), 3) if (r2 and fwd) else None,
+        "rev_in_r1": round(read_support(r1, rev), 3) if rev else None,
         "fwd_state": fwd_edge["state"], "rev_state": rev_edge["state"],
         "fwd_abuts": fwd_edge.get("abuts", []),
         "rev_abuts": rev_edge.get("abuts", []),

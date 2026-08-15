@@ -105,6 +105,7 @@ def validateParams() {
 include { DEMULTIPLEX }       from './modules/demultiplex'
 include { DETECT_PRIMERS }      from './modules/primers'
 include { RESOLVE_PRIMER_SET }  from './modules/primers'
+include { SPLIT_PRIMER_PAIR }   from './modules/primers'
 include { REMOVE_PRIMERS }      from './modules/primers'
 include { PRIMER_ASSIGNMENT } from './modules/primers'
 include { AUTO_TRIM }         from './modules/denoise'
@@ -291,11 +292,18 @@ workflow {
 
         // If samplesheet has primer_pair and we have primer files, run cutadapt
         if (params.samplesheet && !params.skip_primer_removal) {
-            ch_with_primers = ch_trimmed.filter { meta, r1, r2 -> meta.primer_pair }
-                .map { meta, r1, r2 ->
-                    def pf = file("${projectDir}/primers/primers-${meta.primer_pair}.fa")
-                    [meta, r1, r2, pf]
+            ch_pair_reads = ch_trimmed.filter { meta, _r1, _r2 -> meta.primer_pair }
+                .map { meta, r1, r2 -> [meta.primer_pair, meta, r1, r2] }
+            // One split per distinct pair, not per sample.
+            ch_pair_files = ch_pair_reads
+                .map { pair, _meta, _r1, _r2 ->
+                    [pair, file("${projectDir}/primers/primers-${pair}.fa")]
                 }
+                .unique()
+            SPLIT_PRIMER_PAIR(ch_pair_files)
+            ch_with_primers = ch_pair_reads
+                .combine(SPLIT_PRIMER_PAIR.out.ends, by: 0)
+                .map { _pair, meta, r1, r2, pfwd, prev -> [meta, r1, r2, pfwd, prev] }
 
             REMOVE_PRIMERS(ch_with_primers)
             ch_cutadapt_logs = REMOVE_PRIMERS.out.log
@@ -305,15 +313,13 @@ workflow {
                 }
         }
     } else if (params.primers_fwd && params.primers_rev) {
-        // REMOVE_PRIMERS applies one primer file to both reads (cutadapt -g/-G
-        // selects the matching primer per read), exactly like the samplesheet and
-        // auto-detect paths whose primers-*.fa hold both fwd and rev. Passing only
-        // primers_fwd here trimmed R2 with the forward primer, so cutadapt's
-        // --discard-untrimmed dropped ~every pair. Combine fwd + rev into one file.
-        ch_primers_combined = Channel
-            .fromPath([params.primers_fwd, params.primers_rev])
-            .collectFile(name: 'primers_combined.fa')
-        ch_with_primers = ch_demuxed.combine(ch_primers_combined)
+        // Already one file per end, which is what REMOVE_PRIMERS takes: -g gets
+        // the forward file for R1, -G the reverse file for R2. Handing the same
+        // file to both ends trims R2 with the forward primer, and
+        // --discard-untrimmed then drops ~every pair.
+        ch_with_primers = ch_demuxed
+            .combine(Channel.fromPath(params.primers_fwd).first())
+            .combine(Channel.fromPath(params.primers_rev).first())
         REMOVE_PRIMERS(ch_with_primers)
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
         ch_trimmed = REMOVE_PRIMERS.out.reads
@@ -344,7 +350,9 @@ workflow {
         // --skip_primer_removal is the submitter saying so; primer_set.json's
         // `trim` is the reads saying so. Either is enough to leave them alone:
         // trimming reads that carry no primer takes the front of the amplicon.
-        ch_do_trim = ch_resolved.map { !params.skip_primer_removal && it.trim != false }
+        ch_do_trim = ch_resolved.map {
+            !params.skip_primer_removal && (it.trim_fwd != false || it.trim_rev != false)
+        }
 
         // The assay key, from the resolved set rather than from cutadapt's
         // per-adapter counts, so it is the same key whether or not cutadapt runs.
@@ -367,13 +375,18 @@ workflow {
         // nothing must still reach cutadapt.
         ch_with_primers = ch_routed.trim
             .map { meta, r1, r2, _do_trim, _assay -> [meta, r1, r2] }
-            .combine(RESOLVE_PRIMER_SET.out.primers.first())
+            .combine(RESOLVE_PRIMER_SET.out.primers_fwd.first())
+            .combine(RESOLVE_PRIMER_SET.out.primers_rev.first())
         REMOVE_PRIMERS(ch_with_primers)
         ch_cutadapt_logs = REMOVE_PRIMERS.out.log
 
         ch_trimmed = REMOVE_PRIMERS.out.reads
-            .map { meta, r1, r2, assay ->
-                [meta + [plate: plateFor(meta, r1, assay)], r1, r2]
+            .combine(ch_assay_of)
+            .map { meta, r1, r2, assay, assay_of ->
+                // cutadapt reports no winning adapter when R1 is the end that was
+                // already trimmed, so fall back to the key the set resolved.
+                def key = assay && assay != 'none' ? assay : assay_of[meta.id]
+                [meta + [plate: plateFor(meta, r1, key)], r1, r2]
             }
             .mix(ch_routed.keep.map { meta, r1, r2, _do_trim, assay_of ->
                 [meta + [plate: plateFor(meta, r1, assay_of[meta.id])], r1, r2]

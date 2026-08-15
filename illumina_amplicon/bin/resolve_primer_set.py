@@ -13,8 +13,14 @@ A catalogue sequence is preferred as a group's representative: it has the right
 ends, and it already passed the read check in DETECT_PRIMERS, whereas a merged
 core is bounded by whatever its members happened to agree on.
 
+The two ends are written separately, and an end whose reads already begin past
+where a primer would sit gets an empty file — a study can reach SRA trimmed on
+one end and not the other, and one set for both ends can only be wrong for one
+of them.
+
 Usage:
-    resolve_primer_set.py -o primer_set.fa --json primer_set.json *_detected.json
+    resolve_primer_set.py --fwd-out primer_set_fwd.fa --rev-out primer_set_rev.fa \
+        --json primer_set.json *_detected.json
 """
 import argparse
 import json
@@ -92,7 +98,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("detections", nargs="+")
-    ap.add_argument("-o", "--out", default="primer_set.fa")
+    ap.add_argument("--fwd-out", default="primer_set_fwd.fa")
+    ap.add_argument("--rev-out", default="primer_set_rev.fa")
     ap.add_argument("--json", dest="json_out", default="primer_set.json")
     args = ap.parse_args(argv)
 
@@ -136,8 +143,12 @@ def main(argv=None):
         cut = sum(e["samples"] for e in placed if e["state"] == "pre-trimmed")
         return cut > sum(e["samples"] for e in placed) / 2
 
-    ends = [v for v in (_cut(fwd), _cut(rev)) if v is not None]
-    pre_trimmed = bool(ends) and any(ends)
+    # Per end, so a run trimmed on one end only keeps the primer it still has
+    # and keeps the amplicon it no longer has a primer in front of.
+    fwd_cut, rev_cut = _cut(fwd), _cut(rev)
+    trim_fwd = fwd_cut is not None and not fwd_cut
+    trim_rev = rev_cut is not None and not rev_cut
+    pre_trimmed = bool(fwd_cut or rev_cut)
     cut_at = [e for e in entries if e["state"] == "pre-trimmed"]
 
     # Which group each sample fell into — the assay key, derived from the primer
@@ -148,14 +159,40 @@ def main(argv=None):
         for smp in e["members"]:
             assay_of[smp] = e["sequence"]
 
+    # One file per end, because the ends are trimmed independently. An end with
+    # nothing to remove gets an empty file, and REMOVE_PRIMERS passes cutadapt no
+    # adapter option for it — an empty adapter file with --discard-untrimmed
+    # matches nothing and would drop every read.
+    #
     # The header is the sequence: it is what cutadapt reports back in its log,
     # and therefore what the assay is keyed on downstream.
-    with open(args.out, "w") as fh:
-        for e in entries:
-            fh.write(f">{e['sequence']}\n{e['sequence']}\n")
+    for path, end_entries, wanted in ((args.fwd_out, fwd, trim_fwd),
+                                      (args.rev_out, rev, trim_rev)):
+        with open(path, "w") as fh:
+            if wanted:
+                for e in end_entries:
+                    fh.write(f">{e['sequence']}\n{e['sequence']}\n")
+
+    # Reads that arrive in a random orientation carry the forward primer on half
+    # of R1 and the reverse on the other half, so neither end can be trimmed as
+    # an end. The consensus still resolves — to whichever orientation won the
+    # majority — and quietly describes half the run.
+    def _median(key):
+        vals = sorted(v for v in (r.get(key) for r in records) if v is not None)
+        return vals[len(vals) // 2] if vals else None
+
+    # A primer belongs to one end. Finding the forward primer in R2, and the
+    # reverse in R1, at the same time and in a good share of reads, is not a
+    # degenerate match — it is both orientations in both files.
+    fwd_in_r2, rev_in_r1 = _median("fwd_in_r2"), _median("rev_in_r1")
+    scrambled = (fwd_in_r2 is not None and rev_in_r1 is not None
+                 and fwd_in_r2 >= 0.25 and rev_in_r1 >= 0.25)
 
     summary = {"samples": len(records), "ribosomal": ribosomal,
-               "pre_trimmed": pre_trimmed, "trim": not pre_trimmed,
+               "pre_trimmed": pre_trimmed,
+               "trim_fwd": trim_fwd, "trim_rev": trim_rev,
+               "cross_orientation": {"fwd_in_r2": fwd_in_r2, "rev_in_r1": rev_in_r1},
+               "mixed_orientation": scrambled,
                "assay_of": assay_of, "fwd": fwd, "rev": rev}
     with open(args.json_out, "w") as fh:
         json.dump(summary, fh, indent=2)
@@ -180,6 +217,12 @@ def main(argv=None):
         print(f"[WARN] which primer was used is not recoverable — {len(names)} "
               "catalogued primers share that boundary, including "
               + ", ".join(names[:6]), file=sys.stderr)
+    if scrambled:
+        print(f"[WARN] the forward primer is on {fwd_in_r2:.0%} of R2 and the reverse "
+              f"on {rev_in_r1:.0%} of R1 — these reads are in mixed orientation, so "
+              "neither file is an end. -g is given the forward primer and -G the "
+              "reverse, so the half that is the other way round matches no adapter "
+              "and --discard-untrimmed drops it", file=sys.stderr)
     if not ribosomal:
         print("[WARN] no primer matches the 16S or 18S reference — this run is not "
               "a ribosomal assay, and an rRNA taxonomy database would label it "

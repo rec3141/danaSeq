@@ -11,8 +11,9 @@
 //      and reports what it found for that one sample
 //   2. RESOLVE_PRIMER_SET: reduces those per-sample reports to the one set the
 //      whole run is trimmed with
-//   3. REMOVE_PRIMERS: one cutadapt pass with -g file:, so cutadapt picks the
-//      best-matching adapter per read, with --discard-untrimmed
+//   3. REMOVE_PRIMERS: one cutadapt pass, -g for R1 and -G for R2 from separate
+//      files, so an end whose primer was stripped before submission is left
+//      alone while the other end is still trimmed, with --discard-untrimmed
 //
 // If metadata provides a primer_pair column, DETECT_PRIMERS is skipped.
 
@@ -57,14 +58,38 @@ process RESOLVE_PRIMER_SET {
     path(detections)
 
     output:
-    path("primer_set.fa"),   emit: primers
-    path("primer_set.json"), emit: report
+    path("primer_set_fwd.fa"), emit: primers_fwd
+    path("primer_set_rev.fa"), emit: primers_rev
+    path("primer_set.json"),   emit: report
 
     script:
     """
     resolve_primer_set.py ${detections} \
-        -o primer_set.fa \
+        --fwd-out primer_set_fwd.fa \
+        --rev-out primer_set_rev.fa \
         --json primer_set.json
+    """
+}
+
+
+// Split a bundled pair file into its two ends, so every path into REMOVE_PRIMERS
+// hands it one file per end. primers-<FWD>-<REV>.fa holds the forward record
+// first and the reverse second, which is the only thing that says which is which
+// — the headers carry primer names, not ends.
+process SPLIT_PRIMER_PAIR {
+    tag "${pair}"
+    label 'process_low'
+    conda "${projectDir}/envs/python.yml"
+
+    input:
+    tuple val(pair), path(primer_file)
+
+    output:
+    tuple val(pair), path("${pair}_fwd.fa"), path("${pair}_rev.fa"), emit: ends
+
+    script:
+    """
+    split_primer_pair.py "${primer_file}" "${pair}_fwd.fa" "${pair}_rev.fa"
     """
 }
 
@@ -77,7 +102,7 @@ process REMOVE_PRIMERS {
     storeDir params.store_dir ? "${params.store_dir}/trimmed" : null
 
     input:
-    tuple val(meta), path(r1), path(r2), path(primer_file)
+    tuple val(meta), path(r1), path(r2), path(primer_fwd), path(primer_rev)
 
     output:
     // ASSAY is the adapter cutadapt matched most often — the sample's amplicon,
@@ -89,11 +114,25 @@ process REMOVE_PRIMERS {
 
     script:
     """
-    cutadapt \\
-        -g file:${primer_file} \\
-        -G file:${primer_file} \\
+    # One adapter option per end, and none for an end with nothing to remove:
+    # cutadapt given an empty adapter file matches nothing, and with
+    # --discard-untrimmed that empties the run.
+    # if-blocks, not `[ -s f ] && ...`: the script runs under `bash -ue`, where a
+    # test that fails is a command that failed and kills the task.
+    ARGS=""
+    if [ -s "${primer_fwd}" ]; then ARGS="\$ARGS -g file:${primer_fwd}"; fi
+    if [ -s "${primer_rev}" ]; then ARGS="\$ARGS -G file:${primer_rev}"; fi
+
+    # --discard-untrimmed drops a pair when the filter applies to it. With both
+    # ends trimmed that reads as "either mate carried no primer". With one end
+    # trimmed the other mate never carries one, so requiring both is the only way
+    # any pair survives.
+    PAIR_FILTER=both
+    if [ -s "${primer_fwd}" ] && [ -s "${primer_rev}" ]; then PAIR_FILTER=any; fi
+
+    cutadapt \$ARGS \\
         --discard-untrimmed \\
-        --pair-filter=any \\
+        --pair-filter=\$PAIR_FILTER \\
         -j ${task.cpus} \\
         -e ${params.primer_error_rate} \\
         -o ${meta.id}_R1.trimmed.fastq.gz \\
@@ -114,7 +153,7 @@ process REMOVE_PRIMERS {
                   END { print (bn == "" ? "none" : bn) }' "${meta.id}_cutadapt.log")
     export ASSAY
 
-    echo "[INFO] ${meta.id}: primer removal complete (${primer_file}), assay=\$ASSAY" >&2
+    echo "[INFO] ${meta.id}: primer removal complete (\$ARGS), assay=\$ASSAY" >&2
     """
 }
 
