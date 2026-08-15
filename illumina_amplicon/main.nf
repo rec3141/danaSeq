@@ -33,9 +33,8 @@ def helpMessage() {
                            *.fastq.gz files
 
     Primer removal:
-      --primer_auto        Auto-select primer pair by filename prefix [default: true]
-      --primers_fwd PATH   Forward primer FASTA (overrides auto-selection)
-      --primers_rev PATH   Reverse primer FASTA (overrides auto-selection)
+      --primers_fwd PATH   Forward primer FASTA (overrides detection)
+      --primers_rev PATH   Reverse primer FASTA (overrides detection)
       --primer_error_rate  Cutadapt error rate [default: 0.12]
       --primer_detect_reads N  Reads sampled for primer detection [default: 500]
       --min_group_samples N    Min samples before a run/assay group is pooled [default: 3]
