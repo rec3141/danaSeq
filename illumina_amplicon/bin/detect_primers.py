@@ -33,20 +33,27 @@ def main(argv=None):
     ap.add_argument("--json", dest="json_out", default=None)
     ap.add_argument("-n", "--reads", type=int, default=500,
                     help="reads to sample per file [default: 500]")
+    ap.add_argument("--sample", default=None,
+                    help="sample id to record on the detection")
     args = ap.parse_args(argv)
 
     hit = primer_db.detect_from_reads(args.r1, args.r2, n=args.reads)
 
     if not hit:
-        # Write nothing rather than an empty FASTA: cutadapt with an empty
-        # adapter file and --discard-untrimmed silently drops every read, which
-        # looks like a clean run that produced no data.
+        # Report nothing and succeed. A sample is trimmed with the set resolved
+        # across the whole run, not with its own detection, so one that yields no
+        # consensus still gets the primer its assay-mates supplied; exiting non-
+        # zero here would drop it from the run instead.
         print("[WARN] no primer detected — too few reads, or no usable 5' "
               "consensus", file=sys.stderr)
-        return 1
+        return 0
 
     described = primer_db.describe_pair(hit.get("fwd_name"), hit.get("rev_name")) or {}
-    record = {**hit, **{f"assay_{k}": v for k, v in described.items()}}
+    # The sample id travels on the record because RESOLVE_PRIMER_SET groups
+    # these detections into the run's assays, and a group is only an assay key
+    # if it can name its members.
+    record = {"sample": args.sample, **hit,
+              **{f"assay_{k}": v for k, v in described.items()}}
 
     # The FASTA header is the primer's own sequence, because it is the only field
     # that survives the trip downstream — cutadapt reports the header it matched
@@ -66,8 +73,10 @@ def main(argv=None):
     def _where(locs):
         return ", ".join(f"{l['reference']}@{l['start']}" for l in locs) or "no SSU match"
 
-    print(f"[INFO] {hit['fwd']}/{hit.get('rev') or '-'} via {hit.get('source')}, "
-          f"fwd {_where(hit.get('fwd_location') or [])}", file=sys.stderr)
+    print(f"[INFO] {hit['fwd']} ({hit.get('fwd_source')}, "
+          f"{_where(hit.get('fwd_location') or [])}) / "
+          f"{hit.get('rev') or '-'} ({hit.get('rev_source')}, "
+          f"{_where(hit.get('rev_location') or [])})", file=sys.stderr)
     if not hit.get("ribosomal", True):
         print("[WARN] primers match neither the 16S nor the 18S reference — this "
               "assay is not ribosomal, so an rRNA taxonomy database would return "

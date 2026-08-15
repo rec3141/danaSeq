@@ -327,11 +327,18 @@ def describe_pair(fwd_name: str | None, rev_name: str | None = None) -> dict | N
 # A primer we infer must look like one the field actually uses, so the bounds
 # come from the catalogue rather than from taste.
 _DEGENERATE = set("RYSWKMBDHVN")
-MIN_PRIMER_LEN = min(len(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
-MAX_PRIMER_LEN = max(len(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
-MAX_PRIMER_DEGENERACY = max(
-    sum(1 for c in s if c in _DEGENERATE) / len(s)
-    for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
+_CATALOGUE_LENS = sorted(
+    len(s) for s in {s for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s})
+MIN_PRIMER_LEN = _CATALOGUE_LENS[0]
+
+# How long a primer we are willing to invent, which is not the same as the
+# longest one on file. The catalogue's longest entry is a tagged ITS primer whose
+# tag is counted in that length, and two thirds of the table sits between 17 and
+# 22bp — searching out to the extreme means the window keeps extending past the
+# primer into the amplicon, where the added columns are variable. That inflates
+# the consensus' degeneracy until it is rejected outright, and where it is not,
+# cutadapt trims the extra bases off the front of every read.
+MAX_DENOVO_LEN = _CATALOGUE_LENS[int(0.95 * (len(_CATALOGUE_LENS) - 1))]
 
 # A candidate is accepted on the evidence of the reads, not on its alignment
 # score, so the score only has to be loose enough not to miss the real primer.
@@ -348,7 +355,22 @@ _SAMPLE_MIN_BASE_Q = 15
 
 
 def _degeneracy(seq: str) -> float:
-    return sum(1 for c in seq if c in _DEGENERATE) / len(seq) if seq else 1.0
+    """Bits of ambiguity per base: 0 for a fixed base, 1 for Y, 2 for N.
+
+    Counting degenerate positions instead prices a Y the same as an N, which puts
+    a two-fold 28-mer and a four-fold one on the same side of any cap that
+    separates them by a single position — so which of two samples carrying the
+    same primer is accepted comes down to sampling noise.
+    """
+    if not seq:
+        return 2.0
+    return sum(math.log2(len(IUPAC.get(c, "ACGT"))) for c in seq) / len(seq)
+
+
+# A consensus is only worth trimming with if it is as specific as the primers the
+# field actually uses, so the ceiling is the most ambiguous one in the catalogue.
+MAX_PRIMER_DEGENERACY = max(
+    _degeneracy(s) for p in PRIMER_DB for s in (p["fwd"], p["rev"]) if s)
 
 
 def sample_reads(fastq_path: str, n: int = 500, trim: int | None = None,
@@ -441,7 +463,7 @@ def _mafft(seqs: list[str], timeout: int = 120) -> list[str]:
 
 
 def _consensus_primer(reads: list[str], cover: float = 0.9,
-                      min_mean_info: float = 1.2) -> str:
+                      max_mean_ambiguity: float = MAX_PRIMER_DEGENERACY) -> str:
     """De-novo degenerate consensus of the conserved 5' block across `reads`.
 
     Aligns the reads to each other first. A positional consensus assumes every
@@ -455,6 +477,11 @@ def _consensus_primer(reads: list[str], cover: float = 0.9,
     behind it. The window must also start near the 5' end, since adapter
     read-through is every bit as conserved as a primer and lands mid-read on
     short inserts.
+
+    Total information rises with every column added, so the window is held back
+    by what it may not exceed rather than by what it maximises: the degeneracy of
+    the codes it would emit, measured the way resolve_primer measures it. Past the
+    primer the columns are amplicon and the mean climbs, which is where it stops.
     """
     aln = _mafft(reads)
     if not aln:
@@ -462,6 +489,7 @@ def _consensus_primer(reads: list[str], cover: float = 0.9,
     width = len(aln[0])
     cons: list[str] = []
     info: list[float] = []
+    amb: list[float] = []
     # Columns most reads do not occupy are insertions carried by a few of them,
     # not part of the primer, and they grow with the sample: at 50 reads one
     # falls inside the primer, at 500 half a dozen do. Drop them and close the
@@ -480,17 +508,31 @@ def _consensus_primer(reads: list[str], cover: float = 0.9,
             acc += c
             if acc / tot >= cover:
                 break
-        cons.append(_IUPAC_REV.get(frozenset(bases), "N"))
+        code = _IUPAC_REV.get(frozenset(bases), "N")
+        cons.append(code)
         info.append(2.0 - ent)
+        amb.append(math.log2(len(IUPAC[code])))
 
+    # Earliest workable start first, and only then the most informative length
+    # from it. Ranking by information alone lets the window slide 3', because
+    # trading a degenerate 5' column for a clean one further in always scores
+    # better — and it slides by a different amount in each sample, so the primers
+    # no longer line up and collapse_primers grinds the shared core down to
+    # nothing. Where the start has to move it is the degeneracy bound that moves
+    # it, past a barcode or a heterogeneity spacer, which is the only reason a
+    # primer is not already at the 5' end.
     best = None
-    for length in range(MIN_PRIMER_LEN, MAX_PRIMER_LEN + 1):
-        for start in range(min(_PRIMER_MAX_START, len(info) - length) + 1):
-            window = info[start:start + length]
-            if len(window) < length or sum(window) / length < min_mean_info:
+    for start in range(_PRIMER_MAX_START + 1):
+        for length in range(MIN_PRIMER_LEN, MAX_DENOVO_LEN + 1):
+            if start + length > len(info):
+                break
+            if sum(amb[start:start + length]) / length > max_mean_ambiguity:
                 continue
-            if best is None or sum(window) > best[0]:
-                best = (sum(window), start, length)
+            total = sum(info[start:start + length])
+            if best is None or total > best[0]:
+                best = (total, start, length)
+        if best:
+            break
     if not best:
         return ""
     return "".join(cons[best[1]:best[1] + best[2]])
@@ -615,11 +657,17 @@ def resolve_primer(consensus: str, reads: list[str]) -> tuple[str, str, dict]:
                             "rejected": tried}
     degen = _degeneracy(consensus)
     if degen > MAX_PRIMER_DEGENERACY:
-        return "", "none", {"reason": f"consensus degeneracy {degen:.2f} exceeds the "
-                                      f"most degenerate catalogue primer "
+        return "", "none", {"reason": f"consensus carries {degen:.2f} bits of "
+                                      f"ambiguity per base, more than the most "
+                                      f"degenerate catalogue primer "
                                       f"({MAX_PRIMER_DEGENERACY:.2f})",
                             "rejected": tried}
-    return consensus, "de-novo", {"degeneracy": round(degen, 3), "rejected": tried}
+    # read_support on the de-novo branch too: it is what says how many reads
+    # actually carry the block, and a run whose reads are half in one orientation
+    # and half in the other sits near a half on both ends.
+    return consensus, "de-novo", {"degeneracy": round(degen, 3),
+                                  "read_support": round(read_support(reads, consensus), 3),
+                                  "rejected": tried}
 
 
 def detect_from_reads(r1_path: str, r2_path: str | None = None, n: int = 500) -> dict | None:
@@ -760,6 +808,77 @@ def locate_on_ssu(primer: str, min_id: float = 0.80) -> list[dict]:
     return sorted(out, key=lambda d: -d["identity"])
 
 
+@lru_cache(maxsize=1)
+def _catalogue_spans() -> tuple:
+    """Every catalogue primer's placement on the SSU references.
+
+    (reference, start, end, name), one row per primer per reference it lands on.
+    """
+    rows, seen = [], set()
+    for p in PRIMER_DB:
+        for end in ("fwd", "rev"):
+            seq = p[end]
+            name = p["name"] if end == "fwd" else p["rev_name"]
+            if not seq or seq in seen:
+                continue
+            seen.add(seq)
+            for loc in locate_on_ssu(seq):
+                rows.append((loc["reference"], loc["start"], loc["end"], name or seq))
+    return tuple(rows)
+
+
+def amplicon_boundary(consensus: str, slack: int = 1) -> dict:
+    """Whether a 5' block is a primer, or the cut left where one was removed.
+
+    A primer occupies its own coordinates: a block that begins where catalogue
+    primers begin is one. A block that begins in the base immediately after where
+    they end is not a primer at all — it is the amplicon, delivered with the
+    primer already taken off, and trimming it removes real sequence.
+
+    Which primer was removed is not recoverable and is not guessed: ten
+    catalogued primers end against E. coli 534, and nothing in the reads says
+    which of them made the cut. The boundary is the observation, so the boundary
+    is what is reported.
+
+    Measure this on a sample's own consensus, not on a set collapsed across
+    samples: collapsing keeps only what the members share and moves the edge off
+    the boundary, which is the one coordinate the question turns on.
+
+    Returns state "primer", "pre-trimmed", or "unplaced" — the last for a block
+    that sits on neither reference, which is every non-ribosomal assay, and where
+    there is no gene to measure against and so nothing to conclude.
+    """
+    locs = locate_on_ssu(consensus)
+    if not locs:
+        return {"state": "unplaced", "location": []}
+    spans = _catalogue_spans()
+    starts_on, starts_after = [], []
+    for loc in locs:
+        # The amplicon's outer edge is the 5' end of the read, which is the low
+        # coordinate for a forward block and the high one for a reverse block.
+        forward = loc["strand"] == "+"
+        edge = loc["start"] if forward else loc["end"]
+        for ref, start, end, name in spans:
+            if ref != loc["reference"]:
+                continue
+            own = start if forward else end
+            adjacent = end + 1 if forward else start - 1
+            if abs(own - edge) <= slack:
+                starts_on.append(name)
+            elif abs(adjacent - edge) <= slack:
+                starts_after.append(name)
+    if starts_on:
+        state = "primer"
+    elif starts_after:
+        state = "pre-trimmed"
+    else:
+        # On the gene but at no catalogued boundary: a primer nobody has
+        # catalogued is likelier than a cut nobody makes.
+        state = "primer"
+    return {"state": state, "location": locs,
+            "abuts": sorted(set(starts_after)) if state == "pre-trimmed" else []}
+
+
 def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict | None:
     """Infer a sample's primers from reads already in hand.
 
@@ -777,8 +896,12 @@ def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict |
     if r2:
         rev, rev_src, rev_detail = resolve_primer(_consensus_primer(r2), r2)
 
-    fwd_loc = locate_on_ssu(fwd)
-    rev_loc = locate_on_ssu(rev) if rev else []
+    # Measured on the sample's own consensus, which still carries the edge the
+    # boundary test needs — a set collapsed across samples no longer does.
+    fwd_edge = amplicon_boundary(fwd)
+    rev_edge = amplicon_boundary(rev) if rev else {"state": "unplaced", "location": []}
+    fwd_loc = fwd_edge["location"]
+    rev_loc = rev_edge["location"]
     # Both ends landing nowhere on either SSU gene means the assay is not
     # ribosomal, whatever the reads denoise into. Taxonomy against an rRNA
     # database would still return confident labels, and they would be noise.
@@ -789,7 +912,21 @@ def detect_from_read_lists(r1: list[str], r2: list[str] | None = None) -> dict |
         "fwd_name": fwd if fwd_src == "de-novo" else fwd_detail.get("name", fwd),
         "rev_name": rev if rev_src == "de-novo" else rev_detail.get("name", rev),
         "region": "unknown",
-        "source": f"inferred-{fwd_src}",
+        # Per end, because the ends are resolved independently and routinely
+        # disagree — a de-novo forward primer alongside a catalogue reverse one.
+        # One source for the record can only carry one of those answers, and the
+        # end that loses is then treated as de-novo, which strips a catalogue
+        # sequence of the protection that keeps it whole through collapsing.
+        "fwd_source": f"inferred-{fwd_src}",
+        "rev_source": f"inferred-{rev_src}",
+        # Each end's primer looked for in the other end's reads. Reads deposited
+        # in a random orientation put both primers in both files at roughly equal
+        # frequency; correctly oriented reads put each primer in one file only.
+        "fwd_in_r2": round(read_support(r2, fwd), 3) if (r2 and fwd) else None,
+        "rev_in_r1": round(read_support(r1, rev), 3) if rev else None,
+        "fwd_state": fwd_edge["state"], "rev_state": rev_edge["state"],
+        "fwd_abuts": fwd_edge.get("abuts", []),
+        "rev_abuts": rev_edge.get("abuts", []),
         "confidence": fwd_detail.get("read_support"),
         "ribosomal": ribosomal,
         "fwd_detail": fwd_detail, "rev_detail": rev_detail,

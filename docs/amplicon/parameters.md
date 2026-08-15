@@ -29,9 +29,10 @@ nextflow run rec3141/danaSeq -entry illumina_amplicon --help
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--skip_primer_removal` | `false` | Skip if input is already trimmed |
-| `--primer_auto` | `true` | Auto-select primer file by filename prefix (16S/18S/ITS) |
-| `--primers` | auto | Override with a specific primer FASTA |
+| `--skip_primer_removal` | `false` | Skip removal; the reads already have their primers off |
+| `--primers_fwd` | detect | Forward primer FASTA, applied to R1 (overrides detection) |
+| `--primers_rev` | detect | Reverse primer FASTA, applied to R2 (overrides detection) |
+| `--primer_detect_reads` | `500` | Reads sampled per file when detecting primers |
 | `--primer_error_rate` | `0.12` | Cutadapt max error rate |
 
 ---
