@@ -185,16 +185,23 @@ def runIdFromReads(reads) {
 // product and an 18S V4 product on the same run want their own truncation and
 // their own error model. Where a run carries a single assay this is a no-op.
 def plateFor(meta, reads, assay = null) {
-    def runId = runIdFromReads(reads)
-    def base = runId
+    def base = runIdFromReads(reads)
     if (!base) {
+        // No original read names to recover the sequencing run from. What is left
+        // is the sample id, and a prefix of it only groups when the id has one:
+        // `PLATE1_A01_S3` shares `PLATE1_A01` with its neighbours, `SRR16930995`
+        // shares nothing. A base equal to the sample id puts every sample in a
+        // group of one, which then trips --min_group_samples and pools the entire
+        // run — the assay split is computed, keyed, and then discarded.
         def parts = meta.id.split('_')
-        base = parts.size() > 2 ? parts[0..1].join('_') : parts[0]
+        def derived = parts.size() > 2 ? parts[0..1].join('_') : parts[0]
+        base = derived == meta.id ? null : derived
     }
-    if (assay && assay != 'none') {
-        base = "${base}__${assay}".replaceAll(/[^A-Za-z0-9._-]/, '_')
-    }
-    return base
+    def key = (assay && assay != 'none') ? (base ? "${base}__${assay}" : assay) : base
+    // Neither a run nor an assay: samples whose detection found nothing, in a
+    // study with no original read names. One group that says it knows nothing,
+    // rather than one group per sample that pools to the same place by accident.
+    return (key ?: 'unassigned').replaceAll(/[^A-Za-z0-9._-]/, '_')
 }
 
 workflow {
