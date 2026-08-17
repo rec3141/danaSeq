@@ -46,6 +46,7 @@ _TOTAL_RE = re.compile(r"^Total read(?: pair)?s processed:\s*([\d,]+)", re.M)
 # Coordinates first when they exist, because for a pre-trimmed run they are the
 # only description of the assay there is.
 POSITION_COLUMNS = [
+    "assay_set",
     "assay_reference",
     "assay_start",
     "assay_end",

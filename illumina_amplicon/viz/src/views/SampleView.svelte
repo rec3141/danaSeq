@@ -6,7 +6,7 @@
     GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
     taxaMatchingFilter, makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
-    sampleInAssays, assayKey, listAssays, assayHeading,
+    sampleInAssays, assayKey, listAssays, assayHeading, assaySpan, assayPlace,
   } from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
@@ -372,8 +372,10 @@
           {@const s = selectedSampleObj}
           <p class="text-xs text-slate-400">
             <span class="text-slate-500">Assay:</span>
-            {assayHeading(s.assay_gene, s.assay_region, s.assay_primer_fwd, s.assay_primer_rev)}
-            {#if s.assay_primer_fwd || s.assay_primer_rev}
+            {assayHeading(s.assay_gene, s.assay_region, s.assay_primer_fwd, s.assay_primer_rev, assayPlace(s))}
+            {#if assayPlace(s)}
+              <span class="text-slate-500">·</span> {assaySpan(assayPlace(s))}
+            {:else if s.assay_primer_fwd || s.assay_primer_rev}
               <span class="text-slate-500">·</span> {[s.assay_primer_fwd, s.assay_primer_rev].filter(Boolean).join(' / ')}
             {/if}
             {#if Number.isFinite(Number(s.assay_match_fraction))}
@@ -383,7 +385,7 @@
           </p>
         {:else if filters.assays?.size}
           <p class="text-xs text-slate-500">
-            Assay filter active: {filters.assays.size} of {totalAssayCount} primer set{totalAssayCount === 1 ? '' : 's'}
+            Assay filter active: {filters.assays.size} of {totalAssayCount} assay{totalAssayCount === 1 ? '' : 's'}
           </p>
         {/if}
       </div>

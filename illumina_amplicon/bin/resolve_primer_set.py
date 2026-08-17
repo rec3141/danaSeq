@@ -258,11 +258,20 @@ def main(argv=None):
             members = [p for p in places if lo <= p["start"] <= hi]
             start = Counter(group).most_common(1)[0][0]
             ends = [p["end"] for p in members if p["end"] is not None]
+            end = Counter(ends).most_common(1)[0][0] if ends else None
+            # One string names the assay everywhere: it keys the error-model
+            # groups through plateFor() and the assay filter in the viz. Those
+            # have to be the same grouping, or the picture disagrees with the run
+            # it is a picture of — the viz cannot re-derive it from each sample's
+            # own coordinates, which is where the drift this clustering exists to
+            # absorb still lives.
+            label = f"{ref}@{start}-{end}" if end else f"{ref}@{start}"
             for s in set(group):
-                canonical[(ref, s)] = start
+                canonical[(ref, s)] = label
             amplicon.append({"reference": ref,
+                             "set": label,
                              "start": start,
-                             "end": Counter(ends).most_common(1)[0][0] if ends else None,
+                             "end": end,
                              "start_range": [lo, hi],
                              "end_range": [min(ends), max(ends)] if ends else None,
                              "samples": len(members)})
@@ -285,18 +294,18 @@ def main(argv=None):
     for e in fwd:
         for smp in e["members"]:
             place = sample_place.get(smp)
-            assay_of[smp] = (
-                f"{place['reference']}@{canonical[(place['reference'], place['start'])]}"
-                if place else e["sequence"])
+            assay_of[smp] = (canonical[(place["reference"], place["start"])]
+                             if place else e["sequence"])
 
-    pos_cols = ["sample", "assay_reference", "assay_start", "assay_end",
-                "assay_primer_fwd", "assay_primer_rev"]
+    pos_cols = ["sample", "assay_set", "assay_reference", "assay_start",
+                "assay_end", "assay_primer_fwd", "assay_primer_rev"]
     with open(args.positions, "w") as fh:
         fh.write("\t".join(pos_cols) + "\n")
         for smp in sorted(set(seq_of) | set(sample_place)):
             place = sample_place.get(smp) or {}
             seqs = seq_of.get(smp, {})
             row = {"sample": smp,
+                   "assay_set": assay_of.get(smp) if place else None,
                    "assay_reference": place.get("reference"),
                    "assay_start": place.get("start"),
                    "assay_end": place.get("end"),

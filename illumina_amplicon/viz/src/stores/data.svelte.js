@@ -74,12 +74,46 @@ function meaningful(v) {
   return v != null && !PLACEHOLDER_ASSAY.has(String(v).trim().toLowerCase());
 }
 
-/** Stable identity for a sample's assay, or '' when the run was not assigned one. */
+/**
+ * The assay a sample belongs to, as the pipeline decided it — "ecoli_16S@534-786".
+ *
+ * Taken as given rather than rebuilt from the sample's own coordinates, which
+ * still carry the few bases of drift that RESOLVE_PRIMER_SET clustered away: on
+ * PRJNA779070 those spread one assay over 534, 535, 541, 543, 544 and 554. This
+ * is the same string that keys the error-model groups, so the filter and the run
+ * agree by construction. '' when the assay sits on no reference at all.
+ */
+export function assayPlace(sample) {
+  const set = sample?.assay_set;
+  return meaningful(set) ? String(set).trim() : '';
+}
+
+/**
+ * Stable identity for a sample's assay, or '' when the run was not assigned one.
+ *
+ * Where the amplicon is placed on a reference, the placement is the identity and
+ * the primer sequences are left out of it. Reads that arrived with their primers
+ * already removed have no primer to be identified by — what fills that field is
+ * a consensus of amplicon, which differs between samples of one assay, so keying
+ * on it splits an assay into as many sets as it has variants. PRJNA779070 showed
+ * six where it has three. Non-ribosomal assays place nowhere and keep the primer
+ * pair, which for them is real and is all there is.
+ */
 export function assayKey(sample) {
   if (!sample) return '';
-  const parts = [sample.assay_gene, sample.assay_region, sample.assay_primer_fwd, sample.assay_primer_rev];
+  const place = assayPlace(sample);
+  const parts = place
+    ? [sample.assay_gene, sample.assay_region, '', '', place]
+    : [sample.assay_gene, sample.assay_region,
+       sample.assay_primer_fwd, sample.assay_primer_rev, ''];
   return parts.some(meaningful) ? parts.map(p => p ?? '').join('|') : '';
 }
+
+// Reference sequences the pipeline quotes coordinates in, and what they mean.
+const REFERENCE_GENE = {
+  ecoli_16S: { gene: '16S rRNA', organism: 'E. coli' },
+  yeast_18S: { gene: '18S rRNA', organism: 'yeast' },
+};
 
 /**
  * True for a name the pipeline derived from the reads rather than recognised in
@@ -94,20 +128,32 @@ export function isDerivedPrimer(name) {
   return /^[ACGTRYSWKMBDHVN]{14,}$/.test(String(name || '').trim());
 }
 
-/** Heading for an assay: the gene/region when known, else how we got the primers. */
-export function assayHeading(gene, region, fwd, rev) {
+/** Heading for an assay: the gene/region when known, else where it sits. */
+export function assayHeading(gene, region, fwd, rev, place) {
   const named = [gene, region].filter(Boolean).join(' ');
   if (named) return named;
+  if (place) {
+    const [ref] = String(place).split('@');
+    return REFERENCE_GENE[ref]?.gene || ref;
+  }
   return (isDerivedPrimer(fwd) || isDerivedPrimer(rev)) ? 'de novo primers' : 'unknown';
 }
 
-/** Human label for an assay key, e.g. "16S rRNA V3-V4 (341Fv3/Bakt_805R)". */
+/** "E. coli 534-786" — the span an assay covers, for a placed assay. */
+export function assaySpan(place) {
+  if (!place) return '';
+  const [ref, span] = String(place).split('@');
+  const organism = REFERENCE_GENE[ref]?.organism || ref;
+  return span ? `${organism} ${span}` : organism;
+}
+
+/** Human label for an assay key, e.g. "16S rRNA V4 (E. coli 534-786)". */
 export function assayLabel(key) {
   if (!key) return 'unassigned';
-  const [gene, region, fwd, rev] = key.split('|');
-  const head = assayHeading(gene, region, fwd, rev);
-  const primers = [fwd, rev].filter(Boolean).join('/');
-  return primers ? `${head} (${primers})` : head;
+  const [gene, region, fwd, rev, place] = key.split('|');
+  const head = assayHeading(gene, region, fwd, rev, place);
+  const detail = place ? assaySpan(place) : [fwd, rev].filter(Boolean).join('/');
+  return detail ? `${head} (${detail})` : head;
 }
 
 /**
@@ -121,8 +167,9 @@ export function listAssays() {
     const key = assayKey(s);
     if (!key) continue;
     if (!by.has(key)) {
-      const [gene, region, fwd, rev] = key.split('|');
-      by.set(key, { key, label: assayLabel(key), gene, region, fwd, rev, n: 0, _match: [] });
+      const [gene, region, fwd, rev, place] = key.split('|');
+      by.set(key, { key, label: assayLabel(key), gene, region, fwd, rev, place,
+                    span: assaySpan(place), n: 0, _match: [] });
     }
     const rec = by.get(key);
     rec.n++;
