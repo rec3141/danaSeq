@@ -32,6 +32,22 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import primer_db  # noqa: E402
 
 
+def _label(seq, state, location):
+    """What to call this group downstream.
+
+    A real primer is named by its sequence: that is what cutadapt reports back
+    from the log, and it is the same string however many samples carry it. A
+    pre-trimmed end has no primer to name — the sequence is amplicon, it is not
+    what anyone put in the tube, and it drifts between samples because it is a
+    consensus of biology rather than of chemistry. Its coordinate on the gene is
+    the stable, true thing about it, so that is the name.
+    """
+    if state == "pre-trimmed" and location:
+        best = location[0]
+        return f"{best['reference']}@{best['start']}"
+    return seq
+
+
 def _representatives(records, end):
     """Collapse one end's detections into entries, and say which sample is in which.
 
@@ -86,10 +102,12 @@ def _representatives(records, end):
             merged[seq]["samples"] += len(members)
             merged[seq]["members"].extend(samples)
         else:
+            location = primer_db.locate_on_ssu(seq)
             merged[seq] = {"sequence": seq, "samples": len(members), "source": source,
                            "state": state,
-                           "location": primer_db.locate_on_ssu(seq),
+                           "location": location,
                            "abuts": abuts,
+                           "label": _label(seq, state, location),
                            "members": samples}
     return sorted(merged.values(), key=lambda e: -e["samples"])
 
@@ -157,7 +175,7 @@ def main(argv=None):
     assay_of = {}
     for e in fwd:
         for smp in e["members"]:
-            assay_of[smp] = e["sequence"]
+            assay_of[smp] = e["label"]
 
     # One file per end, because the ends are trimmed independently. An end with
     # nothing to remove gets an empty file, and REMOVE_PRIMERS passes cutadapt no
