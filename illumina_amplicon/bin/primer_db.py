@@ -26,6 +26,7 @@ import gzip
 import logging
 import math
 import os
+import random
 import re
 import subprocess
 import tempfile
@@ -350,6 +351,9 @@ _PRIMER_MAX_START = 20        # a primer sits at the 5' end, behind at most a ba
 # Reads at the head of a FASTQ come from one corner of one tile and run roughly a
 # Phred below the body of the file; the difference is gone by ~1000 reads.
 _SAMPLE_SKIP = 1000
+# Reservoir sampling needs a source of randomness; a fixed one keeps detection
+# reproducible, which -resume and provenance both depend on.
+_SAMPLE_SEED = 1337
 _SAMPLE_MIN_MEAN_Q = 30
 _SAMPLE_MIN_BASE_Q = 15
 
@@ -382,14 +386,26 @@ def sample_reads(fastq_path: str, n: int = 500, trim: int | None = None,
     below `min_mean_q`, or any base below `min_base_q`, so the consensus is built
     from the body of the file rather than its weakest corner. Falls back to
     whatever it found if the file is too small to satisfy the filters.
+
+    Sampled across the whole file rather than from the first `n` reads that pass.
+    A FASTQ is not in random order, and a mixed library need not be interleaved:
+    PRJNA779070 writes its 16S and 18S amplicons in contiguous runs, so a window
+    taken near the start reports one of them and never learns the other exists —
+    SRR16930999 reads as 16S from its first 1,500 reads and is 72% 18S.
+
+    Reservoir sampling, on a fixed seed so the same file always yields the same
+    reads: detection has to be reproducible across a -resume, and a consensus
+    that moves between runs is not evidence of anything.
     """
     reads: list[str] = []
     fallback: list[str] = []
+    rng = random.Random(_SAMPLE_SEED)
+    kept = 0
     opener = gzip.open if str(fastq_path).endswith(".gz") else open
     try:
         with opener(fastq_path, "rt") as f:
             seen = 0
-            while len(reads) < n:
+            while True:
                 if not f.readline():
                     break
                 seq = f.readline().strip().upper()
@@ -411,7 +427,13 @@ def sample_reads(fastq_path: str, n: int = 500, trim: int | None = None,
                     continue
                 if min(phred) < min_base_q:
                     continue
-                reads.append(seq)
+                kept += 1
+                if len(reads) < n:
+                    reads.append(seq)
+                else:
+                    j = rng.randrange(kept)
+                    if j < n:
+                        reads[j] = seq
     except (OSError, EOFError):
         pass
     return reads if len(reads) >= 20 else fallback

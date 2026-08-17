@@ -131,10 +131,24 @@ def main():
             if len(lines) < 2:
                 continue
             row = dict(zip(lines[0].split("\t"), lines[1].split("\t")))
+            d = samples.setdefault(acc, {})
             try:
-                samples.setdefault(acc, {})["reads_after_filter"] = int(float(row.get("reads_out", 0)))
+                d["reads_after_filter"] = int(float(row.get("reads_out", 0)))
             except ValueError:
                 pass
+            # reads_in is what reached the filter. With a cutadapt log that is
+            # the count after primer removal and the log already said so; with no
+            # log — a run whose reads arrived with their primers off, so cutadapt
+            # never ran — nothing stands between the FASTQ and the filter, and
+            # this is the raw count. Without it the funnel opens at zero and every
+            # percentage divides by it.
+            try:
+                reads_in = int(float(row["reads_in"]))
+            except (KeyError, ValueError):
+                reads_in = None
+            if reads_in is not None and not d.get("reads_raw"):
+                d["reads_raw"] = reads_in
+                d.setdefault("reads_after_primer", reads_in)
 
     # 4: denoise — every published seqtab, attributed row by row (all of them, so
     # a sample present here but missing from `merge` reveals a DENOISE->MERGE loss).
