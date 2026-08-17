@@ -18,8 +18,14 @@ zoologist, so a record that just says "16S" cannot be read safely.
 Names that resolve to no table entry keep their counts and simply carry no gene,
 rather than being dropped or guessed at.
 
+Reads that reach us with their primers already removed produce no cutadapt log
+at all, and then the coordinates from RESOLVE_PRIMER_SET are the whole record:
+where on the SSU reference each sample's amplicon begins and ends. Those columns
+are merged in whether or not there are logs, so a run that is never trimmed still
+reports what each sample carries.
+
 Usage:
-    parse_primer_assignment.py OUT.tsv LOG [LOG ...]
+    parse_primer_assignment.py OUT.tsv [--positions POS.tsv] [LOG ...]
 """
 import os
 import re
@@ -36,6 +42,14 @@ except ImportError:  # table unavailable — still report what was observed
 _ADAPTER_RE = re.compile(r"^===\s*(?:(First|Second) read:\s*)?Adapter\s+(.+?)\s*===\s*$")
 _TRIMMED_RE = re.compile(r"Trimmed:\s*([\d,]+)\s*times")
 _TOTAL_RE = re.compile(r"^Total read(?: pair)?s processed:\s*([\d,]+)", re.M)
+
+# Coordinates first when they exist, because for a pre-trimmed run they are the
+# only description of the assay there is.
+POSITION_COLUMNS = [
+    "assay_reference",
+    "assay_start",
+    "assay_end",
+]
 
 COLUMNS = [
     "sample",
@@ -111,10 +125,36 @@ def sample_id(path):
     return os.path.splitext(name)[0]
 
 
+def read_positions(path):
+    """Per-sample coordinates from RESOLVE_PRIMER_SET, keyed by sample."""
+    out = {}
+    try:
+        with open(path) as fh:
+            header = fh.readline().rstrip("\n").split("\t")
+            for line in fh:
+                if not line.strip():
+                    continue
+                row = dict(zip(header, line.rstrip("\n").split("\t")))
+                sample = row.get("sample")
+                if sample:
+                    out[sample] = row
+    except OSError as e:
+        print(f"[WARN] unreadable positions {path}: {e}", file=sys.stderr)
+    return out
+
+
 def main(argv):
-    if len(argv) < 3:
+    if len(argv) < 2:
         sys.exit(__doc__.strip())
-    out_path, logs = argv[1], argv[2:]
+    out_path = argv[1]
+    args = argv[2:]
+    positions = {}
+    if args and args[0] == "--positions":
+        if len(args) < 2:
+            sys.exit("--positions needs a file")
+        positions = read_positions(args[1])
+        args = args[2:]
+    logs = args
 
     rows = []
     for path in logs:
@@ -131,17 +171,34 @@ def main(argv):
         rec["sample"] = sample_id(path)
         rows.append(rec)
 
+    # Samples the logs never mentioned — every sample, on a run that was not
+    # trimmed — still get a row from their coordinates.
+    seen = {r["sample"] for r in rows}
+    for sample, pos in positions.items():
+        if sample not in seen:
+            rows.append({"sample": sample,
+                         "assay_primer_fwd": pos.get("assay_primer_fwd") or None,
+                         "assay_primer_rev": pos.get("assay_primer_rev") or None})
+    for r in rows:
+        pos = positions.get(r["sample"])
+        if pos:
+            for c in POSITION_COLUMNS:
+                r[c] = pos.get(c) or None
+
+    columns = COLUMNS + [c for c in POSITION_COLUMNS if any(r.get(c) for r in rows)]
     rows.sort(key=lambda r: r["sample"])
     with open(out_path, "w") as fh:
-        fh.write("\t".join(COLUMNS) + "\n")
+        fh.write("\t".join(columns) + "\n")
         for r in rows:
             fh.write("\t".join("" if r.get(c) is None else str(r.get(c))
-                               for c in COLUMNS) + "\n")
+                               for c in columns) + "\n")
 
-    resolved = sum(1 for r in rows if r["assay_primer_fwd"])
+    resolved = sum(1 for r in rows if r.get("assay_primer_fwd"))
     named = sum(1 for r in rows if r.get("assay_gene"))
+    placed = sum(1 for r in rows if r.get("assay_reference"))
     print(f"[INFO] primer assignment: {resolved}/{len(rows)} samples matched a "
-          f"primer, {named} resolved to a gene -> {out_path}", file=sys.stderr)
+          f"primer, {named} resolved to a gene, {placed} placed on a reference "
+          f"-> {out_path}", file=sys.stderr)
     return 0
 
 

@@ -52,21 +52,24 @@ process DETECT_PRIMERS {
 process RESOLVE_PRIMER_SET {
     label 'process_low'
     conda "${projectDir}/envs/python.yml"
-    publishDir "${params.outdir}/trimmed", mode: 'copy', pattern: "primer_set.json"
+    publishDir "${params.outdir}/trimmed", mode: 'copy',
+        pattern: "{primer_set.json,assay_positions.tsv}"
 
     input:
     path(detections)
 
     output:
-    path("primer_set_fwd.fa"), emit: primers_fwd
-    path("primer_set_rev.fa"), emit: primers_rev
-    path("primer_set.json"),   emit: report
+    path("primer_set_fwd.fa"),   emit: primers_fwd
+    path("primer_set_rev.fa"),   emit: primers_rev
+    path("primer_set.json"),     emit: report
+    path("assay_positions.tsv"), emit: positions
 
     script:
     """
     resolve_primer_set.py ${detections} \
         --fwd-out primer_set_fwd.fa \
         --rev-out primer_set_rev.fa \
+        --positions assay_positions.tsv \
         --json primer_set.json
     """
 }
@@ -165,12 +168,16 @@ process PRIMER_ASSIGNMENT {
 
     input:
     path(cutadapt_logs)
+    path(positions)
 
     output:
     path("primer_assignment.tsv"), emit: tsv
 
     script:
+    // A pre-trimmed run produces no cutadapt log, so the coordinates are the
+    // whole record. Both inputs are optional in practice and either may be empty.
+    def pos_arg = positions.name != 'NO_POSITIONS' ? "--positions ${positions}" : ''
     """
-    parse_primer_assignment.py primer_assignment.tsv ${cutadapt_logs}
+    parse_primer_assignment.py primer_assignment.tsv ${pos_arg} ${cutadapt_logs}
     """
 }

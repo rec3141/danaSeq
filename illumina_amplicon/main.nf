@@ -282,6 +282,9 @@ workflow {
     // really carries, so collect the logs from whichever branch ran. Stays empty
     // when primer removal is skipped, and BUILD_VIZ handles that.
     ch_cutadapt_logs = Channel.empty()
+    // Where each sample's amplicon sits on the SSU references. Only the detection
+    // path can know this; the other paths were told their primers.
+    ch_positions = Channel.value(file('NO_POSITIONS'))
     // Whether the assay is ribosomal at all. Only primer detection can tell —
     // when primers are supplied we are not in a position to second-guess them,
     // so assume they mean what an rRNA reference database expects.
@@ -347,6 +350,7 @@ workflow {
             .collect(sort: true)
             .ifEmpty { error "no primers were detected in any sample — nothing to trim with" }
         RESOLVE_PRIMER_SET(ch_detections)
+        ch_positions = RESOLVE_PRIMER_SET.out.positions.first()
 
         ch_resolved = RESOLVE_PRIMER_SET.out.report
             .map { rep -> new groovy.json.JsonSlurper().parse(rep.toFile()) }
@@ -488,7 +492,9 @@ workflow {
 
 
     // One row per sample: which primer actually matched, and how many reads.
-    PRIMER_ASSIGNMENT(ch_cutadapt_logs.collect())
+    // Logs may be absent entirely: a run whose reads arrived trimmed never calls
+    // cutadapt, and the coordinates are then the only record of the assay.
+    PRIMER_ASSIGNMENT(ch_cutadapt_logs.collect().ifEmpty([]), ch_positions)
     ch_primer_assignment = PRIMER_ASSIGNMENT.out.tsv
 
     // 5. Merge all sequence tables and remove chimeras

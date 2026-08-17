@@ -119,6 +119,8 @@ def main(argv=None):
     ap.add_argument("--fwd-out", default="primer_set_fwd.fa")
     ap.add_argument("--rev-out", default="primer_set_rev.fa")
     ap.add_argument("--json", dest="json_out", default="primer_set.json")
+    ap.add_argument("--positions", default="assay_positions.tsv",
+                    help="per-sample assay coordinates on the SSU references")
     args = ap.parse_args(argv)
 
     records = []
@@ -172,10 +174,112 @@ def main(argv=None):
     # Which group each sample fell into — the assay key, derived from the primer
     # sequences rather than from cutadapt's per-adapter counts, so it survives a
     # run that is never handed to cutadapt at all.
+    # One file per end, because the ends are trimmed independently. An end with
+    # nothing to remove gets an empty file, and REMOVE_PRIMERS passes cutadapt no
+    # adapter option for it — an empty adapter file with --discard-untrimmed
+    # matches nothing and would drop every read.
+    #
+    # The header is the sequence: it is what cutadapt reports back in its log,
+    # and therefore what the assay is keyed on downstream.
+    for path, end_entries, wanted in ((args.fwd_out, fwd, trim_fwd),
+                                      (args.rev_out, rev, trim_rev)):
+        with open(path, "w") as fh:
+            if wanted:
+                for e in end_entries:
+                    fh.write(f">{e['sequence']}\n{e['sequence']}\n")
+
+    # Reads that arrive in a random orientation carry the forward primer on half
+    # of R1 and the reverse on the other half, so neither end can be trimmed as
+    # an end. The consensus still resolves — to whichever orientation won the
+    # majority — and quietly describes half the run.
+    def _median(key):
+        vals = sorted(v for v in (r.get(key) for r in records) if v is not None)
+        return vals[len(vals) // 2] if vals else None
+
+    # A primer belongs to one end. Finding the forward primer in R2, and the
+    # reverse in R1, at the same time and in a good share of reads, is not a
+    # degenerate match — it is both orientations in both files.
+    fwd_in_r2, rev_in_r1 = _median("fwd_in_r2"), _median("rev_in_r1")
+    scrambled = (fwd_in_r2 is not None and rev_in_r1 is not None
+                 and fwd_in_r2 >= 0.25 and rev_in_r1 >= 0.25)
+
+    # Each sample's own gene and span, taken from its own detection. A universal
+    # reverse primer places on both references, so the gene is decided by the
+    # forward end and the reverse is then read on that same reference — otherwise
+    # an 18S sample's reverse primer lands in the 16S record and gives that gene
+    # an end 700 bases past where its amplicon stops.
+    def _on(locs, ref):
+        for l in locs or []:
+            if l["reference"] == ref:
+                return l
+        return None
+
+    sample_place = {}
+    for r in records:
+        smp = r.get("sample")
+        fwd_locs = r.get("fwd_location") or []
+        if not smp or not fwd_locs:
+            continue
+        ref = fwd_locs[0]["reference"]
+        rev_here = _on(r.get("rev_location"), ref)
+        sample_place[smp] = {"reference": ref, "start": fwd_locs[0]["start"],
+                             "end": rev_here["end"] if rev_here else None}
+
+    # One position set per gene: the modal start speaks for the gene. Each
+    # sample's own detection places it to within a base or two — collapse_primers
+    # is what scatters a gene across several coordinates, by merging cores until
+    # the shared stretch has moved off the boundary it was measured against.
+    per_gene = {}
+    for place in sample_place.values():
+        per_gene.setdefault(place["reference"], []).append(place)
+    canonical, amplicon = {}, []
+    for ref, places in per_gene.items():
+        starts = [p["start"] for p in places]
+        ends = [p["end"] for p in places if p["end"] is not None]
+        canonical[ref] = Counter(starts).most_common(1)[0][0]
+        amplicon.append({"reference": ref,
+                         "start": canonical[ref],
+                         "end": Counter(ends).most_common(1)[0][0] if ends else None,
+                         "start_range": [min(starts), max(starts)],
+                         "end_range": [min(ends), max(ends)] if ends else None,
+                         "samples": len(places)})
+    amplicon.sort(key=lambda a: -a["samples"])
+
+    # One row per sample, so the assay travels with the sample into samples.json.
+    # A pre-trimmed run produces no cutadapt log at all, and this is the only
+    # record of what each sample carries.
+    seq_of = {}
+    for end_name, entry_list in (("fwd", fwd), ("rev", rev)):
+        for e in entry_list:
+            for smp in e["members"]:
+                seq_of.setdefault(smp, {})[end_name] = e["sequence"]
+
+    # A sample that sits on a reference is keyed by where it sits, because the
+    # coordinate is stable across samples and the consensus sequence is not. One
+    # that sits on neither — every non-ribosomal assay — is keyed by its
+    # sequence, which is all there is to key it on.
     assay_of = {}
     for e in fwd:
         for smp in e["members"]:
-            assay_of[smp] = e["label"]
+            place = sample_place.get(smp)
+            assay_of[smp] = (f"{place['reference']}@{canonical[place['reference']]}"
+                             if place else e["sequence"])
+
+    pos_cols = ["sample", "assay_reference", "assay_start", "assay_end",
+                "assay_primer_fwd", "assay_primer_rev"]
+    with open(args.positions, "w") as fh:
+        fh.write("\t".join(pos_cols) + "\n")
+        for smp in sorted(set(seq_of) | set(sample_place)):
+            place = sample_place.get(smp) or {}
+            seqs = seq_of.get(smp, {})
+            row = {"sample": smp,
+                   "assay_reference": place.get("reference"),
+                   "assay_start": place.get("start"),
+                   "assay_end": place.get("end"),
+                   "assay_primer_fwd": seqs.get("fwd"),
+                   "assay_primer_rev": seqs.get("rev")}
+            fh.write("\t".join("" if row.get(c) is None else str(row[c])
+                                for c in pos_cols) + "\n")
 
     # One file per end, because the ends are trimmed independently. An end with
     # nothing to remove gets an empty file, and REMOVE_PRIMERS passes cutadapt no
@@ -207,6 +311,7 @@ def main(argv=None):
                  and fwd_in_r2 >= 0.25 and rev_in_r1 >= 0.25)
 
     summary = {"samples": len(records), "ribosomal": ribosomal,
+               "amplicon": amplicon,
                "pre_trimmed": pre_trimmed,
                "trim_fwd": trim_fwd, "trim_rev": trim_rev,
                "cross_orientation": {"fwd_in_r2": fwd_in_r2, "rev_in_r1": rev_in_r1},
@@ -215,6 +320,19 @@ def main(argv=None):
     with open(args.json_out, "w") as fh:
         json.dump(summary, fh, indent=2)
 
+    for a in amplicon:
+        lo, hi = a["start_range"]
+        drift = f", starts span {lo}-{hi}" if hi > lo else ""
+        print(f"[INFO] amplicon on {a['reference']}: {a['start']}-{a['end']} "
+              f"across {a['samples']} samples{drift}", file=sys.stderr)
+        # An outlier absorbed into the gene's one position set is worth seeing:
+        # it is either a second assay or a bad detection, and both matter.
+        strays = sorted({p["start"] for p in per_gene[a["reference"]]
+                         if abs(p["start"] - a["start"]) > 12})
+        if strays:
+            print(f"[WARN] {a['reference']}: {len(strays)} start(s) far from "
+                  f"{a['start']} — {strays} — folded into the one set this gene "
+                  "is allowed", file=sys.stderr)
     print(f"[INFO] {len(records)} samples -> {len(entries)} primer(s)", file=sys.stderr)
     for e in entries:
         where = ", ".join(f"{l['reference']}@{l['start']}-{l['end']}"
@@ -222,16 +340,15 @@ def main(argv=None):
         print(f"[INFO]   {e['sequence']} ({e['source']}, {e['state']}, "
               f"{e['samples']} samples) {where or 'no SSU match'}", file=sys.stderr)
     if pre_trimmed:
-        # Only the ends that carry a cut, and only the reference each one is
-        # placed best on — a V4 primer lands on both genes, and quoting both
-        # coordinates for one boundary reads as two boundaries.
-        spans = sorted({f"{e['location'][0]['reference']} "
-                        f"{e['location'][0]['start']}-{e['location'][0]['end']}"
-                        for e in cut_at if e["location"]})
+        # The spans are reported above, once per gene, from the samples' own
+        # placements. Repeating them here from the collapsed entries quotes the
+        # drifted cores instead and reads as more boundaries than there are.
+        ends = [name for name, cut in (("forward", fwd_cut), ("reverse", rev_cut))
+                if cut]
         names = sorted({n for e in cut_at for n in e["abuts"]})
-        print("[WARN] these reads begin where a primer ends, not where one starts: "
-              "they were trimmed before submission, so nothing is removed here. "
-              "Amplicon spans " + "; ".join(spans), file=sys.stderr)
+        print(f"[WARN] the {' and '.join(ends)} end{'' if len(ends) == 1 else 's'} "
+              "begin where a primer ends, not where one starts: they were trimmed "
+              "before submission, so nothing is removed there", file=sys.stderr)
         print(f"[WARN] which primer was used is not recoverable — {len(names)} "
               "catalogued primers share that boundary, including "
               + ", ".join(names[:6]), file=sys.stderr)
