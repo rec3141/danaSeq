@@ -105,6 +105,7 @@ include { DEMULTIPLEX }       from './modules/demultiplex'
 include { DETECT_PRIMERS }      from './modules/primers'
 include { RESOLVE_PRIMER_SET }  from './modules/primers'
 include { SPLIT_PRIMER_PAIR }   from './modules/primers'
+include { SPLIT_BY_ASSAY }      from './modules/primers'
 include { REMOVE_PRIMERS }      from './modules/primers'
 include { PRIMER_ASSIGNMENT } from './modules/primers'
 include { AUTO_TRIM }         from './modules/denoise'
@@ -350,7 +351,27 @@ workflow {
             .collect(sort: true)
             .ifEmpty { error "no primers were detected in any sample — nothing to trim with" }
         RESOLVE_PRIMER_SET(ch_detections)
-        ch_positions = RESOLVE_PRIMER_SET.out.positions.first()
+        // One accession can hold two libraries. Split before anything downstream
+        // sees the reads, so each stream is a sample with one assay — which is
+        // what the error models, the truncation lengths and the chimera table
+        // all assume. Runs holding one assay come through untouched.
+        SPLIT_BY_ASSAY(ch_demuxed, RESOLVE_PRIMER_SET.out.report.first())
+        ch_demuxed = SPLIT_BY_ASSAY.out.reads
+            .flatMap { meta, r1s, r2s ->
+                def a = (r1s instanceof List ? r1s : [r1s]).sort { it.name }
+                def b = (r2s instanceof List ? r2s : [r2s]).sort { it.name }
+                (0..<a.size()).collect { i ->
+                    def id = a[i].name.replaceAll(/_R1\.fastq\.gz$/, '')
+                    // The assay rides on the name the splitter gave the stream,
+                    // so plateFor() needs no lookup for a split sample.
+                    def suffix = id.contains('__') ? id.substring(id.indexOf('__') + 2) : null
+                    [meta + [id: id, run_id: meta.id, assay: suffix], a[i], b[i]]
+                }
+            }
+        // Coordinates now follow the streams, which have new names.
+        ch_positions = SPLIT_BY_ASSAY.out.positions
+            .collectFile(name: 'assay_positions.tsv', keepHeader: true, skip: 1)
+            .first()
 
         ch_resolved = RESOLVE_PRIMER_SET.out.report
             .map { rep -> new groovy.json.JsonSlurper().parse(rep.toFile()) }
@@ -395,11 +416,12 @@ workflow {
             .map { meta, r1, r2, assay, assay_of ->
                 // cutadapt reports no winning adapter when R1 is the end that was
                 // already trimmed, so fall back to the key the set resolved.
-                def key = assay && assay != 'none' ? assay : assay_of[meta.id]
+                def key = meta.assay ?: (assay && assay != 'none' ? assay : assay_of[meta.id])
                 [meta + [plate: plateFor(meta, r1, key)], r1, r2]
             }
             .mix(ch_routed.keep.map { meta, r1, r2, _do_trim, assay_of ->
-                [meta + [plate: plateFor(meta, r1, assay_of[meta.id])], r1, r2]
+                def key = meta.assay ?: assay_of[meta.id]
+                [meta + [plate: plateFor(meta, r1, key)], r1, r2]
             })
     }
 

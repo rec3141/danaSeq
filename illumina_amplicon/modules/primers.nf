@@ -97,6 +97,36 @@ process SPLIT_PRIMER_PAIR {
 }
 
 
+// One accession is supposed to be one library. Where it holds two — a 16S run
+// and an 18S run concatenated — split it, so each assay is denoised with its own
+// truncation length and error model, and so chimera detection has a table whose
+// samples share an amplicon. A run carrying one assay passes through unchanged
+// and keeps its name.
+process SPLIT_BY_ASSAY {
+    tag "${meta.id}"
+    label 'process_low'
+    conda "${projectDir}/envs/python.yml"
+
+    input:
+    tuple val(meta), path(r1), path(r2)
+    path(primer_set)
+
+    output:
+    tuple val(meta), path("*_R1.fastq.gz"), path("*_R2.fastq.gz"), emit: reads
+    path("${meta.id}_positions.tsv"), emit: positions
+
+    script:
+    """
+    split_by_assay.py \
+        --primer-set ${primer_set} \
+        --id "${meta.id}" \
+        --r1 ${r1} --r2 ${r2} \
+        --min-share ${params.split_min_share} \
+        --positions "${meta.id}_positions.tsv"
+    """
+}
+
+
 process REMOVE_PRIMERS {
     tag "${meta.id}"
     cpus 1
