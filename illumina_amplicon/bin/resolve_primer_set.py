@@ -31,6 +31,24 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import primer_db  # noqa: E402
 
+# How far two samples' start coordinates may sit apart and still be one assay.
+# Across 41 downloaded studies, eight samples each, a single assay never spreads
+# more than 11 bases — that spread is where the de-novo window happened to
+# start, not where the amplicon does. Two assays on one gene are far outside it:
+# 341F and 515F sit 168 apart, a near-full-length 18S primer and a V4 one 563.
+POSITION_TOLERANCE = 25
+
+
+def _cluster(values, tol):
+    """Sorted coordinates split wherever the gap exceeds `tol`."""
+    out = []
+    for v in sorted(values):
+        if out and v - out[-1][-1] <= tol:
+            out[-1].append(v)
+        else:
+            out.append([v])
+    return out
+
 
 def _label(seq, state, location):
     """What to call this group downstream.
@@ -225,24 +243,29 @@ def main(argv=None):
         sample_place[smp] = {"reference": ref, "start": fwd_locs[0]["start"],
                              "end": rev_here["end"] if rev_here else None}
 
-    # One position set per gene: the modal start speaks for the gene. Each
-    # sample's own detection places it to within a base or two — collapse_primers
-    # is what scatters a gene across several coordinates, by merging cores until
-    # the shared stretch has moved off the boundary it was measured against.
+    # Starts within POSITION_TOLERANCE of each other are one assay; the modal
+    # start speaks for it. A gene may hold more than one — PRJNA540708 runs 341F
+    # and 515F, PRJEB75226 runs a near-full-length 18S primer and a V4 one — and
+    # those are different amplicon lengths needing different truncation.
     per_gene = {}
     for place in sample_place.values():
         per_gene.setdefault(place["reference"], []).append(place)
+
     canonical, amplicon = {}, []
     for ref, places in per_gene.items():
-        starts = [p["start"] for p in places]
-        ends = [p["end"] for p in places if p["end"] is not None]
-        canonical[ref] = Counter(starts).most_common(1)[0][0]
-        amplicon.append({"reference": ref,
-                         "start": canonical[ref],
-                         "end": Counter(ends).most_common(1)[0][0] if ends else None,
-                         "start_range": [min(starts), max(starts)],
-                         "end_range": [min(ends), max(ends)] if ends else None,
-                         "samples": len(places)})
+        for group in _cluster([p["start"] for p in places], POSITION_TOLERANCE):
+            lo, hi = group[0], group[-1]
+            members = [p for p in places if lo <= p["start"] <= hi]
+            start = Counter(group).most_common(1)[0][0]
+            ends = [p["end"] for p in members if p["end"] is not None]
+            for s in set(group):
+                canonical[(ref, s)] = start
+            amplicon.append({"reference": ref,
+                             "start": start,
+                             "end": Counter(ends).most_common(1)[0][0] if ends else None,
+                             "start_range": [lo, hi],
+                             "end_range": [min(ends), max(ends)] if ends else None,
+                             "samples": len(members)})
     amplicon.sort(key=lambda a: -a["samples"])
 
     # One row per sample, so the assay travels with the sample into samples.json.
@@ -262,8 +285,9 @@ def main(argv=None):
     for e in fwd:
         for smp in e["members"]:
             place = sample_place.get(smp)
-            assay_of[smp] = (f"{place['reference']}@{canonical[place['reference']]}"
-                             if place else e["sequence"])
+            assay_of[smp] = (
+                f"{place['reference']}@{canonical[(place['reference'], place['start'])]}"
+                if place else e["sequence"])
 
     pos_cols = ["sample", "assay_reference", "assay_start", "assay_end",
                 "assay_primer_fwd", "assay_primer_rev"]
@@ -325,14 +349,22 @@ def main(argv=None):
         drift = f", starts span {lo}-{hi}" if hi > lo else ""
         print(f"[INFO] amplicon on {a['reference']}: {a['start']}-{a['end']} "
               f"across {a['samples']} samples{drift}", file=sys.stderr)
-        # An outlier absorbed into the gene's one position set is worth seeing:
-        # it is either a second assay or a bad detection, and both matter.
-        strays = sorted({p["start"] for p in per_gene[a["reference"]]
-                         if abs(p["start"] - a["start"]) > 12})
-        if strays:
-            print(f"[WARN] {a['reference']}: {len(strays)} start(s) far from "
-                  f"{a['start']} — {strays} — folded into the one set this gene "
-                  "is allowed", file=sys.stderr)
+    # More than one set on a gene is a study running two assays on it, which is
+    # worth saying out loud — it means two amplicon lengths under one accession.
+    for ref in sorted({a["reference"] for a in amplicon}):
+        sets = [a for a in amplicon if a["reference"] == ref]
+        if len(sets) > 1:
+            def _n(a):
+                return f"{a['start']} ({a['samples']} sample" \
+                       f"{'' if a['samples'] == 1 else 's'})"
+            print(f"[WARN] {ref} carries {len(sets)} position sets: "
+                  + ", ".join(_n(a) for a in sorted(sets, key=lambda x: x["start"]))
+                  + " — grouped and truncated apart", file=sys.stderr)
+            lonely = [a for a in sets if a["samples"] == 1]
+            if lonely:
+                print("[WARN] a set of one sample is likelier a bad detection than "
+                      "a second assay: " + ", ".join(str(a["start"]) for a in lonely),
+                      file=sys.stderr)
     print(f"[INFO] {len(records)} samples -> {len(entries)} primer(s)", file=sys.stderr)
     for e in entries:
         where = ", ".join(f"{l['reference']}@{l['start']}-{l['end']}"
