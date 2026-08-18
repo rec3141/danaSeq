@@ -11,6 +11,9 @@
   import { store, loadData, asvIdsForAssays } from './stores/data.svelte.js';
 
   let activeTab = $state('samples');
+  // Drawer state for narrow screens; ignored from md up, where the sidebar is a
+  // column and always shown.
+  let sidebarOpen = $state(false);
 
   // Shared filter state
   let filters = $state({
@@ -35,7 +38,7 @@
     minReads: 0,
     sampleFilter: '',
     showOverlay: true,
-    pointScale: 20,
+    pointScale: 3,
     // Network
     minPrevalence: 0,
     corrThreshold: 0.3,
@@ -70,6 +73,8 @@
     const hash = window.location.hash.replace('#', '') || 'samples';
     if (['samples', 'network', 'phylogeny', 'heatmap', 'tables', 'provenance'].includes(hash)) {
       activeTab = hash;
+      // Picking a tab is a request to see it, not to keep looking at filters.
+      sidebarOpen = false;
     }
   }
 
@@ -81,15 +86,26 @@
   });
 </script>
 
-<div class="flex h-screen flex-col">
-  <NavBar {activeTab} />
+<!-- 100vh is taller than the visible area on mobile browsers, where the address
+     bar overlays the page; dvh tracks what is actually on screen. Declared twice
+     rather than as utilities so the cascade does the fallback: a browser without
+     dvh ignores the second and keeps 100vh. -->
+<div class="flex flex-col" style="height:100vh;height:100dvh">
+  <NavBar {activeTab} onToggleFilters={() => (sidebarOpen = !sidebarOpen)} />
 
-  <div class="flex flex-1 overflow-hidden">
+  <div class="relative flex flex-1 overflow-hidden">
     {#if !store.loading && !store.error}
-      <Sidebar {activeTab} bind:filters />
+      <Sidebar {activeTab} bind:filters open={sidebarOpen}
+               onClose={() => (sidebarOpen = false)} />
+      <!-- Tapping the plot should put the drawer away; only present while it is. -->
+      {#if sidebarOpen}
+        <button type="button" aria-label="Close filters" tabindex="-1"
+                onclick={() => (sidebarOpen = false)}
+                class="fixed inset-0 z-30 bg-slate-950/60 md:hidden"></button>
+      {/if}
     {/if}
 
-    <main class="flex-1 overflow-hidden">
+    <main class="min-w-0 flex-1 overflow-hidden">
       {#if store.loading}
         <div class="flex h-full items-center justify-center">
           <div class="text-center">

@@ -2,7 +2,8 @@
   import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays, assayHeading } from '../stores/data.svelte.js';
   import AutocompleteInput from './AutocompleteInput.svelte';
 
-  let { activeTab = 'samples', filters = $bindable({}) } = $props();
+  let { activeTab = 'samples', filters = $bindable({}), open = false,
+        onClose = null } = $props();
 
   function generateClusterColor(id, total) {
     const hue = ((id - 1) * 137.508) % 360;
@@ -107,7 +108,20 @@
   );
 </script>
 
-<aside class="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-slate-800 bg-slate-900/60">
+<!-- A drawer below md and a column at md and up. Fixed rather than squeezed:
+     256px of a 375px screen leaves nothing to look at, and the plots are the
+     point of the page. -->
+<aside class="fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 transform flex-col
+              overflow-y-auto border-r border-slate-800 bg-slate-900 transition-transform
+              duration-200 md:static md:z-auto md:translate-x-0 md:bg-slate-900/60
+              {open ? 'translate-x-0' : '-translate-x-full'}">
+  {#if onClose}
+    <div class="flex items-center justify-between border-b border-slate-800 px-3 py-2 md:hidden">
+      <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Filters</span>
+      <button type="button" onclick={onClose} aria-label="Close filters"
+              class="rounded px-2 py-1 text-lg leading-none text-slate-400 hover:text-white">&times;</button>
+    </div>
+  {/if}
   <div class="p-3 border-b border-slate-800">
     <p class="text-xs text-slate-500">{store.samples.length} samples | {store.asvs.length} ASVs</p>
   </div>
