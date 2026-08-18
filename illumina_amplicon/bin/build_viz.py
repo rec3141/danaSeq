@@ -517,7 +517,10 @@ def build_renorm_stats(renorm_data):
         else:
             log_warn("renorm data has no 'group' column; stats will be empty")
     else:
-        log_warn(f"Unexpected renorm data type: {type(renorm_data)}")
+        if renorm_data is None:
+            log_info("no renormalized table — renorm_stats.json left empty")
+        else:
+            log_warn(f"Unexpected renorm data type: {type(renorm_data)}")
 
     for grp, stats in result.items():
         log_info(f"  {grp}: {stats['n_asvs']} ASVs, "
@@ -529,6 +532,11 @@ def build_renorm_stats(renorm_data):
 # ---------------------------------------------------------------------------
 # Load taxonomy files from a directory
 # ---------------------------------------------------------------------------
+
+def _absent(path):
+    """True for the NO_* sentinels Nextflow feeds when an input never ran."""
+    return not path or os.path.basename(str(path)).startswith("NO_")
+
 
 def load_taxonomy_dir(taxonomy_dir):
     """Load all *_taxonomy.pkl files from a directory.
@@ -779,10 +787,16 @@ def main():
             log_error(f"seqtab missing required column: {col}")
             sys.exit(1)
 
-    renorm_data = load_pickle(renorm_path)
+    # A run whose primers match neither SSU reference gets no taxonomy, and with
+    # no taxonomy there are no groups to renormalise against — so both arrive as
+    # sentinels. The ASV table, counts, samples and t-SNE stand on their own, and
+    # everything below already branches on their absence.
+    renorm_data = None if _absent(renorm_path) else load_pickle(renorm_path)
 
     # Extract the renorm_table_list (sequence-to-group mapping)
     renorm_table_list = None
+    if renorm_data is None:
+        log_warn("no renormalized table — ASVs will carry no group")
     if isinstance(renorm_data, pd.DataFrame) and "group" in renorm_data.columns:
         # renorm_merged format: extract unique sequence->group mapping
         renorm_table_list = renorm_data[["sequence", "group"]].drop_duplicates()
@@ -797,7 +811,7 @@ def main():
             renorm_table_list = pd.DataFrame(rows).drop_duplicates()
 
     # Load taxonomy
-    taxonomy_dict = load_taxonomy_dir(taxonomy_dir)
+    taxonomy_dict = {} if _absent(taxonomy_dir) else load_taxonomy_dir(taxonomy_dir)
 
     # Load metadata (optional)
     metadata = None

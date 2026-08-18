@@ -602,38 +602,49 @@ workflow {
     // 10. t-SNE clustering (samples + ASVs)
     CLUSTER_TSNE(FILTER_SEQTAB.out.seqtab)
 
-    // 11. SparCC network analysis (requires renormalized data)
+    // 11. SparCC network analysis, where there is renormalized data to run it on.
+    //     Renormalization is by taxonomic group, so a run with no taxonomy has
+    //     no groups and no network — the ASV table is what it has.
+    ch_network = Channel.empty()
     if (params.ref_databases) {
         NETWORK_SPARCC(RENORMALIZE.out.merged, params.min_prevalence)
+        ch_network = NETWORK_SPARCC.out.correlations
+    }
 
-        // 12. Build visualization (bundle all outputs)
-        ch_tax_files = ASSIGN_TAXONOMY.out.taxonomy
-            .map { db_name, tax, boot -> [tax, boot] }
-            .flatten()
-            .collect()
+    // 12. Build visualization. This runs whatever else did or did not: an assay
+    //     whose primers match neither SSU reference is skipped for taxonomy on
+    //     purpose, and skipping its viz too would leave a finished run with
+    //     nothing to look at and nothing to deploy (#51). Marine eDNA makes this
+    //     ordinary rather than rare — COI metabarcoding is not ribosomal.
+    //
+    //     Every optional input has a sentinel. build_viz.py treats a NO_* path as
+    //     absent and drops the section it would have fed, so the viz loses
+    //     taxonomy, groups or edges rather than vanishing.
+    ch_tax_files = (params.ref_databases
+        ? ASSIGN_TAXONOMY.out.taxonomy.map { _db, tax, boot -> [tax, boot] }
+            .flatten().collect()
+        : Channel.empty()).ifEmpty(file('NO_TAXONOMY'))
 
-        // t-SNE and network are optional enhancements running under
-        // errorStrategy 'ignore'. Feed sentinels when their channels are empty
-        // (the process failed/was skipped) so BUILD_VIZ still runs — the viz
-        // just loses scatter coords / network edges instead of vanishing.
-        BUILD_VIZ(
-            FILTER_SEQTAB.out.seqtab,
-            RENORMALIZE.out.merged,
-            ch_tax_files,
-            ch_metadata.ifEmpty(file('NO_METADATA')),
-            CLUSTER_TSNE.out.sample_tsne.ifEmpty(file('NO_SAMPLE_TSNE')),
-            CLUSTER_TSNE.out.seq_tsne.ifEmpty(file('NO_SEQ_TSNE')),
-            NETWORK_SPARCC.out.correlations.ifEmpty(file('NO_NETWORK')),
-            ch_primer_assignment.ifEmpty(file('NO_PRIMER_ASSIGNMENT'))
+    ch_renorm = (params.ref_databases ? RENORMALIZE.out.merged : Channel.empty())
+        .ifEmpty(file('NO_RENORM'))
+
+    BUILD_VIZ(
+        FILTER_SEQTAB.out.seqtab,
+        ch_renorm,
+        ch_tax_files,
+        ch_metadata.ifEmpty(file('NO_METADATA')),
+        CLUSTER_TSNE.out.sample_tsne.ifEmpty(file('NO_SAMPLE_TSNE')),
+        CLUSTER_TSNE.out.seq_tsne.ifEmpty(file('NO_SEQ_TSNE')),
+        ch_network.ifEmpty(file('NO_NETWORK')),
+        ch_primer_assignment.ifEmpty(file('NO_PRIMER_ASSIGNMENT'))
+    )
+
+    // 13. Optional: bundle static viz site (requires Node.js)
+    if (params.build_viz_site) {
+        BUNDLE_VIZ_SITE(
+            BUILD_VIZ.out.json.collect(),
+            BUILD_VIZ.out.json_gz.collect()
         )
-
-        // 13. Optional: bundle static viz site (requires Node.js)
-        if (params.build_viz_site) {
-            BUNDLE_VIZ_SITE(
-                BUILD_VIZ.out.json.collect(),
-                BUILD_VIZ.out.json_gz.collect()
-            )
-        }
     }
 
     // ============================================================================
