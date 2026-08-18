@@ -155,26 +155,38 @@
     return buildTaxColorMap(effectiveColorLevel, filters.taxonFilter, filters.taxonFilterLevel);
   });
 
-  // Build label for an ASV based on selected label levels
+  // Build label for an ASV based on selected label levels.
+  //
+  // Bootstrap is a support value *for a rank*, not for the ASV, so it belongs
+  // beside each rank shown rather than once at the end: a genus called at 62 and
+  // the phylum above it called at 100 are two different statements, and a single
+  // number cannot say which one it is about. Selecting Phylum, Genus and
+  // bootstrap gives `Bacteroidota (100) | Polaribacter (62)`.
   function makeLabel(asvId) {
     const levels = filters.treeLabelLevels || ['id'];
     const tax = taxByAsv[asvId];
     const boot = bootByAsv[asvId];
+    const withBoot = levels.includes('bootstrap');
+    const ranks = levels.filter(l => l !== 'id' && l !== 'bootstrap');
     const parts = [];
 
     for (const level of levels) {
       if (level === 'id') {
         parts.push(asvId);
       } else if (level === 'bootstrap') {
-        if (boot) {
-          // Show bootstrap for the deepest assigned level
+        // Only meaningful on its own when no rank was chosen to attach it to;
+        // then it still answers "how well is this classified at all?".
+        if (boot && ranks.length === 0) {
           for (let i = boot.length - 1; i >= 0; i--) {
             if (tax && tax[i]) { parts.push(`(${boot[i]})`); break; }
           }
         }
       } else if (tax) {
         const idx = taxLevels.indexOf(level);
-        if (idx >= 0 && tax[idx]) parts.push(tax[idx]);
+        if (idx >= 0 && tax[idx]) {
+          const b = withBoot && boot ? boot[idx] : null;
+          parts.push(b == null || b === '' ? tax[idx] : `${tax[idx]} (${b})`);
+        }
       }
     }
 
