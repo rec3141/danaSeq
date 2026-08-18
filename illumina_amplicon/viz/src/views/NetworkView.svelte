@@ -1,4 +1,5 @@
 <script>
+  import { attachPinch, zoomRange } from '../lib/pinch.js';
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
   import {
@@ -151,10 +152,44 @@
     }
   }
 
+  // Two-finger zoom, with the axes free of each other. Plotly's own touch
+  // handling scales both together, which is the wrong default for a projection
+  // whose axes have no shared unit — stretching one to read a crowded band is
+  // exactly the thing worth doing.
+  let pinchStart = null;
+
+  function startPinch() {
+    if (!plotDiv?.layout) return;
+    pinchStart = {
+      x: [...(plotDiv.layout.xaxis?.range ?? [])],
+      y: [...(plotDiv.layout.yaxis?.range ?? [])],
+    };
+  }
+
+  function applyPinch({ sx, sy, cx, cy }) {
+    if (!pinchStart?.x?.length || !plotDiv?._fullLayout) return;
+    const area = plotDiv._fullLayout._size;
+    if (!area) return;
+    // Anchor on the point between the fingers, so the plot grows away from
+    // where you are holding it rather than from the middle.
+    const ax = Math.min(1, Math.max(0, (cx - area.l) / area.w));
+    const ay = Math.min(1, Math.max(0, 1 - (cy - area.t) / area.h));
+    Plotly.relayout(plotDiv, {
+      'xaxis.range': zoomRange(pinchStart.x, sx, ax),
+      'yaxis.range': zoomRange(pinchStart.y, sy, ay),
+    });
+  }
+
   onMount(() => {
     document.addEventListener('keydown', handleKey);
     document.addEventListener('keyup', handleKey);
+    const detachPinch = attachPinch(plotDiv, {
+      onStart: startPinch,
+      onPinch: applyPinch,
+      onEnd: () => { pinchStart = null; },
+    });
     return () => {
+      detachPinch();
       document.removeEventListener('keydown', handleKey);
       document.removeEventListener('keyup', handleKey);
       if (plotDiv && hasPlot) Plotly.purge(plotDiv);

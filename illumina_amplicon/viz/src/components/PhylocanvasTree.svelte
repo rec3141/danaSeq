@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { attachPinch } from '../lib/pinch.js';
 
   let {
     newick = '',
@@ -14,6 +15,36 @@
   let container;
   let tree = null;
   let prevNewick = null;
+
+  // Independent branch (x) and step (y) zoom, from a two-finger gesture.
+  //
+  // A tree's two directions mean different things — branch length along x, one
+  // tip per row down y — and the useful gesture is usually to stretch one
+  // without the other: spread crowded tips apart, or compress them to see the
+  // topology. deck.gl's controller underneath reads a pinch as a single uniform
+  // zoom, so the gesture is taken in the capture phase before it gets there.
+  const ZOOM_MIN = -3;
+  const ZOOM_MAX = 6;
+  let pinchBase = null;
+
+  const clamp = v => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v));
+
+  function startTreePinch() {
+    if (!tree) return;
+    pinchBase = {
+      branch: tree.props?.branchZoom ?? 0,
+      step: tree.props?.stepZoom ?? 0,
+    };
+  }
+
+  function applyTreePinch({ sx, sy }) {
+    if (!tree || !pinchBase) return;
+    // Zoom is a log-scale offset, so a span that doubles is +1.
+    tree.setProps({
+      branchZoom: clamp(pinchBase.branch + Math.log2(sx)),
+      stepZoom: clamp(pinchBase.step + Math.log2(sy)),
+    });
+  }
 
   // Tooltip state
   let tipText = $state('');
@@ -133,7 +164,15 @@
     });
     if (container) ro.observe(container);
 
+    const detachPinch = attachPinch(container, {
+      onStart: startTreePinch,
+      onPinch: applyTreePinch,
+      onEnd: () => { pinchBase = null; },
+      capture: true,
+    });
+
     return () => {
+      detachPinch();
       ro.disconnect();
       if (tree) { tree.destroy(); tree = null; }
     };
