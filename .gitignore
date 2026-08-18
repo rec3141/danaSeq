@@ -103,6 +103,12 @@ eggs/
 .eggs/
 lib/
 lib64/
+# …but not source that happens to live in a directory called lib. The rule above
+# is for Python build output; it silently swallowed illumina_amplicon/viz/src/lib,
+# which shipped an image whose viz could not build because a module the call
+# sites imported was never committed.
+!**/src/lib/
+!**/src/lib/**
 parts/
 sdist/
 var/
