@@ -242,9 +242,42 @@
   }
 
   function closeInfoPanel() { clickedNode = null; }
+
+  // Export what is on screen, not what was loaded: with pruning on, the tree you
+  // are looking at is a subset, and that is the one worth taking away.
+  function exportNewick() {
+    const nwk = (displayNewick || '').trim();
+    if (!nwk) return;
+    const text = nwk.endsWith(';') ? nwk : nwk + ';';
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const pruned = filters.treePrune && filteredAsvIds.size > 0;
+    a.href = url;
+    a.download = pruned ? 'tree.filtered.nwk' : 'tree.nwk';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 </script>
 
 <div class="flex h-full flex-col">
+
+  {#if store.treeNewick}
+    <div class="flex items-center gap-2 px-3 pt-2">
+      <button
+        onclick={exportNewick}
+        class="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300
+               hover:border-slate-500 hover:text-white"
+        title="Download this tree in Newick format">
+        Export Newick{filters.treePrune && filteredAsvIds.size > 0 ? ' (filtered)' : ''}
+      </button>
+      <span class="text-xs text-slate-500">
+        {filteredAsvIds.size > 0 && filters.treePrune
+          ? `${filteredAsvIds.size.toLocaleString()} tips`
+          : `${store.asvs.length.toLocaleString()} tips`}
+      </span>
+    </div>
+  {/if}
 
   <!-- Tree + info panel -->
   <div class="flex flex-1 overflow-hidden">

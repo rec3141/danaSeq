@@ -64,10 +64,60 @@
     return cols;
   });
 
-  let cols = $derived(activeTable === 'asvs' ? asvCols : sampleCols);
+  // ASV x sample counts. One row per ASV, one column per sample, with the
+  // taxonomy carried alongside so the exported file stands on its own — a matrix
+  // of bare counts is not something you can read six months later.
+  const MATRIX_ROW_CAP = 250;
+
+  let sampleIds = $derived(store.counts?.samples || []);
+
+  let matrixCols = $derived.by(() => {
+    const cols = [
+      { key: '_color', label: '', width: '30px' },
+      { key: 'id', label: 'ASV' },
+    ];
+    for (const level of taxLevels) cols.push({ key: `_tax_${level}`, label: level });
+    cols.push({ key: 'total_reads', label: 'Total', numeric: true });
+    for (const sid of sampleIds) {
+      cols.push({ key: `_s_${sid}`, label: sid, numeric: true, sample: true });
+    }
+    return cols;
+  });
+
+  // sequence id -> {sample id -> reads}, built once from the packed counts.
+  let countsByAsv = $derived.by(() => {
+    const c = store.counts;
+    if (!c?.data) return {};
+    const out = {};
+    for (const [si, ai, reads] of c.data) {
+      const aid = c.asvs[ai];
+      (out[aid] ||= {})[c.samples[si]] = reads;
+    }
+    return out;
+  });
+
+  let cols = $derived(
+    activeTable === 'asvs' ? asvCols
+    : activeTable === 'samples' ? sampleCols
+    : matrixCols
+  );
 
   // ── Build enriched rows ──
   let rawRows = $derived.by(() => {
+    if (activeTable === 'matrix') {
+      const per = countsByAsv;
+      return store.asvs.map(a => {
+        const row = { id: a.id, total_reads: a.total_reads, group: a.group };
+        const tax = taxAssignments[a.id];
+        if (tax) {
+          for (let i = 0; i < taxLevels.length; i++) row[`_tax_${taxLevels[i]}`] = tax[i] || '';
+        }
+        const counts = per[a.id] || {};
+        for (const sid of sampleIds) row[`_s_${sid}`] = counts[sid] ?? 0;
+        row._color = GROUP_HEX[a.group] || GROUP_HEX.unknown;
+        return row;
+      });
+    }
     if (activeTable === 'asvs') {
       const asvClusters = store.heatmap?.asvClusters?.[String(filters.asvClusterK || 4)] || {};
       return store.asvs.map(a => {
@@ -113,7 +163,7 @@
     let rows = rawRows;
 
     // Taxonomy filter
-    if (filters.taxonFilter && activeTable === 'asvs') {
+    if (filters.taxonFilter && activeTable !== 'samples') {
       const matches = makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel);
       rows = rows.filter(r => matches(r.id ?? '', r.taxonomy ?? ''));
     }
@@ -149,7 +199,14 @@
     return rows;
   });
 
-  let pageRows = $derived(filteredRows);
+  // A 3,000 x 66 grid is 200,000 cells and the browser will not thank you for
+  // it. Draw the head of the table and export the whole thing.
+  let pageRows = $derived(
+    activeTable === 'matrix' ? filteredRows.slice(0, MATRIX_ROW_CAP) : filteredRows
+  );
+  let matrixTruncated = $derived(
+    activeTable === 'matrix' && filteredRows.length > MATRIX_ROW_CAP
+  );
 
   function toggleSort(key) {
     if (key === '_color') return;
@@ -158,6 +215,8 @@
   }
 
   function exportCsv() {
+    // filteredRows, not pageRows: the drawn table is capped for the browser's
+    // sake, and an export that silently stopped at 250 rows would be a trap.
     const exportCols = cols.filter(c => c.key !== '_color');
     const header = exportCols.map(c => c.label).join(',');
     const body = filteredRows.map(r =>
@@ -169,7 +228,8 @@
     const blob = new Blob([header + '\n' + body], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `${activeTable}.csv`; a.click();
+    const name = activeTable === 'matrix' ? 'asv_by_sample' : activeTable;
+    a.href = url; a.download = `${name}.csv`; a.click();
     URL.revokeObjectURL(url);
   }
 </script>
@@ -187,6 +247,11 @@
           {activeTable === 'samples' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
         onclick={() => { activeTable = 'samples'; sortCol = null; }}
       >Samples</button>
+      <button
+        class="rounded px-3 py-1.5 text-sm font-medium transition-colors
+          {activeTable === 'matrix' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+        onclick={() => { activeTable = 'matrix'; sortCol = null; }}
+      >ASV &times; Sample</button>
     </div>
 
     <input
@@ -201,6 +266,13 @@
       onclick={exportCsv}
     >Export CSV</button>
   </div>
+
+  {#if matrixTruncated}
+    <p class="mb-2 text-xs text-slate-500">
+      Showing the first {MATRIX_ROW_CAP} of {filteredRows.length.toLocaleString()} ASVs —
+      export includes all of them, with taxonomy.
+    </p>
+  {/if}
 
   <div class="flex-1 overflow-auto rounded-lg border border-slate-800">
     <table class="w-full text-sm">

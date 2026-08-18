@@ -108,18 +108,25 @@
   );
 </script>
 
-<!-- A drawer below md and a column at md and up. Fixed rather than squeezed:
-     256px of a 375px screen leaves nothing to look at, and the plots are the
-     point of the page. -->
-<aside class="fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 transform flex-col
-              overflow-y-auto border-r border-slate-800 bg-slate-900 transition-transform
-              duration-200 md:static md:z-auto md:translate-x-0 md:bg-slate-900/60
-              {open ? 'translate-x-0' : '-translate-x-full'}">
+<!-- A bottom sheet below md and a left column at md and up.
+     A sheet rather than a side drawer: filters are a thing you adjust while
+     watching the plot change, and a side drawer covers the plot. Docked to the
+     bottom it takes half the height, leaves the viz visible above it, and sits
+     where a thumb already is. -->
+<aside class="fixed inset-x-0 bottom-0 z-40 flex max-h-[55vh] transform flex-col
+              overflow-y-auto overscroll-contain rounded-t-xl border-t border-slate-700
+              bg-slate-900 shadow-2xl transition-transform duration-200
+              md:static md:inset-auto md:z-auto md:max-h-none md:w-64 md:shrink-0
+              md:translate-y-0 md:rounded-none md:border-r md:border-t-0
+              md:border-slate-800 md:bg-slate-900/60 md:shadow-none
+              {open ? 'translate-y-0' : 'translate-y-full'}">
   {#if onClose}
-    <div class="flex items-center justify-between border-b border-slate-800 px-3 py-2 md:hidden">
+    <!-- Sticky so the handle stays reachable however far the filters scroll. -->
+    <div class="sticky top-0 z-10 flex items-center justify-between border-b border-slate-800
+                bg-slate-900 px-3 py-2 md:hidden">
       <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Filters</span>
       <button type="button" onclick={onClose} aria-label="Close filters"
-              class="rounded px-2 py-1 text-lg leading-none text-slate-400 hover:text-white">&times;</button>
+              class="rounded px-3 py-1 text-lg leading-none text-slate-400 hover:text-white">&times;</button>
     </div>
   {/if}
   <div class="p-3 border-b border-slate-800">

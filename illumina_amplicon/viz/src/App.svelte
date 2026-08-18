@@ -97,11 +97,13 @@
     {#if !store.loading && !store.error}
       <Sidebar {activeTab} bind:filters open={sidebarOpen}
                onClose={() => (sidebarOpen = false)} />
-      <!-- Tapping the plot should put the drawer away; only present while it is. -->
+      <!-- Dim only the area above the sheet, and let a tap there dismiss it. No
+           full-screen scrim: the point of a bottom sheet is that the plot stays
+           visible and legible while the filters are open. -->
       {#if sidebarOpen}
         <button type="button" aria-label="Close filters" tabindex="-1"
                 onclick={() => (sidebarOpen = false)}
-                class="fixed inset-0 z-30 bg-slate-950/60 md:hidden"></button>
+                class="fixed inset-x-0 top-0 bottom-[55vh] z-30 bg-slate-950/30 md:hidden"></button>
       {/if}
     {/if}
 
