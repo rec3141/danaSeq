@@ -103,7 +103,7 @@
       {#if sidebarOpen}
         <button type="button" aria-label="Close filters" tabindex="-1"
                 onclick={() => (sidebarOpen = false)}
-                class="fixed inset-x-0 top-0 bottom-[55vh] z-30 bg-slate-950/30 md:hidden"></button>
+                class="fixed inset-x-0 top-0 bottom-[55vh] z-30 bg-black/30 md:hidden"></button>
       {/if}
     {/if}
 
@@ -112,15 +112,15 @@
         <div class="flex h-full items-center justify-center">
           <div class="text-center">
             <div class="mb-4 h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent mx-auto"></div>
-            <p class="text-sm text-slate-400">Loading data...</p>
+            <p class="text-sm text-muted">Loading data...</p>
           </div>
         </div>
       {:else if store.error}
         <div class="flex h-full items-center justify-center">
-          <div class="rounded-lg border border-red-800 bg-red-950/50 p-6 text-center">
-            <p class="text-red-400">{store.error}</p>
+          <div class="rounded-lg border border-rose-300 bg-rose-50 p-6 text-center dark:border-red-800 dark:bg-red-950/50">
+            <p class="text-rose-700 dark:text-red-400">{store.error}</p>
             <button
-              class="mt-3 rounded bg-red-800 px-4 py-1.5 text-sm text-red-100 hover:bg-red-700"
+              class="mt-3 rounded bg-rose-600 px-4 py-1.5 text-sm text-white hover:bg-rose-700 dark:bg-red-800 dark:hover:bg-red-700"
               onclick={() => loadData()}
             >Retry</button>
           </div>

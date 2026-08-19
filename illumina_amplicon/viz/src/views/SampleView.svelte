@@ -8,6 +8,7 @@
     taxaMatchingFilter, makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
     sampleInAssays, assayKey, listAssays, assayHeading, assaySpan, assayPlace,
   } from '../stores/data.svelte.js';
+  import { chrome } from '../stores/theme.svelte.js';
 
   let { filters = {} } = $props();
 
@@ -109,12 +110,14 @@
 
   $effect(() => {
     if (!plotDiv) return;
+    // Reading the palette here is what redraws the plot when the theme flips.
+    const c = chrome();
     if (filteredSamples.length === 0) {
       if (hasPlot) Plotly.react(plotDiv, [{ x: [], y: [], type: 'scattergl' }], {
-        plot_bgcolor: 'rgba(2, 6, 15, 1)', paper_bgcolor: 'rgba(2, 6, 15, 1)',
+        plot_bgcolor: c.plotBg, paper_bgcolor: c.plotBg,
         xaxis: { visible: false }, yaxis: { visible: false },
         annotations: [{ text: 'No samples match filters', showarrow: false,
-          font: { color: '#64748b', size: 14 }, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
+          font: { color: c.faint, size: 14 }, xref: 'paper', yref: 'paper', x: 0.5, y: 0.5 }],
       });
       lastPoints = null;
       return;
@@ -257,16 +260,16 @@
       dragmode: 'pan',
       xaxis: { title: '', zeroline: false, showgrid: false, showticklabels: false },
       yaxis: { title: '', zeroline: false, showgrid: false, showticklabels: false, scaleanchor: 'x' },
-      plot_bgcolor: 'rgba(2, 6, 15, 1)',
-      paper_bgcolor: 'rgba(2, 6, 15, 1)',
-      font: { color: '#94a3b8' },
+      plot_bgcolor: c.plotBg,
+      paper_bgcolor: c.plotBg,
+      font: { color: c.axis },
       legend: {
         bgcolor: 'rgba(15, 23, 42, 0.8)',
         font: { size: 10 },
       },
       margin: { l: 20, r: 20, t: 10, b: 20 },
       title: { text: `${filteredSamples.length} samples, ${totalPoints.toLocaleString()} points (${isAsvLevel ? 'per ASV' : 'per ' + (colorLevel === 'group' ? 'group' : colorLevel)})`,
-               font: { size: 12, color: '#64748b' }, x: 0.01, y: 0.99 },
+               font: { size: 12, color: c.faint }, x: 0.01, y: 0.99 },
     };
 
     const config = { scrollZoom: true, displayModeBar: false, doubleClick: 'reset+autosize' };
@@ -347,9 +350,9 @@
   </div>
 
   {#if topTaxa.length > 0}
-    <div class="border-t border-slate-800 bg-slate-900/80 p-4">
+    <div class="border-t border-line bg-surface/80 p-4">
       <div class="mb-2 flex items-center justify-between">
-        <h3 class="text-sm font-semibold text-slate-200">
+        <h3 class="text-sm font-semibold text-fg">
           {#if selectedSampleObj}
             {selectedSampleObj.id} &mdash; {(selectedSampleObj.total_reads ?? 0).toLocaleString()} reads
           {:else if filters.lassoSampleIds.size > 0}
@@ -360,7 +363,7 @@
         </h3>
         {#if selectedSampleObj}
           <button
-            class="text-xs text-slate-500 hover:text-slate-300"
+            class="text-xs text-faint hover:text-fg2"
             onclick={() => store.selectedSample = null}
           >Clear selection</button>
         {/if}
@@ -369,21 +372,21 @@
       <div class="mb-2">
         {#if selectedSampleObj && assayKey(selectedSampleObj)}
           {@const s = selectedSampleObj}
-          <p class="text-xs text-slate-400">
-            <span class="text-slate-500">Assay:</span>
+          <p class="text-xs text-muted">
+            <span class="text-faint">Assay:</span>
             {assayHeading(s.assay_gene, s.assay_region, s.assay_primer_fwd, s.assay_primer_rev, assayPlace(s))}
             {#if assayPlace(s)}
-              <span class="text-slate-500">·</span> {assaySpan(assayPlace(s))}
+              <span class="text-faint">·</span> {assaySpan(assayPlace(s))}
             {:else if s.assay_primer_fwd || s.assay_primer_rev}
-              <span class="text-slate-500">·</span> {[s.assay_primer_fwd, s.assay_primer_rev].filter(Boolean).join(' / ')}
+              <span class="text-faint">·</span> {[s.assay_primer_fwd, s.assay_primer_rev].filter(Boolean).join(' / ')}
             {/if}
             {#if Number.isFinite(Number(s.assay_match_fraction))}
-              <span class="text-slate-500">·</span> {(Number(s.assay_match_fraction) * 100).toFixed(1)}% of reads matched
+              <span class="text-faint">·</span> {(Number(s.assay_match_fraction) * 100).toFixed(1)}% of reads matched
             {/if}
-            {#if s.assay_source}<span class="text-slate-500"> (via {s.assay_source})</span>{/if}
+            {#if s.assay_source}<span class="text-faint"> (via {s.assay_source})</span>{/if}
           </p>
         {:else if filters.assays?.size}
-          <p class="text-xs text-slate-500">
+          <p class="text-xs text-faint">
             Assay filter active: {filters.assays.size} of {totalAssayCount} assay{totalAssayCount === 1 ? '' : 's'}
           </p>
         {/if}
@@ -391,7 +394,7 @@
 
         <div class="max-h-48 overflow-y-auto">
           <table class="w-full text-xs">
-            <thead class="sticky top-0 bg-slate-900 text-left text-slate-400">
+            <thead class="sticky top-0 bg-surface text-left text-muted">
               <tr>
                 <th class="py-1 pr-4">ASV</th>
                 <th class="py-1 pr-4">Taxonomy</th>
@@ -399,12 +402,12 @@
                 <th class="py-1 text-right">%</th>
               </tr>
             </thead>
-            <tbody class="text-slate-300">
+            <tbody class="text-fg2">
               {#each topTaxa as row}
                 {@const colorLevel = tableColorLevel}
                 {@const cmap = tableColorMap}
                 {@const rowColor = cmap ? getAsvColor(row.asv.id, colorLevel, cmap) : (GROUP_HEX[row.asv.group] ?? GROUP_HEX.prokaryote)}
-                <tr class="border-t border-slate-800/50 hover:bg-slate-800/30">
+                <tr class="border-t border-line/50 hover:bg-raised/30">
                   <td class="py-1 pr-4 font-mono">
                     <span class="inline-block h-2.5 w-2.5 rounded-full mr-1.5" style="background:{rowColor}"></span>
                     {row.asv.id ?? ''}

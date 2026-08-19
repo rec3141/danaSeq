@@ -2,9 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * One palette per theme, switched by `.dark` on <html>. Channels only, so
+ * Tailwind can apply an opacity modifier to any of them.
+ */
 @layer base {
+  :root {
+    --c-base: 255 255 255;
+    --c-surface: 248 250 252;
+    --c-sunken: 241 245 249;
+    --c-raised: 241 245 249;
+    --c-raised-2: 226 232 240;
+    --c-strong: 2 6 23;
+    --c-fg: 15 23 42;
+    --c-fg-2: 51 65 85;
+    --c-muted: 71 85 105;
+    --c-faint: 100 116 139;
+    --c-line: 226 232 240;
+    --c-line-2: 203 213 225;
+    --c-accent: 37 99 235;
+    --c-link: 14 116 144;
+    --c-link-2: 21 94 117;
+    --c-warn: 225 29 72;
+    --c-caution: 180 83 9;
+  }
+
+  .dark {
+    --c-base: 2 6 23;
+    --c-surface: 15 23 42;
+    --c-sunken: 2 6 23;
+    --c-raised: 30 41 59;
+    --c-raised-2: 51 65 85;
+    --c-strong: 241 245 249;
+    --c-fg: 226 232 240;
+    --c-fg-2: 203 213 225;
+    --c-muted: 148 163 184;
+    --c-faint: 100 116 139;
+    --c-line: 30 41 59;
+    --c-line-2: 71 85 105;
+    --c-accent: 96 165 250;
+    --c-link: 34 211 238;
+    --c-link-2: 103 232 249;
+    --c-warn: 251 113 133;
+    --c-caution: 251 191 36;
+  }
+
   html {
-    @apply bg-slate-950 text-slate-200 antialiased;
+    @apply bg-base text-fg antialiased;
   }
 
   body {
@@ -16,14 +60,14 @@
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-slate-900;
+    @apply bg-surface;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-slate-700 rounded-full;
+    @apply bg-raised2 rounded-full;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-slate-600;
+    @apply bg-line2;
   }
 }

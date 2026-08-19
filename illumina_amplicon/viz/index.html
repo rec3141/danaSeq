@@ -1,11 +1,22 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>dānaSeq Amplicon Explorer</title>
+  <!-- Before first paint, or the page flashes the wrong theme while the module
+       graph loads. The key matches STORAGE_KEY in src/stores/theme.svelte.js. -->
+  <script>
+    (function () {
+      var saved;
+      try { saved = localStorage.getItem('danaseq-viz-theme'); } catch (e) { /* no storage */ }
+      var dark = saved ? saved === 'dark'
+                       : !window.matchMedia('(prefers-color-scheme: light)').matches;
+      if (dark) document.documentElement.classList.add('dark');
+    })();
+  </script>
 </head>
-<body class="bg-slate-950 text-slate-200">
+<body class="bg-base text-fg">
   <div id="app"></div>
   <script src="/phylocanvas-bundle.js"></script>
   <script type="module" src="/src/main.js"></script>

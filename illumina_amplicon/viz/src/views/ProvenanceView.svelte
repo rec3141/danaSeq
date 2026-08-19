@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
   import { store } from '../stores/data.svelte.js';
+  import { chrome } from '../stores/theme.svelte.js';
 
   let plotDiv = $state(null);
   let heatDiv = $state(null);
@@ -42,6 +43,8 @@
 
   function draw() {
     if (!plotDiv || !rows.length) return;
+    // Reading the palette here is what redraws the plot when the theme flips.
+    const c = chrome();
     Plotly.react(
       plotDiv,
       [{
@@ -55,11 +58,11 @@
       }],
       {
         margin: { l: 70, r: 20, t: 30, b: 60 },
-        plot_bgcolor: 'rgba(2, 6, 15, 1)',
-        paper_bgcolor: 'rgba(2, 6, 15, 1)',
-        font: { color: '#94a3b8', size: 12 },
-        xaxis: { gridcolor: '#1e293b' },
-        yaxis: { title: 'reads', gridcolor: '#1e293b', rangemode: 'tozero' },
+        plot_bgcolor: c.plotBg,
+        paper_bgcolor: c.plotBg,
+        font: { color: c.axis, size: 12 },
+        xaxis: { gridcolor: c.grid },
+        yaxis: { title: 'reads', gridcolor: c.grid, rangemode: 'tozero' },
         showlegend: false,
       },
       { responsive: true, displaylogo: false },
@@ -73,6 +76,8 @@
   // retention so the worst-retained samples cluster together.
   function drawHeat() {
     if (!heatDiv || selected !== '__all__' || !stages.length || !sampleIds.length) return;
+    // Reading the palette here is what redraws the plot when the theme flips.
+    const c = chrome();
     const rawId = stages[0].id, finalId = stages[stages.length - 1].id;
     const retention = (id) => {
       const r = prov.samples[id][rawId] || 0;
@@ -95,13 +100,13 @@
         hoverongaps: false,
         hovertemplate: '%{y}<br>%{x}<br>%{customdata:,} reads<extra></extra>',
         colorbar: { title: { text: 'log₁₀(reads)', side: 'right' }, thickness: 12,
-                    tickfont: { color: '#94a3b8', size: 10 } },
+                    tickfont: { color: c.axis, size: 10 } },
       }],
       {
         margin: { l: 110, r: 10, t: 10, b: 70 },
-        plot_bgcolor: 'rgba(2, 6, 15, 1)',
-        paper_bgcolor: 'rgba(2, 6, 15, 1)',
-        font: { color: '#94a3b8', size: 11 },
+        plot_bgcolor: c.plotBg,
+        paper_bgcolor: c.plotBg,
+        font: { color: c.axis, size: 11 },
         xaxis: { tickangle: -30, automargin: true },
         yaxis: { automargin: true, autorange: 'reversed' },
       },
@@ -120,70 +125,70 @@
        neither is much use without the other when you are trying to work out
        why two runs of one accession disagree. -->
   {#if store.runInfo || store.manifest}
-    <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+    <div class="rounded-lg border border-line bg-surface/40 p-3">
       {#if store.runInfo?.title}
-        <h2 class="text-sm font-semibold text-slate-100">{store.runInfo.title}</h2>
+        <h2 class="text-sm font-semibold text-strong">{store.runInfo.title}</h2>
       {/if}
       <dl class="mt-2 grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-xs">
         {#if store.runInfo?.bioproject}
-          <dt class="text-slate-500">BioProject</dt>
-          <dd><a class="text-cyan-400 hover:text-cyan-300"
+          <dt class="text-faint">BioProject</dt>
+          <dd><a class="text-link hover:text-link2"
                  href="https://www.ncbi.nlm.nih.gov/bioproject/{store.runInfo.bioproject}"
                  target="_blank" rel="noopener">{store.runInfo.bioproject}</a></dd>
         {/if}
         {#if store.runInfo?.slug}
-          <dt class="text-slate-500">Run</dt>
-          <dd class="font-mono text-slate-300">
+          <dt class="text-faint">Run</dt>
+          <dd class="font-mono text-fg2">
             {#if store.runInfo.portal_url}
-              <a class="text-cyan-400 hover:text-cyan-300" href={store.runInfo.portal_url}
+              <a class="text-link hover:text-link2" href={store.runInfo.portal_url}
                  target="_blank" rel="noopener">{store.runInfo.slug}</a>
             {:else}{store.runInfo.slug}{/if}
           </dd>
         {/if}
         {#if store.runInfo?.pipeline}
-          <dt class="text-slate-500">Pipeline</dt><dd class="text-slate-300">{store.runInfo.pipeline}</dd>
+          <dt class="text-faint">Pipeline</dt><dd class="text-fg2">{store.runInfo.pipeline}</dd>
         {/if}
         {#if store.runInfo?.cluster}
-          <dt class="text-slate-500">Cluster</dt><dd class="text-slate-300">{store.runInfo.cluster}</dd>
+          <dt class="text-faint">Cluster</dt><dd class="text-fg2">{store.runInfo.cluster}</dd>
         {/if}
         {#if store.manifest?.pipeline}
-          <dt class="text-slate-500">Version</dt><dd class="text-slate-300">{store.manifest.pipeline}</dd>
+          <dt class="text-faint">Version</dt><dd class="text-fg2">{store.manifest.pipeline}</dd>
         {/if}
         {#if store.manifest?.commit_id}
-          <dt class="text-slate-500">Build</dt>
-          <dd class="font-mono text-slate-300">
-            <a class="text-cyan-400 hover:text-cyan-300"
+          <dt class="text-faint">Build</dt>
+          <dd class="font-mono text-fg2">
+            <a class="text-link hover:text-link2"
                href="https://github.com/rec3141/danaSeq/commit/{store.manifest.commit_id}"
                target="_blank" rel="noopener">{store.manifest.commit_id.slice(0, 7)}</a>
             {#if store.manifest.container_built}
-              <span class="text-slate-500">· built {store.manifest.container_built.slice(0, 10)}</span>
+              <span class="text-faint">· built {store.manifest.container_built.slice(0, 10)}</span>
             {/if}
           </dd>
         {/if}
-        <dt class="text-slate-500">Samples</dt>
-        <dd class="text-slate-300">{store.samples.length.toLocaleString()} · {store.asvs.length.toLocaleString()} ASVs</dd>
+        <dt class="text-faint">Samples</dt>
+        <dd class="text-fg2">{store.samples.length.toLocaleString()} · {store.asvs.length.toLocaleString()} ASVs</dd>
       </dl>
 
       {#if store.manifest?.tool_versions}
         <details class="mt-2">
-          <summary class="cursor-pointer text-xs text-slate-400 hover:text-slate-200">Tool versions</summary>
-          <pre class="mt-2 max-h-64 overflow-auto rounded bg-slate-950/60 p-2 text-[11px] leading-relaxed text-slate-400">{JSON.stringify(store.manifest.tool_versions, null, 2)}</pre>
+          <summary class="cursor-pointer text-xs text-muted hover:text-fg">Tool versions</summary>
+          <pre class="mt-2 max-h-64 overflow-auto rounded bg-sunken/60 p-2 text-[11px] leading-relaxed text-muted">{JSON.stringify(store.manifest.tool_versions, null, 2)}</pre>
         </details>
       {/if}
     </div>
   {/if}
 
   {#if !prov}
-    <div class="flex flex-1 items-center justify-center text-sm text-slate-500">
+    <div class="flex flex-1 items-center justify-center text-sm text-faint">
       No read-tracking data — <code class="mx-1">data/provenance.json</code> was not produced for this run.
     </div>
   {:else}
     <div class="flex items-center gap-3">
-      <label for="prov-sample" class="text-xs text-slate-400">Sample</label>
+      <label for="prov-sample" class="text-xs text-muted">Sample</label>
       <select
         id="prov-sample"
         bind:value={selected}
-        class="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+        class="rounded border border-line bg-surface px-2 py-1 text-xs text-fg"
       >
         <option value="__all__">All samples combined ({sampleIds.length})</option>
         {#each sampleIds as id}
@@ -191,7 +196,7 @@
         {/each}
       </select>
       {#if rows.length}
-        <span class="text-xs text-slate-500">
+        <span class="text-xs text-faint">
           {rows[0].n.toLocaleString()} raw &rarr; {rows[rows.length - 1].n.toLocaleString()} retained
           ({rows[rows.length - 1].pct.toFixed(1)}%)
         </span>
@@ -202,9 +207,9 @@
 
     {#if selected === '__all__' && sampleIds.length}
       <div class="shrink-0">
-        <p class="mb-1 text-xs text-slate-400">
+        <p class="mb-1 text-xs text-muted">
           All samples &middot; log<sub>10</sub>(reads) at each stage
-          <span class="text-slate-500">— rows sorted by retention (lowest first)</span>
+          <span class="text-faint">— rows sorted by retention (lowest first)</span>
         </p>
         <div
           bind:this={heatDiv}
@@ -215,32 +220,32 @@
 
     <div class="max-h-40 overflow-y-auto">
       <table class="w-full text-xs">
-        <thead class="text-slate-400">
+        <thead class="text-muted">
           <tr><th class="p-1 text-left">Step</th><th class="p-1 text-right">Reads</th><th class="p-1 text-right">% of raw</th></tr>
         </thead>
-        <tbody class="text-slate-300">
+        <tbody class="text-fg2">
           {#each rows as r}
-            <tr class="border-t border-slate-800">
+            <tr class="border-t border-line">
               <td class="p-1">{r.label}</td>
               <td class="p-1 text-right">{r.n.toLocaleString()}</td>
-              <td class="p-1 text-right" class:text-rose-400={r.pct < 50}>{r.pct.toFixed(1)}%</td>
+              <td class="p-1 text-right" class:text-warn={r.pct < 50}>{r.pct.toFixed(1)}%</td>
             </tr>
           {/each}
         </tbody>
       </table>
 
       {#if selected === '__all__' && lostSamples.length}
-        <p class="mt-2 text-xs text-amber-400">
+        <p class="mt-2 text-xs text-caution">
           {lostSamples.length} sample{lostSamples.length === 1 ? '' : 's'} lost over half their reads at
           primer removal — usually a different primer pair than the one applied:
         </p>
         <table class="w-full text-xs">
-          <tbody class="text-slate-300">
+          <tbody class="text-fg2">
             {#each lostSamples.slice(0, 20) as s}
-              <tr class="border-t border-slate-800">
+              <tr class="border-t border-line">
                 <td class="p-1">{s.id}</td>
                 <td class="p-1 text-right">{s.raw.toLocaleString()} &rarr; {s.kept.toLocaleString()}</td>
-                <td class="p-1 text-right text-rose-400">{s.pct.toFixed(1)}%</td>
+                <td class="p-1 text-right text-warn">{s.pct.toFixed(1)}%</td>
               </tr>
             {/each}
           </tbody>

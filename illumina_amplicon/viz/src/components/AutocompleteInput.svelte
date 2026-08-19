@@ -49,7 +49,7 @@
 
 <label class="block relative">
   {#if label}
-    <span class="text-xs text-slate-400">{label}</span>
+    <span class="text-xs text-muted">{label}</span>
   {/if}
   <input
     type="text"
@@ -60,14 +60,14 @@
     onfocus={() => focused = true}
     onblur={() => setTimeout(() => focused = false, 150)}
     onkeydown={handleKeydown}
-    class="mt-1 w-full rounded border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+    class="mt-1 w-full rounded border border-line bg-raised px-2 py-1 text-sm text-fg placeholder-faint focus:border-blue-500 focus:outline-none"
   />
   {#if suggestions.length > 0 && focused}
-    <ul class="absolute z-50 mt-1 w-full rounded border border-slate-700 bg-slate-800 shadow-lg max-h-48 overflow-y-auto">
+    <ul class="absolute z-50 mt-1 w-full rounded border border-line bg-raised shadow-lg max-h-48 overflow-y-auto">
       {#each suggestions as s, i}
         <li>
           <button
-            class="w-full text-left px-2 py-1 text-xs truncate {i === selectedIdx ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'}"
+            class="w-full text-left px-2 py-1 text-xs truncate {i === selectedIdx ? 'bg-blue-600 text-white' : 'text-fg2 hover:bg-raised2'}"
             onmousedown={() => pick(s)}
           >
             {s}

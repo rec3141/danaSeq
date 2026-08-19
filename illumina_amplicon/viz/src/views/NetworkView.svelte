@@ -7,6 +7,7 @@
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
     makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
   } from '../stores/data.svelte.js';
+  import { chrome } from '../stores/theme.svelte.js';
 
   let { filters = {} } = $props();
 
@@ -108,15 +109,18 @@
       showlegend: false,
     };
 
+    // Reading the palette here is what redraws the plot when the theme flips.
+    const c = chrome();
+
     const layout = {
       dragmode: 'pan',
       xaxis: { title: '', zeroline: false, showgrid: false, showticklabels: false },
       yaxis: { title: '', zeroline: false, showgrid: false, showticklabels: false, scaleanchor: 'x' },
-      plot_bgcolor: 'rgba(2, 6, 15, 1)',
-      paper_bgcolor: 'rgba(2, 6, 15, 1)',
-      font: { color: '#94a3b8' },
+      plot_bgcolor: c.plotBg,
+      paper_bgcolor: c.plotBg,
+      font: { color: c.axis },
       margin: { l: 20, r: 20, t: 10, b: 20 },
-      title: { text: `${filteredAsvs.length} ASVs`, font: { size: 12, color: '#64748b' }, x: 0.01, y: 0.99 },
+      title: { text: `${filteredAsvs.length} ASVs`, font: { size: 12, color: c.faint }, x: 0.01, y: 0.99 },
     };
 
     const config = { scrollZoom: true, displayModeBar: false, doubleClick: 'reset+autosize' };
@@ -168,15 +172,15 @@
   </div>
 
   {#if selectedAsvObj}
-    <div class="border-t border-slate-800 bg-slate-900/80 p-4">
+    <div class="border-t border-line bg-surface/80 p-4">
       <div class="flex items-center justify-between">
-        <h3 class="text-sm font-semibold text-slate-200">
+        <h3 class="text-sm font-semibold text-fg">
           {selectedAsvObj.id ?? 'ASV'} &mdash; {selectedAsvObj.group ?? ''}
         </h3>
-        <button class="text-xs text-slate-500 hover:text-slate-300" onclick={() => store.selectedAsv = null}>Close</button>
+        <button class="text-xs text-faint hover:text-fg2" onclick={() => store.selectedAsv = null}>Close</button>
       </div>
-      <p class="mt-1 text-xs text-slate-400">{selectedAsvObj.taxonomy ?? 'No taxonomy'}</p>
-      <p class="text-xs text-slate-500">
+      <p class="mt-1 text-xs text-muted">{selectedAsvObj.taxonomy ?? 'No taxonomy'}</p>
+      <p class="text-xs text-faint">
         {(selectedAsvObj.total_reads ?? 0).toLocaleString()} total reads |
         Prevalence: {selectedAsvObj.n_samples ?? 0}
       </p>

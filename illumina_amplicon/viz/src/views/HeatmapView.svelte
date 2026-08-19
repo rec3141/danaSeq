@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher, sampleInAssays } from '../stores/data.svelte.js';
+  import { chrome } from '../stores/theme.svelte.js';
 
   let { filters = {} } = $props();
 
@@ -379,7 +380,7 @@
         return getClusterColor(id, mode, k);
       }
       if (type === 'asv') {
-        if (filteredAsvSet && !filteredAsvSet.has(id)) return '#0f172a';
+        if (filteredAsvSet && !filteredAsvSet.has(id)) return chrome().masked;
         if (filters.colorMode === 'group') {
           const asv = store.asvs.find(a => a.id === id);
           return GROUP_HEX[asv?.group ?? 'prokaryote'] ?? GROUP_HEX.unknown;
@@ -390,7 +391,7 @@
       if (type === 'sample' && filters.colorMode === 'cluster') {
         return getClusterColor(id, 'sampleCluster', filters.sampleClusterK);
       }
-      return '#334155';
+      return chrome().cell;
     }
 
     // ── Draw column dendrogram (SVG, above heatmap) ──
@@ -414,7 +415,7 @@
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         line.setAttribute('x1', x1); line.setAttribute('y1', y1);
         line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-        line.setAttribute('stroke', '#64748b');
+        line.setAttribute('stroke', chrome().faint);
         line.setAttribute('stroke-width', '0.5');
         colDendroSvg.appendChild(line);
       }
@@ -433,7 +434,7 @@
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         line.setAttribute('points', points.join(' '));
         line.setAttribute('fill', 'none');
-        line.setAttribute('stroke', '#475569');
+        line.setAttribute('stroke', chrome().rule);
         line.setAttribute('stroke-width', '0.8');
         colDendroSvg.appendChild(line);
       }
@@ -458,7 +459,7 @@
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
         line.setAttribute('points', points.join(' '));
         line.setAttribute('fill', 'none');
-        line.setAttribute('stroke', '#475569');
+        line.setAttribute('stroke', chrome().rule);
         line.setAttribute('stroke-width', '0.8');
         rowDendroSvg.appendChild(line);
       }
@@ -522,13 +523,13 @@
     <div class="flex-1 flex items-center justify-center">
       <div class="text-center">
         <div class="mb-4 h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent mx-auto"></div>
-        <p class="text-sm text-slate-400">Loading heatmap data...</p>
+        <p class="text-sm text-muted">Loading heatmap data...</p>
       </div>
     </div>
   {:else}
     <div class="flex-1 relative" bind:this={container}>
       <!-- Grid: dendro | colorbar | heatmap, with col dendro and colorbar on top -->
-      <div class="absolute inset-0 overflow-auto" style="scrollbar-color: #334155 #0f172a;">
+      <div class="absolute inset-0 overflow-auto" style="scrollbar-color: {chrome().cell} {chrome().masked};">
       <div bind:this={gridEl} class="grid" style="grid-template-columns: {ROW_DENDRO_W}px {COLOR_BAR_W}px auto; grid-template-rows: {COL_DENDRO_H}px {COLOR_BAR_H}px auto;">
         <!-- Row 1: spacer | spacer | col dendrogram -->
         <div></div>
@@ -556,13 +557,13 @@
       </div>
 
       <!-- Title -->
-      <div class="absolute top-1 left-1/2 -translate-x-1/2 text-xs text-slate-500 pointer-events-none">
+      <div class="absolute top-1 left-1/2 -translate-x-1/2 text-xs text-faint pointer-events-none">
         {heatmapData.nSamples} samples × {visibleAsvCount}/{heatmapData.nAsvs} ASVs (max RA ≥{(filters.heatmapMinMaxRA ?? 1).toFixed(1)}%) — {usePhyloOrder ? 'Phylogeny (NJ)' : 'Ward'}
       </div>
 
       <!-- Tooltip -->
       {#if tooltip.show}
-        <div class="fixed z-50 rounded bg-slate-800/95 px-3 py-1.5 text-xs text-slate-200 shadow-lg pointer-events-none"
+        <div class="fixed z-50 rounded bg-raised/95 px-3 py-1.5 text-xs text-fg shadow-lg pointer-events-none"
           style="left: {tooltip.x + 12}px; top: {tooltip.y - 20}px;">
           {tooltip.text}
         </div>

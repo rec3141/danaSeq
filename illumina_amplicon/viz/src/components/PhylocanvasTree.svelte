@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { chrome, theme } from '../stores/theme.svelte.js';
 
   let {
     newick = '',
@@ -21,12 +22,17 @@
   let tipY = $state(0);
   let tipShow = $state(false);
 
-  // Dark theme colours (RGBA 0-255)
-  const DARK_THEME = {
-    fillColour: [148, 163, 184, 255],    // slate-400
-    strokeColour: [71, 85, 105, 255],     // slate-600
-    fontColour: [100, 116, 139, 255],      // slate-500 (dim default for unnamed refs)
-    highlightColour: [220, 225, 235, 180], // soft white, visible on edges
+  // Node, branch and label colours, RGBA 0-255, taken from whichever theme is up.
+  // The default label colour is deliberately dim: most tips are unnamed
+  // references and only the ones the caller styles should stand out.
+  const treeTheme = () => {
+    const c = chrome();
+    return {
+      fillColour: c.node,
+      strokeColour: c.stroke,
+      fontColour: c.label,
+      highlightColour: c.highlight,
+    };
   };
 
   function createTree() {
@@ -56,7 +62,7 @@
       nodeSize: 6,
       lineWidth: 1,
       padding: 24,
-      ...DARK_THEME,
+      ...treeTheme(),
       styles,
       selectedIds,
       collapsedIds,
@@ -161,13 +167,20 @@
       prevStyleCount = styleCount;
     }
   });
+
+  // A theme change repaints an existing tree in place; the rebuild path picks
+  // the colours up on its own, so this only has to cover the other branch.
+  $effect(() => {
+    theme.mode;
+    if (tree) tree.setProps(treeTheme());
+  });
 </script>
 
-<div class="w-full relative overflow-hidden" style="height: 75vh; background: #0f172a;">
+<div class="w-full relative overflow-hidden bg-base" style="height: 75vh;">
   <div bind:this={container} class="absolute inset-0 w-full h-full"></div>
   {#if tipShow}
     <div
-      class="absolute pointer-events-none bg-slate-900/95 text-slate-200 text-xs px-2 py-1 rounded shadow-lg border border-slate-600 whitespace-nowrap z-10"
+      class="absolute pointer-events-none bg-surface/95 text-fg text-xs px-2 py-1 rounded shadow-lg border border-line2 whitespace-nowrap z-10"
       style="left: {tipX}px; top: {tipY}px; transform: translate(-50%, -100%)"
     >
       {tipText}

@@ -236,51 +236,51 @@
 
 <div class="flex h-full flex-col overflow-hidden p-4">
   <div class="mb-4 flex flex-wrap items-center gap-3">
-    <div class="flex rounded-lg border border-slate-700 bg-slate-800">
+    <div class="flex rounded-lg border border-line bg-raised">
       <button
         class="px-4 py-1.5 text-sm font-medium transition-colors rounded-l-lg
-          {activeTable === 'asvs' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+          {activeTable === 'asvs' ? 'bg-blue-600 text-white' : 'text-muted hover:text-fg'}"
         onclick={() => { activeTable = 'asvs'; sortCol = null; }}
       >ASVs</button>
       <button
         class="px-4 py-1.5 text-sm font-medium transition-colors rounded-r-lg
-          {activeTable === 'samples' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+          {activeTable === 'samples' ? 'bg-blue-600 text-white' : 'text-muted hover:text-fg'}"
         onclick={() => { activeTable = 'samples'; sortCol = null; }}
       >Samples</button>
       <button
         class="rounded px-3 py-1.5 text-sm font-medium transition-colors
-          {activeTable === 'matrix' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+          {activeTable === 'matrix' ? 'bg-blue-600 text-white' : 'text-muted hover:text-fg'}"
         onclick={() => { activeTable = 'matrix'; sortCol = null; }}
       >ASV &times; Sample</button>
     </div>
 
     <input
       type="text" bind:value={search} placeholder="Search..."
-      class="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none w-64"
+      class="rounded border border-line bg-raised px-3 py-1.5 text-sm text-fg placeholder-faint focus:border-blue-500 focus:outline-none w-64"
     />
 
-    <span class="text-xs text-slate-500">{filteredRows.length} rows</span>
+    <span class="text-xs text-faint">{filteredRows.length} rows</span>
 
     <button
-      class="ml-auto rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 hover:text-slate-100 transition-colors"
+      class="ml-auto rounded border border-line bg-raised px-3 py-1.5 text-xs font-medium text-fg2 hover:bg-raised2 hover:text-strong transition-colors"
       onclick={exportCsv}
     >Export CSV</button>
   </div>
 
   {#if matrixTruncated}
-    <p class="mb-2 text-xs text-slate-500">
+    <p class="mb-2 text-xs text-faint">
       Showing the first {MATRIX_ROW_CAP} of {filteredRows.length.toLocaleString()} ASVs —
       export includes all of them, with taxonomy.
     </p>
   {/if}
 
-  <div class="flex-1 overflow-auto rounded-lg border border-slate-800">
+  <div class="flex-1 overflow-auto rounded-lg border border-line">
     <table class="w-full text-sm">
-      <thead class="sticky top-0 z-10 bg-slate-900 text-left">
+      <thead class="sticky top-0 z-10 bg-surface text-left">
         <tr>
           {#each cols as col}
             <th
-              class="cursor-pointer select-none border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors"
+              class="cursor-pointer select-none border-b border-line px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted hover:text-fg transition-colors"
               style={col.width ? `width:${col.width}` : ''}
               onclick={() => toggleSort(col.key)}
             >
@@ -288,7 +288,7 @@
                 <span class="inline-flex items-center gap-1">
                   {col.label}
                   {#if sortCol === col.key}
-                    <span class="text-blue-400">{sortAsc ? '▲' : '▼'}</span>
+                    <span class="text-accent">{sortAsc ? '▲' : '▼'}</span>
                   {/if}
                 </span>
               {/if}
@@ -298,9 +298,9 @@
       </thead>
       <tbody>
         {#each pageRows as row}
-          <tr class="border-t border-slate-800/50 hover:bg-slate-800/30 transition-colors">
+          <tr class="border-t border-line/50 hover:bg-raised/30 transition-colors">
             {#each cols as col}
-              <td class="px-3 py-1.5 text-slate-300 {col.numeric ? 'text-right font-mono' : ''}">
+              <td class="px-3 py-1.5 text-fg2 {col.numeric ? 'text-right font-mono' : ''}">
                 {#if col.key === '_color'}
                   <span class="inline-block h-3 w-3 rounded-full" style="background:{row._color}"></span>
                 {:else if col.key === 'group' && row[col.key]}
@@ -320,7 +320,7 @@
 
         {#if pageRows.length === 0}
           <tr>
-            <td colspan={cols.length} class="px-4 py-8 text-center text-slate-500">
+            <td colspan={cols.length} class="px-4 py-8 text-center text-faint">
               No data available.
             </td>
           </tr>

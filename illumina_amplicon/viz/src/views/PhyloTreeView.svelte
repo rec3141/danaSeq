@@ -6,6 +6,7 @@
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor, hexToRgba255,
     makeTaxonMatcher,
   } from '../stores/data.svelte.js';
+  import { chrome } from '../stores/theme.svelte.js';
 
   let { filters = {} } = $props();
 
@@ -204,8 +205,8 @@
 
       if (!isFiltered) {
         styles[id] = {
-          fillColour: '#1e293b',
-          fontColour: '#1e293b',
+          fillColour: chrome().collapsed,
+          fontColour: chrome().collapsed,
           shape: 'circle',
           nodeSize: 0.3,
           label,
@@ -278,12 +279,12 @@
     <div class="flex items-center gap-2 px-3 pt-2">
       <button
         onclick={exportNewick}
-        class="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300
-               hover:border-slate-500 hover:text-white"
+        class="rounded border border-line px-2 py-1 text-xs text-fg2
+               hover:border-line2 hover:text-strong"
         title="Download this tree in Newick format">
         Export Newick{filters.treePrune && filteredAsvIds.size > 0 ? ' (filtered)' : ''}
       </button>
-      <span class="text-xs text-slate-500">
+      <span class="text-xs text-faint">
         {filteredAsvIds.size > 0 && filters.treePrune
           ? `${filteredAsvIds.size.toLocaleString()} tips`
           : `${store.asvs.length.toLocaleString()} tips`}
@@ -296,8 +297,8 @@
     {#if !displayNewick}
       <div class="flex-1 flex items-center justify-center">
         <div class="text-center">
-          <p class="text-slate-400 mb-2">No phylogenetic tree available</p>
-          <p class="text-xs text-slate-500">Run with <code class="bg-slate-800 px-1.5 py-0.5 rounded text-cyan-400">--run_phylogeny</code></p>
+          <p class="text-muted mb-2">No phylogenetic tree available</p>
+          <p class="text-xs text-faint">Run with <code class="bg-raised px-1.5 py-0.5 rounded text-link">--run_phylogeny</code></p>
         </div>
       </div>
     {:else}
@@ -311,37 +312,37 @@
       </div>
 
       {#if clickedNode}
-        <div class="w-1/3 border-l border-slate-800 bg-slate-900/60 overflow-y-auto p-4">
+        <div class="w-1/3 border-l border-line bg-surface/60 overflow-y-auto p-4">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-cyan-400">{clickedNode.id}</h3>
-            <button class="text-slate-500 hover:text-slate-300 text-lg" onclick={closeInfoPanel}>&times;</button>
+            <h3 class="text-sm font-semibold text-link">{clickedNode.id}</h3>
+            <button class="text-faint hover:text-fg2 text-lg" onclick={closeInfoPanel}>&times;</button>
           </div>
 
           {#if clickedNode.asv}
             <dl class="space-y-2 text-sm">
               <div class="flex justify-between">
-                <dt class="text-slate-400">Group</dt>
+                <dt class="text-muted">Group</dt>
                 <dd>
                   <span class="inline-block h-2 w-2 rounded-full mr-1" style="background:{GROUP_HEX[clickedNode.asv.group] || GROUP_HEX.unknown}"></span>
                   {clickedNode.asv.group || 'unknown'}
                 </dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-400">Total Reads</dt>
+                <dt class="text-muted">Total Reads</dt>
                 <dd class="font-mono">{(clickedNode.asv.total_reads || 0).toLocaleString()}</dd>
               </div>
               <div class="flex justify-between">
-                <dt class="text-slate-400">Prevalence</dt>
+                <dt class="text-muted">Prevalence</dt>
                 <dd class="font-mono">{clickedNode.asv.n_samples || 0} samples</dd>
               </div>
 
               {#if clickedNode.tax}
-                <div class="border-t border-slate-700 pt-2 mt-2">
-                  <dt class="text-slate-400 mb-1 font-medium">Taxonomy</dt>
+                <div class="border-t border-line pt-2 mt-2">
+                  <dt class="text-muted mb-1 font-medium">Taxonomy</dt>
                   <dd class="font-mono text-xs">
                     {#each taxLevels as level, i}
                       {#if clickedNode.tax[i]}
-                        <div><span class="text-slate-500">{level}:</span> {clickedNode.tax[i]}</div>
+                        <div><span class="text-faint">{level}:</span> {clickedNode.tax[i]}</div>
                       {/if}
                     {/each}
                   </dd>
@@ -349,7 +350,7 @@
               {/if}
             </dl>
           {:else}
-            <p class="text-xs text-slate-500">Internal node</p>
+            <p class="text-xs text-faint">Internal node</p>
           {/if}
         </div>
       {/if}
