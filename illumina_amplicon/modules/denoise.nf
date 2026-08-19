@@ -301,6 +301,7 @@ process FILTER_TRIM {
     papa2 filter-trim \
         "${r1}" "${meta.id}_R1.filt.fastq.gz" \
         "${r2}" "${meta.id}_R2.filt.fastq.gz" \
+        --threads ${task.cpus} \
         --max-ee ${params.maxEE} \
         --trunc-q ${params.truncQ} \
         --max-n ${params.maxN} \

@@ -24,7 +24,19 @@ import glob
 import pickle
 import numpy as np
 
+
+# Thread budget: honour the task's CPU allocation, not the host's core
+# count.  These must be set BEFORE papa2 is imported — libgomp reads
+# OMP_NUM_THREADS when the shared library loads.
+_cpus = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+if _cpus > 0:
+    os.environ.setdefault("DADA2_CORES", str(_cpus))
+    os.environ.setdefault("OMP_NUM_THREADS", str(_cpus))
+
 import papa2 as dada2py
+if _cpus > 0:
+    dada2py.set_num_threads(_cpus)
+
 
 import matplotlib
 matplotlib.use("Agg")
