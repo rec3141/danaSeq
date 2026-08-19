@@ -16,4 +16,4 @@ dependencies:
   - pip:
     # Pinned, and bumped deliberately — papa2 does the denoising, so its commit
     # decides what the numbers are.
-    - git+https://github.com/rec3141/papa2.git@v0.2.0
+    - git+https://github.com/rec3141/papa2.git@v1.0.0
