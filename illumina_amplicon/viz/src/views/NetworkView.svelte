@@ -160,7 +160,12 @@
   onMount(() => {
     document.addEventListener('keydown', handleKey);
     document.addEventListener('keyup', handleKey);
+    const ro = new ResizeObserver(() => {
+      if (plotDiv && hasPlot) Plotly.Plots.resize(plotDiv);
+    });
+    if (plotDiv?.parentElement) ro.observe(plotDiv.parentElement);
     return () => {
+      ro.disconnect();
       document.removeEventListener('keydown', handleKey);
       document.removeEventListener('keyup', handleKey);
       if (plotDiv && hasPlot) Plotly.purge(plotDiv);
@@ -169,7 +174,9 @@
 </script>
 
 <div class="flex h-full flex-col">
-  <div class="flex-1 relative">
+  <!-- Clipped and observed for the same reason as the sample plot: the canvas
+       is sized when it draws and does not follow the frame afterwards. -->
+  <div class="relative min-h-0 flex-1 overflow-hidden">
     <div bind:this={plotDiv} class="absolute inset-0"></div>
   </div>
 

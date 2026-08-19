@@ -338,7 +338,14 @@
   onMount(() => {
     document.addEventListener('keydown', handleKey);
     document.addEventListener('keyup', handleKey);
+    // The table below appears and changes height as the selection changes, which
+    // shrinks this frame under a canvas that was sized for the old one.
+    const ro = new ResizeObserver(() => {
+      if (plotDiv && hasPlot) Plotly.Plots.resize(plotDiv);
+    });
+    if (plotDiv?.parentElement) ro.observe(plotDiv.parentElement);
     return () => {
+      ro.disconnect();
       document.removeEventListener('keydown', handleKey);
       document.removeEventListener('keyup', handleKey);
       if (plotDiv && hasPlot) Plotly.purge(plotDiv);
@@ -347,7 +354,11 @@
 </script>
 
 <div class="flex h-full flex-col">
-  <div class="flex-1 relative">
+  <!-- The plot is absolutely positioned, so it paints above the static pane
+       below it: any moment its canvas is taller than this frame, it covers the
+       table. Plotly sizes the canvas when it draws and does not re-size it when
+       the frame does, so the frame clips as well as the observer resizing. -->
+  <div class="relative min-h-0 flex-1 overflow-hidden">
     <div bind:this={plotDiv} class="absolute inset-0"></div>
   </div>
 
