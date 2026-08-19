@@ -640,7 +640,56 @@ export function hexToRgba255(hex) {
 
 // ── Data loading ────────────────────────────────────────────────────────────
 
+async function gunzip(buf) {
+  const ds = new DecompressionStream('gzip');
+  const reader = new Blob([buf]).stream().pipeThrough(ds).getReader();
+  const chunks = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const combined = new Uint8Array(chunks.reduce((a, c) => a + c.length, 0));
+  let offset = 0;
+  for (const c of chunks) { combined.set(c, offset); offset += c.length; }
+  return new TextDecoder().decode(combined);
+}
+
+/**
+ * The same payload, carried in the page instead of fetched beside it.
+ *
+ * A downloaded copy is opened from a file:// URL, where a browser treats every
+ * fetch of a sibling file as cross-origin and refuses it — so the app loads and
+ * finds nothing. A <script> tag is not subject to that, so the offline build
+ * ships the data as one, keyed by the same paths and still gzipped: base64 of
+ * compressed bytes is smaller than the JSON it stands for.
+ */
+async function embedded(url) {
+  const gz = globalThis.__VIZ_GZ;
+  if (!gz) return undefined;
+  // Keyed as the app asks for them ('./data/x'), but tolerate a bundle written
+  // without the prefix rather than silently reporting an empty run.
+  const bare = url.replace(/^\.\//, '');
+  const b64 = gz[url] ?? gz[bare] ?? gz[`./${bare}`];
+  if (b64 == null) return undefined;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return gunzip(bytes.buffer);
+}
+
+async function fetchText(url) {
+  const inline = await embedded(url);
+  if (inline !== undefined) return inline;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status} ${url}`);
+  return res.text();
+}
+
 async function fetchJson(url) {
+  const inline = await embedded(url);
+  if (inline !== undefined) return JSON.parse(inline);
+
   // Try .gz first
   try {
     const gzRes = await fetch(url + '.gz');
@@ -648,18 +697,7 @@ async function fetchJson(url) {
       const buf = await gzRes.arrayBuffer();
       const bytes = new Uint8Array(buf);
       if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-        const ds = new DecompressionStream('gzip');
-        const reader = new Blob([buf]).stream().pipeThrough(ds).getReader();
-        const chunks = [];
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-        }
-        const combined = new Uint8Array(chunks.reduce((a, c) => a + c.length, 0));
-        let offset = 0;
-        for (const c of chunks) { combined.set(c, offset); offset += c.length; }
-        return JSON.parse(new TextDecoder().decode(combined));
+        return JSON.parse(await gunzip(buf));
       }
       return JSON.parse(new TextDecoder().decode(buf));
     }
@@ -682,7 +720,7 @@ export async function loadData() {
       fetchJson('./data/counts.json').catch(() => ({ data: [], samples: [], asvs: [] })),
       fetchJson('./data/network.json').catch(() => ({ edges: [] })),
       fetchJson('./data/taxonomy.json').catch(() => ({})),
-      fetch('./data/tree.nwk').then(r => r.ok ? r.text() : '').catch(() => ''),
+      fetchText('./data/tree.nwk').catch(() => ''),
       fetchJson('./data/provenance.json').catch(() => null),
       fetchJson('./data/run_info.json').catch(() => null),
       fetchJson('./data/run_manifest.json').catch(() => null),
@@ -700,8 +738,7 @@ export async function loadData() {
     store.manifest = manifest || null;
 
     // Load heatmap data (async, non-blocking)
-    fetch('./data/heatmap.json.gz')
-      .then(r => r.ok ? r.json() : null)
+    fetchJson('./data/heatmap.json')
       .then(d => {
         if (d) {
           store.heatmap = d;
@@ -711,8 +748,7 @@ export async function loadData() {
       .catch(() => {});
 
     // Load pre-aggregated counts
-    fetch('./data/aggregated_counts.json.gz')
-      .then(r => r.ok ? r.json() : null)
+    fetchJson('./data/aggregated_counts.json')
       .then(d => { if (d) store.aggCounts = d; })
       .catch(() => {});
   } catch (e) {
