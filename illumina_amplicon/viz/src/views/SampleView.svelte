@@ -352,7 +352,9 @@
   </div>
 
   {#if topTaxa.length > 0}
-    <div class="border-t border-line bg-surface/80 p-4">
+    <!-- The plot above keeps flex-1; this pane takes what it needs up to its own
+         cap, and min-h-0 lets it actually shrink when the window is short. -->
+    <div class="flex min-h-0 shrink-0 flex-col border-t border-line bg-surface/80 p-4">
       <div class="mb-2 flex items-center justify-between">
         <h3 class="text-sm font-semibold text-fg">
           {#if selectedSampleObj}
@@ -394,9 +396,13 @@
         {/if}
       </div>
 
-        <div class="max-h-48 overflow-y-auto">
+        <!-- Sized against the window rather than pinned at 12rem, which showed
+             six rows on any screen and cut the seventh through the middle. The
+             header needs its own stacking context or a row scrolling beneath it
+             draws over it instead of under. -->
+        <div class="max-h-[38vh] min-h-0 overflow-y-auto">
           <table class="w-full text-xs">
-            <thead class="sticky top-0 bg-surface text-left text-muted">
+            <thead class="sticky top-0 z-10 bg-surface text-left text-muted shadow-[0_1px_0_0] shadow-line">
               <tr>
                 <th class="py-1 pr-4">ASV</th>
                 <th class="py-1 pr-4">Taxonomy</th>
