@@ -1,5 +1,5 @@
 <script>
-  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays, assayHeading, expandTaxonQuery, activeDb, taxonomyDbs} from '../stores/data.svelte.js';
+  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays, assayHeading, assayMatchNote, expandTaxonQuery, activeDb, taxonomyDbs} from '../stores/data.svelte.js';
   import AutocompleteInput from './AutocompleteInput.svelte';
 
   let { activeTab = 'samples', filters = $bindable({}), open = false,
@@ -144,7 +144,7 @@
   {/if}
   <div class="p-3 border-b border-line">
     {#if store.runInfo?.title}
-      <p class="truncate text-sm font-semibold text-fg" title={store.runInfo.title}>
+      <p class="break-words text-sm font-semibold text-fg">
         {store.runInfo.title}
       </p>
     {/if}
@@ -274,7 +274,7 @@
             {#if filters.navStack?.length > 0}
               {@const prev = filters.navStack[filters.navStack.length - 1]}
               <button
-                class="flex items-center gap-1.5 w-full text-left text-xs hover:bg-raised rounded px-1 py-1 text-link border-b border-line mb-1"
+                class="flex items-center gap-1.5 w-full break-words text-left text-xs hover:bg-raised rounded px-1 py-1 text-link border-b border-line mb-1"
                 onclick={() => {
                   const stack = [...filters.navStack];
                   const popped = stack.pop();
@@ -288,7 +288,7 @@
               </button>
             {:else if filters.taxonFilter}
               <button
-                class="flex items-center gap-1.5 w-full text-left text-xs hover:bg-raised rounded px-1 py-1 text-link border-b border-line mb-1"
+                class="flex items-center gap-1.5 w-full break-words text-left text-xs hover:bg-raised rounded px-1 py-1 text-link border-b border-line mb-1"
                 onclick={() => {
                   filters.taxonFilter = '';
                   filters.taxonFilterLevel = '';
@@ -299,7 +299,7 @@
             {/if}
             {#each taxColors.ranked as item}
               <button
-                class="flex items-center gap-1.5 w-full text-left text-xs hover:bg-raised rounded px-1 py-0.5"
+                class="flex items-start gap-1.5 w-full text-left text-xs hover:bg-raised rounded px-1 py-0.5"
                 onclick={() => {
                   // Read once up front: {@const} is a reactive derived, so after
                   // the assignments below it re-evaluates to the level we just
@@ -313,8 +313,10 @@
                   filters.taxonFilterLevel = level;
                 }}
               >
-                <span class="inline-block h-2 w-2 rounded-full shrink-0" style="background:{item.color}"></span>
-                <span class="truncate">{item.name}</span>
+                <span class="mt-1 inline-block h-2 w-2 rounded-full shrink-0" style="background:{item.color}"></span>
+                <!-- min-w-0 lets a long name wrap rather than shove the count
+                     off the row; the count stays on the first line. -->
+                <span class="min-w-0 break-words">{item.name}</span>
                 <span class="ml-auto shrink-0 tabular-nums text-faint">{(item.count ?? 0).toLocaleString()}</span>
               </button>
             {/each}
@@ -328,9 +330,10 @@
        One assay is worth stating but not worth a checkbox: selecting the only
        option cannot change anything. Filtering appears from two up. -->
   {#if assays.length === 1}
+    {@const match = assayMatchNote(assays[0].meanMatch)}
     <div class="border-b border-line px-3 py-2">
       <p class="text-[10px] uppercase tracking-wider text-faint">Assay</p>
-      <p class="text-xs text-fg2">{assayHeading(assays[0].gene, assays[0].region, assays[0].fwd, assays[0].rev, assays[0].place)}</p>
+      <p class="text-xs text-fg2">{assayHeading(assays[0].gene, assays[0].region, assays[0].fwd, assays[0].rev, assays[0].place, assays[0].conflict)}</p>
       {#if assays[0].span}
         <p class="text-[10px] text-muted">{assays[0].span}</p>
       {/if}
@@ -339,8 +342,8 @@
       {:else if !assays[0].span}
         <p class="text-[10px] text-faint">no primers recorded</p>
       {/if}
-      <p class="text-[10px] text-faint">
-        all {assays[0].n} sample{assays[0].n === 1 ? '' : 's'}{assays[0].meanMatch != null ? ` · ${(assays[0].meanMatch * 100).toFixed(1)}% matched` : ''}
+      <p class="text-[10px] text-faint" title={match?.title}>
+        all {assays[0].n} sample{assays[0].n === 1 ? '' : 's'}{match ? ` · ${match.text}` : ''}
       </p>
     </div>
   {:else if assays.length > 1}
@@ -356,28 +359,31 @@
             {#if filters.assays?.size}&mdash; {filters.assays.size} selected{:else}&mdash; all shown{/if}
           </p>
           {#each assays as a}
+            {@const match = assayMatchNote(a.meanMatch)}
             <label class="flex items-start gap-2 text-xs cursor-pointer hover:bg-raised/50 rounded px-1 py-1">
               <input type="checkbox" class="mt-0.5 accent-blue-500"
                 checked={filters.assays?.has(a.key) ?? false}
                 onchange={() => toggleAssay(a.key)} />
               <span class="min-w-0 flex-1">
-                <span class="block truncate text-fg">{assayHeading(a.gene, a.region, a.fwd, a.rev, a.place)}</span>
+                <span class="block break-words text-fg">{assayHeading(a.gene, a.region, a.fwd, a.rev, a.place, a.conflict)}</span>
                 {#if a.span}
-                  <span class="block truncate text-[10px] text-muted">{a.span}</span>
+                  <span class="block break-words text-[10px] text-muted">{a.span}</span>
                 {/if}
                 <!-- Where it sits on the gene and what was in the tube are
                      different facts, and a run can have one without the other:
                      a pre-trimmed end has a location and no primer, a
                      functional-gene assay has a primer and no location. -->
                 {#if a.fwd || a.rev}
-                  <span class="block truncate text-[10px] text-faint">
+                  <!-- A primer is one unbroken run of IUPAC codes, so only
+                       break-all gives it anywhere to wrap. -->
+                  <span class="block break-all text-[10px] text-faint">
                     {[a.fwd, a.rev].filter(Boolean).join(' / ')}
                   </span>
                 {:else if !a.span}
                   <span class="block text-[10px] text-faint">no primers recorded</span>
                 {/if}
-                <span class="block text-[10px] text-faint">
-                  {a.n} sample{a.n === 1 ? '' : 's'}{a.meanMatch != null ? ` · ${(a.meanMatch * 100).toFixed(1)}% matched` : ''}
+                <span class="block text-[10px] text-faint" title={match?.title}>
+                  {a.n} sample{a.n === 1 ? '' : 's'}{match ? ` · ${match.text}` : ''}
                 </span>
               </span>
             </label>
@@ -603,9 +609,9 @@
   <!-- ══ Selection info ══ -->
   <div class="mt-auto border-t border-line p-3">
     {#if store.selectedSample != null}
-      <p class="text-xs text-muted">Selected: {store.samples[store.selectedSample]?.id || ''}</p>
+      <p class="break-all text-xs text-muted">Selected: {store.samples[store.selectedSample]?.id || ''}</p>
     {:else if store.selectedAsv != null}
-      <p class="text-xs text-muted">Selected: {store.asvs[store.selectedAsv]?.id || ''}</p>
+      <p class="break-all text-xs text-muted">Selected: {store.asvs[store.selectedAsv]?.id || ''}</p>
     {:else}
       <p class="text-xs text-faint">Click to select, Shift+drag to lasso</p>
       <p class="text-xs text-faint">Shift+double-click to deselect</p>

@@ -136,14 +136,18 @@ export function isDerivedPrimer(name) {
 }
 
 /** Heading for an assay: the gene/region when known, else where it sits. */
-export function assayHeading(gene, region, fwd, rev, place) {
+export function assayHeading(gene, region, fwd, rev, place, conflict) {
   const named = [gene, region].filter(Boolean).join(' ');
   if (named) return named;
   if (place) {
     const [ref] = String(place).split('@');
     return REFERENCE_GENE[ref]?.gene || ref;
   }
-  return (isDerivedPrimer(fwd) || isDerivedPrimer(rev)) ? 'de novo primers' : 'unknown';
+  // A pair whose ends belong to different genes names no assay, and the reason
+  // it names none is worth more than the primer text it would otherwise show
+  // (danaSeq #53).
+  if (conflict) return conflict;
+  return (isDerivedPrimer(fwd) || isDerivedPrimer(rev)) ? 'inferred primers' : 'unknown';
 }
 
 /** "E. coli 534-786" — the span an assay covers, for a placed assay. */
@@ -176,7 +180,8 @@ export function listAssays() {
     if (!by.has(key)) {
       const [gene, region, fwd, rev, place] = key.split('|');
       by.set(key, { key, label: assayLabel(key), gene, region, fwd, rev, place,
-                    span: assaySpan(place), n: 0, _match: [] });
+                    span: assaySpan(place), conflict: s.assay_conflict || '',
+                    n: 0, _match: [] });
     }
     const rec = by.get(key);
     rec.n++;
@@ -190,6 +195,23 @@ export function listAssays() {
   out.forEach(a => delete a._match);
   out.sort((a, b) => b.n - a.n);
   return out;
+}
+
+/**
+ * How often cutadapt found an assay's primers, as {text, title}: a phrase short
+ * enough for the sidebar and the long form for its tooltip. A bare percentage
+ * cannot say what it is a fraction of, and this one is of reads, not of samples.
+ * null when no sample of the assay reported a fraction — reads that arrive with
+ * their primers already gone have nothing to have matched.
+ */
+export function assayMatchNote(meanMatch) {
+  if (!Number.isFinite(meanMatch)) return null;
+  const pct = (meanMatch * 100).toFixed(1);
+  return {
+    text: `primers in ${pct}% of reads`,
+    title: `cutadapt found this primer pair in ${pct}% of a sample's reads, `
+         + 'averaged across the samples of this assay',
+  };
 }
 
 /** True when this sample passes the assay selection (null/empty = no filter). */

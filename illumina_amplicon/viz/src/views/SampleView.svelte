@@ -375,7 +375,7 @@
           {@const s = selectedSampleObj}
           <p class="text-xs text-muted">
             <span class="text-faint">Assay:</span>
-            {assayHeading(s.assay_gene, s.assay_region, s.assay_primer_fwd, s.assay_primer_rev, assayPlace(s))}
+            {assayHeading(s.assay_gene, s.assay_region, s.assay_primer_fwd, s.assay_primer_rev, assayPlace(s), s.assay_conflict)}
             {#if assayPlace(s)}
               <span class="text-faint">·</span> {assaySpan(assayPlace(s))}
             {:else if s.assay_primer_fwd || s.assay_primer_rev}
