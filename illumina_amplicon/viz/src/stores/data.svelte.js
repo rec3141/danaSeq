@@ -252,7 +252,7 @@ function generatePalette(n) {
  * matched against that rank alone. Matching it as a substring of the whole
  * lineage instead makes "SAR" (the eukaryotic supergroup) also select SAR11,
  * SAR86 and SAR116, which sit on a different branch entirely. A hand-typed
- * filter has no level and stays a free regex over the lineage and ASV id.
+ * filter has no level and is a substring of the lineage or the ASV id.
  */
 export function makeTaxonMatcher(taxonFilter = '', filterLevel = '') {
   if (!taxonFilter) return null;
@@ -266,14 +266,15 @@ export function makeTaxonMatcher(taxonFilter = '', filterLevel = '') {
     return (asvId) => (assignments[asvId]?.[levelIdx] || '').toLowerCase() === lower;
   }
 
-  let re;
-  try { re = new RegExp(taxonFilter, 'i'); } catch { re = null; }
+  // Plain case-insensitive substring, not a regex. Taxon names carry characters
+  // a regex reads as syntax — a stray `(` threw and silently fell back to
+  // substring, while `.` quietly matched everything — so the box behaved like
+  // two different tools depending on what you typed. Substring is what people
+  // were reaching for anyway.
   return (asvId, lineage) => {
     const fullTax = lineage ?? (assignments[asvId]?.filter(Boolean).join(';') || '');
     const id = asvId ?? '';
-    return re
-      ? (re.test(fullTax) || re.test(id))
-      : (fullTax.toLowerCase().includes(lower) || id.toLowerCase().includes(lower));
+    return fullTax.toLowerCase().includes(lower) || id.toLowerCase().includes(lower);
   };
 }
 

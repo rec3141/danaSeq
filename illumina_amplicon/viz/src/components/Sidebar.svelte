@@ -22,7 +22,7 @@
     }
   }
 
-  // A hand-typed filter is a free regex over the whole lineage, so it has no rank.
+  // A hand-typed filter is a substring of the whole lineage, so it has no rank.
   function clearFilterLevel() {
     filters.taxonFilterLevel = '';
   }
@@ -143,7 +143,7 @@
       <div class="space-y-3 px-3 pb-3">
         <AutocompleteInput
           bind:value={filters.taxonFilter}
-          label="Filter (regex)"
+          label="Filter"
           placeholder="e.g. Proteobacteria"
           candidates={taxCandidates}
           onPick={navigateToTaxon}
@@ -275,9 +275,12 @@
       <p class="text-[10px] uppercase tracking-wider text-slate-500">Assay</p>
       <p class="text-xs text-slate-300">{assayHeading(assays[0].gene, assays[0].region, assays[0].fwd, assays[0].rev, assays[0].place)}</p>
       {#if assays[0].span}
-        <p class="text-[10px] text-slate-500">{assays[0].span}</p>
-      {:else if assays[0].fwd || assays[0].rev}
-        <p class="text-[10px] text-slate-500">{[assays[0].fwd, assays[0].rev].filter(Boolean).join(' / ')}</p>
+        <p class="text-[10px] text-slate-400">{assays[0].span}</p>
+      {/if}
+      {#if assays[0].fwd || assays[0].rev}
+        <p class="break-all text-[10px] text-slate-500">{[assays[0].fwd, assays[0].rev].filter(Boolean).join(' / ')}</p>
+      {:else if !assays[0].span}
+        <p class="text-[10px] text-slate-500">no primers recorded</p>
       {/if}
       <p class="text-[10px] text-slate-500">
         all {assays[0].n} sample{assays[0].n === 1 ? '' : 's'}{assays[0].meanMatch != null ? ` · ${(assays[0].meanMatch * 100).toFixed(1)}% matched` : ''}
@@ -302,9 +305,20 @@
                 onchange={() => toggleAssay(a.key)} />
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-slate-200">{assayHeading(a.gene, a.region, a.fwd, a.rev, a.place)}</span>
-                <span class="block truncate text-[10px] text-slate-500">
-                  {a.span || [a.fwd, a.rev].filter(Boolean).join(' / ') || 'no primers recorded'}
-                </span>
+                {#if a.span}
+                  <span class="block truncate text-[10px] text-slate-400">{a.span}</span>
+                {/if}
+                <!-- Where it sits on the gene and what was in the tube are
+                     different facts, and a run can have one without the other:
+                     a pre-trimmed end has a location and no primer, a
+                     functional-gene assay has a primer and no location. -->
+                {#if a.fwd || a.rev}
+                  <span class="block truncate text-[10px] text-slate-500">
+                    {[a.fwd, a.rev].filter(Boolean).join(' / ')}
+                  </span>
+                {:else if !a.span}
+                  <span class="block text-[10px] text-slate-500">no primers recorded</span>
+                {/if}
                 <span class="block text-[10px] text-slate-500">
                   {a.n} sample{a.n === 1 ? '' : 's'}{a.meanMatch != null ? ` · ${(a.meanMatch * 100).toFixed(1)}% matched` : ''}
                 </span>
@@ -339,7 +353,7 @@
 
           <AutocompleteInput
             bind:value={filters.sampleFilter}
-            label="Sample filter (regex)"
+            label="Sample filter"
             placeholder="e.g. Plate1"
             candidates={sampleCandidates}
           />

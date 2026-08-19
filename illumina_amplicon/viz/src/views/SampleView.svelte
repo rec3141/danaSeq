@@ -36,11 +36,11 @@
       (s.total_reads ?? 0) >= (filters.minReads || 0) && sampleInAssays(s, filters.assays)
     );
     if (filters.sampleFilter) {
-      try {
-        const re = new RegExp(filters.sampleFilter, 'i');
-        const matched = s.filter(sample => re.test(sample.id ?? ''));
-        if (matched.length > 0) s = matched;
-      } catch {}
+      // Substring, matching the taxonomy box. A sample id is not a pattern
+      // language, and an invalid one used to silently match everything.
+      const q = filters.sampleFilter.toLowerCase();
+      const matched = s.filter(sample => (sample.id ?? '').toLowerCase().includes(q));
+      if (matched.length > 0) s = matched;
     }
     return s;
   });
@@ -135,13 +135,12 @@
     const aggData = aggLevel && store.aggCounts?.[aggLevel];
     // Once drilled down, filters.taxonFilter is an ancestor of the aggregated
     // taxa, so it must be resolved to the matching taxa at this level rather
-    // than regex-tested against each child name (which matched nothing).
+    // than tested against each child name (which matched nothing).
     const allowedTaxa = taxaMatchingFilter(aggLevel, filters.taxonFilter, filters.taxonFilterLevel);
 
-    let aggNameRe = null;
-    if (filters.taxonFilter && !allowedTaxa) {
-      try { aggNameRe = new RegExp(filters.taxonFilter, 'i'); } catch {}
-    }
+    const aggNameQuery = filters.taxonFilter && !allowedTaxa
+      ? filters.taxonFilter.toLowerCase()
+      : null;
 
     const allPoints = [];
 
@@ -179,7 +178,7 @@
         // can do is test the aggregated taxon name itself.
         if (allowedTaxa) {
           if (!allowedTaxa.has(taxon)) continue;
-        } else if (aggNameRe && !aggNameRe.test(taxon)) continue;
+        } else if (aggNameQuery && !String(taxon).toLowerCase().includes(aggNameQuery)) continue;
 
         const proportion = prop || (count / (sampleTotals[sid] || 1));
         const color = cmap ? (taxonColors[taxon] || '#475569') : (GROUP_HEX[taxon] || '#475569');
