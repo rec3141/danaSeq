@@ -115,9 +115,67 @@
 </script>
 
 <div class="flex h-full flex-col gap-3 overflow-y-auto p-3">
+  <!-- What this run is and what produced it, above the read funnel. Both come
+       from files the pipeline and the portal each write for their own reasons;
+       neither is much use without the other when you are trying to work out
+       why two runs of one accession disagree. -->
+  {#if store.runInfo || store.manifest}
+    <div class="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+      {#if store.runInfo?.title}
+        <h2 class="text-sm font-semibold text-slate-100">{store.runInfo.title}</h2>
+      {/if}
+      <dl class="mt-2 grid grid-cols-[auto,1fr] gap-x-4 gap-y-1 text-xs">
+        {#if store.runInfo?.bioproject}
+          <dt class="text-slate-500">BioProject</dt>
+          <dd><a class="text-cyan-400 hover:text-cyan-300"
+                 href="https://www.ncbi.nlm.nih.gov/bioproject/{store.runInfo.bioproject}"
+                 target="_blank" rel="noopener">{store.runInfo.bioproject}</a></dd>
+        {/if}
+        {#if store.runInfo?.slug}
+          <dt class="text-slate-500">Run</dt>
+          <dd class="font-mono text-slate-300">
+            {#if store.runInfo.portal_url}
+              <a class="text-cyan-400 hover:text-cyan-300" href={store.runInfo.portal_url}
+                 target="_blank" rel="noopener">{store.runInfo.slug}</a>
+            {:else}{store.runInfo.slug}{/if}
+          </dd>
+        {/if}
+        {#if store.runInfo?.pipeline}
+          <dt class="text-slate-500">Pipeline</dt><dd class="text-slate-300">{store.runInfo.pipeline}</dd>
+        {/if}
+        {#if store.runInfo?.cluster}
+          <dt class="text-slate-500">Cluster</dt><dd class="text-slate-300">{store.runInfo.cluster}</dd>
+        {/if}
+        {#if store.manifest?.pipeline}
+          <dt class="text-slate-500">Version</dt><dd class="text-slate-300">{store.manifest.pipeline}</dd>
+        {/if}
+        {#if store.manifest?.commit_id}
+          <dt class="text-slate-500">Build</dt>
+          <dd class="font-mono text-slate-300">
+            <a class="text-cyan-400 hover:text-cyan-300"
+               href="https://github.com/rec3141/danaSeq/commit/{store.manifest.commit_id}"
+               target="_blank" rel="noopener">{store.manifest.commit_id.slice(0, 7)}</a>
+            {#if store.manifest.container_built}
+              <span class="text-slate-500">· built {store.manifest.container_built.slice(0, 10)}</span>
+            {/if}
+          </dd>
+        {/if}
+        <dt class="text-slate-500">Samples</dt>
+        <dd class="text-slate-300">{store.samples.length.toLocaleString()} · {store.asvs.length.toLocaleString()} ASVs</dd>
+      </dl>
+
+      {#if store.manifest?.tool_versions}
+        <details class="mt-2">
+          <summary class="cursor-pointer text-xs text-slate-400 hover:text-slate-200">Tool versions</summary>
+          <pre class="mt-2 max-h-64 overflow-auto rounded bg-slate-950/60 p-2 text-[11px] leading-relaxed text-slate-400">{JSON.stringify(store.manifest.tool_versions, null, 2)}</pre>
+        </details>
+      {/if}
+    </div>
+  {/if}
+
   {#if !prov}
     <div class="flex flex-1 items-center justify-center text-sm text-slate-500">
-      No provenance data — <code class="mx-1">data/provenance.json</code> was not produced for this run.
+      No read-tracking data — <code class="mx-1">data/provenance.json</code> was not produced for this run.
     </div>
   {:else}
     <div class="flex items-center gap-3">

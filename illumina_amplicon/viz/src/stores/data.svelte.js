@@ -15,6 +15,12 @@ export const store = $state({
   taxonomy: {},
   treeNewick: '',      // phylogeny (NJ) tree
   provenance: null,    // per-step read counts (data/provenance.json)
+  // Which study this is. Written at deploy by OMC, which knows the accession —
+  // the pipeline is handed a directory of reads and never learns it. Absent for
+  // a site opened straight out of a results directory, so everything that reads
+  // it has to cope with null.
+  runInfo: null,       // data/run_info.json
+  manifest: null,      // data/run_manifest.json — pipeline build and tool versions
   heatmapNewick: '',   // Ward clustering tree (from heatmap data)
   heatmap: null,
   aggCounts: null,     // Pre-aggregated counts per taxonomy level
@@ -598,7 +604,8 @@ export async function loadData() {
   store.error = null;
 
   try {
-    const [samples, asvs, counts, network, taxonomy, treeNewick, provenance] = await Promise.all([
+    const [samples, asvs, counts, network, taxonomy, treeNewick, provenance,
+           runInfo, manifest] = await Promise.all([
       fetchJson('./data/samples.json').catch(() => []),
       fetchJson('./data/asvs.json').catch(() => []),
       fetchJson('./data/counts.json').catch(() => ({ data: [], samples: [], asvs: [] })),
@@ -606,6 +613,8 @@ export async function loadData() {
       fetchJson('./data/taxonomy.json').catch(() => ({})),
       fetch('./data/tree.nwk').then(r => r.ok ? r.text() : '').catch(() => ''),
       fetchJson('./data/provenance.json').catch(() => null),
+      fetchJson('./data/run_info.json').catch(() => null),
+      fetchJson('./data/run_manifest.json').catch(() => null),
     ]);
 
     store.samples = samples;
@@ -616,6 +625,8 @@ export async function loadData() {
     store.taxonomy = taxonomy;
     store.treeNewick = treeNewick.trim();
     store.provenance = provenance || null;
+    store.runInfo = runInfo || null;
+    store.manifest = manifest || null;
 
     // Load heatmap data (async, non-blocking)
     fetch('./data/heatmap.json.gz')

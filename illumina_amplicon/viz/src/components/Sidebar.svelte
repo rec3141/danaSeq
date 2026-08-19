@@ -130,6 +130,22 @@
     </div>
   {/if}
   <div class="p-3 border-b border-slate-800">
+    {#if store.runInfo?.title}
+      <p class="truncate text-sm font-semibold text-slate-200" title={store.runInfo.title}>
+        {store.runInfo.title}
+      </p>
+    {/if}
+    {#if store.runInfo?.bioproject}
+      <p class="text-[11px] text-slate-400">
+        <a href="https://www.ncbi.nlm.nih.gov/bioproject/{store.runInfo.bioproject}"
+           target="_blank" rel="noopener" class="hover:text-cyan-400">{store.runInfo.bioproject}</a>
+        {#if store.runInfo.portal_url}
+          <span class="text-slate-600">·</span>
+          <a href={store.runInfo.portal_url} target="_blank" rel="noopener"
+             class="hover:text-cyan-400">run {store.runInfo.slug}</a>
+        {/if}
+      </p>
+    {/if}
     <p class="text-xs text-slate-500">{store.samples.length} samples | {store.asvs.length} ASVs</p>
   </div>
 
@@ -211,9 +227,13 @@
           {@const effectiveLevel = getEffectiveColorLevel(filters.colorByLevel, filters.taxonFilter, filters.taxonFilterLevel)}
           {@const taxColors = buildTaxColorMap(effectiveLevel, filters.taxonFilter, filters.taxonFilterLevel)}
           <div class="space-y-0.5 max-h-48 overflow-y-auto">
-            <p class="text-[10px] text-slate-500 mb-1">
-              {effectiveLevel === '_asv' ? 'ASV' : effectiveLevel} ({taxColors.ranked.length})
-            </p>
+            <!-- The number in each row means different things at different
+                 levels — ASVs at a rank, reads for a single ASV — so the column
+                 is labelled rather than left to be inferred. -->
+            <div class="mb-1 flex items-baseline gap-2 text-[10px] text-slate-500">
+              <span>{effectiveLevel === '_asv' ? 'ASV' : effectiveLevel} ({taxColors.ranked.length})</span>
+              <span class="ml-auto">{effectiveLevel === '_asv' ? 'reads' : 'ASVs'}</span>
+            </div>
             {#if filters.navStack?.length > 0}
               {@const prev = filters.navStack[filters.navStack.length - 1]}
               <button
@@ -258,7 +278,7 @@
               >
                 <span class="inline-block h-2 w-2 rounded-full shrink-0" style="background:{item.color}"></span>
                 <span class="truncate">{item.name}</span>
-                <span class="ml-auto text-slate-500 shrink-0">{item.count}</span>
+                <span class="ml-auto shrink-0 tabular-nums text-slate-500">{(item.count ?? 0).toLocaleString()}</span>
               </button>
             {/each}
           </div>
