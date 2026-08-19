@@ -7,6 +7,7 @@
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
     taxaMatchingFilter, makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
     sampleInAssays, assayKey, listAssays, assayHeading, assaySpan, assayPlace,
+    lineageOf,
   } from '../stores/data.svelte.js';
   import { chrome } from '../stores/theme.svelte.js';
 
@@ -85,7 +86,7 @@
         if (!e.asv) return false;
         const group = e.asv.group ?? 'prokaryote';
         if (gf[group] === false) return false;
-        if (matches && !matches(e.asv.id ?? '', e.asv.taxonomy ?? '')) return false;
+        if (matches && !matches(e.asv.id ?? '', lineageOf(e.asv.id, e.asv.taxonomy))) return false;
         return true;
       })
       .sort((a, b) => b.count - a.count)
@@ -207,7 +208,7 @@
           const group = asv.group ?? 'prokaryote';
           if (gf[group] === false) continue;
           if ((asv.n_samples ?? 0) < (filters.minPrevalence || 0)) continue;
-          if (matches && !matches(asv.id ?? '', asv.taxonomy ?? '')) continue;
+          if (matches && !matches(asv.id ?? '', lineageOf(asv.id, asv.taxonomy))) continue;
 
           const proportion = count / totalCount;
           let color;
@@ -412,7 +413,7 @@
                     <span class="inline-block h-2.5 w-2.5 rounded-full mr-1.5" style="background:{rowColor}"></span>
                     {row.asv.id ?? ''}
                   </td>
-                  <td class="py-1 pr-4 max-w-xs truncate">{row.asv.taxonomy ?? ''}</td>
+                  <td class="py-1 pr-4">{lineageOf(row.asv.id, row.asv.taxonomy)}</td>
                   <td class="py-1 pr-4 text-right font-mono">{row.count.toLocaleString()}</td>
                   <td class="py-1 text-right font-mono">{row.pct}</td>
                 </tr>

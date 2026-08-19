@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher, sampleInAssays } from '../stores/data.svelte.js';
+  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher, sampleInAssays, activeDb} from '../stores/data.svelte.js';
   import { chrome } from '../stores/theme.svelte.js';
 
   let { filters = {} } = $props();
@@ -366,7 +366,7 @@
     const taxonMatches = makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel);
     if (taxonMatches) {
       filteredAsvSet = new Set();
-      const db = Object.keys(store.taxonomy)[0];
+      const db = activeDb();
       const assigns = db ? store.taxonomy[db]?.assignments : {};
       for (const asvId in assigns) {
         if (taxonMatches(asvId)) filteredAsvSet.add(asvId);

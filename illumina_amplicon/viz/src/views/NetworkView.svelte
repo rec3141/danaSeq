@@ -6,6 +6,7 @@
     GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
     makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
+    lineageOf,
   } from '../stores/data.svelte.js';
   import { chrome } from '../stores/theme.svelte.js';
 
@@ -29,7 +30,7 @@
       if ((a.total_reads ?? 0) < (filters.minReads || 0)) return false;
       const group = a.group ?? 'unknown';
       if (gf[group] === false) return false;
-      if (matches && !matches(a.id ?? '', a.taxonomy ?? '')) return false;
+      if (matches && !matches(a.id ?? '', lineageOf(a.id, a.taxonomy))) return false;
       return true;
     });
   });
@@ -102,7 +103,7 @@
         line: { width: 0 },
       },
       text: filteredAsvs.map(a =>
-        `${a.id}<br>${a.taxonomy ?? ''}<br>${(a.total_reads ?? 0).toLocaleString()} reads<br>${a.n_samples ?? 0} samples`
+        `${a.id}<br>${lineageOf(a.id, a.taxonomy)}<br>${(a.total_reads ?? 0).toLocaleString()} reads<br>${a.n_samples ?? 0} samples`
         + `<br>mean RA: ${((meanRaById.get(a.id) ?? 0) * 100).toFixed(3)}%`
       ),
       hoverinfo: 'text',
@@ -179,7 +180,7 @@
         </h3>
         <button class="text-xs text-faint hover:text-fg2" onclick={() => store.selectedAsv = null}>Close</button>
       </div>
-      <p class="mt-1 text-xs text-muted">{selectedAsvObj.taxonomy ?? 'No taxonomy'}</p>
+      <p class="mt-1 text-xs text-muted">{lineageOf(selectedAsvObj.id, selectedAsvObj.taxonomy) || 'No taxonomy'}</p>
       <p class="text-xs text-faint">
         {(selectedAsvObj.total_reads ?? 0).toLocaleString()} total reads |
         Prevalence: {selectedAsvObj.n_samples ?? 0}

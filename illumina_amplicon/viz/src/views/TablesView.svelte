@@ -1,5 +1,5 @@
 <script>
-  import { store, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor, makeTaxonMatcher } from '../stores/data.svelte.js';
+  import { store, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor, makeTaxonMatcher, lineageOf, activeDb} from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
 
@@ -9,10 +9,10 @@
   let sortAsc = $state(true);
 
   // ── Taxonomy helpers ──
-  let primaryDb = $derived(Object.keys(store.taxonomy)[0] || null);
-  let taxLevels = $derived(primaryDb ? (store.taxonomy[primaryDb]?.levels || []) : []);
-  let taxAssignments = $derived(primaryDb ? (store.taxonomy[primaryDb]?.assignments || {}) : {});
-  let taxBootstraps = $derived(primaryDb ? (store.taxonomy[primaryDb]?.bootstraps || {}) : {});
+  let taxDb = $derived(activeDb() || null);
+  let taxLevels = $derived(taxDb ? (store.taxonomy[taxDb]?.levels || []) : []);
+  let taxAssignments = $derived(taxDb ? (store.taxonomy[taxDb]?.assignments || {}) : {});
+  let taxBootstraps = $derived(taxDb ? (store.taxonomy[taxDb]?.bootstraps || {}) : {});
 
   let effectiveColorLevel = $derived(
     filters.colorMode === 'taxonomy'
@@ -165,7 +165,7 @@
     // Taxonomy filter
     if (filters.taxonFilter && activeTable !== 'samples') {
       const matches = makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel);
-      rows = rows.filter(r => matches(r.id ?? '', r.taxonomy ?? ''));
+      rows = rows.filter(r => matches(r.id ?? '', lineageOf(r.id, r.taxonomy)));
     }
 
     // Search filter
@@ -228,8 +228,12 @@
     const blob = new Blob([header + '\n' + body], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+    // Named for the reference as well as the table: two exports of the same
+    // table under SILVA and PR2 differ in every taxonomy column, and a file
+    // called asvs.csv does not say which one is in your hand.
     const name = activeTable === 'matrix' ? 'asv_by_sample' : activeTable;
-    a.href = url; a.download = `${name}.csv`; a.click();
+    const ref = taxDb ? `_${taxDb}` : '';
+    a.href = url; a.download = `${name}${ref}.csv`; a.click();
     URL.revokeObjectURL(url);
   }
 </script>

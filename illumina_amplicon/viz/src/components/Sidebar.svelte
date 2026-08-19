@@ -1,5 +1,5 @@
 <script>
-  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays, assayHeading, expandTaxonQuery } from '../stores/data.svelte.js';
+  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays, assayHeading, expandTaxonQuery, activeDb, taxonomyDbs} from '../stores/data.svelte.js';
   import AutocompleteInput from './AutocompleteInput.svelte';
 
   let { activeTab = 'samples', filters = $bindable({}), open = false,
@@ -55,6 +55,19 @@
     return v >= 10 ? Math.round(v) : v.toFixed(1);
   }
 
+  // A rank name means nothing outside the reference that defines it — PR2 has
+  // Subdivision and Supergroup, SILVA has Phylum — so a drill-down cannot
+  // survive the switch and is cleared rather than left pointing at a rank that
+  // no longer exists.
+  function switchReference(db) {
+    store.taxonomyDb = db;
+    filters.navStack = [];
+    filters.colorByLevel = '';
+    filters.taxonFilter = '';
+    filters.taxonFilterLevel = '';
+    filters.treeLabelLevels = (filters.treeLabelLevels || []).filter(l => l === 'id');
+  }
+
   function pushNav() {
     filters.navStack = [
       ...(filters.navStack || []),
@@ -86,12 +99,12 @@
 
   // Taxonomy levels from data
   let taxLevels = $derived(
-    store.taxonomy[Object.keys(store.taxonomy)[0]]?.levels || []
+    store.taxonomy[activeDb()]?.levels || []
   );
 
   // Autocomplete candidates
   let taxCandidates = $derived.by(() => {
-    const db = Object.keys(store.taxonomy)[0];
+    const db = activeDb();
     if (!db || !store.taxonomy[db]?.assignments) return [];
     const terms = new Set();
     for (const asvId in store.taxonomy[db].assignments) {
@@ -161,6 +174,25 @@
     </button>
     {#if sections.taxonomy}
       <div class="space-y-3 px-3 pb-3">
+        <!-- Only worth a control when there is a choice; most runs name one
+             reference and a select with one option is furniture. -->
+        {#if taxonomyDbs().length > 1}
+          <label class="block">
+            <span class="text-xs text-muted">Reference</span>
+            <select value={activeDb()}
+                    onchange={(e) => switchReference(e.target.value)}
+                    class="mt-1 w-full rounded border border-line bg-raised px-2 py-1 text-sm text-fg">
+              {#each taxonomyDbs() as db}
+                <option value={db}>{db}{db === taxonomyDbs()[0] ? ' (primary)' : ''}</option>
+              {/each}
+            </select>
+            <span class="mt-1 block text-[10px] text-faint">
+              {(store.taxonomy[activeDb()]?.levels || []).length} ranks · groups and
+              renormalisation come from {taxonomyDbs()[0]}
+            </span>
+          </label>
+        {/if}
+
         <AutocompleteInput
           bind:value={filters.taxonFilter}
           label="Filter"

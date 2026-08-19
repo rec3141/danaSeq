@@ -5,6 +5,8 @@
     GROUP_COLORS, GROUP_HEX,
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor, hexToRgba255,
     makeTaxonMatcher,
+    lineageOf,
+    activeDb,
   } from '../stores/data.svelte.js';
   import { chrome } from '../stores/theme.svelte.js';
 
@@ -97,13 +99,13 @@
   });
 
   // ---- Taxonomy data ----
-  let primaryDb = $derived(Object.keys(store.taxonomy)[0] || null);
+  let taxDb = $derived(activeDb() || null);
   let taxByAsv = $derived.by(() => {
-    if (!primaryDb || !store.taxonomy[primaryDb]?.assignments) return {};
-    return store.taxonomy[primaryDb].assignments;
+    if (!taxDb || !store.taxonomy[taxDb]?.assignments) return {};
+    return store.taxonomy[taxDb].assignments;
   });
   let taxLevels = $derived(
-    primaryDb && store.taxonomy[primaryDb]?.levels ? store.taxonomy[primaryDb].levels : []
+    taxDb && store.taxonomy[taxDb]?.levels ? store.taxonomy[taxDb].levels : []
   );
 
   // ---- Taxonomy filter predicate ----
@@ -113,8 +115,8 @@
 
   // Bootstrap data
   let bootByAsv = $derived.by(() => {
-    if (!primaryDb || !store.taxonomy[primaryDb]?.bootstraps) return {};
-    return store.taxonomy[primaryDb].bootstraps;
+    if (!taxDb || !store.taxonomy[taxDb]?.bootstraps) return {};
+    return store.taxonomy[taxDb].bootstraps;
   });
 
   // ---- Filtered ASV set (by taxonomy, group, bootstrap) ----
@@ -128,7 +130,7 @@
       if (assayAsvs && !assayAsvs.has(asv.id)) continue;
       const group = asv.group ?? 'unknown';
       if (gf[group] === false) continue;
-      if (matches && !matches(asv.id ?? '', asv.taxonomy ?? '')) continue;
+      if (matches && !matches(asv.id ?? '', lineageOf(asv.id, asv.taxonomy))) continue;
       // Check bootstrap at deepest assigned rank
       if (minBoot > 0) {
         const boot = bootByAsv[asv.id];

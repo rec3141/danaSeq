@@ -13,6 +13,7 @@ export const store = $state({
   counts: { data: [], samples: [], asvs: [] },
   network: { edges: [] },
   taxonomy: {},
+  taxonomyDb: null,   // which reference is on screen; null means the primary
   treeNewick: '',      // phylogeny (NJ) tree
   provenance: null,    // per-step read counts (data/provenance.json)
   // Which study this is. Written at deploy by OMC, which knows the accession —
@@ -261,6 +262,52 @@ function generatePalette(n) {
  * filter has no level and is a substring of the lineage or the ASV id.
  */
 /**
+ * Which reference the page is showing.
+ *
+ * A run can be classified against several references at once — SILVA for the
+ * prokaryotes, PR2 for the eukaryotes — and they disagree about more than
+ * names: PR2 has nine ranks to SILVA's six, so the level a view is drilling
+ * into is only meaningful next to the reference it came from.
+ *
+ * The first key is the primary, in the order the run named them; everything
+ * defaults to it, including the per-ASV lineage baked into asvs.json.
+ */
+export function taxonomyDbs() {
+  return Object.keys(store.taxonomy);
+}
+
+export function activeDb() {
+  const dbs = taxonomyDbs();
+  if (!dbs.length) return null;
+  return dbs.includes(store.taxonomyDb) ? store.taxonomyDb : dbs[0];
+}
+
+// Built once per reference: the alternative is rebuilding a lineage string per
+// ASV per redraw, and the sample view does that inside a loop over every ASV.
+let _lineageCache = { db: null, map: null };
+
+/**
+ * An ASV's lineage under the reference now selected.
+ *
+ * `fallback` is the string asvs.json carries, which is the primary reference's
+ * — right when that is what is selected, and all there is for an ASV the
+ * selected reference could not place.
+ */
+export function lineageOf(asvId, fallback = '') {
+  const db = activeDb();
+  if (!db) return fallback;
+  if (_lineageCache.db !== db) {
+    const assignments = store.taxonomy[db]?.assignments || {};
+    const map = new Map();
+    for (const id in assignments) {
+      map.set(id, (assignments[id] || []).filter(Boolean).join(';'));
+    }
+    _lineageCache = { db, map };
+  }
+  return _lineageCache.map.get(asvId) || fallback;
+}
+
+/**
  * Names people still type, and what the current SILVA calls them.
  *
  * SILVA 138.2 adopted the 2021 ICNP phylum names, so the data says
@@ -332,7 +379,7 @@ export function expandTaxonQuery(query) {
 
 export function makeTaxonMatcher(taxonFilter = '', filterLevel = '') {
   if (!taxonFilter) return null;
-  const db = Object.keys(store.taxonomy)[0];
+  const db = activeDb();
   const levels = db ? (store.taxonomy[db]?.levels || []) : [];
   const assignments = db ? (store.taxonomy[db]?.assignments || {}) : {};
   const lower = taxonFilter.toLowerCase();
@@ -365,7 +412,7 @@ export function makeTaxonMatcher(taxonFilter = '', filterLevel = '') {
  */
 export function taxaMatchingFilter(level, taxonFilter = '', filterLevel = '') {
   if (!taxonFilter || !level || level === '_asv' || level === 'group') return null;
-  const db = Object.keys(store.taxonomy)[0];
+  const db = activeDb();
   if (!db || !store.taxonomy[db]) return null;
 
   const levels = store.taxonomy[db].levels || [];
@@ -394,7 +441,7 @@ export function buildTaxColorMap(level, taxonFilter = '', filterLevel = '') {
   const cacheKey = `${level}|${taxonFilter}|${filterLevel}|${store.assayCacheKey}`;
   if (_taxColorCache.key === cacheKey) return _taxColorCache.result;
 
-  const db = Object.keys(store.taxonomy)[0];
+  const db = activeDb();
   if (!db || !store.taxonomy[db]) return { colorMap: {}, ranked: [] };
 
   const levels = store.taxonomy[db].levels || [];
@@ -468,7 +515,7 @@ export function buildTaxColorMap(level, taxonFilter = '', filterLevel = '') {
 export function getEffectiveColorLevel(colorByLevel, taxonFilter, filterLevel = '') {
   if (!taxonFilter || colorByLevel === 'group') return colorByLevel;
 
-  const db = Object.keys(store.taxonomy)[0];
+  const db = activeDb();
   if (!db || !store.taxonomy[db]) return colorByLevel;
 
   const levels = store.taxonomy[db].levels || [];
@@ -531,7 +578,7 @@ export function getEffectiveColorLevel(colorByLevel, taxonFilter, filterLevel = 
  * Returns the level name (e.g. 'Phylum') or null if not found.
  */
 export function findTaxonLevel(taxonName) {
-  const db = Object.keys(store.taxonomy)[0];
+  const db = activeDb();
   if (!db || !store.taxonomy[db] || !taxonName) return null;
 
   const levels = store.taxonomy[db].levels || [];
@@ -557,7 +604,7 @@ export function getAsvColor(asvId, level, colorMap) {
     return colorMap[asvId] || '#475569';
   }
 
-  const db = Object.keys(store.taxonomy)[0];
+  const db = activeDb();
   if (!db || !store.taxonomy[db]) return '#475569';
 
   const levels = store.taxonomy[db].levels || [];
@@ -732,6 +779,8 @@ export async function loadData() {
     store.counts = counts;
     store.network = network;
     store.taxonomy = taxonomy;
+    store.taxonomyDb = Object.keys(taxonomy)[0] ?? null;
+    _lineageCache = { db: null, map: null };
     store.treeNewick = treeNewick.trim();
     store.provenance = provenance || null;
     store.runInfo = runInfo || null;
