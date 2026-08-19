@@ -184,8 +184,11 @@ def main(argv=None):
     # Per end, so a run trimmed on one end only keeps the primer it still has
     # and keeps the amplicon it no longer has a primer in front of.
     fwd_cut, rev_cut = _cut(fwd), _cut(rev)
-    trim_fwd = fwd_cut is not None and not fwd_cut
-    trim_rev = rev_cut is not None and not rev_cut
+    # None is "cannot be judged", which is not "already cut" — an end with no
+    # placement keeps its primer and is trimmed. Both falsy, so one `not` covers
+    # the unjudged end and the end that begins on its primer alike.
+    trim_fwd = not fwd_cut
+    trim_rev = not rev_cut
     pre_trimmed = bool(fwd_cut or rev_cut)
     cut_at = [e for e in entries if e["state"] == "pre-trimmed"]
 
