@@ -37,7 +37,7 @@ Raw FASTQ files
 
 | Project | Purpose |
 |---|---|
-| [papa2](https://github.com/rec3141/papa2) | DADA2 denoising (bioconda) |
+| [papa2](https://github.com/rec3141/papa2) | DADA2 denoising (pinned GitHub release, byte-identical to R dada2) |
 | [danaSeq](https://github.com/rec3141/danaSeq) | This pipeline's home, alongside the metagenomics stages |
 | [microscape.app](https://microscape.app) | Hosting and sharing the interactive viz |
 

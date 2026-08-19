@@ -60,10 +60,13 @@ The container includes both Python and R environments:
 | Component | Version | Source |
 |-----------|---------|--------|
 | Nextflow | latest | nextflow.io |
-| papa2 | 0.1.0 | bioconda |
+| papa2 | v1.0.0 (pinned release, bumped deliberately) | [GitHub release](https://github.com/rec3141/papa2/releases) via pip |
 | cutadapt | latest | bioconda |
-| MAFFT | latest | bioconda |
-| R + dada2 | 4.x + 1.36 | bioconda |
+| MAFFT + FastTree | latest | bioconda |
+
+There is no R in the image: papa2 is byte-identical to R dada2 1.40
+(see its [parity documentation](https://rec3141.github.io/papa2/parity/)),
+so the pipeline runs on one engine.
 
 ## Building Locally
 
