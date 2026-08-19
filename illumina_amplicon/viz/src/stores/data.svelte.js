@@ -744,6 +744,31 @@ export function hexToRgba255(hex) {
 
 // ── Data loading ────────────────────────────────────────────────────────────
 
+/**
+ * The names actually present in data/, when the site says.
+ *
+ * Without it every load probes for a gzipped copy of each file and falls back to
+ * the plain one, which costs a 404 per file — and a further one for each file a
+ * run never produced. The deploy writes the list because it is the step that
+ * knows (danaSeq #28); a site without it behaves as before.
+ */
+let _dataIndex;
+
+async function dataIndex() {
+  if (_dataIndex !== undefined) return _dataIndex;
+  const inline = await embedded('./data/index.json');
+  if (inline !== undefined) {
+    try { _dataIndex = new Set(JSON.parse(inline)); return _dataIndex; } catch { /* fall through */ }
+  }
+  try {
+    const res = await fetch('./data/index.json');
+    _dataIndex = res.ok ? new Set(await res.json()) : null;
+  } catch {
+    _dataIndex = null;
+  }
+  return _dataIndex;
+}
+
 async function gunzip(buf) {
   const ds = new DecompressionStream('gzip');
   const reader = new Blob([buf]).stream().pipeThrough(ds).getReader();
@@ -790,6 +815,8 @@ export function isOfflineCopy() {
 async function fetchText(url) {
   const inline = await embedded(url);
   if (inline !== undefined) return inline;
+  const index = await dataIndex();
+  if (index && !index.has(url.split('/').pop())) throw new Error(`not in this run: ${url}`);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   return res.text();
@@ -798,6 +825,22 @@ async function fetchText(url) {
 export async function fetchJson(url) {
   const inline = await embedded(url);
   if (inline !== undefined) return JSON.parse(inline);
+
+  const index = await dataIndex();
+  if (index) {
+    const name = url.split('/').pop();
+    if (index.has(`${name}.gz`)) {
+      const res = await fetch(`${url}.gz`);
+      const buf = await res.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      return JSON.parse(bytes[0] === 0x1f && bytes[1] === 0x8b
+        ? await gunzip(buf) : new TextDecoder().decode(buf));
+    }
+    if (!index.has(name)) throw new Error(`not in this run: ${name}`);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${res.status} ${url}`);
+    return res.json();
+  }
 
   // Try .gz first
   try {
