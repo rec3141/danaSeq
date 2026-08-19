@@ -8,6 +8,7 @@
     taxaMatchingFilter, makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
     sampleInAssays, assayKey, listAssays, assayHeading, assaySpan, assayPlace,
     lineageOf,
+    markerRadius,
   } from '../stores/data.svelte.js';
   import { chrome } from '../stores/theme.svelte.js';
 
@@ -189,7 +190,7 @@
         allPoints.push({
           x: sample.x,
           y: sample.y,
-          size: Math.sqrt(proportion) * 20,
+          size: markerRadius(proportion, 17),
           color,
           proportion,
           text: `${sid}<br>${taxon}: ${(proportion * 100).toFixed(1)}%<br>${(sample.total_reads ?? 0).toLocaleString()} reads`,
@@ -223,7 +224,7 @@
           allPoints.push({
             x: sample.x,
             y: sample.y,
-            size: Math.sqrt(proportion) * 20,
+            size: markerRadius(proportion, 17),
             color,
             proportion,
             text: `${sample.id}<br>${asv.id}: ${(proportion * 100).toFixed(1)}%<br>${(sample.total_reads ?? 0).toLocaleString()} reads`,

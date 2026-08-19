@@ -517,7 +517,10 @@ workflow {
     // Logs may be absent entirely: a run whose reads arrived trimmed never calls
     // cutadapt, and the coordinates are then the only record of the assay.
     PRIMER_ASSIGNMENT(ch_cutadapt_logs.collect().ifEmpty([]), ch_positions)
-    ch_primer_assignment = PRIMER_ASSIGNMENT.out.tsv
+    // A value channel, because two processes read it: the ordination, to keep
+    // assays that share no sequences out of one embedding, and the viz build.
+    // A queue channel would deliver its one item to whichever asked first.
+    ch_primer_assignment = PRIMER_ASSIGNMENT.out.tsv.first()
 
     // 5. Merge all sequence tables and remove chimeras
     ch_all_seqtabs = DENOISE.out.seqtab.map { meta, rds -> rds }.collect()
@@ -600,7 +603,7 @@ workflow {
     }
 
     // 10. t-SNE clustering (samples + ASVs)
-    CLUSTER_TSNE(FILTER_SEQTAB.out.seqtab)
+    CLUSTER_TSNE(FILTER_SEQTAB.out.seqtab, ch_primer_assignment)
 
     // 11. SparCC network analysis, where there is renormalized data to run it on.
     //     Renormalization is by taxonomic group, so a run with no taxonomy has
@@ -636,7 +639,7 @@ workflow {
         CLUSTER_TSNE.out.sample_tsne.ifEmpty(file('NO_SAMPLE_TSNE')),
         CLUSTER_TSNE.out.seq_tsne.ifEmpty(file('NO_SEQ_TSNE')),
         ch_network.ifEmpty(file('NO_NETWORK')),
-        ch_primer_assignment.ifEmpty(file('NO_PRIMER_ASSIGNMENT'))
+        ch_primer_assignment
     )
 
     // 13. Optional: bundle static viz site (requires Node.js)

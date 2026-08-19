@@ -40,7 +40,10 @@
     showOverlay: true,
     pointScale: 3,
     // Network
-    minPrevalence: 0,
+    // An ASV seen in one sample cannot be compared with anything, and on a run
+    // with few samples they are most of the table — 9,075 of 11,418 on
+    // PRJNA661323 — where they crowd out the ASVs that do co-occur (danaSeq #53).
+    minPrevalence: 2,
     corrThreshold: 0.3,
     showEdges: true,
     networkPointScale: 10,

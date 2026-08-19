@@ -7,6 +7,7 @@
     buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor,
     makeTaxonMatcher, scaleMarkerSizes, maxUsefulScale,
     lineageOf,
+    markerRadius,
   } from '../stores/data.svelte.js';
   import { chrome } from '../stores/theme.svelte.js';
 
@@ -81,7 +82,7 @@
     // explorer (sqrt of a 0..1 fraction, times 6) so a marker means the same
     // thing in both views.
     const baseSizes = filteredAsvs.map(a =>
-      Math.sqrt(meanRaById.get(a.id) ?? 0) * 6
+      markerRadius(meanRaById.get(a.id), 5)
     );
     store.maxNetworkPointScale = maxUsefulScale(baseSizes);
 

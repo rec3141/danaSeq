@@ -665,6 +665,24 @@ export function getAsvColor(asvId, level, colorMap) {
 export const MAX_MARKER_PX = 100;
 
 /**
+ * How a proportion becomes a marker radius.
+ *
+ * Relative abundances run over several orders of magnitude, so plotting them
+ * directly leaves one visible point and a field of dust. A root compresses that;
+ * which root decides how much. A square root still spans a hundredfold where the
+ * data spans ten thousand, and the fourth root is what the ordination already
+ * applies to the same numbers before measuring distances between them — so the
+ * markers and the layout now agree about how much a difference in abundance is
+ * worth.
+ */
+export const MARKER_EXPONENT = 0.25;
+
+/** Marker radius for a proportion, before the sidebar's scale is applied. */
+export function markerRadius(proportion, factor) {
+  return Math.pow(Math.max(0, proportion || 0), MARKER_EXPONENT) * factor;
+}
+
+/**
  * The scale factor at which the largest of `base` reaches MAX_MARKER_PX — i.e.
  * the largest scale that still does anything. The sidebar sliders use it as their
  * top end so the whole track stays live whatever data is loaded.
