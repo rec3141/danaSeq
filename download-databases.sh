@@ -29,6 +29,7 @@ set -euo pipefail
 #   ./download-databases.sh --kraken2         # Download Kraken2 PlusPFP-8 (~8 GB)
 #   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
 #   ./download-databases.sh --pr2             # Download PR2 SSU (eukaryotic rRNA, ~350 MB)
+#   ./download-databases.sh --silva132        # Download SILVA 132 train set (pre-2021 names, ~60 MB)
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
 #   ./download-databases.sh --gtdbtk          # Download GTDB-Tk r226 reference data (~132 GB)
 #   ./download-databases.sh --antismash      # Download antiSMASH databases (~2 GB)
@@ -140,6 +141,7 @@ DOWNLOAD_METAEUK=false
 DOWNLOAD_KRAKEN2=false
 DOWNLOAD_SILVA=false
 DOWNLOAD_PR2=false
+DOWNLOAD_SILVA132=false
 DOWNLOAD_MARFERRET=false
 DOWNLOAD_GTDBTK=false
 DOWNLOAD_ANTISMASH=false
@@ -175,6 +177,7 @@ while (( $# )); do
         --kraken2)   DOWNLOAD_KRAKEN2=true; INTERACTIVE=false; shift ;;
         --silva)     DOWNLOAD_SILVA=true; INTERACTIVE=false; shift ;;
         --pr2)       DOWNLOAD_PR2=true; INTERACTIVE=false; shift ;;
+        --silva132)  DOWNLOAD_SILVA132=true; INTERACTIVE=false; shift ;;
         --marferret) DOWNLOAD_MARFERRET=true; INTERACTIVE=false; shift ;;
         --gtdbtk)    DOWNLOAD_GTDBTK=true; INTERACTIVE=false; shift ;;
         --antismash) DOWNLOAD_ANTISMASH=true; INTERACTIVE=false; shift ;;
@@ -205,6 +208,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_KRAKEN2=true
     DOWNLOAD_SILVA=true
     DOWNLOAD_PR2=true
+    DOWNLOAD_SILVA132=true
     DOWNLOAD_MARFERRET=true
     DOWNLOAD_GTDBTK=true
     DOWNLOAD_ANTISMASH=true
@@ -266,6 +270,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "kraken2"  "~8 GB"   "Kraken2 PlusPFP-8 (k-mer contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "silva"    "~900 MB" "SILVA 138.2 SSU + LSU NR99 (rRNA gene classification)"
     printf "  %-12s %-8s  %s\n" "pr2"      "~350 MB" "PR2 5.1.1 SSU (eukaryotic rRNA; SILVA under-resolves protists)"
+    printf "  %-12s %-8s  %s\n" "silva132" "~60 MB"  "SILVA 132 train set (pre-2021 names: Proteobacteria, not Pseudomonadota)"
     printf "  %-12s %-8s  %s\n" "marferret" "~9 GB"  "MarFERReT v1.1.1 marine eukaryotic proteins (DIAMOND + taxonomy + Pfam)"
     printf "  %-12s %-8s  %s\n" "gtdbtk"   "~132 GB" "GTDB-Tk r226 reference data (phylogenetic MAG classification)"
     echo ""
@@ -329,9 +334,10 @@ if $INTERACTIVE; then
     echo " 16) silva     - SILVA SSU + LSU NR99 (rRNA classification, ~900 MB)"
     echo " 17) marferret - MarFERReT marine eukaryotic proteins (~9 GB)"
     echo " 18) pr2       - PR2 SSU eukaryotic rRNA classification (~350 MB)"
-    echo " 19) all       - All databases"
+    echo " 19) silva132  - SILVA 132 train set, pre-2021 nomenclature (~60 MB)"
+    echo " 20) all       - All databases"
     echo ""
-    read -rp "Choice [1-19, or names]: " choice
+    read -rp "Choice [1-20, or names]: " choice
 
     case "$choice" in
         1|human)        DOWNLOAD_HUMAN=true ;;
@@ -351,8 +357,9 @@ if $INTERACTIVE; then
         15|kraken2)     DOWNLOAD_KRAKEN2=true ;;
         16|silva)       DOWNLOAD_SILVA=true ;;
         18|pr2)         DOWNLOAD_PR2=true ;;
+        19|silva132)    DOWNLOAD_SILVA132=true ;;
         17|marferret)   DOWNLOAD_MARFERRET=true ;;
-        19|all)         DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_MARFERRET=true ;;
+        20|all)         DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_SILVA132=true; DOWNLOAD_MARFERRET=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -374,15 +381,16 @@ if $INTERACTIVE; then
                     15|kraken2)     DOWNLOAD_KRAKEN2=true ;;
                     16|silva)       DOWNLOAD_SILVA=true ;;
                     18|pr2)         DOWNLOAD_PR2=true ;;
+                    19|silva132)    DOWNLOAD_SILVA132=true ;;
                     17|marferret)   DOWNLOAD_MARFERRET=true ;;
-                    all)            DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_MARFERRET=true ;;
+                    all)            DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_SILVA132=true; DOWNLOAD_MARFERRET=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_HUMAN && ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_BAKTA_LIGHT && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_PR2 && ! $DOWNLOAD_MARFERRET; then
+    if ! $DOWNLOAD_HUMAN && ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_BAKTA_LIGHT && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_PR2 && ! $DOWNLOAD_SILVA132 && ! $DOWNLOAD_MARFERRET; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -1072,6 +1080,11 @@ download_silva() {
 # Subdivision, so a 4.x list shifts every rank below Division up one and a class
 # is reported as a division. They are recorded next to the file they describe.
 PR2_VERSION="5.1.1"
+# SILVA 132 predates the 2021 ICNP renaming, so it still says Proteobacteria,
+# Firmicutes and Bacteroidetes where 138.2 says Pseudomonadota, Bacillota and
+# Bacteroidota. Kept alongside rather than instead: comparing against published
+# work that used it needs the names that work used.
+SILVA132_RANKS="Domain,Phylum,Class,Order,Family,Genus"
 PR2_RANKS="Domain,Supergroup,Division,Subdivision,Class,Order,Family,Genus,Species"
 SILVA_RANKS="Domain,Phylum,Class,Order,Family,Genus"
 
@@ -1084,6 +1097,7 @@ sync_amplicon_registry() {
     local reg="${DB_DIR}/amplicon_taxonomy.tsv"
     local silva_ssu="${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
     local pr2_fasta="${DB_DIR}/pr2_db/pr2_version_${PR2_VERSION}_SSU_dada2.fasta"
+    local silva132="${DB_DIR}/silva_db/silva_nr_v132_train_set.fa"
 
     if [ ! -f "${reg}" ]; then
         {
@@ -1102,6 +1116,7 @@ sync_amplicon_registry() {
     # nothing about how a run is grouped.
     _register_reference "${reg}" "silva" "${silva_ssu}" "${SILVA_RANKS}"
     _register_reference "${reg}" "pr2"   "${pr2_fasta}" "${PR2_RANKS}"
+    _register_reference "${reg}" "silva132" "${silva132}" "${SILVA132_RANKS}"
 
     # Whichever registered first is primary and stays primary, which is a
     # surprise if PR2 was fetched before SILVA. Say which it is rather than
@@ -1153,6 +1168,35 @@ download_pr2() {
 
     echo "[SUCCESS] PR2 downloaded to ${fasta}"
     echo "  Ranks: ${PR2_RANKS}"
+    sync_amplicon_registry
+}
+
+download_silva132() {
+    local db_path="${DB_DIR}/silva_db"
+    local fasta="${db_path}/silva_nr_v132_train_set.fa"
+
+    if [ -f "${fasta}" ]; then
+        echo "[INFO] SILVA 132 training set already exists at ${fasta}"
+        sync_amplicon_registry
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading SILVA 132 training set (~60 MB compressed)..."
+    echo "  Source: zenodo.org/records/1172783 (DADA2-formatted, 6 ranks)"
+    echo "  Destination: ${db_path}"
+
+    mkdir -p "${db_path}"
+    local gz="${db_path}/silva_nr_v132_train_set.fa.gz"
+    wget -q --show-progress -O "${gz}" \
+        "https://zenodo.org/records/1172783/files/silva_nr_v132_train_set.fa.gz?download=1"
+    # DNA already, unlike the arb-silva exports, which are RNA.
+    gunzip -c "${gz}" > "${fasta}"
+    rm -f "${gz}"
+
+    echo "[SUCCESS] SILVA 132 downloaded to ${fasta}"
+    echo "  Ranks: ${SILVA132_RANKS}"
+    echo "  Note: pre-2021 nomenclature — Proteobacteria, not Pseudomonadota."
     sync_amplicon_registry
 }
 
@@ -1394,6 +1438,10 @@ fi
 
 if $DOWNLOAD_PR2; then
     ( download_pr2 ) || failed=$((failed + 1))
+fi
+
+if $DOWNLOAD_SILVA132; then
+    ( download_silva132 ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_MARFERRET; then
