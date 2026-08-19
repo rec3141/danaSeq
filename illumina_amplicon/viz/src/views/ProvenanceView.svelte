@@ -136,6 +136,14 @@
                  href="https://www.ncbi.nlm.nih.gov/bioproject/{store.runInfo.bioproject}"
                  target="_blank" rel="noopener">{store.runInfo.bioproject}</a></dd>
         {/if}
+        {#if store.runInfo?.registered}
+          <dt class="text-faint">Released</dt>
+          <dd class="text-fg2">{store.runInfo.registered}
+            {#if store.runInfo.updated && store.runInfo.updated !== store.runInfo.registered}
+              <span class="text-faint">· updated {store.runInfo.updated}</span>
+            {/if}
+          </dd>
+        {/if}
         {#if store.runInfo?.slug}
           <dt class="text-faint">Run</dt>
           <dd class="font-mono text-fg2">

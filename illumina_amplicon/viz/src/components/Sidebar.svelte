@@ -139,6 +139,10 @@
       <p class="text-[11px] text-muted">
         <a href="https://www.ncbi.nlm.nih.gov/bioproject/{store.runInfo.bioproject}"
            target="_blank" rel="noopener" class="hover:text-link">{store.runInfo.bioproject}</a>
+        {#if store.runInfo.registered}
+          <span class="text-faint">·</span>
+          <span title="released to the public archive">{store.runInfo.registered}</span>
+        {/if}
         {#if store.runInfo.portal_url}
           <span class="text-faint">·</span>
           <a href={store.runInfo.portal_url} target="_blank" rel="noopener"
