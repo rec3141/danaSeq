@@ -45,7 +45,19 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.version="${GIT_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
+# Node, for building the viz SPA out of the image. The site is rebuilt from the
+# image whenever the front end moves (omc-refresh-sites.py), so the image has to
+# be able to build it without reaching the network — which is also what lets it
+# build on an offline compute node.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY . /pipeline/
+
+# Pre-install the viz app's node_modules, so a later `vite build` needs nothing
+# fetched.
+RUN cd /pipeline/viz && npm ci --no-audit --no-fund
 
 # Docker config: disable per-process conda (tools already on PATH via wrappers)
 RUN echo 'conda.enabled = false' > /pipeline/docker.config

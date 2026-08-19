@@ -14,3 +14,8 @@ databases/
 
 # Docker context bloat
 *.log
+
+# The image installs these itself (npm ci); shipping the host's copy would bloat
+# the build context and then be overwritten.
+viz/node_modules/
+viz/dist/
