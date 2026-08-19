@@ -7,18 +7,43 @@
     maxSuggestions = 8,
     onPick = null,
     onType = null,   // fired on manual edits only — pick() sets the value directly
+    // Extra strings to search for besides what was typed, so a name that has
+    // been retired can still lead to the one that replaced it. Returns the
+    // query first; anything after it is a synonym and ranks below a direct hit.
+    expand = null,
   } = $props();
 
   let focused = $state(false);
   let selectedIdx = $state(-1);
   let inputEl;
 
+  // Ranked, because the cut to maxSuggestions decides what the reader believes
+  // exists. Alphabetical order put Alphaproteobacteria and Gammaproteobacteria
+  // above the phylum a search for "Proteo" is actually after, and the phylum
+  // fell off the end — the list then reads as proof it is not in the data.
+  // Rank: what the query starts, then what merely contains it, then names
+  // reached through a synonym; alphabetical within each.
   let suggestions = $derived.by(() => {
     if (!value || !focused) return [];
-    const lower = value.toLowerCase();
+    const needles = expand ? expand(value) : [value.toLowerCase()];
+    if (!needles.length) return [];
+    const [query, ...synonyms] = needles;
+
+    const rank = (c) => {
+      const lc = c.toLowerCase();
+      if (lc.startsWith(query)) return 0;
+      if (lc.includes(query)) return 1;
+      if (synonyms.some(n => lc.startsWith(n))) return 2;
+      if (synonyms.some(n => lc.includes(n))) return 3;
+      return -1;
+    };
+
     return candidates
-      .filter(c => c.toLowerCase().includes(lower))
-      .slice(0, maxSuggestions);
+      .map(c => ({ c, r: rank(c) }))
+      .filter(x => x.r >= 0)
+      .sort((a, b) => a.r - b.r || a.c.localeCompare(b.c))
+      .slice(0, maxSuggestions)
+      .map(x => x.c);
   });
 
   function pick(s) {

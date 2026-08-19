@@ -1,5 +1,5 @@
 <script>
-  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays, assayHeading } from '../stores/data.svelte.js';
+  import { store, GROUP_HEX, buildTaxColorMap, getEffectiveColorLevel, findTaxonLevel, listAssays, assayHeading, expandTaxonQuery } from '../stores/data.svelte.js';
   import AutocompleteInput from './AutocompleteInput.svelte';
 
   let { activeTab = 'samples', filters = $bindable({}), open = false,
@@ -160,8 +160,9 @@
         <AutocompleteInput
           bind:value={filters.taxonFilter}
           label="Filter"
-          placeholder="e.g. Proteobacteria"
+          placeholder="e.g. Pseudomonadota"
           candidates={taxCandidates}
+          expand={expandTaxonQuery}
           onPick={navigateToTaxon}
           onType={clearFilterLevel}
         />

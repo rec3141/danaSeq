@@ -260,6 +260,76 @@ function generatePalette(n) {
  * SAR86 and SAR116, which sit on a different branch entirely. A hand-typed
  * filter has no level and is a substring of the lineage or the ASV id.
  */
+/**
+ * Names people still type, and what the current SILVA calls them.
+ *
+ * SILVA 138.2 adopted the 2021 ICNP phylum names, so the data says
+ * Pseudomonadota where a decade of papers, teaching and memory says
+ * Proteobacteria. Typing the familiar name finds nothing, and nothing about the
+ * empty result says why — the reader concludes the filter is broken, or worse,
+ * that the group is absent. Class names were not renamed, so a search for
+ * "Proteo" does return Alphaproteobacteria and Gammaproteobacteria, which makes
+ * the phylum's absence look stranger still.
+ *
+ * Keyed by the old name; the value is what to search for instead. Euryarchaeota
+ * was split rather than renamed, so it maps to several.
+ */
+export const TAXON_SYNONYMS = {
+  proteobacteria: ['Pseudomonadota'],
+  firmicutes: ['Bacillota'],
+  actinobacteria: ['Actinomycetota'],
+  actinobacteriota: ['Actinomycetota'],
+  bacteroidetes: ['Bacteroidota'],
+  cyanobacteria: ['Cyanobacteriota'],
+  chloroflexi: ['Chloroflexota'],
+  verrucomicrobia: ['Verrucomicrobiota'],
+  planctomycetes: ['Planctomycetota'],
+  acidobacteria: ['Acidobacteriota'],
+  spirochaetes: ['Spirochaetota'],
+  fusobacteria: ['Fusobacteriota'],
+  nitrospirae: ['Nitrospirota'],
+  tenericutes: ['Mycoplasmatota'],
+  chlamydiae: ['Chlamydiota'],
+  synergistetes: ['Synergistota'],
+  thermotogae: ['Thermotogota'],
+  aquificae: ['Aquificota'],
+  armatimonadetes: ['Armatimonadota'],
+  gemmatimonadetes: ['Gemmatimonadota'],
+  lentisphaerae: ['Lentisphaerota'],
+  'deinococcus-thermus': ['Deinococcota'],
+  epsilonbacteraeota: ['Campylobacterota'],
+  desulfobacterota: ['Thermodesulfobacteriota'],
+  crenarchaeota: ['Thermoproteota'],
+  thaumarchaeota: ['Nitrososphaerota'],
+  euryarchaeota: ['Methanobacteriota', 'Halobacteriota', 'Thermoplasmatota'],
+};
+
+/**
+ * The strings to look for, given what was typed: the query itself, plus the
+ * current name of any retired taxon the query is starting to spell.
+ *
+ * Prefix rather than substring, and only once enough has been typed to be
+ * aiming at something: "p" prefixes half the table, and standing in for every
+ * one of them is not help.
+ */
+const MIN_SYNONYM_PREFIX = 3;
+
+export function expandTaxonQuery(query) {
+  const lower = (query || '').toLowerCase().trim();
+  if (!lower) return [];
+  const out = [lower];
+  if (lower.length < MIN_SYNONYM_PREFIX) return out;
+  for (const [old, current] of Object.entries(TAXON_SYNONYMS)) {
+    if (old.startsWith(lower)) {
+      for (const name of current) {
+        const n = name.toLowerCase();
+        if (!out.includes(n)) out.push(n);
+      }
+    }
+  }
+  return out;
+}
+
 export function makeTaxonMatcher(taxonFilter = '', filterLevel = '') {
   if (!taxonFilter) return null;
   const db = Object.keys(store.taxonomy)[0];
@@ -277,10 +347,11 @@ export function makeTaxonMatcher(taxonFilter = '', filterLevel = '') {
   // substring, while `.` quietly matched everything — so the box behaved like
   // two different tools depending on what you typed. Substring is what people
   // were reaching for anyway.
+  const needles = expandTaxonQuery(taxonFilter);
   return (asvId, lineage) => {
-    const fullTax = lineage ?? (assignments[asvId]?.filter(Boolean).join(';') || '');
-    const id = asvId ?? '';
-    return fullTax.toLowerCase().includes(lower) || id.toLowerCase().includes(lower);
+    const fullTax = (lineage ?? (assignments[asvId]?.filter(Boolean).join(';') || '')).toLowerCase();
+    const id = (asvId ?? '').toLowerCase();
+    return needles.some(n => fullTax.includes(n) || id.includes(n));
   };
 }
 
