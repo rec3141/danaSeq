@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher, sampleInAssays, activeDb, fetchJson} from '../stores/data.svelte.js';
+  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher, sampleInAssays, activeDb, fetchJson, lineageOf} from '../stores/data.svelte.js';
   import { chrome } from '../stores/theme.svelte.js';
 
   let { filters = {} } = $props();
@@ -42,7 +42,7 @@
   // An assay filter cuts both axes: its samples are the rows, and the ASVs it
   // observed are the columns. Either dendrogram is dropped once its axis is
   // subset, since the stored linkage no longer describes what is drawn.
-  function filterHeatmap(data, minMaxRA, assayAsvs, assaySamples) {
+  function filterHeatmap(data, minMaxRA, assayAsvs, assaySamples, keepAsvs) {
     if (!data?.z?.length) return data;
     const nCols = data.z[0]?.length || 0;
     const nRows = data.sampleIds?.length ?? data.z.length;
@@ -56,6 +56,8 @@
     for (let j = 0; j < nCols; j++) {
       if (colMaxZ[j] < zThreshold) continue;
       if (assayAsvs && !assayAsvs.has(data.asvIds[j])) continue;
+      // The taxonomy filter, when it is set to drop rather than dim.
+      if (keepAsvs && !keepAsvs.has(data.asvIds[j])) continue;
       keepCols.push(j);
     }
 
@@ -89,13 +91,26 @@
     return ids;
   });
 
+  // ASVs the taxonomy filter admits, or null when there is no filter. Derived
+  // once here because both the redraw and the column filter need it.
+  let taxonAdmitted = $derived.by(() => {
+    const matches = makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel);
+    if (!matches) return null;
+    const db = activeDb();
+    const assigns = db ? store.taxonomy[db]?.assignments || {} : {};
+    const keep = new Set();
+    for (const id in assigns) if (matches(id)) keep.add(id);
+    return keep;
+  });
+
   onMount(async () => {
     try {
       // Through the store's loader, which prefers a payload the page carries
       // over one it has to fetch — an offline copy has no server to fetch from.
       rawHeatmapData = await fetchJson('./data/heatmap.json');
       if (rawHeatmapData) {
-        const filtered = filterHeatmap(rawHeatmapData, filters.heatmapMinMaxRA ?? 1.0, assayAsvs, assaySamples);
+        const filtered = filterHeatmap(rawHeatmapData, filters.heatmapMinMaxRA ?? 1.0, assayAsvs, assaySamples,
+                                    filters.treePrune ? taxonAdmitted : null);
         heatmapData = filtered;
         visibleAsvCount = filtered?.asvIds?.length ?? 0;
       }
@@ -239,12 +254,16 @@
   // Re-filter when slider changes (debounced — 65M cell scan is expensive)
   let filterTimer = null;
   $effect(() => {
+    // Read in the effect body, not in the callback: what the timeout closes over
+    // is not what the effect tracks, so a value only read inside it never
+    // triggers a redraw.
     const threshold = filters.heatmapMinMaxRA;
     const aAsvs = assayAsvs, aSamples = assaySamples;
+    const keep = filters.treePrune ? taxonAdmitted : null;
     if (rawHeatmapData) {
       if (filterTimer) clearTimeout(filterTimer);
       filterTimer = setTimeout(() => {
-        const filtered = filterHeatmap(rawHeatmapData, threshold ?? 1.0, aAsvs, aSamples);
+        const filtered = filterHeatmap(rawHeatmapData, threshold ?? 1.0, aAsvs, aSamples, keep);
         heatmapData = filtered;
         visibleAsvCount = filtered?.asvIds?.length ?? 0;
       }, 300);
@@ -361,7 +380,9 @@
       ? buildTaxColorMap(colorLevel, filters.taxonFilter, filters.taxonFilterLevel).colorMap
       : null;
 
-    // Build filtered set for dimming
+    // The set the taxonomy filter admits. Dimmed by default so the filtered
+    // ASVs stay in place against the rest; dropped entirely when asked, which is
+    // what makes a phylogeny-ordered heatmap match a pruned tree.
     let filteredAsvSet = null;
     const taxonMatches = makeTaxonMatcher(filters.taxonFilter, filters.taxonFilterLevel);
     if (taxonMatches) {
@@ -506,7 +527,10 @@
           show: true,
           x: e.clientX,
           y: e.clientY,
-          text: `${sampleIds[row]} | ${asvIds[col]} ${asvLabels[col]} | ${(val ** 4 * 100).toFixed(2)}%`,
+          // The whole lineage, not the label: the label is one rank, and which
+          // rank it is depends on where the drill-down happens to be.
+          text: `${sampleIds[row]} | ${asvIds[col]} | ${(val ** 4 * 100).toFixed(2)}%\n`
+                + (lineageOf(asvIds[col]) || asvLabels[col] || 'no taxonomy'),
         };
       } else {
         tooltip = { show: false, x: 0, y: 0, text: '' };
@@ -563,7 +587,9 @@
 
       <!-- Tooltip -->
       {#if tooltip.show}
-        <div class="fixed z-50 rounded bg-raised/95 px-3 py-1.5 text-xs text-fg shadow-lg pointer-events-none"
+        <!-- A lineage is long, so it wraps and keeps its own line rather than
+             running off the window edge. -->
+        <div class="pointer-events-none fixed z-50 max-w-sm whitespace-pre-line break-words rounded bg-raised/95 px-3 py-1.5 text-xs text-fg shadow-lg"
           style="left: {tooltip.x + 12}px; top: {tooltip.y - 20}px;">
           {tooltip.text}
         </div>

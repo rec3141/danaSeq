@@ -592,6 +592,14 @@
             <input type="range" min="1" max="20" step="1" bind:value={filters.heatmapCellSize} class="mt-1 w-full accent-blue-500" />
           </label>
 
+          <!-- The same switch the tree carries. Ordering the heatmap by the
+               phylogeny and then leaving the filtered ASVs greyed in place puts
+               it out of step with the pruned tree beside it. -->
+          <label class="flex items-center gap-2 text-xs">
+            <input type="checkbox" bind:checked={filters.treePrune} class="accent-blue-500" />
+            Drop filtered ASVs
+          </label>
+
           <label class="block">
             <span class="text-xs text-muted">ASV ordering</span>
             <select bind:value={filters.heatmapAsvTree} class="mt-1 w-full rounded border border-line bg-raised px-2 py-1 text-sm text-fg">
