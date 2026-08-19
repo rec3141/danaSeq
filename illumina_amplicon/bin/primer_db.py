@@ -723,6 +723,24 @@ def best_supported_catalogue_primer(reads: list[str], end: str = "fwd",
     return best if best[2] >= min_support else ("", "", best[2])
 
 
+def _template_consumed(primer: str) -> int:
+    """How much of the gene a primer eats, for choosing between candidates.
+
+    Lower is better, and the number only means anything against other candidates
+    for the same end. A forward primer consumes up to its last base, so its end
+    coordinate is the measure. A reverse primer is written as the other strand
+    and extends leftwards along the reference, so the base it consumes to is its
+    *start* coordinate and a higher one leaves more amplicon — negated so that
+    smaller still means better.
+
+    A primer that places nowhere sorts last: nothing can be said about where it
+    stops, and a placed candidate is the better evidence.
+    """
+    locs = locate_on_ssu(primer)
+    if not locs:
+        return 10 ** 6
+    return min((l["end"] if l["strand"] == "+" else -l["start"]) for l in locs)
+
 def resolve_primer(consensus: str, reads: list[str]) -> tuple[str, str, dict]:
     """Settle on the sequence to trim with: (sequence, source, detail).
 
@@ -735,16 +753,42 @@ def resolve_primer(consensus: str, reads: list[str]) -> tuple[str, str, dict]:
     Only when nothing in the catalogue survives is a primer invented, and then it
     must be at least as long and no more degenerate than the catalogue allows.
     """
-    tried = []
+    tried, confirmed = [], []
     for name, ref, anchors, score in catalogue_candidates(consensus) if consensus else []:
         obs = read_support(reads, ref)
-        tried.append({"name": name, "anchors": anchors,
-                      "id": round(score, 3), "read_support": round(obs, 3)})
+        record = {"name": name, "anchors": anchors,
+                  "id": round(score, 3), "read_support": round(obs, 3)}
+        tried.append(record)
         if obs >= _VERIFY_MIN:
-            return ref, "catalogue", {"name": name, "anchors": anchors,
-                                      "id": round(score, 3),
-                                      "read_support": round(obs, 3),
-                                      "rejected": tried[:-1]}
+            confirmed.append((len(ref), -score, name, ref, anchors, obs, record))
+
+    # Among those the reads confirm, the one that cuts least far into the gene.
+    #
+    # The catalogue holds one primer site at several lengths: 341F ends at E. coli
+    # 357, and 341Fmod is the same primer plus 8 bases, ending at 365. Reads
+    # cannot separate them — the bases past a primer are conserved across the
+    # community, so they are as invariant as the primer itself, and both clear
+    # the threshold on the same sample (0.986 and 0.980).
+    #
+    # The two mistakes are not equal. Cut too far and the surplus comes out of
+    # template: real variation there is deleted, and the reads carrying it fail
+    # the match and are discarded — 11 points of yield on PRJNA661323. Cut too
+    # short and a constant remnant stays on every read, which denoising collapses
+    # to a single sequence and which costs nothing but where the amplicon starts.
+    # One loses data, the other keeps it (danaSeq #59).
+    #
+    # It is the 3' end that decides this, not the length: 343F is shorter than
+    # 341F only because it starts later, and starting later removes nothing extra
+    # — cutadapt's -g takes everything ahead of the match regardless. So the
+    # candidate eating least template wins, and among those reaching equally far
+    # the longest, being the most specific match.
+    if confirmed:
+        confirmed.sort(key=lambda c: (_template_consumed(c[3]), -len(c[3]), c[1]))
+        _len, _negscore, name, ref, anchors, obs, record = confirmed[0]
+        return ref, "catalogue", {"name": name, "anchors": anchors,
+                                  "id": record["id"],
+                                  "read_support": record["read_support"],
+                                  "rejected": [t for t in tried if t is not record]}
 
     # The consensus is the average read, and averages a mixed library into
     # something no candidate resembles. Ask the catalogue directly instead.
