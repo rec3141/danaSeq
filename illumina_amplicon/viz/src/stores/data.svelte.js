@@ -117,9 +117,16 @@ export function assayKey(sample) {
 }
 
 // Reference sequences the pipeline quotes coordinates in, and what they mean.
+//
+// Which organism supplied the reference is an implementation detail of the
+// measurement: a placement on E. coli says the assay targets bacteria, not that
+// anyone expects E. coli in the sample, and reading an organism name beside
+// one's own marine data invites exactly that misreading. The domain is what the
+// placement actually establishes, so the domain is what is shown; the organism
+// stays available for the places that quote the coordinate system itself.
 const REFERENCE_GENE = {
-  ecoli_16S: { gene: '16S rRNA', organism: 'E. coli' },
-  yeast_18S: { gene: '18S rRNA', organism: 'yeast' },
+  ecoli_16S: { gene: '16S rRNA', domain: 'bacterial', organism: 'E. coli' },
+  yeast_18S: { gene: '18S rRNA', domain: 'eukaryotic', organism: 'yeast' },
 };
 
 /**
@@ -141,7 +148,8 @@ export function assayHeading(gene, region, fwd, rev, place, conflict) {
   if (named) return named;
   if (place) {
     const [ref] = String(place).split('@');
-    return REFERENCE_GENE[ref]?.gene || ref;
+    const meta = REFERENCE_GENE[ref];
+    return meta ? `${meta.domain} ${meta.gene}` : ref;
   }
   // A pair whose ends belong to different genes names no assay, and the reason
   // it names none is worth more than the primer text it would otherwise show
@@ -150,15 +158,24 @@ export function assayHeading(gene, region, fwd, rev, place, conflict) {
   return (isDerivedPrimer(fwd) || isDerivedPrimer(rev)) ? 'inferred primers' : 'unknown';
 }
 
-/** "E. coli 534-786" — the span an assay covers, for a placed assay. */
+/** "bacterial 16S 534-786" — the span an assay covers, for a placed assay. */
 export function assaySpan(place) {
   if (!place) return '';
   const [ref, span] = String(place).split('@');
-  const organism = REFERENCE_GENE[ref]?.organism || ref;
-  return span ? `${organism} ${span}` : organism;
+  const meta = REFERENCE_GENE[ref];
+  const what = meta ? `${meta.domain} ${meta.gene.replace(/ rRNA$/, '')}` : ref;
+  return span ? `${what} ${span}` : what;
 }
 
-/** Human label for an assay key, e.g. "16S rRNA V4 (E. coli 534-786)". */
+/** Which reference a placement is quoted against, named as the sequence it is. */
+export function assayReferenceName(place) {
+  if (!place) return '';
+  const [ref] = String(place).split('@');
+  const meta = REFERENCE_GENE[ref];
+  return meta ? `${meta.organism} ${meta.gene}` : ref;
+}
+
+/** Human label for an assay key, e.g. "16S rRNA V4 (bacterial 16S 534-786)". */
 export function assayLabel(key) {
   if (!key) return 'unassigned';
   const [gene, region, fwd, rev, place] = key.split('|');

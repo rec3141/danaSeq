@@ -914,6 +914,26 @@ def locate_on_ssu(primer: str, min_id: float = 0.80) -> list[dict]:
     return sorted(out, key=lambda d: -d["identity"])
 
 
+# How close a second reference has to score before a primer is called universal.
+# Judged on what the sequence does rather than on what the primer is
+# conventionally called: 1492R is spoken of as universal and is 1.0 on E. coli
+# against 0.909 on yeast, which is a preference, while 515F is 1.0 on both and
+# genuinely cannot tell the domains apart.
+_UNIVERSAL_MARGIN = 0.05
+
+
+def is_universal(locations: list[dict]) -> bool:
+    """True when a primer places as well on a second reference as on the first.
+
+    Worth knowing separately from where it placed. A universal primer still has
+    to have its coordinates quoted against one reference, and which one wins is
+    then decided by a tie — so calling the assay bacterial because E. coli was
+    reached first states a domain the sequence never established.
+    """
+    if not locations or len(locations) < 2:
+        return False
+    return (locations[0]["identity"] - locations[1]["identity"]) <= _UNIVERSAL_MARGIN
+
 @lru_cache(maxsize=1)
 def _catalogue_spans() -> tuple:
     """Every catalogue primer's placement on the SSU references.
