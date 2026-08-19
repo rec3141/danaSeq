@@ -290,11 +290,13 @@
 
   <div class="flex-1 overflow-auto rounded-lg border border-line">
     <table class="w-full text-sm">
-      <thead class="sticky top-0 z-10 bg-surface text-left">
+      <!-- Sticky on the cells, not the section: Safari does not make a table
+           section a sticky container. -->
+      <thead class="text-left">
         <tr>
           {#each cols as col}
             <th
-              class="cursor-pointer select-none border-b border-line px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted hover:text-fg transition-colors"
+              class="sticky top-0 z-10 cursor-pointer select-none border-b border-line bg-surface px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted transition-colors hover:text-fg"
               style={col.width ? `width:${col.width}` : ''}
               onclick={() => toggleSort(col.key)}
             >

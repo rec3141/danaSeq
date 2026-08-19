@@ -402,12 +402,15 @@
              draws over it instead of under. -->
         <div class="max-h-[38vh] min-h-0 overflow-y-auto">
           <table class="w-full text-xs">
-            <thead class="sticky top-0 z-10 bg-surface text-left text-muted shadow-[0_1px_0_0] shadow-line">
+            <!-- Sticky on the cells rather than on <thead>: Safari does not
+                 make a table section a sticky container, so a header set there
+                 scrolls away and the rows arrive under nothing. -->
+            <thead class="text-left text-muted">
               <tr>
-                <th class="py-1 pr-4">ASV</th>
-                <th class="py-1 pr-4">Taxonomy</th>
-                <th class="py-1 pr-4 text-right">Reads</th>
-                <th class="py-1 text-right">%</th>
+                <th class="sticky top-0 z-10 bg-surface py-1 pr-4 shadow-[0_1px_0_0] shadow-line">ASV</th>
+                <th class="sticky top-0 z-10 bg-surface py-1 pr-4 shadow-[0_1px_0_0] shadow-line">Taxonomy</th>
+                <th class="sticky top-0 z-10 bg-surface py-1 pr-4 text-right shadow-[0_1px_0_0] shadow-line">Reads</th>
+                <th class="sticky top-0 z-10 bg-surface py-1 text-right shadow-[0_1px_0_0] shadow-line">%</th>
               </tr>
             </thead>
             <tbody class="text-fg2">
