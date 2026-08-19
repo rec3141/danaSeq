@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 #
-# remove_chimeras.py — Consensus chimera removal using dada2's C library
+# remove_chimeras.py — de novo chimera removal using papa2's C library
 #
 # Python mirror of remove_chimeras.R. Converts long-format count data to a
-# dense matrix and calls dada2's C-level table_bimera() for consensus
-# chimera detection (identical algorithm to R's removeBimeraDenovo).
+# dense matrix and calls papa2's remove_bimera_denovo(), the same algorithm as
+# R's removeBimeraDenovo.
 #
 # Usage:
-#   remove_chimeras.py <seqtab.pkl> <cpus>
+#   remove_chimeras.py <seqtab.pkl> <cpus> [method]
 #
 # Outputs:
 #   seqtab_nochim.pkl    Chimera-free sequence table (long-format DataFrame)
@@ -39,12 +39,19 @@ if _cpus > 0:
 # ===========================================================================
 
 if len(sys.argv) < 3:
-    print("Usage: remove_chimeras.py <seqtab_long.pkl> <cpus>",
+    print("Usage: remove_chimeras.py <seqtab_long.pkl> <cpus> [method]",
           file=sys.stderr)
     sys.exit(1)
 
 input_path = sys.argv[1]
 cpus       = int(sys.argv[2])
+method     = sys.argv[3] if len(sys.argv) > 3 else "pooled"
+
+_METHODS = ("pooled", "consensus", "per-sample")
+if method not in _METHODS:
+    print(f"[ERROR] chimera_method must be one of {_METHODS}, got {method!r}",
+          file=sys.stderr)
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # Load input (long-format DataFrame from merge_seqtabs.py)
@@ -87,8 +94,15 @@ print(f"[INFO] Chimera input: {dt['sequence'].nunique()} ASVs, "
       f"{len(dt)} non-zero entries")
 
 # ---------------------------------------------------------------------------
-# Run chimera detection using dada2's C-level consensus method
+# Run chimera detection
 # ---------------------------------------------------------------------------
+# The mode matters more than any threshold here. "consensus" calls chimeras
+# per sample and then requires an ASV to be flagged in nearly every sample it
+# appears in; across samples drawn from unlike communities that agreement never
+# arrives, and the step passes everything through (#58). "pooled" sums the
+# counts and calls once against the whole study, which is what the studies we
+# run look like.
+
 # Build dense matrix from long-format DataFrame
 all_seqs = sorted(dt["sequence"].unique())
 all_samples = sorted(dt["sample"].unique())
@@ -101,12 +115,20 @@ col_idx = dt["sequence"].map(seq_to_idx).values
 mat[row_idx, col_idx] = dt["count"].values.astype(np.int32)
 
 print(f"[INFO] Checking {len(all_seqs)} ASVs for chimeras "
-      f"({len(all_samples)} samples)")
+      f"({len(all_samples)} samples, method={method})")
 
 seqtab = {"table": mat, "seqs": all_seqs}
-chim_result = dada2py.remove_bimera_denovo(seqtab, verbose=True)
+chim_result = dada2py.remove_bimera_denovo(seqtab, method=method, verbose=True)
 
-is_chimera = np.array(chim_result["is_chimera"])
+# "per-sample" flags cells, not columns: its is_chimera is (samples x ASVs).
+# An ASV is dropped from the table only when every sample carrying it flagged
+# it — anything less is handled by zeroing the cells, which this long-format
+# path does not do, so collapse conservatively.
+is_chimera = np.asarray(chim_result["is_chimera"])
+if is_chimera.ndim == 2:
+    present = mat > 0
+    flagged = (is_chimera & present).sum(axis=0)
+    is_chimera = (flagged > 0) & (flagged == present.sum(axis=0))
 chimeric_seqs = set(s for s, c in zip(all_seqs, is_chimera) if c)
 
 # Remove chimeric sequences
@@ -134,6 +156,7 @@ with open("seqtab_nochim.pkl", "wb") as f:
 
 stats = pd.DataFrame([{
     "step": "chimera_removal",
+    "method": method,
     "input_asvs": n_input_asvs,
     "pre_filtered": n_pre_removed,
     "chimeras": chimeras_removed,

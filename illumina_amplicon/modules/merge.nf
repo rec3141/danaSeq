@@ -30,7 +30,7 @@ process MERGE_SEQTABS {
     """
 }
 
-// Sparse consensus chimera removal.
+// De novo chimera removal, in the mode params.chimera_method names.
 process REMOVE_CHIMERAS {
     tag "chimera-removal"
     label 'process_high'
@@ -50,7 +50,7 @@ process REMOVE_CHIMERAS {
 
     script:
     """
-    remove_chimeras.py "${seqtab}" ${task.cpus}
+    remove_chimeras.py "${seqtab}" ${task.cpus} "${params.chimera_method}"
     """
 }
 

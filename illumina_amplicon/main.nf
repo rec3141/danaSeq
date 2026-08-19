@@ -51,6 +51,7 @@ def helpMessage() {
       --truncLen_fwd N     Truncate forward reads at position N [default: 0 = off]
       --truncLen_rev N     Truncate reverse reads at position N [default: 0 = off]
       --min_overlap N      Min overlap for pair merging [default: 10]
+      --chimera_method M   pooled | consensus | per-sample [default: pooled]
 
     QC filtering:
       --min_seq_length N   Min sequence length [default: 50]
@@ -737,6 +738,7 @@ workflow {
                         truncLen_rev         : params.truncLen_rev,
                         trunc_policy         : params.trunc_policy,
                         min_overlap          : params.min_overlap,
+                        chimera_method       : params.chimera_method,
                         min_seq_length       : params.min_seq_length,
                         min_reads            : params.min_reads,
                         min_samples          : params.min_samples,
