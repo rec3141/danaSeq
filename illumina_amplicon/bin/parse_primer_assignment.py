@@ -33,9 +33,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
-    from primer_db import describe_pair
+    from primer_db import describe_pair, regions_in_span
 except ImportError:  # table unavailable — still report what was observed
     describe_pair = lambda *_a, **_k: None
+    regions_in_span = lambda *_a, **_k: None
 
 # "=== First read: Adapter 341Fv3 ===" / "=== Second read: Adapter Bakt_805R ==="
 # and the single-end form "=== Adapter 341Fv3 ===".
@@ -191,6 +192,15 @@ def main(argv):
         if pos:
             for c in POSITION_COLUMNS:
                 r[c] = pos.get(c) or None
+        # Where the catalogue does not name the region, the placement does. An
+        # assay nobody has catalogued still lands on the gene, and where it
+        # lands is the same fact (danaSeq #53).
+        if not r.get("assay_region") and r.get("assay_reference"):
+            try:
+                r["assay_region"] = regions_in_span(
+                    r["assay_reference"], int(r["assay_start"]), int(r["assay_end"]))
+            except (TypeError, ValueError):
+                pass
 
     columns = COLUMNS + [c for c in POSITION_COLUMNS if any(r.get(c) for r in rows)]
     rows.sort(key=lambda r: r["sample"])

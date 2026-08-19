@@ -24,6 +24,7 @@ from __future__ import annotations
 import csv
 import gzip
 import logging
+import bisect
 import math
 import os
 import random
@@ -931,6 +932,106 @@ def _catalogue_spans() -> tuple:
                 rows.append((loc["reference"], loc["start"], loc["end"], name or seq))
     return tuple(rows)
 
+
+# Where the variable regions sit on E. coli 16S, in the J01695 numbering every
+# 16S primer name already refers to — 515F is the forward primer at position 515.
+# Checked against the catalogue: of 108 amplicons whose label names a region, 102
+# do contain the interval below. All six exceptions are the label being wrong
+# rather than the coordinates — k1f/k1r is filed as V3-V4 and spans 515-805,
+# which is V4 alone.
+_VARIABLE_REGIONS_16S = {
+    "V1": (69, 99), "V2": (137, 242), "V3": (433, 497), "V4": (576, 682),
+    "V5": (822, 879), "V6": (986, 1043), "V7": (1117, 1173), "V8": (1243, 1294),
+    "V9": (1435, 1465),
+}
+
+# How much of a variable region an amplicon has to span before it is said to
+# cover it. Not all of it: a primer sitting a few bases inside a boundary still
+# reads that region, and the boundaries themselves are a convention drawn on a
+# continuum.
+_REGION_COVER = 0.9
+
+
+@lru_cache(maxsize=1)
+def _reference_ladder() -> tuple:
+    """Positions that are the same place on both references, ascending.
+
+    The SSU is one molecule across the domains, so a primer that matches both
+    references is matching the same site twice and its two coordinates are a
+    correspondence. The catalogue supplies these for free: the universal primers
+    in it place on both, closely enough together to interpolate between.
+    """
+    by_16s: dict[int, list[int]] = {}
+    seen = set()
+    for p in PRIMER_DB:
+        for end in ("fwd", "rev"):
+            seq = p.get(end)
+            if not seq or seq in seen:
+                continue
+            seen.add(seq)
+            locs = {loc["reference"]: loc for loc in locate_on_ssu(seq)}
+            if "ecoli_16S" in locs and "yeast_18S" in locs:
+                by_16s.setdefault(locs["ecoli_16S"]["start"], []).append(
+                    locs["yeast_18S"]["start"])
+    # One 18S position per 16S position, so the ladder cannot double back.
+    return tuple(sorted((a, sorted(v)[len(v) // 2]) for a, v in by_16s.items()))
+
+
+def _to_18s(pos: int) -> int:
+    """An E. coli 16S coordinate at the corresponding place on yeast 18S."""
+    ladder = _reference_ladder()
+    if not ladder:
+        return pos
+    xs = [a for a, _ in ladder]
+    ys = [b for _, b in ladder]
+    if pos <= xs[0]:
+        return ys[0] + (pos - xs[0])
+    if pos >= xs[-1]:
+        return ys[-1] + (pos - xs[-1])
+    i = bisect.bisect_right(xs, pos) - 1
+    x0, x1, y0, y1 = xs[i], xs[i + 1], ys[i], ys[i + 1]
+    return round(y0 + (pos - x0) * (y1 - y0) / (x1 - x0))
+
+
+@lru_cache(maxsize=1)
+def _variable_regions() -> dict:
+    """{reference: {region: (start, end)}} in each reference's own numbering.
+
+    18S is carried over from 16S through the ladder rather than tabulated
+    separately: the regions are the same features of the same molecule, and the
+    eukaryotic expansions are exactly what the interpolation accounts for — V4
+    is 107 bases on E. coli and 213 on yeast. Checked the same way as the 16S
+    table, at 87 of 93.
+    """
+    return {
+        "ecoli_16S": dict(_VARIABLE_REGIONS_16S),
+        "yeast_18S": {r: (_to_18s(a), _to_18s(b))
+                      for r, (a, b) in _VARIABLE_REGIONS_16S.items()},
+    }
+
+
+def regions_in_span(reference: str, start: int, end: int) -> str | None:
+    """Which variable regions an amplicon covers: "V4", "V3-V4", or None.
+
+    This is what a placement is for. An assay whose primers the catalogue does
+    not hold still lands somewhere on the gene, and where it lands is the same
+    fact the catalogue would have supplied — so a region can be named for an
+    assay nobody has catalogued (danaSeq #53).
+    """
+    table = _variable_regions().get(reference)
+    if not table or not start or not end or end <= start:
+        return None
+    covered = []
+    for name, (a, b) in table.items():
+        overlap = min(end, b) - max(start, a) + 1
+        if overlap >= _REGION_COVER * (b - a + 1):
+            covered.append((int(name[1:]), name))
+    if not covered:
+        return None
+    covered.sort()
+    # Contiguous or not, the span is what it reaches: an amplicon covering V3
+    # and V4 is V3-V4, and one reaching V3 and V5 is still described by its ends.
+    return covered[0][1] if len(covered) == 1 else f"{covered[0][1]}-{covered[-1][1]}"
 
 def amplicon_boundary(consensus: str, slack: int = 1) -> dict:
     """Whether a 5' block is a primer, or the cut left where one was removed.
