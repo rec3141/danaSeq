@@ -920,6 +920,44 @@ def reverse_complement(seq: str) -> str:
     return "".join(_COMPLEMENT.get(b, "N") for b in reversed(seq.upper()))
 
 
+# A placement has to beat what the primer's own degeneracy would reach by
+# chance. Identity alone cannot say that: scoring counts a match whenever the
+# reference base falls inside the primer's IUPAC set, so an N matches
+# everywhere and a B three times in four. nifH's PolF is 28 bases of which ten
+# are degenerate, and the best of the ~6,000 offsets across both references and
+# both strands reaches 0.82 on yeast 18S — enough to clear any fixed floor, on a
+# gene that is not ribosomal at all.
+#
+# So compare the match to the primer's own null: each position matches by chance
+# with probability |IUPAC set| / 4, which gives a mean and variance for the
+# number of matching positions, and the placement is scored in standard
+# deviations above that mean.
+#
+# Where the bar sits is decided by the two ends of the observed gap. Below it,
+# the highest-scoring thing that is not a ribosomal primer: the truncated nifH
+# forward at 4.33, with COI around 4.1. Above it, the weakest placement the
+# catalogue still depends on: LABY-A's reverse end at 5.34, the only one of 259
+# catalogue placements anywhere near the bar. Everything else that is genuinely
+# SSU sits at 6.7-8.0.
+#
+# 12S is the case this cannot decide. Mitochondrial 12S is an SSU rRNA, so the
+# teleo forward reads as one (0.88 on E. coli, z 6.0) and is right to. Telling
+# it from 16S needs a 12S reference, not a threshold (#51).
+_MIN_PLACEMENT_Z = 5.0
+
+
+def _placement_z(primer: str, matched: int) -> float:
+    """How many standard deviations `matched` positions beat chance for `primer`."""
+    ps = [len(_SETS.get(b, _SETS["N"])) / 4 for b in primer]
+    mu = sum(ps)
+    var = sum(p * (1 - p) for p in ps)
+    if var <= 0:
+        # Every position degenerate: the primer matches everywhere and says
+        # nothing about where it is.
+        return 0.0
+    return (matched - mu) / var ** 0.5
+
+
 def locate_on_ssu(primer: str, min_id: float = 0.80) -> list[dict]:
     """Where `primer` sits on the SSU references, best match first.
 
@@ -932,7 +970,9 @@ def locate_on_ssu(primer: str, min_id: float = 0.80) -> list[dict]:
 
     An empty result is the useful case: a primer that lands on neither gene is
     not a ribosomal primer, and the run should not be handed an rRNA reference
-    database.
+    database. A match counts only when it beats the primer's own degeneracy by
+    _MIN_PLACEMENT_Z, so a degenerate primer for some other gene reports nothing
+    rather than the best of several thousand accidents.
     """
     if not primer:
         return []
@@ -951,10 +991,11 @@ def locate_on_ssu(primer: str, min_id: float = 0.80) -> list[dict]:
                 score = ok / length
                 if score > best[0]:
                     best = (score, i + 1, strand)
-        if best[0] >= min_id:
+        z = _placement_z(primer, best[0] * length)
+        if best[0] >= min_id and z >= _MIN_PLACEMENT_Z:
             out.append({"reference": ref_name, "identity": round(best[0], 3),
                         "start": best[1], "end": best[1] + length - 1,
-                        "strand": best[2]})
+                        "strand": best[2], "z": round(z, 2)})
     return sorted(out, key=lambda d: -d["identity"])
 
 

@@ -20,9 +20,14 @@ pairs are written to one FASTQ pair per assay. A run carrying a single assay is
 passed through untouched and keeps its name, so nothing changes for the runs that
 were deposited properly.
 
+A split has to account for the reads it keeps: if more than --max-unassigned of
+them resemble none of the assays, the assays are not what the run holds and it is
+passed through whole rather than silently reduced to the fraction that matched.
+
 Usage:
     split_by_assay.py --primer-set primer_set.json --id SAMPLE \\
-        --r1 in_R1.fastq.gz --r2 in_R2.fastq.gz [--min-share 0.05] [--min-reads 500]
+        --r1 in_R1.fastq.gz --r2 in_R2.fastq.gz [--min-share 0.05] \\
+        [--min-reads 500] [--max-unassigned 0.30]
 """
 import argparse
 import gzip
@@ -103,6 +108,9 @@ def main(argv=None):
     ap.add_argument("--min-share", type=float, default=0.05,
                     help="assay must hold this fraction of reads to be split out")
     ap.add_argument("--min-reads", type=int, default=500)
+    ap.add_argument("--max-unassigned", type=float, default=0.30,
+                    help="refuse the split when this fraction of reads matches "
+                         "no assay")
     ap.add_argument("--positions", default=None,
                     help="per-stream assay coordinates, one row per emitted sample")
     args = ap.parse_args(argv)
@@ -163,8 +171,24 @@ def main(argv=None):
         print(f"[INFO] {args.id}: {counts[k]:>8,} reads ({100*counts[k]/total:5.1f}%) "
               f"{k}{'' if k in keep else '  — below threshold, dropped'}",
               file=sys.stderr)
-    print(f"[INFO] {args.id}: {counts[None]:>8,} reads ({100*counts[None]/total:5.1f}%) "
+    unassigned = counts[None] / total
+    print(f"[INFO] {args.id}: {counts[None]:>8,} reads ({100*unassigned:5.1f}%) "
           "matched no assay", file=sys.stderr)
+
+    # Splitting keeps only what it can assign, so a split that assigns little is
+    # not a split — it is the reads being thrown away. That is how a nifH run
+    # lost two thirds of its reads to blocks taken off 16S and 18S: the coordinates
+    # placed, the reads did not resemble them, and every unmatched pair was
+    # dropped without the run failing (#60). Above the ceiling the reads are
+    # passed through whole and the operator is told why.
+    if unassigned > args.max_unassigned:
+        print(f"[WARN] {args.id}: {100*unassigned:.1f}% of reads match none of "
+              f"{len(keys)} assays ({', '.join(keys)}) — over the "
+              f"{100*args.max_unassigned:.0f}% ceiling, so this is not two "
+              f"libraries. Passed through whole.", file=sys.stderr)
+        _passthrough(args)
+        _write_positions(args.positions, [(args.id, None)])
+        return 0
 
     if len(keep) < 2:
         # One assay carries the run after all: keep it whole rather than renaming
@@ -192,7 +216,10 @@ def main(argv=None):
             f1.close()
             f2.close()
 
-    print(f"[INFO] {args.id}: split into {len(keep)} assays", file=sys.stderr)
+    dropped = total - sum(counts[k] for k in keep)
+    print(f"[INFO] {args.id}: split into {len(keep)} assays, "
+          f"{dropped:,} reads ({100*dropped/total:.1f}%) not carried through",
+          file=sys.stderr)
     _write_positions(args.positions,
                      [(f"{args.id}__{_label(k)}", k) for k in keep])
     return 0
