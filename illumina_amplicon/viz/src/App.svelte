@@ -137,7 +137,7 @@
         {:else if activeTab === 'tables'}
           <TablesView {filters} />
         {:else if activeTab === 'provenance'}
-          <ProvenanceView />
+          <ProvenanceView {filters} />
         {/if}
       {/if}
     </main>
