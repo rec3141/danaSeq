@@ -57,6 +57,7 @@ COLUMNS = [
     "assay_gene",
     "assay_gene_lineage",
     "assay_region",
+    "assay_conflict",
     "assay_primer_fwd",
     "assay_primer_rev",
     "assay_reads_in",
@@ -169,6 +170,11 @@ def main(argv):
         rec["assay_gene"] = described.get("gene")
         rec["assay_gene_lineage"] = described.get("lineage")
         rec["assay_region"] = described.get("region")
+        # Set when the two ends belong to different genes, which happens in
+        # deposited runs and leaves no assay to name (danaSeq #53). Carried so
+        # the reader is told, rather than shown one end's answer for a pair that
+        # cannot have amplified it.
+        rec["assay_conflict"] = described.get("gene_conflict")
         rec["sample"] = sample_id(path)
         rows.append(rec)
 
@@ -196,6 +202,11 @@ def main(argv):
 
     resolved = sum(1 for r in rows if r.get("assay_primer_fwd"))
     named = sum(1 for r in rows if r.get("assay_gene"))
+    conflicting = sum(1 for r in rows if r.get("assay_conflict"))
+    if conflicting:
+        example = next(r["assay_conflict"] for r in rows if r.get("assay_conflict"))
+        print(f"[WARN] {conflicting} sample(s) carry primers from two genes: {example}",
+              file=sys.stderr)
     placed = sum(1 for r in rows if r.get("assay_reference"))
     print(f"[INFO] primer assignment: {resolved}/{len(rows)} samples matched a "
           f"primer, {named} resolved to a gene, {placed} placed on a reference "

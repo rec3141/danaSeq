@@ -280,35 +280,118 @@ def _build_primer_db() -> list[dict]:
 PRIMER_DB = _build_primer_db()
 
 
-def describe_pair(fwd_name: str | None, rev_name: str | None = None) -> dict | None:
+# How much of two primers has to line up before they are called the same primer.
+# The catalogue holds the same primer at several lengths — TAReukFWD1 is
+# TAReuk454FWD1 three bases shorter — so agreement is judged over the shorter of
+# the two, from the 5' end where both are anchored.
+_MIN_SEQ_OVERLAP = 15
+
+
+def _same_primer(observed: str, catalogued: str) -> bool:
+    """True when an observed sequence is the catalogue's primer.
+
+    Degenerate positions are compared by whether the two codes can stand for a
+    common base, not by whether they are written the same way: a consensus taken
+    from reads records the bases those reads actually carried, which is at most
+    what the ordered primer allowed and is usually less.
+    """
+    if not observed or not catalogued:
+        return False
+    n = min(len(observed), len(catalogued))
+    if n < _MIN_SEQ_OVERLAP:
+        return False
+    for i in range(n):
+        if not (set(IUPAC.get(observed[i], "")) & set(IUPAC.get(catalogued[i], ""))):
+            return False
+    return True
+
+
+def _end_matches(entry: dict, token: str, end: str, exact: bool) -> bool:
+    """Does `token` identify this catalogue entry's forward or reverse primer?
+
+    A token is whatever the run recorded, which is a catalogue name when the
+    primers were supplied and the primer's own sequence when they were detected
+    from the reads. Both are accepted because the caller cannot tell them apart
+    and should not have to.
+
+    `exact` distinguishes the two strengths of evidence. Compatibility is a wide
+    net — one degenerate position is enough to make a primer for one gene answer
+    to another's — and the catalogue holds near-duplicates that differ by a
+    single code, so it can only be trusted once nothing exact has been found.
+    """
+    name_key, seq_key = ("name", "fwd") if end == "fwd" else ("rev_name", "rev")
+    if entry.get(name_key) == token:
+        return True
+    seq = (entry.get(seq_key) or "").upper()
+    token = token.upper()
+    return seq == token if exact else _same_primer(token, seq)
+
+
+def _end_gene(token: str, end: str) -> str | None:
+    """The gene one end alone points at, or None if it is silent or ambiguous."""
+    if not token:
+        return None
+    for exact in (True, False):
+        hits = [p for p in PRIMER_DB if _end_matches(p, token, end, exact)]
+        if hits:
+            genes = {p["gene"] for p in hits if p.get("gene")}
+            return genes.pop() if len(genes) == 1 else None
+    return None
+
+
+def describe_pair(fwd: str | None, rev: str | None = None) -> dict | None:
     """Interpret an observed primer pair: which gene, whose lineage, what region.
 
     This is the OMC half of assay provenance (issue #57). The pipeline reports
-    only what it can observe — that adapter `341Fv3` matched these reads — because
-    a primer FASTA carries nothing but the name (and cutadapt truncates headers at
-    whitespace, so it cannot be annotated into the log either). The curated table
-    here is what turns that name into "bacterial/archaeal 16S rRNA, V3-V4".
+    only what it can observe, and what that is depends on how the run was set up:
+    a supplied primer is known by the name in the cutadapt log, while a detected
+    one is known only by the sequence the reads agreed on, since there was never
+    a name to record. Both arrive here and both are looked up, because a detected
+    primer is very often a catalogue primer that nobody typed the name of
+    (danaSeq #53). The curated table is what turns either into "bacterial/archaeal
+    16S rRNA, V3-V4".
 
-    Matching prefers the exact pair, then the forward name alone, then the
-    reverse. Returns None when nothing matches, and omits `region` when the pair
-    resolves to conflicting sub-regions — an unknown assay must read as unknown
-    rather than as a confident guess.
+    Matching prefers the exact pair, then the forward alone, then the reverse.
+    Returns None when nothing matches, and omits `region` when the pair resolves
+    to conflicting sub-regions — an unknown assay must read as unknown rather
+    than as a confident guess.
     """
-    fwd = (fwd_name or "").strip()
-    rev = (rev_name or "").strip()
+    fwd = (fwd or "").strip()
+    rev = (rev or "").strip()
     if not fwd and not rev:
         return None
 
     def _match(pred):
         return [p for p in PRIMER_DB if pred(p)]
 
+    # Strongest evidence first: both ends exactly is one assay, one end
+    # compatibly is a family of them, and the checks below decide whether that
+    # family still agrees on an answer.
     hits = []
-    if fwd and rev:
-        hits = _match(lambda p: p.get("name") == fwd and p.get("rev_name") == rev)
-    if not hits and fwd:
-        hits = _match(lambda p: p.get("name") == fwd)
-    if not hits and rev:
-        hits = _match(lambda p: p.get("rev_name") == rev)
+    for exact in (True, False):
+        if fwd and rev:
+            hits = _match(lambda p: _end_matches(p, fwd, "fwd", exact)
+                          and _end_matches(p, rev, "rev", exact))
+        if hits:
+            break
+
+    # No pair matched, and the two ends may be why. A forward for one gene and a
+    # reverse for another is a real thing to find in a deposited run, and
+    # answering with the forward's assay would state an amplicon that was never
+    # amplified. Resolve the ends separately and say so when they disagree.
+    if not hits:
+        fwd_gene = _end_gene(fwd, "fwd")
+        rev_gene = _end_gene(rev, "rev")
+        if fwd_gene and rev_gene and fwd_gene != rev_gene:
+            return {"gene_conflict": f"{fwd_gene} forward with {rev_gene} reverse",
+                    "fwd_gene": fwd_gene, "rev_gene": rev_gene}
+        for exact in (True, False):
+            if fwd:
+                hits = _match(lambda p: _end_matches(p, fwd, "fwd", exact))
+            if not hits and rev:
+                hits = _match(lambda p: _end_matches(p, rev, "rev", exact))
+            if hits:
+                break
     if not hits:
         return None
 
