@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher, sampleInAssays, activeDb} from '../stores/data.svelte.js';
+  import { store, getClusterColor, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, makeTaxonMatcher, sampleInAssays, activeDb, fetchJson} from '../stores/data.svelte.js';
   import { chrome } from '../stores/theme.svelte.js';
 
   let { filters = {} } = $props();
@@ -91,10 +91,10 @@
 
   onMount(async () => {
     try {
-      let res = await fetch('./data/heatmap.json.gz');
-      if (!res.ok) res = await fetch('./data/heatmap.json');
-      if (res.ok) {
-        rawHeatmapData = await res.json();
+      // Through the store's loader, which prefers a payload the page carries
+      // over one it has to fetch — an offline copy has no server to fetch from.
+      rawHeatmapData = await fetchJson('./data/heatmap.json');
+      if (rawHeatmapData) {
         const filtered = filterHeatmap(rawHeatmapData, filters.heatmapMinMaxRA ?? 1.0, assayAsvs, assaySamples);
         heatmapData = filtered;
         visibleAsvCount = filtered?.asvIds?.length ?? 0;

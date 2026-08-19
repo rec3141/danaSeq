@@ -772,7 +772,7 @@ async function fetchText(url) {
   return res.text();
 }
 
-async function fetchJson(url) {
+export async function fetchJson(url) {
   const inline = await embedded(url);
   if (inline !== undefined) return JSON.parse(inline);
 
