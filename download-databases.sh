@@ -28,6 +28,7 @@ set -euo pipefail
 #   ./download-databases.sh --metaeuk          # Download MetaEuk OrthoDB Eukaryota (~23 GB)
 #   ./download-databases.sh --kraken2         # Download Kraken2 PlusPFP-8 (~8 GB)
 #   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
+#   ./download-databases.sh --pr2             # Download PR2 SSU (eukaryotic rRNA, ~350 MB)
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
 #   ./download-databases.sh --gtdbtk          # Download GTDB-Tk r226 reference data (~132 GB)
 #   ./download-databases.sh --antismash      # Download antiSMASH databases (~2 GB)
@@ -138,6 +139,7 @@ DOWNLOAD_DBCAN=false
 DOWNLOAD_METAEUK=false
 DOWNLOAD_KRAKEN2=false
 DOWNLOAD_SILVA=false
+DOWNLOAD_PR2=false
 DOWNLOAD_MARFERRET=false
 DOWNLOAD_GTDBTK=false
 DOWNLOAD_ANTISMASH=false
@@ -172,6 +174,7 @@ while (( $# )); do
         --metaeuk)   DOWNLOAD_METAEUK=true; INTERACTIVE=false; shift ;;
         --kraken2)   DOWNLOAD_KRAKEN2=true; INTERACTIVE=false; shift ;;
         --silva)     DOWNLOAD_SILVA=true; INTERACTIVE=false; shift ;;
+        --pr2)       DOWNLOAD_PR2=true; INTERACTIVE=false; shift ;;
         --marferret) DOWNLOAD_MARFERRET=true; INTERACTIVE=false; shift ;;
         --gtdbtk)    DOWNLOAD_GTDBTK=true; INTERACTIVE=false; shift ;;
         --antismash) DOWNLOAD_ANTISMASH=true; INTERACTIVE=false; shift ;;
@@ -201,6 +204,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_METAEUK=true
     DOWNLOAD_KRAKEN2=true
     DOWNLOAD_SILVA=true
+    DOWNLOAD_PR2=true
     DOWNLOAD_MARFERRET=true
     DOWNLOAD_GTDBTK=true
     DOWNLOAD_ANTISMASH=true
@@ -261,6 +265,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "metaeuk"  "~8.5 GB" "MetaEuk OrthoDB v11 Eukaryota (eukaryotic gene prediction)"
     printf "  %-12s %-8s  %s\n" "kraken2"  "~8 GB"   "Kraken2 PlusPFP-8 (k-mer contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "silva"    "~900 MB" "SILVA 138.2 SSU + LSU NR99 (rRNA gene classification)"
+    printf "  %-12s %-8s  %s\n" "pr2"      "~350 MB" "PR2 5.1.1 SSU (eukaryotic rRNA; SILVA under-resolves protists)"
     printf "  %-12s %-8s  %s\n" "marferret" "~9 GB"  "MarFERReT v1.1.1 marine eukaryotic proteins (DIAMOND + taxonomy + Pfam)"
     printf "  %-12s %-8s  %s\n" "gtdbtk"   "~132 GB" "GTDB-Tk r226 reference data (phylogenetic MAG classification)"
     echo ""
@@ -323,9 +328,10 @@ if $INTERACTIVE; then
     echo " 15) kraken2   - Kraken2 PlusPFP-8 (contig taxonomy, ~8 GB)"
     echo " 16) silva     - SILVA SSU + LSU NR99 (rRNA classification, ~900 MB)"
     echo " 17) marferret - MarFERReT marine eukaryotic proteins (~9 GB)"
-    echo " 18) all       - All databases"
+    echo " 18) pr2       - PR2 SSU eukaryotic rRNA classification (~350 MB)"
+    echo " 19) all       - All databases"
     echo ""
-    read -rp "Choice [1-18, or names]: " choice
+    read -rp "Choice [1-19, or names]: " choice
 
     case "$choice" in
         1|human)        DOWNLOAD_HUMAN=true ;;
@@ -344,8 +350,9 @@ if $INTERACTIVE; then
         14|metaeuk)     DOWNLOAD_METAEUK=true ;;
         15|kraken2)     DOWNLOAD_KRAKEN2=true ;;
         16|silva)       DOWNLOAD_SILVA=true ;;
+        18|pr2)         DOWNLOAD_PR2=true ;;
         17|marferret)   DOWNLOAD_MARFERRET=true ;;
-        18|all)         DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
+        19|all)         DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_MARFERRET=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -366,15 +373,16 @@ if $INTERACTIVE; then
                     14|metaeuk)     DOWNLOAD_METAEUK=true ;;
                     15|kraken2)     DOWNLOAD_KRAKEN2=true ;;
                     16|silva)       DOWNLOAD_SILVA=true ;;
+                    18|pr2)         DOWNLOAD_PR2=true ;;
                     17|marferret)   DOWNLOAD_MARFERRET=true ;;
-                    all)            DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_MARFERRET=true ;;
+                    all)            DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_MARFERRET=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_HUMAN && ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_BAKTA_LIGHT && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_MARFERRET; then
+    if ! $DOWNLOAD_HUMAN && ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_BAKTA_LIGHT && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_PR2 && ! $DOWNLOAD_MARFERRET; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -1053,9 +1061,99 @@ download_silva() {
         echo "[INFO] LSU NR99 ready: ${lsu_fasta}"
     fi
 
+    sync_amplicon_registry
+
     echo "[SUCCESS] SILVA databases downloaded to ${db_path}"
     echo "  Use with: --silva_ssu_db ${ssu_fasta}"
     echo "            --silva_lsu_db ${lsu_fasta}"
+}
+
+# Ranks are a property of the release, not the database: PR2 5.x inserted
+# Subdivision, so a 4.x list shifts every rank below Division up one and a class
+# is reported as a division. They are recorded next to the file they describe.
+PR2_VERSION="5.1.1"
+PR2_RANKS="Domain,Supergroup,Division,Subdivision,Class,Order,Family,Genus,Species"
+SILVA_RANKS="Domain,Phylum,Class,Order,Family,Genus"
+
+# Which references the amplicon pipeline should use, read at run time from
+# ${DB_DIR}/amplicon_taxonomy.tsv. Order is precedence: the first row is the
+# primary, and renormalisation, the groups and the ASV-level labels come from
+# it. Rows are only ever added, never reordered or removed, so an operator who
+# has arranged this file keeps their arrangement.
+sync_amplicon_registry() {
+    local reg="${DB_DIR}/amplicon_taxonomy.tsv"
+    local silva_ssu="${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
+    local pr2_fasta="${DB_DIR}/pr2_db/pr2_version_${PR2_VERSION}_SSU_dada2.fasta"
+
+    if [ ! -f "${reg}" ]; then
+        {
+            echo "# Taxonomy references this cluster provides, read at run time by the"
+            echo "# amplicon job. Tab-separated: name, path (absolute or relative to this"
+            echo "# directory), and the rank names the reference uses."
+            echo "#"
+            echo "# Order is precedence: the first row is the primary reference, and"
+            echo "# renormalisation and the ASV-level labels come from it. A row whose file"
+            echo "# is missing is skipped at run time with a warning."
+            printf '#\n# name\tpath\tranks\n'
+        } > "${reg}"
+    fi
+
+    # SILVA first when both are new, so it stays primary and adding PR2 changes
+    # nothing about how a run is grouped.
+    _register_reference "${reg}" "silva" "${silva_ssu}" "${SILVA_RANKS}"
+    _register_reference "${reg}" "pr2"   "${pr2_fasta}" "${PR2_RANKS}"
+
+    # Whichever registered first is primary and stays primary, which is a
+    # surprise if PR2 was fetched before SILVA. Say which it is rather than
+    # reordering someone's file underneath them; the order is theirs to set.
+    local primary
+    primary=$(grep -v '^[[:space:]]*#' "${reg}" | grep -v '^[[:space:]]*$' | head -1 | cut -f1)
+    if [ -n "${primary}" ]; then
+        echo "[INFO] primary taxonomy reference: ${primary}  (first row of ${reg})"
+        echo "       Renormalisation, the groups and the ASV-level labels come from it."
+        echo "       Reorder the rows to change which."
+    fi
+}
+
+_register_reference() {
+    local reg="$1" name="$2" path="$3" ranks="$4"
+    [ -f "${path}" ] || return 0
+    if grep -qP "^${name}\t" "${reg}" 2>/dev/null || grep -q "^${name}	" "${reg}" 2>/dev/null; then
+        return 0
+    fi
+    printf '%s\t%s\t%s\n' "${name}" "${path}" "${ranks}" >> "${reg}"
+    echo "[INFO] registered ${name} in ${reg}"
+}
+
+download_pr2() {
+    local db_path="${DB_DIR}/pr2_db"
+    local fasta="${db_path}/pr2_version_${PR2_VERSION}_SSU_dada2.fasta"
+
+    if [ -f "${fasta}" ]; then
+        echo "[INFO] PR2 already exists at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        sync_amplicon_registry
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading PR2 ${PR2_VERSION} SSU (~55 MB compressed, ~350 MB on disk)..."
+    echo "  Source: github.com/pr2database/pr2database (DADA2-formatted release)"
+    echo "  Destination: ${db_path}"
+
+    mkdir -p "${db_path}"
+    local gz="${db_path}/pr2_dada2.fasta.gz"
+    wget -q --show-progress -O "${gz}" \
+        "https://github.com/pr2database/pr2database/releases/download/v${PR2_VERSION}/pr2_version_${PR2_VERSION}_SSU_dada2.fasta.gz"
+    # The DADA2 export is DNA already, so the U→T pass finds nothing to do. It
+    # costs one stream and removes the question, which SILVA needs answered.
+    echo "[INFO] Decompressing..."
+    gunzip -c "${gz}" | sed '/^[^>]/s/U/T/g' > "${fasta}"
+    rm -f "${gz}"
+
+    echo "[SUCCESS] PR2 downloaded to ${fasta}"
+    echo "  Ranks: ${PR2_RANKS}"
+    sync_amplicon_registry
 }
 
 download_marferret() {
@@ -1292,6 +1390,10 @@ fi
 
 if $DOWNLOAD_SILVA; then
     ( download_silva ) || failed=$((failed + 1))
+fi
+
+if $DOWNLOAD_PR2; then
+    ( download_pr2 ) || failed=$((failed + 1))
 fi
 
 if $DOWNLOAD_MARFERRET; then
