@@ -462,7 +462,7 @@
                   {#if r.version}
                     <span class="text-fg2">{r.version}</span>
                   {:else}
-                    <span class="text-caution">version not stated in the filename</span>
+                    <span class="text-caution">version undeclared</span>
                   {/if}
                   {#if r.primary && references.length > 1}
                     <span class="text-faint">· primary</span>

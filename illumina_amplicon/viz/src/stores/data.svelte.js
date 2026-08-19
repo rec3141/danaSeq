@@ -782,6 +782,11 @@ async function embedded(url) {
   return gunzip(bytes.buffer);
 }
 
+/** True when this page is the downloaded copy, which carries its own data. */
+export function isOfflineCopy() {
+  return !!globalThis.__VIZ_GZ;
+}
+
 async function fetchText(url) {
   const inline = await embedded(url);
   if (inline !== undefined) return inline;

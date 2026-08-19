@@ -1,5 +1,5 @@
 <script>
-  import { store, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor, makeTaxonMatcher, lineageOf, activeDb} from '../stores/data.svelte.js';
+  import { store, GROUP_HEX, buildTaxColorMap, getAsvColor, getEffectiveColorLevel, getClusterColor, makeTaxonMatcher, lineageOf, activeDb, isOfflineCopy} from '../stores/data.svelte.js';
 
   let { filters = {} } = $props();
 
@@ -269,6 +269,16 @@
       class="ml-auto rounded border border-line bg-raised px-3 py-1.5 text-xs font-medium text-fg2 hover:bg-raised2 hover:text-strong transition-colors"
       onclick={exportCsv}
     >Export CSV</button>
+
+    <!-- The whole run rather than the table on screen: the page, its figures and
+         every JSON behind them, in one file that opens without a server. Absent
+         on the downloaded copy, which is already it, and on a site opened
+         outside the portal, which has nowhere to fetch it from. -->
+    {#if store.runInfo?.portal_url && !isOfflineCopy()}
+      <a href="{store.runInfo.portal_url}/offline.zip"
+         class="rounded border border-line bg-raised px-3 py-1.5 text-xs font-medium text-fg2 transition-colors hover:bg-raised2 hover:text-strong"
+         title="This page and all of its data as one file, to keep and open offline">Download offline copy</a>
+    {/if}
   </div>
 
   {#if matrixTruncated}
