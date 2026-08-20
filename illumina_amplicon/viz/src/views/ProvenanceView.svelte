@@ -3,6 +3,7 @@
   import Plotly from 'plotly.js-dist-min';
   import {
     store, listAssays, assayKey, assayHeading, assayMatchNote, sampleInAssays,
+    references as storeReferences,
   } from '../stores/data.svelte.js';
   import { chrome } from '../stores/theme.svelte.js';
 
@@ -236,43 +237,7 @@
    * matches none of these gets no version rather than a number lifted from
    * whichever digits it happens to contain.
    */
-  function versionFromFilename(file) {
-    const stem = String(file || '')
-      .replace(/\.gz$/i, '')
-      .replace(/\.(fasta|fa|fna|fas|faa|tsv|txt)$/i, '');
-    const tagged = stem.match(/(?:^|[_.\-])v(?:ersion)?[_.\-]?(\d+(?:\.\d+)*)(?=[_.\-]|$)/i);
-    if (tagged) return tagged[1];
-    const dotted = stem.match(/(?:^|[_.\-])(\d+\.\d+(?:\.\d+)*)(?=[_.\-]|$)/);
-    if (dotted) return dotted[1];
-    const bare = stem.match(/(?:^|[_.\-])(\d{2,4})(?=[_.\-]|$)/);
-    if (bare) return bare[1];
-    return null;
-  }
-
-  /**
-   * `name:path:Rank1,Rank2;name:path:...` as the run was given it.
-   *
-   * The path is delimited on both sides rather than split on every colon, since
-   * a path may hold one of its own; a trailing field that looks like a path is
-   * treated as one, which is what an entry naming no ranks looks like.
-   */
-  function parseReferences(spec) {
-    if (!spec) return [];
-    return String(spec).split(';').map(e => e.trim()).filter(Boolean).map((entry, i) => {
-      const first = entry.indexOf(':');
-      const last = entry.lastIndexOf(':');
-      const name = first > 0 ? entry.slice(0, first) : entry;
-      const rest = first > 0 ? entry.slice(first + 1) : '';
-      const tail = last > first ? entry.slice(last + 1) : '';
-      const hasRanks = tail !== '' && !tail.includes('/');
-      const path = hasRanks ? entry.slice(first + 1, last) : rest;
-      const ranks = hasRanks ? tail.split(',').map(r => r.trim()).filter(Boolean) : [];
-      const file = path.split('/').pop();
-      return { name, path, file, ranks, version: versionFromFilename(file), primary: i === 0 };
-    });
-  }
-
-  const references = $derived(parseReferences(store.manifest?.reference_databases));
+  const references = $derived(storeReferences());
 
   // ── Plots ─────────────────────────────────────────────────────────────────
 

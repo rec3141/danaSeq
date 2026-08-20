@@ -209,21 +209,6 @@ def main(argv=None):
                 for e in end_entries:
                     fh.write(f">{e['sequence']}\n{e['sequence']}\n")
 
-    # Reads that arrive in a random orientation carry the forward primer on half
-    # of R1 and the reverse on the other half, so neither end can be trimmed as
-    # an end. The consensus still resolves — to whichever orientation won the
-    # majority — and quietly describes half the run.
-    def _median(key):
-        vals = sorted(v for v in (r.get(key) for r in records) if v is not None)
-        return vals[len(vals) // 2] if vals else None
-
-    # A primer belongs to one end. Finding the forward primer in R2, and the
-    # reverse in R1, at the same time and in a good share of reads, is not a
-    # degenerate match — it is both orientations in both files.
-    fwd_in_r2, rev_in_r1 = _median("fwd_in_r2"), _median("rev_in_r1")
-    scrambled = (fwd_in_r2 is not None and rev_in_r1 is not None
-                 and fwd_in_r2 >= 0.25 and rev_in_r1 >= 0.25)
-
     # Each sample's own gene and span, taken from its own detection. A universal
     # reverse primer places on both references, so the gene is decided by the
     # forward end and the reverse is then read on that same reference — otherwise
@@ -399,9 +384,9 @@ def main(argv=None):
     if scrambled:
         print(f"[WARN] the forward primer is on {fwd_in_r2:.0%} of R2 and the reverse "
               f"on {rev_in_r1:.0%} of R1 — these reads are in mixed orientation, so "
-              "neither file is an end. -g is given the forward primer and -G the "
-              "reverse, so the half that is the other way round matches no adapter "
-              "and --discard-untrimmed drops it", file=sys.stderr)
+              "neither file is an end. REMOVE_PRIMERS reads each pair both ways "
+              "round and keeps the orientation that matches, so the run is trimmed "
+              "whole; the amplicon is one amplicon either way", file=sys.stderr)
     if not ribosomal:
         print("[WARN] no primer matches the 16S or 18S reference — this run is not "
               "a ribosomal assay, and an rRNA taxonomy database would label it "
