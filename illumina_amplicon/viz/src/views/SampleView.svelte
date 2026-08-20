@@ -408,10 +408,11 @@
       </div>
 
         <!-- Sized against the window rather than pinned at 12rem, which showed
-             six rows on any screen and cut the seventh through the middle. The
-             header needs its own stacking context or a row scrolling beneath it
-             draws over it instead of under. -->
-        <div class="max-h-[38vh] min-h-0 overflow-y-auto">
+             six rows on any screen and cut the seventh through the middle. Kept
+             to a fifth of it: this table is the plot's companion, and the plot
+             is what the tab is for. The header needs its own stacking context or
+             a row scrolling beneath it draws over it instead of under. -->
+        <div class="max-h-[20vh] min-h-0 overflow-y-auto">
           <table class="w-full text-xs">
             <!-- Sticky on the cells rather than on <thead>: Safari does not
                  make a table section a sticky container, so a header set there

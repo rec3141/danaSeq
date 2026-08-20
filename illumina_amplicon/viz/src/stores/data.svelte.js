@@ -82,7 +82,7 @@ function meaningful(v) {
 }
 
 /**
- * The assay a sample belongs to, as the pipeline decided it — "ecoli_16S@534-786".
+ * The assay a sample belongs to, as the pipeline decided it — "bacteria_ssu@534-786".
  *
  * Taken as given rather than rebuilt from the sample's own coordinates, which
  * still carry the few bases of drift that RESOLVE_PRIMER_SET clustered away: on
@@ -124,9 +124,15 @@ export function assayKey(sample) {
 // one's own marine data invites exactly that misreading. The domain is what the
 // placement actually establishes, so the domain is what is shown; the organism
 // stays available for the places that quote the coordinate system itself.
+//
+// The ecoli_/yeast_ keys are what runs before the references were renamed
+// recorded in their samples.json, and those files are not rewritten. A run
+// already published keys on the name it was given, so both spellings resolve.
 const REFERENCE_GENE = {
-  ecoli_16S: { gene: '16S rRNA', domain: 'bacterial', organism: 'E. coli' },
-  yeast_18S: { gene: '18S rRNA', domain: 'eukaryotic', organism: 'yeast' },
+  bacteria_ssu:  { gene: '16S rRNA', domain: 'bacterial',  organism: 'E. coli' },
+  eukaryota_ssu: { gene: '18S rRNA', domain: 'eukaryotic', organism: 'yeast' },
+  ecoli_16S:     { gene: '16S rRNA', domain: 'bacterial',  organism: 'E. coli' },
+  yeast_18S:     { gene: '18S rRNA', domain: 'eukaryotic', organism: 'yeast' },
 };
 
 /**
@@ -311,8 +317,62 @@ function generatePalette(n) {
  * The first key is the primary, in the order the run named them; everything
  * defaults to it, including the per-ASV lineage baked into asvs.json.
  */
+function versionFromFilename(file) {
+  const stem = String(file || '')
+    .replace(/\.gz$/i, '')
+    .replace(/\.(fasta|fa|fna|fas|faa|tsv|txt)$/i, '');
+  const tagged = stem.match(/(?:^|[_.\-])v(?:ersion)?[_.\-]?(\d+(?:\.\d+)*)(?=[_.\-]|$)/i);
+  if (tagged) return tagged[1];
+  const dotted = stem.match(/(?:^|[_.\-])(\d+\.\d+(?:\.\d+)*)(?=[_.\-]|$)/);
+  if (dotted) return dotted[1];
+  const bare = stem.match(/(?:^|[_.\-])(\d{2,4})(?=[_.\-]|$)/);
+  if (bare) return bare[1];
+  return null;
+}
+
+/**
+ * `name:path:Rank1,Rank2;name:path:...` as the run was given it.
+ *
+ * The path is delimited on both sides rather than split on every colon, since
+ * a path may hold one of its own; a trailing field that looks like a path is
+ * treated as one, which is what an entry naming no ranks looks like.
+ */
+export function parseReferences(spec) {
+  if (!spec) return [];
+  return String(spec).split(';').map(e => e.trim()).filter(Boolean).map((entry, i) => {
+    const first = entry.indexOf(':');
+    const last = entry.lastIndexOf(':');
+    const name = first > 0 ? entry.slice(0, first) : entry;
+    const rest = first > 0 ? entry.slice(first + 1) : '';
+    const tail = last > first ? entry.slice(last + 1) : '';
+    const hasRanks = tail !== '' && !tail.includes('/');
+    const path = hasRanks ? entry.slice(first + 1, last) : rest;
+    const ranks = hasRanks ? tail.split(',').map(r => r.trim()).filter(Boolean) : [];
+    const file = path.split('/').pop();
+    return { name, path, file, ranks, version: versionFromFilename(file), primary: i === 0 };
+  });
+}
+
+
+/**
+ * The references the run named, in the order it named them; first is primary.
+ *
+ * The manifest is the only record of that order. taxonomy.json is an object
+ * whose keys arrive in whatever order it was built in — for PRJNA599410 that is
+ * pr2, silva132, silva against a run that named silva first — so choosing the
+ * primary by key order picks a different reference from the one the provenance
+ * tab reports, and renormalises against it.
+ */
+export function references() {
+  return parseReferences(store.manifest?.reference_databases);
+}
+
 export function taxonomyDbs() {
-  return Object.keys(store.taxonomy);
+  const present = Object.keys(store.taxonomy);
+  const named = references().map(r => r.name).filter(n => present.includes(n));
+  // Anything the manifest did not name still belongs in the list, after the
+  // ones it did: a reference is switchable whether or not it was recorded.
+  return [...named, ...present.filter(n => !named.includes(n))];
 }
 
 export function activeDb() {
@@ -884,12 +944,15 @@ export async function loadData() {
     store.counts = counts;
     store.network = network;
     store.taxonomy = taxonomy;
-    store.taxonomyDb = Object.keys(taxonomy)[0] ?? null;
+
     _lineageCache = { db: null, map: null };
     store.treeNewick = treeNewick.trim();
     store.provenance = provenance || null;
     store.runInfo = runInfo || null;
     store.manifest = manifest || null;
+    // After the manifest: the primary reference is the first the run named, and
+    // that order lives only there.
+    store.taxonomyDb = taxonomyDbs()[0] ?? null;
 
     // Load heatmap data (async, non-blocking)
     fetchJson('./data/heatmap.json')
