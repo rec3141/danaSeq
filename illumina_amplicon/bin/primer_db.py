@@ -160,6 +160,37 @@ def insert_length_for(fwd: str, rev: str) -> int | None:
     return lengths.pop() if len(lengths) == 1 else None
 
 
+def amplicon_length_from_placement(fwd: str, rev: str) -> tuple[int, str] | None:
+    """Merged-fragment length read off the SSU coordinates, or None.
+
+    insert_length_for needs both ends to be one catalogue record, and only the
+    16S table carries lengths — so a run trimmed with a de-novo primer, or with a
+    catalogue pair nobody wrote a length for, gets no answer and the overlap
+    check falls back to "longer than 62 bases", which every run passes.
+
+    The coordinates say it directly. Both primers place on the same reference,
+    the forward occupies up to its end and the reverse from its start, so what
+    lies between them is the fragment that has to be spanned once cutadapt has
+    taken the primers off. Reported with the reference it was measured on,
+    because a primer pair that places on both is being quoted against one.
+    """
+    if not fwd or not rev:
+        return None
+    fwd_locs = {l["reference"]: l for l in locate_on_ssu(fwd)}
+    rev_locs = {l["reference"]: l for l in locate_on_ssu(rev)}
+    for ref in fwd_locs:
+        if ref not in rev_locs:
+            continue
+        f, r = fwd_locs[ref], rev_locs[ref]
+        span = r["start"] - f["end"] - 1
+        # A reverse primer sits downstream of the forward one. Anything else is
+        # not an amplicon: the two ends placed on unrelated sites, or the pair is
+        # two forward primers, which is what a mixed-orientation run resolves to.
+        if span > 0:
+            return span, ref
+    return None
+
+
 def _load_vendored_primers() -> list[dict]:
     """Parse the vendored FoodMicrobionet primer tables (16S + ITS).
 
@@ -891,7 +922,14 @@ def collapse_primers(primers: list[str]) -> list[tuple[str, int]]:
 
 @lru_cache(maxsize=1)
 def _ssu_references() -> dict[str, str]:
-    """The E. coli 16S and yeast 18S sequences primer coordinates are quoted in."""
+    """The 16S and 18S sequences primer coordinates are quoted in.
+
+    Keyed by domain rather than by the organism supplying the sequence.
+    Which strain of E. coli the 16S came from is an accident of what was
+    sequenced first, and the key travels into every assay label a reader
+    sees. The coordinates are still E. coli's, since 515F is named for
+    aligning at 515; the record headers say whose sequence each one is.
+    """
     path = os.path.join(_DATA_DIR, "ssu_references.fa")
     refs: dict[str, list[str]] = {}
     name = None
@@ -1075,9 +1113,9 @@ def _reference_ladder() -> tuple:
                 continue
             seen.add(seq)
             locs = {loc["reference"]: loc for loc in locate_on_ssu(seq)}
-            if "ecoli_16S" in locs and "yeast_18S" in locs:
-                by_16s.setdefault(locs["ecoli_16S"]["start"], []).append(
-                    locs["yeast_18S"]["start"])
+            if "bacteria_ssu" in locs and "eukaryota_ssu" in locs:
+                by_16s.setdefault(locs["bacteria_ssu"]["start"], []).append(
+                    locs["eukaryota_ssu"]["start"])
     # One 18S position per 16S position, so the ladder cannot double back.
     return tuple(sorted((a, sorted(v)[len(v) // 2]) for a, v in by_16s.items()))
 
@@ -1109,8 +1147,8 @@ def _variable_regions() -> dict:
     table, at 87 of 93.
     """
     return {
-        "ecoli_16S": dict(_VARIABLE_REGIONS_16S),
-        "yeast_18S": {r: (_to_18s(a), _to_18s(b))
+        "bacteria_ssu": dict(_VARIABLE_REGIONS_16S),
+        "eukaryota_ssu": {r: (_to_18s(a), _to_18s(b))
                       for r, (a, b) in _VARIABLE_REGIONS_16S.items()},
     }
 

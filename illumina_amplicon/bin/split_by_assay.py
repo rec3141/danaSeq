@@ -55,7 +55,7 @@ _SETS = {k: frozenset(v) for k, v in IUPAC.items()}
 
 
 def _label(assay):
-    """Filesystem-safe form of an assay key: ecoli_16S@534-786 -> ecoli_16S_534-786."""
+    """Filesystem-safe form of an assay key: bacteria_ssu@534-786 -> bacteria_ssu_534-786."""
     return re.sub(r"[^A-Za-z0-9._-]", "_", assay)
 
 
@@ -120,7 +120,7 @@ def main(argv=None):
 
     # The block for each assay comes off the reference at the coordinate the assay
     # is named for, not from the group's collapsed core. A core is what its
-    # members happened to share and has drifted off the start — ecoli_16S@534's
+    # members happened to share and has drifted off the start — bacteria_ssu@534's
     # longest core begins at 554, twenty bases into the read, and matches nothing
     # anchored there.
     refs = _ssu_references()

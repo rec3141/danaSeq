@@ -129,7 +129,7 @@ if expected <= 0:
                 cur.append(line.upper())
         if cur: seqs.append("".join(cur))
     try:
-        from primer_db import insert_length_for
+        from primer_db import insert_length_for, amplicon_length_from_placement
         for i in range(len(seqs)):
             for j in range(len(seqs)):
                 if i == j: continue
@@ -138,6 +138,19 @@ if expected <= 0:
                     expected, expected_src = hit, "primer database"
                     break
             if expected > 0: break
+        # Only the 16S table carries lengths, and it carries them per pair, so a
+        # catalogued primer used with an uncatalogued partner — or either end
+        # resolved de novo — gets nothing from the lookup above. Where both ends
+        # place on a reference the coordinates give the answer outright.
+        if expected <= 0:
+            for i in range(len(seqs)):
+                for j in range(len(seqs)):
+                    if i == j: continue
+                    hit = amplicon_length_from_placement(seqs[i], seqs[j])
+                    if hit:
+                        expected, expected_src = hit[0], "SSU placement on " + hit[1]
+                        break
+                if expected > 0: break
     except Exception as e:
         print("[INFO] Trunc policy: primer database unavailable (%s)" % e)
 
@@ -353,6 +366,6 @@ process DENOISE {
     """
     denoise.py \
         "${meta.id}" "${errF}" "${errR}" \
-        ${params.min_overlap} ${task.cpus}
+        ${params.min_overlap} ${task.cpus} ${params.min_merge_pct}
     """
 }

@@ -163,7 +163,14 @@ process REMOVE_PRIMERS {
     PAIR_FILTER=both
     if [ -s "${primer_fwd}" ] && [ -s "${primer_rev}" ]; then PAIR_FILTER=any; fi
 
+    # --revcomp: a study deposited in mixed orientation carries the forward
+    # primer on part of R1 and the reverse on the rest, so neither file is an
+    # end and --discard-untrimmed drops whichever half is the other way round.
+    # cutadapt tries each pair both ways and keeps the orientation that matches,
+    # swapping the mates together so their IDs still pair. On reads that are all
+    # one way round it changes nothing — byte-identical output, 0 reads flipped.
     cutadapt \$ARGS \\
+        --revcomp \\
         --discard-untrimmed \\
         --pair-filter=\$PAIR_FILTER \\
         -j ${task.cpus} \\

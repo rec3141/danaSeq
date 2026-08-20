@@ -48,7 +48,7 @@ if _cpus > 0:
 # ---------------------------------------------------------------------------
 if len(sys.argv) < 6:
     print("Usage: dada2_denoise.py <plate_id> <errF.pkl> <errR.pkl> "
-          "<min_overlap> <cpus>", file=sys.stderr)
+          "<min_overlap> <cpus> [min_merge_pct]", file=sys.stderr)
     sys.exit(1)
 
 plate_id    = sys.argv[1]
@@ -56,6 +56,10 @@ errF_path   = sys.argv[2]
 errR_path   = sys.argv[3]
 min_overlap = int(sys.argv[4])
 cpus        = int(sys.argv[5])
+# The floor is deliberately far below any healthy run — good plates merge
+# 70-98% — so it fires on a run that could not merge rather than on one that
+# merged poorly. 0 disables it.
+min_merge_pct = float(sys.argv[6]) if len(sys.argv) > 6 else 10.0
 
 
 def write_empty_seqtab(reason):
@@ -137,6 +141,7 @@ print(f"[INFO] Plate {plate_id} : denoising {len(fwd_files)} samples")
 # Per-sample: dereplicate -> denoise -> merge pairs
 # ---------------------------------------------------------------------------
 all_merged = {}  # sample_name -> {merged_seq: abundance}
+merge_offered = merge_kept = 0
 
 for i, sample_name in enumerate(sample_names):
     print(f"[INFO] Processing: {sample_name}")
@@ -168,8 +173,35 @@ for i, sample_name in enumerate(sample_names):
         if m["accept"]:
             accepted[m["sequence"]] = accepted.get(m["sequence"], 0) + m["abundance"]
 
+    # What merging was offered against what it kept. Pairs that do not overlap
+    # are dropped here and nowhere else: the table that comes out is a valid
+    # table of whatever did merge, so a run where almost nothing overlapped is
+    # indistinguishable downstream from a small one (#33, #61).
+    offered = int(derepF["abundances"].sum())
+    kept = int(sum(accepted.values()))
+    merge_offered += offered
+    merge_kept += kept
+    if offered and kept / offered < 0.5:
+        print(f"[WARNING] {sample_name}: merged {kept:,} of {offered:,} pairs "
+              f"({100 * kept / offered:.1f}%) — the rest did not overlap")
+
     if accepted:
         all_merged[sample_name] = accepted
+
+# Merging is where reads go missing without anything failing, so say what it did
+# for the plate before the table is built on top of it.
+if merge_offered:
+    pct = 100 * merge_kept / merge_offered
+    print(f"[INFO] Plate {plate_id} : merged {merge_kept:,} of {merge_offered:,} "
+          f"pairs ({pct:.1f}%)")
+    if pct < min_merge_pct:
+        sys.exit(
+            f"[ERROR] Plate {plate_id}: only {pct:.1f}% of pairs merged, under the "
+            f"{min_merge_pct:.0f}% floor. The reads do not span the amplicon — "
+            f"check the truncation lengths against its length, and see "
+            f"quality_check/{plate_id}_trunc_policy.tsv for what was applied. "
+            f"Continuing would build a table from the {merge_kept:,} pairs that "
+            f"happened to overlap and report it as the run.")
 
 # Drop samples that produced no merged reads — empty table, never a crash.
 if len(all_merged) == 0:
