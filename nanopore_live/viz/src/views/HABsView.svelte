@@ -99,6 +99,8 @@
     { id: 'saxitoxin',          label: 'Saxitoxin',          class: 'PSP alkaloid' },
     { id: 'anatoxin_a',         label: 'Anatoxin-a',         class: 'tropane alkaloid' },
     { id: 'nodularin',          label: 'Nodularin',          class: 'cyclic pentapeptide' },
+    { id: 'guanitoxin',         label: 'Guanitoxin',         class: 'phosphoguanidine ester' },
+    { id: 'aetokthonotoxin',    label: 'Aetokthonotoxin',    class: 'bis-chlorinated indole alkaloid' },
   ];
   let compoundIdx = $state(0);
   let compound = $derived(HAB_COMPOUNDS[compoundIdx]);

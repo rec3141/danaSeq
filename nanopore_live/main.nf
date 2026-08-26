@@ -202,6 +202,18 @@ include { CLEANUP }           from './modules/db_integration'
 // Expected filename format: FLOWCELL_pass_barcodeNN_*.fastq.gz
 // Extracts metadata (flowcell, barcode) from filename, carried through entire DAG
 
+// Optionally shuffle the discovered FASTQ list so multiple flowcells interleave
+// (results from all appear ~evenly instead of one flowcell front-loading). Sort
+// first for a canonical starting order, then a SEEDED shuffle, so the ordering is
+// identical on every run — a -resume replays the exact same sequence, keeping
+// progress/ETA predictable and store_dir cache hits in the same positions.
+def order_input(List items) {
+    if (!params.shuffle_input || !items) return items
+    def out = new ArrayList(items.sort(false))
+    java.util.Collections.shuffle(out, new java.util.Random(params.shuffle_seed as long))
+    return out
+}
+
 def create_fastq_channel() {
     // Batch mode uses ** recursive glob (fromPath handles this natively).
     // Watch mode: Java WatchService cannot use ** for recursive watches, so we
@@ -212,11 +224,14 @@ def create_fastq_channel() {
     def ch_raw
     if (params.watch) {
         // Catch up on existing files, then watch for new ones
+        // Include flat singleplex layout where fastq.gz land directly in fastq_pass/
         def existing = file("${params.input}/**/fastq_pass/barcode*/*.fastq.gz") +
-                       file("${params.input}/fastq_pass/barcode*/*.fastq.gz")
+                       file("${params.input}/fastq_pass/barcode*/*.fastq.gz") +
+                       file("${params.input}/**/fastq_pass/*.fastq.gz") +
+                       file("${params.input}/fastq_pass/*.fastq.gz")
         def skipped = existing ? existing.findAll { it.size() < params.min_file_size } : []
         log.info "Watch mode: ${existing ? existing.size() : 0} existing FASTQ files (${skipped.size()} skipped, < ${params.min_file_size} bytes; adjust with --min_file_size)"
-        def ch_existing = existing ? Channel.from(existing) : Channel.empty()
+        def ch_existing = existing ? Channel.from(order_input(existing)) : Channel.empty()
 
         // Auto-detect watch glob: find depth to fastq_pass/ from existing files,
         // or watch common depths 0-3 if no files exist yet.
@@ -228,12 +243,19 @@ def create_fastq_channel() {
             def parts = rel.split('/')
             def fp_idx = parts.findIndexOf { it == 'fastq_pass' }
             if (fp_idx >= 0) {
-                watch_globs = [('*/' * fp_idx) + 'fastq_pass/barcode*/*.fastq.gz']
+                // Watch both multiplexed (barcode*/) and flat singleplex layouts
+                watch_globs = [
+                    ('*/' * fp_idx) + 'fastq_pass/barcode*/*.fastq.gz',
+                    ('*/' * fp_idx) + 'fastq_pass/*.fastq.gz',
+                ]
             }
         }
         if (!watch_globs) {
             // No files yet — watch all common depths so we catch them when they appear
-            watch_globs = (0..3).collect { d -> ('*/' * d) + 'fastq_pass/barcode*/*.fastq.gz' }
+            watch_globs = (0..3).collectMany { d -> [
+                ('*/' * d) + 'fastq_pass/barcode*/*.fastq.gz',
+                ('*/' * d) + 'fastq_pass/*.fastq.gz',
+            ]}
         }
         watch_globs.each { g -> log.info "Watch glob: ${params.input}/${g}" }
 
@@ -248,11 +270,14 @@ def create_fastq_channel() {
             error "ERROR: --input directory does not exist: ${params.input}\nRun with --help for usage."
         }
 
-        // Check for nanopore barcode structure at any depth
+        // Check for nanopore barcode structure at any depth.
         // Note: Nextflow's ** glob doesn't match fastq_pass as a direct child,
-        // so we check both the recursive and direct patterns
+        // so we check both recursive and direct patterns.
+        // Also handles flat singleplex layout (fastq.gz directly in fastq_pass/).
         def found = file("${params.input}/**/fastq_pass/barcode*/*.fastq.gz") +
-                    file("${params.input}/fastq_pass/barcode*/*.fastq.gz")
+                    file("${params.input}/fastq_pass/barcode*/*.fastq.gz") +
+                    file("${params.input}/**/fastq_pass/*.fastq.gz") +
+                    file("${params.input}/fastq_pass/*.fastq.gz")
 
         if (!found) {
             def has_fastq_pass = file("${params.input}/fastq_pass").isDirectory()
@@ -260,7 +285,7 @@ def create_fastq_channel() {
 
             def hint = ""
             if (has_fastq_pass) {
-                hint = "    ${params.input} contains fastq_pass/ but no barcode*/*.fastq.gz files inside it.\n    Check: ls ${params.input}/fastq_pass/barcode*/*.fastq.gz"
+                hint = "    ${params.input} contains fastq_pass/ but no FASTQ files inside it.\n    Check: ls ${params.input}/fastq_pass/"
             } else if (has_barcode_dirs) {
                 hint = "    It looks like --input points at fastq_pass/ itself.\n    Point --input one level UP:\n      --input ${input_dir.getParent()}"
             } else {
@@ -270,12 +295,14 @@ def create_fastq_channel() {
             error "ERROR: No FASTQ files found.\n\n" +
                   "    Searched: ${params.input}/**/fastq_pass/barcode*/*.fastq.gz\n" +
                   "              ${params.input}/fastq_pass/barcode*/*.fastq.gz\n" +
+                  "              ${params.input}/**/fastq_pass/*.fastq.gz\n" +
+                  "              ${params.input}/fastq_pass/*.fastq.gz\n" +
                   "${hint}\n\n    Run with --help for full usage information."
         }
 
         def skipped = found.findAll { it.size() < params.min_file_size }
         log.info "Found ${found.size()} FASTQ files (${skipped.size()} skipped, < ${params.min_file_size} bytes; adjust with --min_file_size)"
-        ch_raw = Channel.from(found)
+        ch_raw = Channel.from(order_input(found))
     }
 
     ch_raw
@@ -284,7 +311,12 @@ def create_fastq_channel() {
             def name = fastq.baseName.replace('.fastq', '')
             def parts = name.split('_')
             def flowcell = parts[0]
-            def barcode = parts[2]
+            // Standard multiplexed:  FLOWCELL_pass_barcodeNN_HASH_N.fastq.gz  → parts[2]
+            // Non-multiplexed subdir: parent dir is barcode00/ (or barcode_na/ renamed) → parent.name
+            // Flat singleplex:        file sits directly in fastq_pass/ → treat as barcode00
+            def parentName = fastq.parent.name
+            def barcode = (parts.size() > 2 && parts[2] =~ /^barcode/) \
+                ? parts[2] : (parentName == 'fastq_pass' ? 'barcode00' : parentName)
             def meta = [
                 id:       name,
                 flowcell: flowcell,
