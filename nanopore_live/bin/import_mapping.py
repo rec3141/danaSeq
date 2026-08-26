@@ -1,14 +1,22 @@
 """Import reference-mapping output into dana.duckdb.
 
 Called from import_all.py with the per-barcode directory as cwd. Reads
-`map/*.txt` — each file is a filtered SAM-ish stream produced by
-modules/mapping.nf (filter_minimap2.awk: headers stripped, mapq>=1 and
-aligned_len>=10). The file basename (sans .txt) is the canonical
-reference name and lands in the `mapping.reference` column.
+`map/<meta.id>/<refname>.txt` — one subdir per read-chunk, each file a
+filtered SAM-ish stream produced by modules/mapping.nf (filter_minimap2.awk:
+headers stripped, mapq>=1 and aligned_len>=10). The file basename (sans .txt)
+is the canonical reference name and lands in the `mapping.reference` column;
+the full path (map/<chunk>/<refname>.txt) is the idempotency key.
 
-Idempotent via the shared `import_log` table — files keyed as
-`map/<refname>.txt`. Re-importing the same key replaces that
-reference's rows (DELETE + INSERT) so updates pick up cleanly.
+Every read-chunk is a DISJOINT set of reads, so the loader APPENDS each new
+chunk file's rows (no per-reference DELETE) — the reference's rows are the
+union across all chunks. Idempotency is per-file via the shared `import_log`
+table: each map/<chunk>/<refname>.txt is imported exactly once, so a fresh DB
+rebuild inserts the complete set and an incremental sync only adds new chunks.
+
+NOTE: this supersedes the old flat `map/<refname>.txt` layout, where every
+chunk collided on one filename and storeDir skipped all but the first — leaving
+mapping/AIS with a single chunk's alignments per barcode. Rebuild affected DBs
+against the new per-chunk layout for complete data.
 """
 
 import glob
@@ -59,7 +67,12 @@ def _parse_txt(path, reference):
 
 
 def import_mapping(con, imported):
-    files = sorted(glob.glob('map/*.txt'))
+    # Per-chunk layout: map/<meta.id>/<refname>.txt. Each chunk is a disjoint
+    # read set, so we APPEND (no per-reference DELETE) — the union across chunks
+    # is the reference's full alignment set. Per-file import_log dedup keeps this
+    # idempotent: a file is imported once whether the DB is freshly rebuilt or
+    # incrementally synced.
+    files = sorted(glob.glob('map/*/*.txt'))
     pending = [f for f in files if f not in imported]
     if not pending:
         return
@@ -67,8 +80,6 @@ def import_mapping(con, imported):
     for path in pending:
         ref = os.path.splitext(os.path.basename(path))[0]
         rows = list(_parse_txt(path, ref))
-        # Replace any existing rows for this reference (idempotent updates).
-        con.execute('DELETE FROM mapping WHERE reference = ?', [ref])
         if rows:
             con.executemany(
                 'INSERT INTO mapping VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',

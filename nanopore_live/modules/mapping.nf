@@ -8,15 +8,22 @@
 //   - Reference index basename is the canonical reference name (matches the
 //     `mapping.reference` column in dana.duckdb and the ./data/ais_<name>.json
 //     filename consumed by the SPA's AIS view).
-//   - Output filename is `<refname>.txt`, dropped under map/ inside the
-//     barcode dir so multiple references can co-exist.
+//   - Output filename is `<refname>.txt`, dropped under map/<meta.id>/ inside
+//     the barcode dir so multiple references co-exist AND every read-chunk keeps
+//     its own copy. The per-chunk subdir is essential: in watch mode a barcode is
+//     split into hundreds of FASTQ chunks (one meta.id each), and storeDir's
+//     skip-check keys on the OUTPUT PATH. If all chunks wrote map/<refname>.txt,
+//     the first chunk's file would satisfy storeDir for every later chunk of that
+//     (barcode, reference) — so ~all chunks got "skipped" and only one chunk's
+//     alignments survived. Namespacing by meta.id makes each (chunk, reference)
+//     output unique; import_mapping.py then unions map/*/*.txt per reference.
 
 process MAP_REFERENCE {
     tag "${meta.id}_${refname}"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-tools"
-    publishDir { "${params.outdir}/${meta.flowcell}/${meta.barcode}/map" }, mode: 'copy', enabled: !params.store_dir
-    storeDir { params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/map" : null }
+    publishDir { "${params.outdir}/${meta.flowcell}/${meta.barcode}/map/${meta.id}" }, mode: 'copy', enabled: !params.store_dir
+    storeDir { params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/map/${meta.id}" : null }
 
     input:
     tuple val(meta), path(fastq), val(refname), path(ref_idx)
