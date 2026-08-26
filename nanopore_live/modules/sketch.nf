@@ -15,6 +15,9 @@ process SENDSKETCH {
     conda "${projectDir}/conda-envs/dana-bbmap"
     publishDir { "${params.outdir}/${meta.flowcell}/${meta.barcode}/sketch" }, mode: 'copy', enabled: !params.store_dir
     storeDir { params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/sketch" : null }
+    // Transient failures (host down) should surface as errors and be retried on -resume,
+    // not silently cached as empty output. 'ignore' keeps the watch pipeline alive.
+    errorStrategy 'ignore'
 
     input:
     tuple val(meta), path(fasta)
@@ -47,25 +50,31 @@ process SENDSKETCH {
     sketch_ok=true
     for chunk in chunks/chunk_*.fa; do
         echo "[INFO] Processing \$(basename \$chunk) ..." >&2
-        set +e
-        sendsketch.sh \\
-            -Xmx${mem_mb}m \\
-            in="\$chunk" \\
-            address="${address}" \\
-            k=31 \\
-            format=2 \\
-            persequence \\
-            records=1 \\
-            color=f \\
-            printtaxa=t \\
-            out=sendsketch_chunk.txt \\
-            2>sendsketch_stderr.txt
-        chunk_exit=\$?
-        set -e
+        chunk_exit=1
+        for attempt in 1 2 3; do
+            set +e
+            sendsketch.sh \\
+                -Xmx${mem_mb}m \\
+                in="\$chunk" \\
+                address="${address}" \\
+                k=31 \\
+                format=2 \\
+                persequence \\
+                records=1 \\
+                color=f \\
+                printtaxa=t \\
+                out=sendsketch_chunk.txt \\
+                2>sendsketch_stderr.txt
+            chunk_exit=\$?
+            set -e
+            [ \$chunk_exit -eq 0 ] && break
+            echo "[WARNING] sendsketch.sh attempt \$attempt/3 failed for \$(basename \$chunk), exit \$chunk_exit" >&2
+            cat sendsketch_stderr.txt >&2
+            [ \$attempt -lt 3 ] && sleep 10
+        done
 
         if [ \$chunk_exit -ne 0 ]; then
-            echo "[WARNING] sendsketch.sh exited with code \$chunk_exit for \$(basename \$chunk)" >&2
-            cat sendsketch_stderr.txt >&2
+            echo "[ERROR] sendsketch.sh failed after 3 attempts for \$(basename \$chunk)" >&2
             sketch_ok=false
             break
         fi
@@ -73,8 +82,8 @@ process SENDSKETCH {
     done
 
     if [ "\$sketch_ok" != "true" ]; then
-        printf 'read_id\\tstatus\\tANI\\tref_name\\tlineage\\n' > "${meta.id}.sendsketch_reads.tsv"
-        exit 0
+        echo "[ERROR] sendsketch failed for ${meta.id} — server may be down; task will be retried on -resume" >&2
+        exit 1
     fi
 
     # NOTE: \\t / \\n are doubled below because this heredoc lives inside a
