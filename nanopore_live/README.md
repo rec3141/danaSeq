@@ -20,7 +20,10 @@ Data for each sequencing run lives across three locations, by data tier:
 launcher spawns `bin/watch_for_completion.sh`, which polls the input dir
 for MinKNOW's `final_summary_*.txt` (one per flow cell). Once every
 observed FC has one and nextflow has drained (no in-flight tasks, trace
-stable), it SIGTERMs nextflow and invokes `bin/archive_run.sh`.
+stable), it SIGTERMs nextflow and invokes `bin/archive_run.sh`. After the
+archive succeeds, it runs `nextflow clean <session> -f` to reclaim this run's
+work dirs from the shared `-w` tree (scoped to the run's session UUID, so other
+runs sharing the work dir are untouched).
 
 ```bash
 ./run-realtime.sh --input /data/<RUN> --outdir /data/scratch/nanopore_live/<RUN> \

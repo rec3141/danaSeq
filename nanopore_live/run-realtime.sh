@@ -126,7 +126,8 @@ usage() {
     echo "  --archive                Watch for MinKNOW final_summary_*.txt across all FCs"
     echo "                             in --input. Once seen and nextflow has drained,"
     echo "                             SIGTERM nextflow and rsync raw + outputs to the"
-    echo "                             archive destinations."
+    echo "                             archive destinations, then 'nextflow clean' this"
+    echo "                             run's work dirs from the shared -w tree."
     echo "  --archive_raw_dest DIR   Where to move raw reads (every FC run dir under"
     echo "                             --input). Falls back to \$ARCHIVE_RAW_DEST."
     echo "  --archive_out_dest DIR   Where to move pipeline FC outputs (FC subdirs of"
@@ -502,6 +503,12 @@ echo ""
 
 mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
+# The watcher writes this marker only once the pipeline has fully drained, and
+# run-realtime uses it to gate end-of-run archiving. Clear any marker left from
+# a previous invocation so a stale file can't trigger a premature archive when
+# this run resumes (which would yank raw inputs out from under live tasks).
+rm -f "${OUTDIR_HOST}/pipeline_info/final_summary_seen.txt"
+
 # Pull -w / --work-dir out of NF_ARGS so the completion-watcher can detect
 # in-flight tasks without a second grep through .nextflow.log.
 NF_WORKDIR=""
@@ -546,12 +553,17 @@ printf '%s\n' "${LOCAL_CMD[*]}" >> "${OUTDIR_HOST}/pipeline_info/run_command.sh"
 # typically yields a non-zero exit. Treat that as a clean shutdown only if
 # the watcher's marker file is present; otherwise propagate the failure.
 if [[ "$ARCHIVE" == true ]]; then
-    # Reap the watcher (it should have exited after sending SIGTERM).
+    # Reap the watcher and capture its exit status. It exits 0 only after it has
+    # seen end-of-run, waited for the pipeline to fully drain, and signalled
+    # nextflow — i.e. a completion produced by THIS run. Gating on the watcher's
+    # exit (not just the marker's existence) is what prevents a stale/early
+    # marker from triggering an archive while tasks are still running.
+    WATCH_RC=1
     if [[ -n "$WATCH_PID" ]]; then
-        wait "$WATCH_PID" 2>/dev/null || true
+        if wait "$WATCH_PID"; then WATCH_RC=0; else WATCH_RC=$?; fi
     fi
     MARKER="${OUTDIR_HOST}/pipeline_info/final_summary_seen.txt"
-    if [[ -f "$MARKER" ]]; then
+    if [[ "$WATCH_RC" -eq 0 && -f "$MARKER" ]]; then
         echo "[INFO] Completion-watcher signalled end of run at $(cat "$MARKER")"
         echo "[INFO] Running archive: raw -> $ARCHIVE_RAW_DEST  out -> $ARCHIVE_OUT_DEST"
         "${SCRIPT_DIR}/bin/archive_run.sh" \
@@ -559,10 +571,28 @@ if [[ "$ARCHIVE" == true ]]; then
             --outdir   "$OUTDIR_HOST" \
             --raw-dest "$ARCHIVE_RAW_DEST" \
             --out-dest "$ARCHIVE_OUT_DEST"
+
+        # Outputs are safely archived (and integrity-checked by archive_run.sh),
+        # so reclaim this run's Nextflow work dirs from the shared -w tree.
+        # Scoped to THIS session's UUID so any other run sharing the work dir is
+        # left untouched. Best-effort: a failed clean must not mask a successful
+        # archive. cwd is $OUTDIR_HOST (set above), so `nextflow clean` reads
+        # this run's .nextflow/history + cache.
+        if [[ -n "$NF_SESSION" ]]; then
+            echo "[INFO] Cleaning Nextflow work dirs for session $NF_SESSION"
+            mamba run -p "${SCRIPT_DIR}/conda-envs/dana-tools" \
+                nextflow clean "$NF_SESSION" -f \
+                || warn "nextflow clean failed for session $NF_SESSION; work dirs left in place"
+        else
+            warn "No session UUID captured; skipping work-dir clean"
+            warn "(clean manually once verified: nextflow clean <session> -f)"
+        fi
+
         # Override NF_EXIT — completion-driven SIGTERM is success.
         NF_EXIT=0
     else
-        warn "Nextflow exited (code=$NF_EXIT) but no final_summary marker was written"
+        warn "Watcher did not signal a clean completion for this run"
+        warn "(watcher rc=$WATCH_RC, marker=$([[ -f "$MARKER" ]] && echo present || echo absent), nextflow code=$NF_EXIT)"
         warn "Skipping archive. Re-run with -resume to continue watching, or invoke"
         warn "bin/archive_run.sh manually once the run is genuinely complete."
     fi

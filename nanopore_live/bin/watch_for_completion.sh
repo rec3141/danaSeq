@@ -141,7 +141,10 @@ while :; do
     done <<<"$fc_dirs"
     if [[ "$pending" -eq 0 ]]; then
         log "all $(echo "$fc_dirs" | wc -l | tr -d ' ') FC run dirs have final_summary"
-        now > "$MARKER"
+        # NOTE: the completion MARKER is intentionally NOT written here. It is
+        # written only after phase 3 (full drain) so its presence means "safe to
+        # archive", not merely "sequencing finished". Writing it at phase 1 left
+        # a stale marker that could trigger a premature archive on a later resume.
         break
     fi
     log "still pending: $pending FC dir(s) without final_summary"
@@ -172,13 +175,19 @@ done
 log "phase 3: waiting for nextflow drain (workdir=${WORKDIR:-<unavailable>})"
 prev_trace=""
 drain=0
+saw_inflight=0
 while :; do
     in_flight=$(count_in_flight_tasks)
     trace_rows=$(count_trace_rows)
+    [[ "$in_flight" -gt 0 ]] && saw_inflight=1
     if [[ "$trace_rows" = "$prev_trace" && "$in_flight" -eq 0 ]]; then
         drain=$((drain + 1))
-        if [[ "$drain" -ge 2 ]]; then
-            log "drained: trace_rows=$trace_rows in_flight=$in_flight (stable for $drain polls)"
+        # Require either that we've actually observed work in flight (guards
+        # against a false "drain" during nextflow -resume startup, before the
+        # backlog is dispatched) or a generous stability window for genuinely
+        # all-cached runs that never show in-flight tasks.
+        if [[ "$drain" -ge 2 && ( "$saw_inflight" -eq 1 || "$drain" -ge 10 ) ]]; then
+            log "drained: trace_rows=$trace_rows in_flight=$in_flight (stable $drain polls, saw_inflight=$saw_inflight)"
             break
         fi
     else
@@ -188,6 +197,10 @@ while :; do
     fi
     sleep "$POLL"
 done
+
+# Pipeline is fully drained: NOW write the completion marker that run-realtime
+# uses to gate end-of-run archiving.
+now > "$MARKER"
 
 # ---------- Phase 4: signal nextflow targeting this outdir
 log "phase 4: signalling nextflow for --outdir $OUTDIR"

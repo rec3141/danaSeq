@@ -62,6 +62,17 @@ done
 now() { date "+%Y-%m-%dT%H:%M:%S%z"; }
 log() { printf '%s [%s] %s\n' "$(now)" "$SELF" "$*" >&2; }
 
+# Safety: never archive while a nextflow pipeline is still running against this
+# outdir. The raw archive uses `rsync --remove-source-files`, which would delete
+# input/intermediate files out from under live tasks (symlinked into --input),
+# breaking VALIDATE_FASTQ / QC_FASTQ_FILTER etc. Match nextflow by its main.nf +
+# --outdir args so this never matches archive_run.sh's own command line.
+if pgrep -af -- 'main\.nf' 2>/dev/null | grep -q -- "--outdir ${OUTDIR}"; then
+    echo "[$SELF] REFUSING: a nextflow pipeline is still running for --outdir $OUTDIR" >&2
+    echo "[$SELF] Stop the pipeline (let it drain / SIGTERM) before archiving." >&2
+    exit 3
+fi
+
 run() {
     if $DRY_RUN; then
         log "DRY-RUN: $*"
