@@ -11,6 +11,8 @@ Arguments:
   --input DIR         Directory containing nanopore_live run outputs (e.g. /matika/vistara/dana/out_dana_bc/)
   --output DIR        Output directory for JSON files (default: ../public/data)
   --metadata TSV      Optional sample metadata file (TSV with sample_id, barcode, lat, lon, etc.)
+  --mapping-refs DIR  Mapping reference dir (enriches per-ref AIS/HAB/SAR payloads
+                      with contig offsets + category labels, like DB_SYNC does)
   --env PATH          Conda environment path for BBMap (passed to compute_sketches.sh)
   --skip-sketches     Skip comparesketch all-vs-all computation
   --skip-reads        Skip read-level t-SNE computation (saves time for large datasets)
@@ -30,6 +32,7 @@ EOF
 INPUT_DIR=""
 OUTPUT_DIR=""
 METADATA=""
+MAPPING_REFS=""
 CONDA_ENV=""
 SKIP_SKETCHES=false
 SKIP_READS=false
@@ -41,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --input)         INPUT_DIR="$2"; shift 2 ;;
     --output)        OUTPUT_DIR="$2"; shift 2 ;;
     --metadata)      METADATA="$2"; shift 2 ;;
+    --mapping-refs)  MAPPING_REFS="$2"; shift 2 ;;
     --env)           CONDA_ENV="$2"; shift 2 ;;
     --skip-sketches) SKIP_SKETCHES=true; shift ;;
     --skip-reads)    SKIP_READS=true; shift ;;
@@ -92,6 +96,10 @@ PREPROCESS_ARGS=(
 )
 if [[ -n "$METADATA" ]]; then
   PREPROCESS_ARGS+=(--metadata "$METADATA")
+fi
+if [[ -n "$MAPPING_REFS" ]]; then
+  [[ -d "$MAPPING_REFS" ]] || { echo "[ERROR] --mapping-refs dir does not exist: $MAPPING_REFS" >&2; exit 1; }
+  PREPROCESS_ARGS+=(--mapping-refs "$MAPPING_REFS")
 fi
 if [[ -f "$OUTPUT_DIR/sketch_distances.tsv" ]]; then
   PREPROCESS_ARGS+=(--sketch-distances "$OUTPUT_DIR/sketch_distances.tsv")

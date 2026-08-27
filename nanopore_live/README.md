@@ -240,7 +240,23 @@ Scripts are idempotent and track imports via `import_log`. Contig names are pref
 
 The viz SPA + preprocessed JSONs are published to the portal via the ingest API. In watch mode, DB_SYNC fires a per-run deploy hook each tick (after preprocess regenerates `<outdir>/viz/*.json*`).
 
-**One-off manual push:**
+**Batch runs never deploy on their own** — there is no DB_SYNC tick, so
+`<outdir>/viz` is never generated. Preprocess and push manually once the
+run is done:
+
+```bash
+# 1. Generate <outdir>/viz JSONs (sketch distances, DuckDB->JSON, read t-SNE)
+viz/preprocess/run_preprocess.sh \
+    --input <outdir> --output <outdir>/viz \
+    --mapping-refs /data/scratch/refdbs/mapping_refs \
+    --env conda-envs/dana-bbmap
+
+# 2. Push to the portal
+viz/deploy.sh --preprocess-dir <outdir>/viz \
+              --slug grace_20260826 --name "Grace 2026-08-26" --visibility public
+```
+
+**One-off manual push** (viz JSONs already present):
 
 ```bash
 viz/deploy.sh --preprocess-dir <outdir>/viz \
