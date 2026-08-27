@@ -36,19 +36,40 @@ process BAKTA_CDS {
 
     cat fastas/* > combined.fa
 
-    bakta \
-        --db "${params.bakta_db}" \
-        --meta \
-        --tmp-dir "\$TMPDIR" \
-        --threads ${task.cpus} \
-        --output "${meta.id}" \
-        --prefix "${meta.id}" \
-        --force \
-        --skip-trna --skip-tmrna --skip-rrna \
-        --skip-ncrna --skip-ncrna-region \
-        --skip-crispr --skip-sorf \
-        --skip-gap --skip-ori --skip-plot \
-        combined.fa
+    # Bakta --meta holds every read's sequence + gene objects in RAM at once;
+    # a multi-GB per-barcode FASTA can OOM the host (observed: 6.2 GB input
+    # -> >61 GB RSS). Split on record boundaries into <= bakta_chunk_mb MiB
+    # parts and annotate sequentially — reads are annotated independently in
+    # meta mode, and each bakta run mints its own random locus-tag prefix, so
+    # per-chunk outputs merge exactly like watch mode's per-file runs.
+    mkdir -p parts "${meta.id}"
+    awk -v maxb=\$(( ${params.bakta_chunk_mb} * 1024 * 1024 )) -v dir=parts '
+        BEGIN { n = maxb; part = -1 }
+        /^>/ { if (n >= maxb) { part++; fn = sprintf("%s/part_%03d.fa", dir, part); n = 0 } }
+        { print > fn; n += length(\$0) + 1 }
+    ' combined.fa
+
+    for p in parts/part_*.fa; do
+        bakta \
+            --db "${params.bakta_db}" \
+            --meta \
+            --tmp-dir "\$TMPDIR" \
+            --threads ${task.cpus} \
+            --output part_out \
+            --prefix part \
+            --force \
+            --skip-trna --skip-tmrna --skip-rrna \
+            --skip-ncrna --skip-ncrna-region \
+            --skip-crispr --skip-sorf \
+            --skip-gap --skip-ori --skip-plot \
+            "\$p"
+        cat part_out/part.faa >> "${meta.id}/${meta.id}.faa"
+        cat part_out/part.tsv >> "${meta.id}/${meta.id}.tsv"
+        # Drop the trailing ##FASTA section: the importer stops at the first
+        # one, which would hide every subsequent chunk's features.
+        sed '/^##FASTA/,\$d' part_out/part.gff3 >> "${meta.id}/${meta.id}.gff3"
+        rm -rf part_out
+    done
 
     # storeDir publishes by MOVING ${meta.id}/ into the store after this script
     # exits. If that slot is already populated (a resumed or duplicate run that
