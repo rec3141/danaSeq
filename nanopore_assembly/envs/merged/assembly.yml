@@ -4,6 +4,7 @@ channels:
   - bioconda
 dependencies:
   - flye=2.9.6
+  - pip          # for the patched-Flye pip install (Dockerfile.base / install.sh)
   - filtlong=0.3.1
   - samtools>=1.17
   - minimap2=2.28
