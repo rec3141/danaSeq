@@ -4,6 +4,38 @@
 // samtools>=1.17 to replace Flye's bundled samtools 1.9 which deadlocks
 // on large BAMs (github.com/samtools/htslib/issues/831).
 
+// Shared bash fragment: decompress the gzipped reads once into node-local
+// scratch (SLURM_TMPDIR) and point the assembler at the plain FASTQ.
+// Flye alone parses the read file 4-5 times (configure, assemble, repeat,
+// contigger, polish), and every pass is bottlenecked on single-threaded
+// gzip inflate (~22 min per pass on 148 Gbp). metaMDBG and myloasm also
+// make several passes. Falls back to the .gz when SLURM_TMPDIR is unset or
+// short on space. Sets $READS; the plain file is removed on exit.
+def stageReadsScript() {
+    return '''
+    READS=all_reads.fastq.gz
+    TMP="${SLURM_TMPDIR:-}"
+    if [ -n "$TMP" ] && [ -d "$TMP" ] && [ -w "$TMP" ]; then
+        gz_bytes=$(stat -Lc%s all_reads.fastq.gz)
+        need_kb=$(( gz_bytes / 1024 * 4 ))     # plain FASTQ ~3x gz, plus margin
+        avail_kb=$(df -Pk "$TMP" | awk 'NR==2{print $4}')
+        if [ "$avail_kb" -gt "$need_kb" ]; then
+            PLAIN="$TMP/$(basename "$PWD")_all_reads.fastq"
+            trap 'rm -f "$PLAIN"' EXIT
+            echo "[INFO] Decompressing reads once to $PLAIN"
+            SECONDS=0
+            pigz -dc all_reads.fastq.gz > "$PLAIN"
+            echo "[INFO] Decompressed $(stat -c%s "$PLAIN") bytes in ${SECONDS}s"
+            READS="$PLAIN"
+        else
+            echo "[INFO] SLURM_TMPDIR=$TMP has ${avail_kb}K free, need ${need_kb}K; using gzipped reads"
+        fi
+    else
+        echo "[INFO] SLURM_TMPDIR not available; assembler will read gzipped input directly"
+    fi
+    '''
+}
+
 process FLYE_ASSEMBLE {
     tag "flye-assemble"
     label 'process_high'
@@ -46,13 +78,13 @@ print(int(quals[len(quals)//2]) if quals else 10)
         FLYE_READ_TYPE="--${params.read_type}"
     fi
     echo "[INFO] Flye read type: \$FLYE_READ_TYPE"
-
+    ${stageReadsScript()}
     # Run Flye assembly without polishing (handled by FLYE_POLISH downstream)
     flye \\
         --meta \\
         --min-overlap ${params.min_overlap} \\
         --iterations 0 \\
-        \$FLYE_READ_TYPE all_reads.fastq.gz \\
+        \$FLYE_READ_TYPE "\$READS" \\
         --out-dir flye_out \\
         --threads ${task.cpus}
 
@@ -165,10 +197,11 @@ process ASSEMBLY_METAMDBG {
 
     script:
     """
+    ${stageReadsScript()}
     # Run metaMDBG assembly
     metaMDBG asm \\
         --out-dir metamdbg_out \\
-        --in-ont all_reads.fastq.gz \\
+        --in-ont "\$READS" \\
         --threads ${task.cpus}
 
     # Generate GFA (separate metaMDBG command)
@@ -244,8 +277,9 @@ process ASSEMBLY_MYLOASM {
 
     script:
     """
+    ${stageReadsScript()}
     # Run myloasm assembly
-    myloasm all_reads.fastq.gz \\
+    myloasm "\$READS" \\
         -o myloasm_out \\
         -t ${task.cpus} \\
         --clean-dir
