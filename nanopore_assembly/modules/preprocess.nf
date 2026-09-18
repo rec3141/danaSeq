@@ -87,6 +87,15 @@ process CONCAT_READS {
 
 // Concatenate all per-barcode reads, deduplicate, and optionally filter by quality/length.
 // Pipes cat directly into fastq_filter (no intermediate file on disk).
+// Intermediate read sets are large (100 GB+ gzipped at scale) and every
+// downstream consumer pays a single-threaded gzip inflate per pass, so by
+// default they are written as plain FASTQ in the (transient) work dir. When
+// --store_dir is set the files persist across runs and are compressed with
+// pigz (parallel) instead of the previous single-threaded zlib writer.
+def writeReads(String basename, int cpus) {
+    return params.store_dir ? "pigz -p ${cpus} > ${basename}.gz" : "cat > ${basename}"
+}
+
 // fastq_filter replaces both BBMap dedupe and filtlong in a single streaming pass.
 process PREPARE_READS {
     tag "prepare-reads"
@@ -100,7 +109,7 @@ process PREPARE_READS {
     path(fastqs)
 
     output:
-    path("all_reads.fastq.gz"), emit: reads
+    path("all_reads.fastq*"), emit: reads
 
     script:
     def filter_args = params.dedupe ? "" : "--no_dedupe"
@@ -123,7 +132,7 @@ process PREPARE_READS {
             *)
                 cat "\$f" ;;
         esac
-    done | fastq_filter ${filter_args} -o all_reads.fastq.gz
+    done | fastq_filter ${filter_args} | ${writeReads('all_reads.fastq', task.cpus)}
     """
 }
 
@@ -139,23 +148,34 @@ process REMOVE_HUMAN {
     path(reads)
 
     output:
-    path("nohuman_reads.fastq.gz"), emit: reads
+    path("nohuman_reads.fastq*"), emit: reads
 
     script:
     """
+    # Read counts are taken from the stream (primary records in = reads in,
+    # FASTQ records out = reads out) instead of re-reading both files
+    # afterwards, which cost two full decompressions of the read set.
     minimap2 -a -x map-ont --secondary=no -t ${task.cpus} \\
         "${params.human_ref}" "${reads}" \\
-        | samtools view -b -f 4 \\
+        | samtools view -b - \\
+        | tee >(samtools view -c -F 0x900 - > input.count) \\
+        | samtools view -b -f 4 - \\
         | samtools fastq -@ ${task.cpus} - \\
-        | pigz -p ${task.cpus} > nohuman_reads.fastq.gz
+        | tee >(awk 'NR%4==1' | wc -l > output.count) \\
+        | ${writeReads('nohuman_reads.fastq', task.cpus)}
 
-    if [ ! -s nohuman_reads.fastq.gz ]; then
+    # process substitutions may still be flushing after the pipeline returns
+    for i in \$(seq 1 120); do
+        [ -s input.count ] && [ -s output.count ] && break
+        sleep 1
+    done
+    if [ ! -s nohuman_reads.fastq* ]; then
         echo "[ERROR] Human removal produced empty output" >&2
         exit 1
     fi
 
-    input_count=\$(zcat "${reads}" | awk 'NR%4==1' | wc -l)
-    output_count=\$(zcat nohuman_reads.fastq.gz | awk 'NR%4==1' | wc -l)
+    input_count=\$(cat input.count)
+    output_count=\$(cat output.count)
     removed=\$((input_count - output_count))
     echo "[INFO] Human removal: \${input_count} reads in, \${output_count} out, \${removed} removed (\$(( removed * 100 / (input_count + 1) ))%)" >&2
     """

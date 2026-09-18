@@ -271,6 +271,11 @@ if [[ "$USE_CONTAINER" == true ]]; then
     fi
 
     BINDS+=("${NF_CACHE}/dotdir:/home/dana/.nextflow")
+    # Node-local scratch: assembler processes decompress reads there once
+    # (see stageReadsScript in modules/assembly.nf). Same path inside and out.
+    if [[ -n "${SLURM_TMPDIR:-}" && -d "$SLURM_TMPDIR" ]]; then
+        BINDS+=("${SLURM_TMPDIR}:${SLURM_TMPDIR}")
+    fi
 
     CONTAINER_CMD=()
     case "$CONTAINER_RUNTIME" in
