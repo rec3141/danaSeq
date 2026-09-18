@@ -76,6 +76,14 @@ do_install() {
         echo "[INFO] Symlinked conda into assembly env for Nextflow activation"
     fi
 
+    # Flye with the repeat-graph fix from mikolmogorov/Flye#795 (see
+    # Dockerfile.base). Builds flye-modules from source (needs g++, make, zlib
+    # headers) over the bioconda install. Drop once bioconda ships the fix.
+    echo "[INFO] Installing patched Flye (mikolmogorov/Flye#795) via pip..."
+    "${ENV_PATH}/bin/pip" install --force-reinstall --no-deps \
+        'flye @ git+https://github.com/rec3141/Flye.git@fix/initialize-edges-hash-parallel' \
+        > /dev/null 2>&1 || echo "[WARNING] patched Flye install failed; bioconda Flye 2.9.6 left in place" >&2
+
     # Compile C binaries
     compile_binaries
 
