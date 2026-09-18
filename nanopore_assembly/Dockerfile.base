@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         procps \
         curl \
         build-essential \
+        zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
@@ -33,6 +34,13 @@ COPY envs/ /tmp/envs/
 # Flye, metaMDBG, myloasm, minimap2, samtools, CoverM, BBMap, filtlong, Nextflow
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-assembly -f /tmp/envs/merged/assembly.yml
+# Flye with the repeat-graph fix from mikolmogorov/Flye#795 (pairhash collisions
+# made "Initializing edges" quadratic and single-threaded; the branch also
+# parallelizes it). Builds flye-modules from source over the bioconda 2.9.6
+# install. Drop this line once the fix ships in a bioconda release.
+RUN /opt/conda/envs/dana-mag-assembly/bin/pip install --force-reinstall --no-deps \
+    'flye @ git+https://github.com/rec3141/Flye.git@fix/initialize-edges-hash-parallel' \
+    && /opt/conda/envs/dana-mag-assembly/bin/flye-modules 2>&1 | head -1
 
 # --- Illumina assembly envs ---
 # BBTools + FastQC + samtools + Nextflow
