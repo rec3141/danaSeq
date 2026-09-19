@@ -11,8 +11,10 @@ process CONCAT_READS {
     label 'process_medium'
     maxForks 32
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    publishDir "${params.outdir}/concat", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/concat" : null
+    // Per-barcode concatenations duplicate the input reads byte for byte
+    // (~300 GB per large co-assembly), so they are neither published nor
+    // stored unless --publish_concat is given.
+    publishDir "${params.outdir}/concat", mode: 'copy', enabled: params.publish_concat
 
     input:
     tuple val(meta), path(fastqs)
@@ -87,13 +89,14 @@ process CONCAT_READS {
 
 // Concatenate all per-barcode reads, deduplicate, and optionally filter by quality/length.
 // Pipes cat directly into fastq_filter (no intermediate file on disk).
-// Intermediate read sets are large (100 GB+ gzipped at scale) and every
-// downstream consumer pays a single-threaded gzip inflate per pass, so by
-// default they are written as plain FASTQ in the (transient) work dir. When
-// --store_dir is set the files persist across runs and are compressed with
-// pigz (parallel) instead of the previous single-threaded zlib writer.
+// Intermediate read sets are large (~700 GB plain at 340 Gbp) and every
+// downstream consumer pays a single-threaded gzip inflate per pass, so they
+// are written as plain FASTQ in the work dir and never stored: regenerating
+// them (1-2 h each at that scale) is cheaper than keeping them, and the work
+// dir is meant to live on node-local disk (see run-nanopore-assembly.sh).
+// Only the assembly itself goes to --store_dir.
 def writeReads(String basename, int cpus) {
-    return params.store_dir ? "pigz -p ${cpus} > ${basename}.gz" : "cat > ${basename}"
+    return "cat > ${basename}"
 }
 
 // fastq_filter replaces both BBMap dedupe and filtlong in a single streaming pass.
@@ -101,9 +104,8 @@ process PREPARE_READS {
     tag "prepare-reads"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    // No publishDir — all_reads.fastq.gz is a large intermediate (100G+), not a result.
-    // storeDir still works for skipping on re-runs with --store_dir.
-    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+    // No publishDir / storeDir — all_reads.fastq is a large transient
+    // intermediate (see writeReads above), not a result.
 
     input:
     path(fastqs)
@@ -142,7 +144,7 @@ process REMOVE_HUMAN {
     tag "remove-human"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+    // No storeDir — nohuman_reads.fastq is a large transient intermediate.
 
     input:
     path(reads)
