@@ -80,6 +80,7 @@ cd illumina_assembly
 | `--run_megahit` | `true` | Run Megahit assembler |
 | `--run_spades` | `true` | Run SPAdes assembler |
 | `--run_metaspades` | `true` | Run metaSPAdes assembler |
+| `--run_mapping` | `true` | Map reads back to the deduplicated assembly and compute depths; `false` stops after deduplication |
 | `--dedupe_identity` | `98` | Final deduplication identity threshold |
 | `--min_contig_len` | `500` | Minimum contig length after deduplication |
 
@@ -89,6 +90,7 @@ cd illumina_assembly
 |-----------|---------|-------------|
 | `--assembly_cpus` | `24` | CPUs for assembly processes |
 | `--assembly_memory` | `250 GB` | Memory for assembly processes |
+| `--workdir` | `$SLURM_TMPDIR/illumina_assembly_work`, else `/tmp/...` | Nextflow work directory. Node-local by default under Slurm: read intermediates and SPAdes' k-mer temp files stay off the shared filesystem and vanish with the job; use `--store_dir` to keep outputs for resume |
 
 ### SLURM
 

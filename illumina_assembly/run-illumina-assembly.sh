@@ -22,6 +22,12 @@ PULL_SIF=false
 NF_ARGS=()
 MOUNTS=()
 ORIGINAL_ARGS=("$@")
+# Default work dir: node-local scratch when running under Slurm (the per-sample
+# read intermediates and SPAdes' k-mer temp files then never touch the shared
+# filesystem and vanish with the job; use --store_dir to keep outputs for
+# resume/MAG), else /tmp. SPAdes in particular opens hundreds of temp files in
+# its work dir and has failed with I/O errors on Lustre scratch.
+WORKDIR_HOST="${SLURM_TMPDIR:-/tmp}/illumina_assembly_work"
 
 die() { echo "[ERROR] $1" >&2; exit 1; }
 
@@ -65,11 +71,13 @@ usage() {
     echo "  --run_megahit BOOL        Run Megahit assembler [default: true]"
     echo "  --run_spades BOOL         Run SPAdes assembler [default: true]"
     echo "  --run_metaspades BOOL     Run metaSPAdes assembler [default: true]"
+    echo "  --run_mapping BOOL        Map reads back + depth table [default: true]"
     echo "  --min_readlen N           Minimum read length [default: 70]"
     echo "  --dedupe_identity N       Deduplication identity threshold [default: 98]"
     echo "  --assembly_cpus N         CPUs for assembly [default: 24]"
     echo "  --assembly_memory S       Memory for assembly [default: '250 GB']"
     echo "  --store_dir DIR           Persistent cache directory (storeDir)"
+    echo "  --workdir DIR             Nextflow work directory (default: \$SLURM_TMPDIR/illumina_assembly_work, else /tmp/...)"
     echo ""
     echo "Output feeds into mag_analysis:"
     echo "  mag_analysis/run-mag-analysis.sh \\"
@@ -135,6 +143,10 @@ while (( $# )); do
             [[ -z "${2:-}" ]] && die "--human_ref requires a directory path"
             HUMAN_REF_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
             NF_ARGS+=("--human_ref" "$HUMAN_REF_HOST")
+            shift 2 ;;
+        --workdir|-w)
+            [[ -z "${2:-}" ]] && die "--workdir requires a directory path"
+            WORKDIR_HOST="$(realpath -m "$2")"
             shift 2 ;;
         --store_dir)
             [[ -z "${2:-}" ]] && die "--store_dir requires a directory path"
@@ -244,8 +256,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
     fi
 
     # Work directory (writable inside container)
-    WORKDIR_HOST="${OUTDIR_HOST}/work"
-    mkdir -p "${WORKDIR_HOST}" 2>/dev/null || true
+    mkdir -p "${WORKDIR_HOST}" || die "Cannot create work directory: $WORKDIR_HOST"
     BINDS+=("${WORKDIR_HOST}:/data/work")
 
     NF_CACHE="${OUTDIR_HOST}/.nextflow-cache"
@@ -276,6 +287,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
     echo "[INFO] Mode:   Container (${CONTAINER_RUNTIME})"
     echo "[INFO] Input:  $INPUT_HOST"
     echo "[INFO] Output: $OUTDIR_HOST"
+    echo "[INFO] Work:   $WORKDIR_HOST"
     echo ""
 
     mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
@@ -300,18 +312,22 @@ elif [[ -x "${BBMAP_ENV}/bin/java" ]]; then
     export NXF_JAVA_HOME="${BBMAP_ENV}"
 fi
 
+mkdir -p "$WORKDIR_HOST" || die "Cannot create work directory: $WORKDIR_HOST"
+
 LOCAL_CMD=(
     mamba run -p "${SCRIPT_DIR}/conda-envs/dana-illumina-mag-bbmap"
     nextflow run "${SCRIPT_DIR}/main.nf"
     --input "$INPUT_HOST"
     --outdir "$OUTDIR_HOST"
     "${NF_ARGS[@]}"
+    -w "$WORKDIR_HOST"
     -resume ${RESUME_SESSION}
 )
 
 echo "[INFO] Mode:   Local (conda)"
 echo "[INFO] Input:  $INPUT_HOST"
 echo "[INFO] Output: $OUTDIR_HOST"
+echo "[INFO] Work:   $WORKDIR_HOST"
 echo ""
 
 mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
