@@ -117,7 +117,7 @@ verify_archives() {
     log "verifying FASTQ integrity under ${#dirs[@]} archived dest(s)..."
     : > "$report"
     find "${dirs[@]}" -name '*.fastq.gz' -print0 2>/dev/null \
-      | xargs -0 -P 8 -n 1 bash -c '
+      | xargs -0 -r -P 8 -n 1 bash -c '
             f="$1"; msg=$(gzip -t "$f" 2>&1)
             if [[ $? -ne 0 ]]; then printf "CORRUPT(error)\t%s\n" "$f"
             elif grep -q "trailing garbage" <<<"$msg"; then printf "CORRUPT(trailing-garbage)\t%s\n" "$f"; fi
