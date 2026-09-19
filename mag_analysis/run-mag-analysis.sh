@@ -23,6 +23,12 @@ SIF_PATH=""
 PULL_SIF=false
 NF_ARGS=()
 DB_ARGS=()
+# Squashed database images (<db_dir>/<name>.sqsh) mounted read-only into the
+# container in place of the plain directory <db_dir>/<name with - -> _>, e.g.
+# bakta.sqsh -> bakta/, gtdbtk-db.sqsh -> gtdbtk_db/. One file instead of
+# tens of thousands keeps the scratch inode quota in check. Apptainer/
+# Singularity only (bind ... :image-src=/); Docker falls back to the plain dir.
+SQSH_IMAGES=()   # entries: "<host path to .sqsh>|<subdir name>"
 MOUNTS=()
 ORIGINAL_ARGS=("$@")
 
@@ -50,9 +56,25 @@ resolve_db_dir() {
         [--antismash_db]="antismash_db"
         [--magscot_hmm_dir]="magscot_hmm"
     )
+    # Squashed images take precedence over plain dirs when a container runtime
+    # can mount them (decided later; Docker gets the plain dir if present).
+    local img sub
+    for img in "${base}"/*.sqsh; do
+        [[ -f "$img" ]] || continue
+        sub="$(basename "${img%.sqsh}")"; sub="${sub//-/_}"
+        SQSH_IMAGES+=("${img}|${sub}")
+    done
+    sqsh_covers() {   # $1 = path under $base; true if a squashed image provides it
+        local rel="${1#${base}/}" e
+        for e in "${SQSH_IMAGES[@]}"; do
+            [[ "$rel" == "${e#*|}" || "$rel" == "${e#*|}/"* ]] && return 0
+        done
+        return 1
+    }
+
     for flag in "${!fixed_dbs[@]}"; do
         path="${base}/${fixed_dbs[$flag]}"
-        [[ -e "$path" ]] && DB_ARGS+=("$flag" "$path")
+        if [[ -e "$path" ]] || sqsh_covers "$path"; then DB_ARGS+=("$flag" "$path"); fi
     done
 
     # Kaiju
@@ -360,6 +382,35 @@ if [[ "$USE_CONTAINER" == true ]]; then
 
     if [[ -n "${DB_DIR_HOST:-}" ]]; then
         BINDS+=("${DB_DIR_HOST}:/data/db:ro")
+        # Squashed images: mount each at /data/dbimg/<sub> and point the
+        # matching --*_db paths there (before the generic /data/db rewrite).
+        if [[ "$CONTAINER_RUNTIME" == "apptainer" || "$CONTAINER_RUNTIME" == "singularity" ]]; then
+            for e in "${SQSH_IMAGES[@]}"; do
+                img="${e%%|*}"; sub="${e#*|}"
+                BINDS+=("${img}:/data/dbimg/${sub}:image-src=/")
+                for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+                    case "${NF_ARGS[$i]}" in
+                        "${DB_DIR_HOST}/${sub}"|"${DB_DIR_HOST}/${sub}"/*)
+                            NF_ARGS[$i]="/data/dbimg/${sub}${NF_ARGS[$i]#${DB_DIR_HOST}/${sub}}" ;;
+                    esac
+                done
+                echo "[INFO] Using squashed database image $(basename "$img") for ${sub}/"
+            done
+        else
+            for e in "${SQSH_IMAGES[@]}"; do
+                sub="${e#*|}"
+                [[ -e "${DB_DIR_HOST}/${sub}" ]] || echo "[WARNING] ${sub}: only a .sqsh image is available; ${CONTAINER_RUNTIME} cannot mount it, database skipped"
+            done
+            for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+                for e in "${SQSH_IMAGES[@]}"; do
+                    sub="${e#*|}"
+                    case "${NF_ARGS[$i]}" in
+                        "${DB_DIR_HOST}/${sub}"|"${DB_DIR_HOST}/${sub}"/*) [[ -e "${NF_ARGS[$i]}" ]] || { unset "NF_ARGS[$((i-1))]" "NF_ARGS[$i]"; } ;;
+                    esac
+                done
+            done
+            NF_ARGS=("${NF_ARGS[@]}")
+        fi
         for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
             NF_ARGS[$i]="${NF_ARGS[$i]//${DB_DIR_HOST}/\/data\/db}"
         done
