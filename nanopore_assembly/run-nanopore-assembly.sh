@@ -65,7 +65,8 @@ usage() {
     echo "  --pull           Pull/build SIF image if not found"
     echo ""
     echo "Caching & Resume:"
-    echo "  --workdir DIR        Nextflow work directory (default: /tmp/nanopore_assembly_work)"
+    echo "  --workdir DIR        Nextflow work directory (default: \$SLURM_TMPDIR/nanopore_assembly_work, else /tmp/...)"
+    echo "  --publish_concat     Also publish the per-barcode concatenated reads (off: they duplicate the input)"
     echo "  --store_dir DIR      Persistent cache directory (storeDir)"
     echo "  --resume [ID]        Resume a previous run"
     echo ""
@@ -93,7 +94,10 @@ usage() {
 
 INPUT_HOST=""
 OUTDIR_HOST=""
-WORKDIR_HOST="/tmp/nanopore_assembly_work"
+# Default work dir: node-local scratch when running under Slurm (the large
+# read intermediates then never touch the shared filesystem and vanish with
+# the job; use --store_dir to keep the assembly for resume/MAG), else /tmp.
+WORKDIR_HOST="${SLURM_TMPDIR:-/tmp}/nanopore_assembly_work"
 RESUME_SESSION=""
 DO_RESUME=false
 STORE_DIR_HOST=""
