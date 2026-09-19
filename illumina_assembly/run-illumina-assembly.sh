@@ -65,6 +65,7 @@ usage() {
     echo "  --run_megahit BOOL        Run Megahit assembler [default: true]"
     echo "  --run_spades BOOL         Run SPAdes assembler [default: true]"
     echo "  --run_metaspades BOOL     Run metaSPAdes assembler [default: true]"
+    echo "  --run_mapping BOOL        Map reads back + depth table [default: true]"
     echo "  --min_readlen N           Minimum read length [default: 70]"
     echo "  --dedupe_identity N       Deduplication identity threshold [default: 98]"
     echo "  --assembly_cpus N         CPUs for assembly [default: 24]"

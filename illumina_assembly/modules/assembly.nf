@@ -1,5 +1,16 @@
 // Assembly: Tadpole, Megahit, SPAdes, metaSPAdes
 
+// In co-assembly mode every assembler receives a list of per-sample files
+// (one merged + one qtrimmed per sample). A Nextflow path list renders as a
+// space-separated string, which none of the tools parse, so each process
+// turns it into what its tool accepts: Tadpole and Megahit take comma lists,
+// SPAdes takes a YAML dataset in which one library may span several files.
+def fileList(f) { (f instanceof List ? f : [f]).collect { it.toString() } }
+def csv(f)      { fileList(f).join(',') }
+// SPAdes resolves relative YAML paths against the YAML file's directory; the
+// staged inputs sit beside it, so bare names are enough.
+def yamlList(f) { fileList(f).collect { '"' + it + '"' }.join(', ') }
+
 process ASSEMBLE_TADPOLE {
     tag "${meta.id}"
     label 'process_high'
@@ -18,7 +29,7 @@ process ASSEMBLE_TADPOLE {
     """
     set +e
     tadpole.sh ${xmx} \\
-        in="${merged},${qtrimmed}" \\
+        in="${csv(merged)},${csv(qtrimmed)}" \\
         out="${meta.id}.tadpole.fasta" \\
         k=124 \\
         prefilter=2 prepasses=auto \\
@@ -49,10 +60,9 @@ process ASSEMBLE_MEGAHIT {
 
     script:
     def mem_bytes = task.memory ? task.memory.toBytes() : 250000000000
-    // Megahit -r and --12 take comma-separated lists; works for either a single
-    // path or a list of paths (coassembly mode).
-    def merged_csv   = (merged   instanceof List) ? merged.collect{ it.toString() }.join(',')   : merged.toString()
-    def qtrimmed_csv = (qtrimmed instanceof List) ? qtrimmed.collect{ it.toString() }.join(',') : qtrimmed.toString()
+    // Megahit -r and --12 take comma-separated lists.
+    def merged_csv   = csv(merged)
+    def qtrimmed_csv = csv(qtrimmed)
     """
     set +e
     megahit \\
@@ -94,12 +104,20 @@ process ASSEMBLE_SPADES {
     script:
     def mem_gb = task.memory ? (task.memory.toGiga()) : 250
     """
+    # One paired-end library (interlaced) plus one single-read library (merged
+    # pairs), each spanning every input file.
+    cat > dataset.yaml <<YAML
+    [
+      { orientation: "fr", type: "paired-end", interlaced reads: [ ${yamlList(qtrimmed)} ] },
+      { type: "single", single reads: [ ${yamlList(merged)} ] }
+    ]
+    YAML
+
     set +e
     spades.py \\
         -k 25,55,95,125 \\
         --phred-offset 33 \\
-        -s "${merged}" \\
-        --12 "${qtrimmed}" \\
+        --dataset dataset.yaml \\
         -o spades_out \\
         --only-assembler \\
         --mem ${mem_gb} \\
@@ -135,11 +153,19 @@ process ASSEMBLE_METASPADES {
     script:
     def mem_gb = task.memory ? (task.memory.toGiga()) : 250
     """
+    # metaSPAdes accepts a single paired-end library; one library may still
+    # span every input file.
+    cat > dataset.yaml <<YAML
+    [
+      { orientation: "fr", type: "paired-end", interlaced reads: [ ${yamlList(normalized)} ] }
+    ]
+    YAML
+
     set +e
     spades.py \\
         -k 25,55,77 \\
         --phred-offset 33 \\
-        --12 "${normalized}" \\
+        --dataset dataset.yaml \\
         -o spadesmeta_out \\
         --only-assembler --meta \\
         --mem ${mem_gb} \\

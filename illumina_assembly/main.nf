@@ -62,6 +62,9 @@ def helpMessage() {
       --run_spades       Run SPAdes assembler [default: true]
       --run_metaspades   Run metaSPAdes assembler [default: true]
 
+    Mapping:
+      --run_mapping      Map reads back and compute depths [default: true]
+
     Deduplication:
       --dedupe_identity N  Final deduplication identity threshold [default: 98]
       --min_contig_len N   Minimum contig length after deduplication [default: 500]
@@ -255,24 +258,26 @@ workflow {
 
         DEDUPE_ASSEMBLIES(ch_for_dedupe)
 
-        // Map each sample back to the co-assembly
-        ch_map_input = ch_filtered.combine(DEDUPE_ASSEMBLIES.out.assembly.map { meta, asm -> asm })
-            .map { meta, reads, asm -> [meta, reads, asm] }
+        if (params.run_mapping) {
+            // Map each sample back to the co-assembly
+            ch_map_input = ch_filtered.combine(DEDUPE_ASSEMBLIES.out.assembly.map { meta, asm -> asm })
+                .map { meta, reads, asm -> [meta, reads, asm] }
 
-        MAP_READS_BBMAP(ch_map_input)
+            MAP_READS_BBMAP(ch_map_input)
 
-        // Bundle BAMs + the assembly with a single mix/toList — same dodge as
-        // above to keep .combine from flattening the list-of-bams.
-        ch_depth_input = MAP_READS_BBMAP.out.bam.map { meta, bam, bai -> [bam, 'bam'] }
-            .mix(DEDUPE_ASSEMBLIES.out.assembly.map { meta, asm -> [asm, 'asm'] })
-            .toList()
-            .map { items ->
-                def bams = items.findAll { it[1] == 'bam' }.collect { it[0] }
-                def asm  = items.findAll { it[1] == 'asm' }.collect { it[0] }[0]
-                [coasm_meta, bams, asm]
-            }
+            // Bundle BAMs + the assembly with a single mix/toList — same dodge as
+            // above to keep .combine from flattening the list-of-bams.
+            ch_depth_input = MAP_READS_BBMAP.out.bam.map { meta, bam, bai -> [bam, 'bam'] }
+                .mix(DEDUPE_ASSEMBLIES.out.assembly.map { meta, asm -> [asm, 'asm'] })
+                .toList()
+                .map { items ->
+                    def bams = items.findAll { it[1] == 'bam' }.collect { it[0] }
+                    def asm  = items.findAll { it[1] == 'asm' }.collect { it[0] }[0]
+                    [coasm_meta, bams, asm]
+                }
 
-        CALCULATE_DEPTHS(ch_depth_input)
+            CALCULATE_DEPTHS(ch_depth_input)
+        }
 
     } else {
         // Per-sample assembly mode (default)
@@ -305,16 +310,18 @@ workflow {
 
         DEDUPE_ASSEMBLIES(ch_for_dedupe)
 
-        ch_map_input = ch_filtered.join(DEDUPE_ASSEMBLIES.out.assembly)
-            .map { meta, reads, asm -> [meta, reads, asm] }
+        if (params.run_mapping) {
+            ch_map_input = ch_filtered.join(DEDUPE_ASSEMBLIES.out.assembly)
+                .map { meta, reads, asm -> [meta, reads, asm] }
 
-        MAP_READS_BBMAP(ch_map_input)
+            MAP_READS_BBMAP(ch_map_input)
 
-        ch_depth_input = MAP_READS_BBMAP.out.bam
-            .join(DEDUPE_ASSEMBLIES.out.assembly)
-            .map { meta, bam, bai, asm -> [meta, [bam], asm] }
+            ch_depth_input = MAP_READS_BBMAP.out.bam
+                .join(DEDUPE_ASSEMBLIES.out.assembly)
+                .map { meta, bam, bai, asm -> [meta, [bam], asm] }
 
-        CALCULATE_DEPTHS(ch_depth_input)
+            CALCULATE_DEPTHS(ch_depth_input)
+        }
     }
 
     workflow.onComplete = {
