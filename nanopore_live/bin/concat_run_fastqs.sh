@@ -117,13 +117,28 @@ bb_file() {  # validate a file on disk
     bb_parse <<<"$out"
 }
 
-# Salvage a cut-off chunk: inflate what there is, keep only whole 4-line
-# records, recompress.
+# Salvage a cut-off chunk: inflate what there is, keep only records that are
+# structurally whole, recompress.
+#
+# Counting lines is not enough. A file cut mid-record usually ends with all
+# four lines present but the quality line short, and emitting that record
+# gets the whole salvage rejected ("Mismatch between length of bases and
+# qualities"). A record is kept only if the header starts '@', the separator
+# starts '+', and the quality line is exactly as long as the bases. Anything
+# out of frame ends the salvage there and keeps what came before; a trailing
+# partial record is dropped.
 salvage_chunk() {
     local src="$1" dst="$2"
     $GUNZIP -dc "$src" 2>/dev/null \
-      | awk 'NR%4==1 {if (buf != "") printf "%s", buf; buf=""} {buf = buf $0 "\n"}
-             END {n=split(buf, L, "\n"); if (n-1 >= 4) printf "%s", buf}' \
+      | awk '{ L[++k] = $0
+               if (k == 4) {
+                   if (substr(L[1],1,1) == "@" && substr(L[3],1,1) == "+" \
+                       && length(L[2]) == length(L[4]))
+                       printf "%s\n%s\n%s\n%s\n", L[1], L[2], L[3], L[4]
+                   else
+                       exit
+                   k = 0
+               } }' \
       | $GZ -c > "$dst" 2>/dev/null
     [[ -s "$dst" ]] && $GUNZIP -t "$dst" 2>/dev/null
 }
@@ -182,7 +197,12 @@ collapse_dir() {
             log "FAIL $d: cannot write $tmp_out"; rm -rf "$wd"; TOT_FAIL=$((TOT_FAIL+1)); return 1; }
         want=0; bad=0; rc=0
         for i in "${!srcs[@]}"; do
-            cat "${srcs[$i]}" | tee -a "$tmp_out" | $GUNZIP -t 2>/dev/null
+            # gzip -t quits at the first bad byte, so the tail of the stage
+            # has to keep draining or tee -- and then cat -- die of SIGPIPE
+            # and a corrupt chunk looks like a read error instead of one the
+            # repair pass below can salvage. Drain, then report gzip's status.
+            cat "${srcs[$i]}" | tee -a "$tmp_out" \
+              | { $GUNZIP -t 2>/dev/null; __g=$?; cat >/dev/null 2>&1; exit "$__g"; }
             local -a st=("${PIPESTATUS[@]}")
             if (( ${st[0]:-1} != 0 )); then rc=1; break; fi
             if (( ${st[2]:-1} != 0 )); then bad=$((bad + 1)); fi
