@@ -37,12 +37,14 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 # Flye 2.9.6 with the repeat-graph fixes from mikolmogorov/Flye#795 (pairhash
 # collisions made "Initializing edges" quadratic and single-threaded; also
 # parallelized) and #797 (superbubble search copied the looped-edge set per
-# candidate; haplotype masking now parallel) and the quadratic
-# findHeterozygousLoops scan fix, merged on the rec3141/Flye
+# candidate; haplotype masking now parallel), the quadratic
+# findHeterozygousLoops scan fix (#798/#799) and the repeat-stage
+# reproducibility work (#640/#801, byte-identical output run to run and
+# across thread counts), merged on the rec3141/Flye
 # "flye" branch and pinned by commit. Builds flye-modules from source over the
 # bioconda 2.9.6 install. Drop this line once the fixes ship in bioconda.
 RUN /opt/conda/envs/dana-mag-assembly/bin/pip install --force-reinstall --no-deps \
-    'flye @ git+https://github.com/rec3141/Flye.git@1d380176' \
+    'flye @ git+https://github.com/rec3141/Flye.git@1efed102' \
     && /opt/conda/envs/dana-mag-assembly/bin/flye-modules 2>&1 | head -1
 
 # --- Illumina assembly envs ---

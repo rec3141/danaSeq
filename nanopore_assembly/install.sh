@@ -76,12 +76,13 @@ do_install() {
         echo "[INFO] Symlinked conda into assembly env for Nextflow activation"
     fi
 
-    # Flye with the repeat-graph fixes from mikolmogorov/Flye#795, #797 and the findHeterozygousLoops scan fix
+    # Flye with the repeat-graph fixes from mikolmogorov/Flye#795, #797, #799 and the reproducibility
+    # work in #801
     # (see Dockerfile.base). Builds flye-modules from source (needs g++, make, zlib
     # headers) over the bioconda install. Drop once bioconda ships the fix.
-    echo "[INFO] Installing patched Flye (mikolmogorov/Flye#795, #797 + loop-scan fix) via pip..."
+    echo "[INFO] Installing patched Flye (mikolmogorov/Flye#795, #797, #799, #801) via pip..."
     "${ENV_PATH}/bin/pip" install --force-reinstall --no-deps \
-        'flye @ git+https://github.com/rec3141/Flye.git@1d380176' \
+        'flye @ git+https://github.com/rec3141/Flye.git@1efed102' \
         > /dev/null 2>&1 || echo "[WARNING] patched Flye install failed; bioconda Flye 2.9.6 left in place" >&2
 
     # Compile C binaries
