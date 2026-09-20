@@ -89,6 +89,7 @@ include { PREPARE_READS }        from './modules/preprocess'
 include { REMOVE_HUMAN }        from './modules/preprocess'
 include { FLYE_ASSEMBLE }       from './modules/assembly'
 include { FLYE_POLISH }         from './modules/assembly'
+include { PUBLISH_UNPOLISHED } from './modules/assembly'
 include { ASSEMBLY_METAMDBG }   from './modules/assembly'
 include { ASSEMBLY_MYLOASM }    from './modules/assembly'
 include { CALCULATE_TNF }       from './modules/assembly'
@@ -235,7 +236,12 @@ workflow {
         ch_asm_info  = FLYE_POLISH.out.info
         ch_asm_graph = FLYE_POLISH.out.graph
     } else {
-        ch_assembly = ch_raw_assembly
+        // No polishing: the draft IS the final assembly, so republish it under the
+        // plain name rather than leaving only draft_assembly.fasta behind.
+        PUBLISH_UNPOLISHED(ch_raw_assembly, ch_asm_info, ch_asm_graph)
+        ch_assembly  = PUBLISH_UNPOLISHED.out.assembly
+        ch_asm_info  = PUBLISH_UNPOLISHED.out.info
+        ch_asm_graph = PUBLISH_UNPOLISHED.out.graph
     }
 
     // Tetranucleotide frequencies from assembly
@@ -252,6 +258,25 @@ workflow {
     CALCULATE_DEPTHS(ch_bam_files, ch_assembly)
 
     workflow.onComplete = {
+        // The draft is a rescue/-resume artifact, not a deliverable. Once the
+        // polished assembly is in place, drop the draft copies from the outdir.
+        if (workflow.success && do_polish) {
+            def asmdir = file("${params.outdir}/assembly")
+            def polished = asmdir.resolve('assembly.fasta')
+            if (polished.exists() && polished.size() > 0) {
+                ['draft_assembly.fasta', 'draft_assembly_info.txt',
+                 'draft_assembly_graph.gfa'].each { n ->
+                    def f = asmdir.resolve(n)
+                    if (f.exists()) {
+                        log.info "Removing draft artifact ${n} (polished assembly present)"
+                        f.delete()
+                    }
+                }
+            } else {
+                log.warn "Polished assembly missing or empty - keeping draft_* for rescue"
+            }
+        }
+
         def msg = """\
             Pipeline completed at : ${workflow.complete}
             Duration              : ${workflow.duration}

@@ -47,8 +47,12 @@ process FLYE_ASSEMBLE {
     tag "flye-assemble"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+    // Draft (pre-polish) outputs publish as draft_* and store separately, so they
+    // cannot collide with FLYE_POLISH's assembly.fasta. The draft exists for
+    // rescue/-resume, not as a final result; it is removed on success (main.nf).
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir,
+               saveAs: { fn -> "draft_${fn}" }
+    storeDir params.store_dir ? "${params.store_dir}/assembly_draft" : null
 
     input:
     path(reads)
@@ -192,8 +196,12 @@ process ASSEMBLY_METAMDBG {
     tag "co-assembly-metamdbg"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+    // Draft (pre-polish) outputs publish as draft_* and store separately, so they
+    // cannot collide with FLYE_POLISH's assembly.fasta. The draft exists for
+    // rescue/-resume, not as a final result; it is removed on success (main.nf).
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir,
+               saveAs: { fn -> "draft_${fn}" }
+    storeDir params.store_dir ? "${params.store_dir}/assembly_draft" : null
 
     input:
     path(reads)
@@ -273,8 +281,12 @@ process ASSEMBLY_MYLOASM {
     tag "co-assembly-myloasm"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-mag-assembly"
-    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+    // Draft (pre-polish) outputs publish as draft_* and store separately, so they
+    // cannot collide with FLYE_POLISH's assembly.fasta. The draft exists for
+    // rescue/-resume, not as a final result; it is removed on success (main.nf).
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir,
+               saveAs: { fn -> "draft_${fn}" }
+    storeDir params.store_dir ? "${params.store_dir}/assembly_draft" : null
 
     input:
     path(reads)
@@ -393,5 +405,33 @@ with open(sys.argv[1]) as fin, open(sys.argv[2], "w") as fout:
         gc = sum(f * w for f, w in zip(freqs, gc_weights))
         fout.write(f"{contig_id}\\t{gc * 100:.2f}\\n")
 PYEOF
+    """
+}
+
+// When polishing is disabled the draft IS the deliverable, but the assembler
+// processes publish under draft_* to keep their outputs distinct from
+// FLYE_POLISH's. This republishes them under the plain names so downstream
+// consumers (and mag_analysis) always find assembly.fasta.
+process PUBLISH_UNPOLISHED {
+    tag "publish-unpolished"
+    label 'process_single'
+    publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/assembly" : null
+
+    input:
+    path(assembly)
+    path(info)
+    path(graph)
+
+    output:
+    path("assembly.fasta"),      emit: assembly
+    path("assembly_info.txt"),   emit: info
+    path("assembly_graph.gfa"),  emit: graph
+
+    script:
+    """
+    [ "${assembly}" != "assembly.fasta" ]     && cp ${assembly} assembly.fasta         || true
+    [ "${info}" != "assembly_info.txt" ]      && cp ${info} assembly_info.txt          || true
+    [ "${graph}" != "assembly_graph.gfa" ]    && cp ${graph} assembly_graph.gfa        || true
     """
 }
