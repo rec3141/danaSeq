@@ -10,21 +10,29 @@
 # members concatenated read back as 300 reads), as do zlib, pigz, zcat and
 # fastq_filter.
 #
-# Per barcode:
-#   1. gzip -t every chunk. A chunk that is cut off, or has junk appended,
-#      makes any decompressor stop at that point and report a short count —
-#      and the concatenated file would report the same short count, so the
-#      two would agree on a truncated total. gzip -t is the only step that
-#      tells "this member ended" apart from "this file ended", so it is never
-#      skipped. A cut-off chunk (the common real failure) has its complete
-#      records salvaged into a repaired copy, which is used in its place and
-#      recorded in the manifest.
-#   2. cat the chunks, writing the result while the identical byte stream is
-#      piped through reformat.sh: that parses every record in the originals
-#      and gives the expected read and base counts.
-#   3. reformat.sh reads the finished file back from disk.
-#   4. The counts must match and be non-zero. Only then are the chunks
-#      removed. Anything unproven is left exactly as it was found.
+# Per barcode, the data is read twice and written once:
+#   1. Each chunk is read once: its bytes are appended to the result and, in
+#      the same pass, piped through gzip -t. A chunk that is cut off or has
+#      junk appended makes any decompressor stop at that point and report a
+#      short count — and the concatenated file would report the same short
+#      count, so comparing only those two would accept a truncated total.
+#      gzip -t is what tells "this member ended" apart from "this file
+#      ended", so it is never skipped. A cut-off chunk (the common real
+#      failure) has its complete records salvaged into a repaired copy, which
+#      is used in its place and recorded in the manifest.
+#   2. The result must be exactly as long as the chunks that went into it.
+#      Raw concatenation is byte-exact, so this is a free check that the
+#      write was faithful — no extra pass for it.
+#   3. reformat.sh reads the result once: it parses every record and reports
+#      the read and base counts that go into the manifest. A non-zero count
+#      and a clean exit are required.
+# Only then are the chunks removed. Anything unproven is left as found.
+#
+# --work DIR does the whole thing on local disk and copies only the finished
+# file back, which is what you want when the run already lives on a NAS: one
+# read and one write over the wire instead of three reads. When the run is
+# still on the machine that produced it, concatenate before copying it
+# anywhere — archive_run.sh does that.
 #
 # reformat.sh runs under `timeout` with stdin closed where possible: on a
 # malformed .gz it can throw and then hang, and a hang must fail the barcode,
@@ -35,7 +43,7 @@ set -uo pipefail
 
 SELF=$(basename "$0")
 RUN=""; DRY_RUN=false; KEEP=false; KEEP_TRUNC=false; FORCE=false
-STAGE="${TMPDIR:-/tmp}"; MIN_CHUNKS=2; BB_TO=21600
+STAGE="${TMPDIR:-/tmp}"; WORKDIR=""; MIN_CHUNKS=2; BB_TO=21600
 REFORMAT="${REFORMAT:-reformat.sh}"; BBMEM="${BBMEM:--Xmx2g}"
 
 now() { date +%Y-%m-%dT%H:%M:%S%z; }
@@ -49,6 +57,9 @@ Usage: $SELF --run RUN_DIR [options]
   --keep-truncated    keep the original of any chunk that had to be salvaged
   --force             re-collapse a directory that already has a manifest
   --stage DIR         local scratch for repaired chunks (default: \$TMPDIR)
+  --work DIR          do the work on local disk: stage each barcode's chunks
+                      there, build and verify the result there, copy only the
+                      result back. Use for runs that already live on a NAS.
   --min-chunks N      only collapse barcodes with at least N chunks (default: 2)
   --timeout S         seconds reformat.sh may spend on one stream (default: 21600)
 EOF
@@ -62,6 +73,7 @@ while [[ $# -gt 0 ]]; do
         --keep-truncated) KEEP_TRUNC=true; shift ;;
         --force) FORCE=true; shift ;;
         --stage) STAGE="${2:-}"; shift 2 ;;
+        --work) WORKDIR="${2:-}"; shift 2 ;;
         --min-chunks) MIN_CHUNKS="${2:-}"; shift 2 ;;
         --timeout) BB_TO="${2:-}"; shift 2 ;;
         -h|--help) usage ;;
@@ -122,53 +134,99 @@ collapse_dir() {
     # Input list: chunk paths, with repaired copies substituted after a repair.
     local -a srcs=(); for c in "${chunks[@]}"; do srcs+=("$d/$c"); done
     local -A repaired=()
-    local tmp_out="$d/.partial.$out" ntrunc=0
-    local in_counts out_counts rc
-
-    # Every chunk is tested on its own first. This is not optional: a chunk
-    # that is cut off or has junk appended makes the decompressor stop there
-    # and report a short count, and the same short count would come back from
-    # the concatenated file — the two would agree on a truncated total and the
-    # originals would be deleted. gzip -t is what distinguishes "this member
-    # ended" from "this file ended".
-    local i bad=0
-    for i in "${!srcs[@]}"; do
-        $GZ -t "${srcs[$i]}" 2>/dev/null && continue
-        bad=$((bad + 1))
-        local rep="$STAGE/.repair.$$.$i.fastq.gz" rep_counts=""
-        if salvage_chunk "${srcs[$i]}" "$rep" && rep_counts=$(bb_file "$rep") \
-           && [[ "${rep_counts%% *}" != "0" ]]; then
-            log "TRUNCATED ${srcs[$i]}: salvaged ${rep_counts%% *} complete reads"
-            repaired["${chunks[$i]}"]=1; srcs[$i]="$rep"; ntrunc=$((ntrunc + 1))
-        else
-            # Nothing readable in it at all. This is the only copy, so it is
-            # left for a human to look at rather than quietly dropped.
-            log "FAIL $d: ${srcs[$i]} holds no recoverable reads; nothing removed"
-            rm -f "$STAGE/.repair.$$."* ; TOT_FAIL=$((TOT_FAIL + 1)); return 1
-        fi
-    done
-    (( bad > 0 )) && log "$d: $bad of $n chunks needed repair"
-
-    rm -f "$tmp_out"
-    # One read of the chunks: write the result while BBTools reads the same
-    # bytes straight from the originals.
-    in_counts=$(cat "${srcs[@]}" | tee "$tmp_out" \
-                | timeout "$BB_TO" "$REFORMAT" in=stdin.fq.gz out=null ow=t int=f $BBMEM 2>&1 | bb_parse)
-    rc=$?
-    if (( rc != 0 )) || [[ -z "$in_counts" ]]; then
-        log "FAIL $d: reformat.sh could not read the chunk stream; nothing removed"
-        rm -f "$tmp_out" "$STAGE/.repair.$$."*; TOT_FAIL=$((TOT_FAIL + 1)); return 1
+    local ntrunc=0 in_counts out_counts rc wd="" tmp_out="$d/.partial.$out"
+    if [[ -n "$WORKDIR" ]]; then
+        # Pull the barcode onto local disk once; everything below then reads
+        # and writes at SSD speed and only the finished file goes back.
+        wd="$WORKDIR/$(basename "$d").$$"
+        rm -rf "$wd"; mkdir -p "$wd" || { log "FAIL $d: cannot create $wd"; TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+        local j
+        for j in "${!srcs[@]}"; do
+            cp -f "${srcs[$j]}" "$wd/${chunks[$j]}" || {
+                log "FAIL $d: cannot stage ${chunks[$j]}"; rm -rf "$wd"
+                TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+            srcs[$j]="$wd/${chunks[$j]}"
+        done
+        tmp_out="$wd/$out"
     fi
+
+    # Build the result. Each chunk is read once: its bytes go to the result
+    # and, in the same pass, through gzip -t. Testing is not optional — a
+    # chunk that is cut off or has junk appended makes any decompressor stop
+    # there and report a short count, and the concatenated file would report
+    # the same short count, so the two would agree on a truncated total.
+    # gzip -t is what tells "this member ended" from "this file ended".
+    local i want got pass bad
+    for pass in 1 2; do
+        rm -f "$tmp_out"; : > "$tmp_out" || {
+            log "FAIL $d: cannot write $tmp_out"; rm -rf "$wd"; TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+        want=0; bad=0; rc=0
+        for i in "${!srcs[@]}"; do
+            cat "${srcs[$i]}" | tee -a "$tmp_out" | $GZ -t 2>/dev/null
+            local -a st=("${PIPESTATUS[@]}")
+            if (( ${st[0]:-1} != 0 )); then rc=1; break; fi
+            if (( ${st[2]:-1} != 0 )); then bad=$((bad + 1)); fi
+            want=$((want + $(stat -c %s "${srcs[$i]}")))
+        done
+        (( rc != 0 )) && { log "FAIL $d: read error while concatenating; nothing removed"
+                           rm -f "$tmp_out"; rm -rf "$wd"; TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+        got=$(stat -c %s "$tmp_out" 2>/dev/null || echo -1)
+        if (( want != got )); then
+            log "FAIL $d: short write ($got of $want bytes); nothing removed"
+            rm -f "$tmp_out"; rm -rf "$wd"; TOT_FAIL=$((TOT_FAIL+1)); return 1
+        fi
+        (( bad == 0 )) && break
+        (( pass == 2 )) && { log "FAIL $d: chunks still fail gzip -t after repair; nothing removed"
+                             rm -f "$tmp_out"; rm -rf "$wd"; rm -f "$STAGE/.repair.$$."*
+                             TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+
+        # Repair pass: name the bad chunks and salvage their whole records.
+        log "$d: $bad of $n chunks failed gzip -t; repairing"
+        for i in "${!srcs[@]}"; do
+            $GZ -t "${srcs[$i]}" 2>/dev/null && continue
+            local rep="$STAGE/.repair.$$.$i.fastq.gz" rep_counts=""
+            if salvage_chunk "${srcs[$i]}" "$rep" && rep_counts=$(bb_file "$rep") \
+               && [[ "${rep_counts%% *}" != "0" ]]; then
+                log "TRUNCATED ${chunks[$i]}: salvaged ${rep_counts%% *} complete reads"
+                repaired["${chunks[$i]}"]=1; srcs[$i]="$rep"; ntrunc=$((ntrunc + 1))
+            else
+                # Nothing readable in it. The archive holds the only copy, so
+                # it is left for a human rather than quietly dropped.
+                log "FAIL $d: ${chunks[$i]} holds no recoverable reads; nothing removed"
+                rm -f "$tmp_out" "$STAGE/.repair.$$."*; rm -rf "$wd"
+                TOT_FAIL=$((TOT_FAIL + 1)); return 1
+            fi
+        done
+    done
     if ! out_counts=$(bb_file "$tmp_out"); then
         log "FAIL $d: reformat.sh could not read the concatenated file; nothing removed"
         rm -f "$tmp_out" "$STAGE/.repair.$$."*; TOT_FAIL=$((TOT_FAIL + 1)); return 1
     fi
-    if [[ "$in_counts" != "$out_counts" || "${in_counts%% *}" == "0" ]]; then
-        log "FAIL $d: chunks [$in_counts] vs result [$out_counts]; nothing removed"
+    if [[ "${out_counts%% *}" == "0" ]]; then
+        log "FAIL $d: the concatenated file holds no reads; nothing removed"
         rm -f "$tmp_out" "$STAGE/.repair.$$."*; TOT_FAIL=$((TOT_FAIL + 1)); return 1
     fi
+    in_counts="$out_counts"
 
-    mv -f "$tmp_out" "$d/$out" || { log "FAIL $d: could not install $out"; TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+    if [[ -n "$wd" ]]; then
+        # The archive gets one write. Compare checksums afterwards, because
+        # the chunks are about to go and this becomes the only copy.
+        local local_md5 remote_md5
+        local_md5=$(md5sum < "$tmp_out" | cut -d" " -f1)
+        cp -f "$tmp_out" "$d/.partial.$out" || {
+            log "FAIL $d: could not write the result back"; rm -rf "$wd"
+            TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+        remote_md5=$(md5sum < "$d/.partial.$out" | cut -d" " -f1)
+        if [[ "$local_md5" != "$remote_md5" ]]; then
+            log "FAIL $d: the copy back does not match ($local_md5 vs $remote_md5); nothing removed"
+            rm -f "$d/.partial.$out"; rm -rf "$wd"; TOT_FAIL=$((TOT_FAIL+1)); return 1
+        fi
+        mv -f "$d/.partial.$out" "$d/$out" || { log "FAIL $d: could not install $out"
+            rm -rf "$wd"; TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+        rm -rf "$wd"
+    else
+        mv -f "$tmp_out" "$d/$out" || { log "FAIL $d: could not install $out"; TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+    fi
     { printf '# collapsed\t%s\tchunks %s\treads %s\tbases %s\tsalvaged %s\tvalidator %s\n' \
              "$(now)" "$n" "${in_counts%% *}" "${in_counts##* }" "$ntrunc" \
              "$("$REFORMAT" --version 2>&1 | grep -iom1 'BBTools version [0-9.]*')"

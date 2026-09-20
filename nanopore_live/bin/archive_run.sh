@@ -139,17 +139,20 @@ while IFS= read -r marker; do
     [[ -n "$marker" ]] || continue
     fc_run=$(dirname "$marker")
     rn=$(basename "$fc_run")
-    archive_one "$fc_run" "$RAW_DEST/$rn" "raw"
-    # Collapse MinKNOW's per-barcode chunks into one .fastq.gz per barcode.
-    # concat_run_fastqs.sh verifies with BBTools before it removes anything, so
-    # a failure here leaves the archived run exactly as rsync left it.
-    if [[ -d "$RAW_DEST/$rn" ]] && ! $DRY_RUN; then
-        if "$SCRIPT_DIR/concat_run_fastqs.sh" --run "$RAW_DEST/$rn" --stage "${TMPDIR:-/tmp}"; then
-            log "concat: collapsed per-barcode chunks in $RAW_DEST/$rn"
+    # Collapse MinKNOW's per-barcode chunks into one .fastq.gz per barcode
+    # BEFORE the copy, while the run is still on local disk: the reading and
+    # verifying all happen at SSD speed, and what crosses to the archive is
+    # one file per barcode instead of hundreds. concat_run_fastqs.sh verifies
+    # with BBTools before it removes anything, so a barcode it cannot prove is
+    # simply copied as it stands.
+    if ! $DRY_RUN; then
+        if "$SCRIPT_DIR/concat_run_fastqs.sh" --run "$fc_run" --stage "${TMPDIR:-/tmp}"; then
+            log "concat: collapsed per-barcode chunks in $fc_run"
         else
-            log "WARNING concat: some barcodes in $RAW_DEST/$rn were left chunked; see the log above"
+            log "WARNING concat: some barcodes in $fc_run stay chunked; see the log above"
         fi
     fi
+    archive_one "$fc_run" "$RAW_DEST/$rn" "raw"
     raw_count=$((raw_count + 1))
 done < <(find "$INPUT" -type f -name "final_summary_*.txt" 2>/dev/null)
 log "raw archive: processed $raw_count FC run dir(s)"

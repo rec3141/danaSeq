@@ -55,8 +55,8 @@ Raw reads move to `/matika/`, processed reads and pipeline outputs move to `/vis
 
 ### Per-barcode concatenation
 
-After the raw copy lands, `archive_run.sh` calls `bin/concat_run_fastqs.sh`,
-which replaces MinKNOW's chunked `fastq_pass/<barcode>/*_0.fastq.gz …
+Before the raw copy goes out, `archive_run.sh` calls `bin/concat_run_fastqs.sh`
+on the run while it is still on local disk, which replaces MinKNOW's chunked `fastq_pass/<barcode>/*_0.fastq.gz …
 *_571.fastq.gz` with a single `.fastq.gz` per barcode. MinKNOW writes plain
 gzip, so the concatenation is an ordinary multi-member gzip that zlib, pigz,
 zcat, BBTools and `fastq_filter` all read.
@@ -70,8 +70,18 @@ Nothing is deleted on trust:
 2. a cut-off chunk has its complete records salvaged into a repaired copy,
    which is used in its place (a chunk with nothing readable in it fails the
    barcode instead, since the archive holds the only copy);
-3. BBTools `reformat.sh` reads the chunk stream and then the finished file,
-   and their read and base counts must match.
+3. the result must be exactly as long as the chunks that went into it (raw
+   concatenation is byte-exact, so this costs nothing and catches a short
+   write);
+4. BBTools `reformat.sh` reads the finished file and must parse every record
+   and report a non-zero count.
+
+Each chunk is read once, for the append and the `gzip -t` in the same pass,
+and the result is read once by `reformat.sh`. Doing this before the copy
+means all of that happens on the SSD and only one file per barcode crosses
+to the NAS. For a run that is already archived, `--work DIR` stages each
+barcode to local disk, builds and verifies there, and copies just the result
+back, comparing checksums afterwards since the chunks are about to go.
 
 Each collapsed directory gets a `.concat_manifest.tsv` recording the chunks,
 their sizes, the totals and any salvage. Its presence also marks the directory
