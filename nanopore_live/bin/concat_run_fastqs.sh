@@ -36,7 +36,9 @@
 #
 # reformat.sh runs under `timeout` with stdin closed where possible: on a
 # malformed .gz it can throw and then hang, and a hang must fail the barcode,
-# not the script.
+# not the script. It is given qin=33 because nanopore FASTQ is always
+# Phred+33 and BBTools' autodetection guesses Phred+64 on a read whose
+# quality line is all '@', then aborts on the first out-of-range value.
 #
 # Usage: concat_run_fastqs.sh --run RUN_DIR [options]
 set -uo pipefail
@@ -92,7 +94,7 @@ bb_parse() { awk -F'\t' '/^Input:/ {gsub(/[^0-9]/,"",$2); gsub(/[^0-9]/,"",$3); 
                          END {exit !f}'; }
 bb_file() {  # validate a file on disk
     local out rc
-    out=$(timeout "$BB_TO" "$REFORMAT" in="$1" out=null ow=t int=f $BBMEM < /dev/null 2>&1); rc=$?
+    out=$(timeout "$BB_TO" "$REFORMAT" in="$1" out=null ow=t int=f qin=33 $BBMEM < /dev/null 2>&1); rc=$?
     (( rc != 0 )) && { printf '%s\n' "$out" | grep -E 'Exception|Error' | head -2 >&2; return "$rc"; }
     bb_parse <<<"$out"
 }
