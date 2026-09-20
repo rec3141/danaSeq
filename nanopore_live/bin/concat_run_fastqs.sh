@@ -84,6 +84,13 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$RUN" && -d "$RUN" ]] || { echo "[$SELF] --run must name an existing directory" >&2; exit 1; }
 command -v "$REFORMAT" >/dev/null 2>&1 || { echo "[$SELF] BBTools '$REFORMAT' not on PATH" >&2; exit 1; }
+# Two decompressors on purpose. pigz parallelises compression well, but it
+# cannot parallelise inflating a single gzip member, so it buys nothing on
+# the read side -- and on a loaded machine `pigz -dc` into a pipe parks in
+# futex_wait and never returns (observed: 4s of CPU in 3 minutes of wall
+# clock on a file plain gzip inflates in 2.7s). Every read, test and salvage
+# path therefore uses gzip; only the recompress in salvage_chunk uses pigz.
+GUNZIP=$(command -v gzip || command -v pigz)
 GZ=$(command -v pigz || command -v gzip)
 mkdir -p "$STAGE" || exit 1
 
@@ -93,8 +100,19 @@ TOT_OK=0; TOT_SKIP=0; TOT_FAIL=0; TOT_CHUNKS=0; TOT_TRUNC=0
 bb_parse() { awk -F'\t' '/^Input:/ {gsub(/[^0-9]/,"",$2); gsub(/[^0-9]/,"",$3); print $2, $3; f=1}
                          END {exit !f}'; }
 bb_file() {  # validate a file on disk
+    # The stream is decompressed by gzip/pigz and handed to reformat.sh on
+    # stdin rather than passed as in=<file>. BBTools 39.52's multithreaded
+    # gzip reader (stream.bam.BgzfInputStreamMT2) deadlocks on a loaded
+    # machine -- the reader thread blocks in JobQueue.take() while its
+    # decompress worker parks waiting for work, and the run sits at 0% CPU
+    # until the timeout fires. Same file, same counts, seconds instead of
+    # hours when gzip does the inflating.
+    # pipefail so a decompression error fails the check instead of looking
+    # like a short-but-valid file.
     local out rc
-    out=$(timeout "$BB_TO" "$REFORMAT" in="$1" out=null ow=t int=f qin=33 $BBMEM < /dev/null 2>&1); rc=$?
+    out=$( set -o pipefail
+           $GUNZIP -dc "$1" 2>/dev/null \
+           | timeout "$BB_TO" "$REFORMAT" in=stdin.fq out=null ow=t int=f qin=33 $BBMEM 2>&1 ); rc=$?
     (( rc != 0 )) && { printf '%s\n' "$out" | grep -E 'Exception|Error' | head -2 >&2; return "$rc"; }
     bb_parse <<<"$out"
 }
@@ -103,11 +121,11 @@ bb_file() {  # validate a file on disk
 # records, recompress.
 salvage_chunk() {
     local src="$1" dst="$2"
-    $GZ -dc "$src" 2>/dev/null \
+    $GUNZIP -dc "$src" 2>/dev/null \
       | awk 'NR%4==1 {if (buf != "") printf "%s", buf; buf=""} {buf = buf $0 "\n"}
              END {n=split(buf, L, "\n"); if (n-1 >= 4) printf "%s", buf}' \
       | $GZ -c > "$dst" 2>/dev/null
-    [[ -s "$dst" ]] && $GZ -t "$dst" 2>/dev/null
+    [[ -s "$dst" ]] && $GUNZIP -t "$dst" 2>/dev/null
 }
 
 collapse_dir() {
@@ -164,7 +182,7 @@ collapse_dir() {
             log "FAIL $d: cannot write $tmp_out"; rm -rf "$wd"; TOT_FAIL=$((TOT_FAIL+1)); return 1; }
         want=0; bad=0; rc=0
         for i in "${!srcs[@]}"; do
-            cat "${srcs[$i]}" | tee -a "$tmp_out" | $GZ -t 2>/dev/null
+            cat "${srcs[$i]}" | tee -a "$tmp_out" | $GUNZIP -t 2>/dev/null
             local -a st=("${PIPESTATUS[@]}")
             if (( ${st[0]:-1} != 0 )); then rc=1; break; fi
             if (( ${st[2]:-1} != 0 )); then bad=$((bad + 1)); fi
@@ -185,7 +203,7 @@ collapse_dir() {
         # Repair pass: name the bad chunks and salvage their whole records.
         log "$d: $bad of $n chunks failed gzip -t; repairing"
         for i in "${!srcs[@]}"; do
-            $GZ -t "${srcs[$i]}" 2>/dev/null && continue
+            $GUNZIP -t "${srcs[$i]}" 2>/dev/null && continue
             local rep="$STAGE/.repair.$$.$i.fastq.gz" rep_counts=""
             if salvage_chunk "${srcs[$i]}" "$rep" && rep_counts=$(bb_file "$rep") \
                && [[ "${rep_counts%% *}" != "0" ]]; then
