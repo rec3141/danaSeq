@@ -255,7 +255,11 @@ workflow {
     ch_bam_files = MAP_READS.out.bam
         .flatMap { meta, bam, bai -> [bam, bai] }
         .collect()
-    CALCULATE_DEPTHS(ch_bam_files, ch_assembly)
+    // Every sample we asked MAP_READS to map. Passed to CALCULATE_DEPTHS so it
+    // can name the ones that never produced a BAM -- errorStrategy 'ignore'
+    // makes those failures invisible otherwise.
+    ch_expected_ids = ch_reads.map { meta, fastq -> meta.id }.collect()
+    CALCULATE_DEPTHS(ch_bam_files, ch_assembly, ch_expected_ids)
 
     workflow.onComplete = {
         // The draft is a rescue/-resume artifact, not a deliverable. Once the
