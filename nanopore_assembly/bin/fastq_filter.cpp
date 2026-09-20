@@ -107,6 +107,8 @@ static void usage(const char* prog) {
         "\n  Additional options:\n"
         "  --window_size N        Quality scoring window (default: 250)\n"
         "  -D, --no_dedupe        Skip deduplication (filtlong has no dedup)\n"
+        "  -M, --read_map FILE    Write accepted read_id<TAB>flowcell_barcode\n"
+        "                         (parsed from the header) for BAM demultiplexing\n"
         "  -o, --output FILE      Output file (default: stdout, .gz for gzipped)\n"
         "  -h, --help             Show this help\n"
         "\nReads from stdin if no files given.\n"
@@ -124,6 +126,7 @@ int main(int argc, char** argv) {
     int window_size = 250;
     bool dedupe = true;
     const char* output_path = nullptr;
+    const char* read_map_path = nullptr;
 
     static struct option long_opts[] = {
         {"target_bases",  required_argument, 0, 't'},
@@ -133,13 +136,14 @@ int main(int argc, char** argv) {
         {"min_window_q",  required_argument, 0, 'W'},
         {"window_size",   required_argument, 0, 'w'},
         {"no_dedupe",     no_argument,       0, 'D'},
+        {"read_map",      required_argument, 0, 'M'},
         {"output",        required_argument, 0, 'o'},
         {"help",          no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "t:p:m:w:Do:h", long_opts, nullptr)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:p:m:w:DM:o:h", long_opts, nullptr)) != -1) {
         switch (c) {
             case 't': target_bases = atoll(optarg); break;
             case 'p': keep_percent = atof(optarg); break;
@@ -148,6 +152,7 @@ int main(int argc, char** argv) {
             case 'W': min_window_q = atof(optarg); break;
             case 'w': window_size = atoi(optarg); break;
             case 'D': dedupe = false; break;
+            case 'M': read_map_path = optarg; break;
             case 'o': output_path = optarg; break;
             case 'h': usage(argv[0]); return 0;
             default:  usage(argv[0]); return 1;
@@ -230,6 +235,33 @@ int main(int argc, char** argv) {
     // Line buffers
     const int MAXLINE = 1 << 20; // 1 MB max line
     char* hdr_buf = (char*)malloc(MAXLINE);
+    // Optional read_id -> sample map for demultiplexing a pooled BAM later.
+    // Written here because this loop already parses every header; a separate
+    // pass over the reads would cost another full read of the input.
+    FILE* read_map = nullptr;
+    if (read_map_path) {
+        read_map = fopen(read_map_path, "w");
+        if (!read_map) { fprintf(stderr, "[fastq_filter] cannot open %s\n", read_map_path); return 1; }
+    }
+
+    // Parse "flow_cell_id=X ... barcode=Y" out of a nanopore header comment and
+    // emit "<read_id>\t<X>_<Y>", matching the meta.id the pipeline uses.
+    auto write_read_map = [&](const char* hdr, int hlen) {
+        if (!read_map) return;
+        const char* p = hdr + 1;
+        const char* e = p;
+        while (*e && *e != ' ' && *e != '\t') e++;
+        std::string rid(p, e - p);
+        std::string fc, bc;
+        const char* q = strstr(hdr, "flow_cell_id=");
+        if (q) { q += 13; const char* r = q; while (*r && *r != ' ' && *r != '\t') r++; fc.assign(q, r - q); }
+        q = strstr(hdr, " barcode=");
+        if (q) { q += 9; const char* r = q; while (*r && *r != ' ' && *r != '\t') r++; bc.assign(q, r - q); }
+        if (fc.empty() && bc.empty()) return;
+        fprintf(read_map, "%s\t%s_%s\n", rid.c_str(), fc.c_str(), bc.c_str());
+        (void)hlen;
+    };
+
     char* seq_buf = (char*)malloc(MAXLINE);
     char* plus_buf = (char*)malloc(MAXLINE);
     char* qual_buf = (char*)malloc(MAXLINE);
@@ -332,6 +364,7 @@ int main(int argc, char** argv) {
             // No score-based filtering — just dedup/length/quality and output
             if (!filtering) {
                 write_record(hdr_buf, hlen, seq_buf, slen, qual_buf, qlen);
+                write_read_map(hdr_buf, hlen);
                 accepted_reads++;
                 accepted_bases += slen;
                 continue;
@@ -407,6 +440,7 @@ int main(int argc, char** argv) {
             // Accept/reject
             if (score >= threshold) {
                 write_record(hdr_buf, hlen, seq_buf, slen, qual_buf, qlen);
+                write_read_map(hdr_buf, hlen);
                 accepted_reads++;
                 accepted_bases += slen;
                 score_hist_kept[bin]++;
@@ -416,6 +450,7 @@ int main(int argc, char** argv) {
         gzclose(gz);
     }
 
+    if (read_map) fclose(read_map);
     if (gz_out) gzclose(gz_out);
     else if (out != stdout) fclose(out);
 

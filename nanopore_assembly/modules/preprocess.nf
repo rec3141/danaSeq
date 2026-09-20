@@ -111,12 +111,20 @@ process PREPARE_READS {
     path(fastqs)
 
     output:
-    path("all_reads.fastq*"), emit: reads
+    path("all_reads.fastq*"),  emit: reads
+    path("read_map.tsv.gz"),   emit: read_map, optional: true
 
     script:
     def filter_args = params.dedupe ? "" : "--no_dedupe"
     if (params.filtlong_size) {
         filter_args += " --target_bases ${params.filtlong_size}"
+    }
+    // read_id -> flowcell_barcode for every accepted read. fastq_filter already
+    // parses each header, so this costs no extra pass over the reads. It lets a
+    // pooled BAM (e.g. Flye's polishing alignment) be split per sample without
+    // re-reading the fastqs.
+    if (params.emit_read_map) {
+        filter_args += " --read_map read_map.tsv"
     }
     """
     # Stream each input to fastq_filter. FASTA inputs (.fa/.fasta[.gz]) are
@@ -135,6 +143,11 @@ process PREPARE_READS {
                 cat "\$f" ;;
         esac
     done | fastq_filter ${filter_args} | ${writeReads('all_reads.fastq', task.cpus)}
+
+    if [ -s read_map.tsv ]; then
+        gzip -1 read_map.tsv
+        echo "[INFO] read map: \$(zcat read_map.tsv.gz | wc -l) reads"
+    fi
     """
 }
 
