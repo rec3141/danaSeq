@@ -128,15 +128,36 @@ process PREPARE_READS {
     for f in ${fastqs}; do
         # The staged files are CONCAT_READS outputs named <meta.id>.fastq.gz, so
         # the filename IS the sample id -- the same value main.nf derives from the
-        # barcode directory. Do NOT parse the sample out of read headers: by
-        # convention unbarcoded runs are filed under barcode00, and their reads
-        # carry no barcode= field at all (e.g. the R9.4.1 runs FAR84275 /
-        # FAR92771 / FAR84277, sample_id=no_sample). Header parsing would invent
-        # a sample that does not exist in the pipeline's namespace; the directory
-        # is authoritative.
+        # barcode directory. Do NOT parse the sample out of read headers. Three
+        # header formats occur in practice and each defeats a different parser:
+        #   MinKNOW key=value, but unbarcoded runs (filed under barcode00 by
+        #     convention) carry no barcode= at all;
+        #   SAM tags (PU:Z/SM:Z) from a Dorado -> BAM -> samtools fastq round
+        #     trip, with no flow_cell_id=/barcode= anywhere;
+        #   bare UUIDs, stripped of every field.
+        # The directory is authoritative; the header is not.
         SAMPLE=\$(basename "\$f")
         SAMPLE=\${SAMPLE%.gz}; SAMPLE=\${SAMPLE%.fastq}; SAMPLE=\${SAMPLE%.fq}
         SAMPLE=\${SAMPLE%.fasta}; SAMPLE=\${SAMPLE%.fa}
+
+        # Read map: one file per sample, written synchronously before the record
+        # stream is handed to fastq_filter. Deliberately NOT `tee >(... >> shared)`:
+        # bash does not wait for a process substitution before the next iteration,
+        # so concurrent appends tear lines at ~4 KB buffer boundaries and invent
+        # samples. Costs one extra decompress per file; correctness over speed,
+        # and the whole thing is opt-in.
+        if [ "${params.emit_read_map}" = "true" ]; then
+            mkdir -p read_map.d
+            case "\$f" in
+                *.fa|*.fasta|*.fa.gz|*.fasta.gz)
+                    zcat -f "\$f" | awk -v s="\$SAMPLE" \
+                        '/^>/ { print substr(\$1, 2) "\\t" s }' > "read_map.d/\$SAMPLE.tsv" ;;
+                *)
+                    zcat -f "\$f" | awk -v s="\$SAMPLE" \
+                        'NR % 4 == 1 { print substr(\$1, 2) "\\t" s }' > "read_map.d/\$SAMPLE.tsv" ;;
+            esac
+        fi
+
         case "\$f" in
             *.fa|*.fasta|*.fa.gz|*.fasta.gz)
                 zcat -f "\$f" | awk '
@@ -144,20 +165,15 @@ process PREPARE_READS {
                     { s=s\$0 }
                     END { if (s) { print "@"n; print s; print "+"; q=s; gsub(/./,"I",q); print q } }' | gzip ;;
             *)
-                if [ "${params.emit_read_map}" = "true" ]; then
-                    # tee gives the read map a second consumer of the same stream:
-                    # one read from disk, gz bytes still go downstream untouched.
-                    cat "\$f" | tee >(zcat -f | awk -v s="\$SAMPLE" \
-                        'NR % 4 == 1 { print substr(\$1, 2) "\\t" s }' >> read_map.tsv)
-                else
-                    cat "\$f"
-                fi ;;
+                cat "\$f" ;;
         esac
     done | fastq_filter ${filter_args} | ${writeReads('all_reads.fastq', task.cpus)}
 
-    if [ -s read_map.tsv ]; then
-        gzip -1 read_map.tsv
-        echo "[INFO] read map: \$(zcat read_map.tsv.gz | wc -l) reads, \$(zcat read_map.tsv.gz | cut -f2 | sort -u | wc -l) samples" >&2
+    if [ -d read_map.d ]; then
+        cat read_map.d/*.tsv | gzip -1 > read_map.tsv.gz
+        n_parts=\$(ls read_map.d/*.tsv | wc -l)
+        rm -rf read_map.d
+        echo "[INFO] read map: \$(zcat read_map.tsv.gz | wc -l) reads, \$(zcat read_map.tsv.gz | cut -f2 | sort -u | wc -l) samples from \$n_parts files" >&2
     fi
     """
 }
