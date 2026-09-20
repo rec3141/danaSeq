@@ -53,6 +53,36 @@ bin/archive_run.sh \
 
 Raw reads move to `/matika/`, processed reads and pipeline outputs move to `/vistara`,
 
+### Per-barcode concatenation
+
+After the raw copy lands, `archive_run.sh` calls `bin/concat_run_fastqs.sh`,
+which replaces MinKNOW's chunked `fastq_pass/<barcode>/*_0.fastq.gz …
+*_571.fastq.gz` with a single `.fastq.gz` per barcode. MinKNOW writes plain
+gzip, so the concatenation is an ordinary multi-member gzip that zlib, pigz,
+zcat, BBTools and `fastq_filter` all read.
+
+Nothing is deleted on trust:
+
+1. every chunk is checked with `gzip -t` first — a chunk that is cut off, the
+   common real failure, makes any decompressor stop there and report a short
+   count, and the concatenated file would report the same short count, so the
+   two would otherwise agree on a truncated total;
+2. a cut-off chunk has its complete records salvaged into a repaired copy,
+   which is used in its place (a chunk with nothing readable in it fails the
+   barcode instead, since the archive holds the only copy);
+3. BBTools `reformat.sh` reads the chunk stream and then the finished file,
+   and their read and base counts must match.
+
+Each collapsed directory gets a `.concat_manifest.tsv` recording the chunks,
+their sizes, the totals and any salvage. Its presence also marks the directory
+as done, so re-running is a no-op. Run it by hand over an already-archived run
+with:
+
+```bash
+bin/concat_run_fastqs.sh --run /matika/seqs/metagenome/nanopore/reads/<RUN>
+```
+
+
 ## Quick Start
 
 ```bash
