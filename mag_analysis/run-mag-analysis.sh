@@ -449,11 +449,24 @@ if [[ "$USE_CONTAINER" == true ]]; then
     mkdir -p "${NF_CACHE}/dotdir" 2>/dev/null || true
     BINDS+=("${NF_CACHE}/dotdir:/home/dana/.nextflow")
 
+    # Node-local scratch for the tools' own temporary files: binning, GTDB-Tk
+    # and antiSMASH each write sizeable scratch, which otherwise lands in the
+    # container overlay. SLURM_TMPDIR where a scheduler provides it, else
+    # TMPDIR. Bound at the same path inside and out, and exported, because
+    # Docker does not inherit the host environment.
+    SCRATCH_HOST="${SLURM_TMPDIR:-${TMPDIR:-}}"
+    if [[ -n "$SCRATCH_HOST" && -d "$SCRATCH_HOST" && -w "$SCRATCH_HOST" ]]; then
+        BINDS+=("${SCRATCH_HOST}:${SCRATCH_HOST}")
+    else
+        SCRATCH_HOST=""
+    fi
+
     CONTAINER_CMD=()
     case "$CONTAINER_RUNTIME" in
         docker)
             CONTAINER_CMD+=(docker run --user "$(id -u):$(id -g)")
             CONTAINER_CMD+=("-e" "NXF_HOME=/home/dana/.nextflow")
+            [[ -n "$SCRATCH_HOST" ]] && CONTAINER_CMD+=("-e" "TMPDIR=${SCRATCH_HOST}")
             for bind in "${BINDS[@]}"; do CONTAINER_CMD+=("-v" "$bind"); done
             CONTAINER_CMD+=("$CONTAINER_IMAGE" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
@@ -461,6 +474,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             container_ca="/etc/ssl/certs/ca-certificates.crt"
             CONTAINER_CMD+=("$CONTAINER_RUNTIME" run)
             CONTAINER_CMD+=("--env" "NXF_HOME=/home/dana/.nextflow")
+            [[ -n "$SCRATCH_HOST" ]] && CONTAINER_CMD+=("--env" "TMPDIR=${SCRATCH_HOST}")
             CONTAINER_CMD+=("--env" "REQUESTS_CA_BUNDLE=${container_ca}")
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")
             CONTAINER_CMD+=("--env" "CURL_CA_BUNDLE=${container_ca}")
