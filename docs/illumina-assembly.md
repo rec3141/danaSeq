@@ -96,7 +96,7 @@ cd illumina_assembly
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--slurm_account` | `def-rec3141` | SLURM `--account` for job submission |
+| `--slurm_account` | _(none)_ | SLURM `--account` for job submission; required with `-profile slurm` |
 | `--conda_path` | (none) | Path to conda/mamba `bin/` for SLURM jobs |
 
 ## Outputs
