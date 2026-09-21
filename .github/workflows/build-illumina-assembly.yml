@@ -11,6 +11,15 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# One build of an image at a time, in the order they were queued. A commit that
+# touches Dockerfile.base and a leaf together queues the leaf's own push build
+# and, once the base finishes, the base's rebuild of that leaf — both pushing
+# :latest. Without this the tag is whichever finished last, and the push build
+# is the faster of the two, so the stale one can win.
+concurrency:
+  group: image-danaseq-illumina-assembly
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/danaseq-illumina-assembly
