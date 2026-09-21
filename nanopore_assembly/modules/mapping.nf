@@ -106,6 +106,9 @@ process CALCULATE_DEPTHS {
     path("unmapped_samples.txt"),  emit: unmapped, optional: true
 
     script:
+    // Built here, not inside the script: a '\n' in an interpolated expression
+    // is unescaped by the GString lexer before the expression is parsed.
+    def expected_list = expected_ids.join(System.lineSeparator())
     """
     # MAP_READS runs under errorStrategy 'ignore' (a failed mapping must not
     # take down a multi-day assembly), which means a sample can disappear from
@@ -113,9 +116,9 @@ process CALCULATE_DEPTHS {
     # from whatever BAMs exist and MetaBAT/SemiBin bin on missing columns.
     # Reconcile what was asked for against what arrived, and say so loudly.
     cat > expected.txt <<'EXPECTED_EOF'
-${expected_ids.join('\n')}
+${expected_list}
 EXPECTED_EOF
-    ls *.sorted.bam 2>/dev/null | sed 's/\.sorted\.bam\$//' | sort -u > got.txt
+    ls *.sorted.bam 2>/dev/null | sed 's/\\.sorted\\.bam\$//' | sort -u > got.txt
     sort -u expected.txt > exp.txt
     comm -23 exp.txt got.txt > unmapped_samples.txt || true
     N_EXP=\$(wc -l < exp.txt); N_GOT=\$(wc -l < got.txt); N_MISS=\$(wc -l < unmapped_samples.txt)
