@@ -146,7 +146,22 @@ salvage_chunk() {
 collapse_dir() {
     local d="$1"
     local -a chunks
-    mapfile -t chunks < <(find "$d" -maxdepth 1 -name '*.fastq.gz' -type f -printf '%f\n' | sort -V)
+    # -not -name '.*' matters. Unlike a shell glob, find's -name '*.fastq.gz'
+    # matches dotfiles, so this script's own scratch file -- .partial.<out> left
+    # behind by a write-back that failed -- came back as an input chunk on the
+    # next pass. It sorts first (leading dot), so its salvaged reads landed as a
+    # duplicate prefix and the run reported success. Observed on 20260430
+    # barcode16: 810 "chunks", 1788010 reads duplicated. Never read a dotfile.
+    mapfile -t chunks < <(find "$d" -maxdepth 1 -name '*.fastq.gz' -not -name '.*' -type f -printf '%f\n' | sort -V)
+    # A leftover .partial.* means a previous write-back died partway. The chunks
+    # are still here, so this is recoverable, but it needs a decision rather than
+    # a silent retry: refuse the barcode and say so.
+    local -a stale
+    mapfile -t stale < <(find "$d" -maxdepth 1 -name '.partial.*' -type f -printf '%f\n')
+    if (( ${#stale[@]} > 0 )); then
+        log "FAIL $d: leftover ${stale[*]} from an interrupted write-back; remove it and re-run; nothing done"
+        TOT_FAIL=$((TOT_FAIL + 1)); return 1
+    fi
     local n=${#chunks[@]}
     (( n == 0 )) && return 0
     local manifest="$d/.concat_manifest.tsv"
@@ -254,7 +269,9 @@ collapse_dir() {
         local local_md5 remote_md5
         local_md5=$(md5sum < "$tmp_out" | cut -d" " -f1)
         cp -f "$tmp_out" "$d/.partial.$out" || {
-            log "FAIL $d: could not write the result back"; rm -rf "$wd"
+            # Drop the half-written file. Leaving it behind is what let a later
+            # pass pick it up as an input chunk (see the find above).
+            log "FAIL $d: could not write the result back"; rm -f "$d/.partial.$out"; rm -rf "$wd"
             TOT_FAIL=$((TOT_FAIL+1)); return 1; }
         remote_md5=$(md5sum < "$d/.partial.$out" | cut -d" " -f1)
         if [[ "$local_md5" != "$remote_md5" ]]; then
