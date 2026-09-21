@@ -67,7 +67,8 @@ usage() {
     echo "Caching & Resume:"
     echo "  --workdir DIR        Nextflow work directory (default: \$SLURM_TMPDIR/nanopore_assembly_work, else /tmp/...)"
     echo "  --publish_concat     Also publish the per-barcode concatenated reads (off: they duplicate the input)"
-    echo "  --store_dir DIR      Persistent cache directory (storeDir)"
+    echo "  --store_dir DIR      Persistent cache directory (storeDir) [default: --outdir]"
+    echo "  --publish            Copy outputs instead of storing them; a resubmit then redoes everything"
     echo "  --resume [ID]        Resume a previous run"
     echo ""
     echo "Pipeline flags (passed to Nextflow):"
@@ -101,6 +102,9 @@ WORKDIR_HOST="${SLURM_TMPDIR:-/tmp}/nanopore_assembly_work"
 RESUME_SESSION=""
 DO_RESUME=false
 STORE_DIR_HOST=""
+# Store mode is the default: outputs land in --outdir via storeDir, so a
+# resubmit skips whatever already completed. --publish restores plain copies.
+STORE_MODE=true
 
 while (( $# )); do
     case "$1" in
@@ -143,6 +147,9 @@ while (( $# )); do
             STORE_DIR_HOST="$(realpath -m "$2")"
             NF_ARGS+=("--store_dir" "$STORE_DIR_HOST")
             shift 2 ;;
+        --publish)
+            STORE_MODE=false
+            shift ;;
         --resume)
             DO_RESUME=true
             if [[ -n "${2:-}" && "${2}" != --* ]]; then
@@ -174,6 +181,17 @@ if [[ -z "$OUTDIR_HOST" && -n "$STORE_DIR_HOST" ]]; then
     NF_ARGS+=("--outdir" "$OUTDIR_HOST")
 fi
 [[ -z "$OUTDIR_HOST" ]] && die "--outdir (or --store_dir) is required."
+
+# Default to store mode. storeDir puts the assembly in the same place publishDir
+# did ($OUTDIR/assembly, $OUTDIR/mapping), so the layout is unchanged -- what it
+# adds is that a resubmit reuses whatever is already there instead of redoing
+# it. That is what makes a node-local work directory safe: $SLURM_TMPDIR is
+# erased when the job ends, and without this the expensive stages would have
+# nothing to resume from.
+if [[ "$STORE_MODE" == true && -z "$STORE_DIR_HOST" ]]; then
+    STORE_DIR_HOST="$OUTDIR_HOST"
+    NF_ARGS+=("--store_dir" "$STORE_DIR_HOST")
+fi
 
 [[ -d "$INPUT_HOST" ]] || die "Input directory does not exist: $INPUT_HOST"
 
