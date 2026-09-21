@@ -73,7 +73,7 @@ Pipeline flags (passed to Nextflow):
   --store_dir DIR          Persistent cache directory (storeDir)
 
 SLURM flags:
-  --slurm_account STR  SLURM --account [default: def-rec3141]
+  --slurm_account STR  SLURM --account (required with -profile slurm)
   --conda_path PATH    Path to conda/mamba bin/ dir for SLURM jobs
 
 EOF

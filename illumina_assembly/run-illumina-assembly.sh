@@ -86,7 +86,7 @@ usage() {
     echo "      --bam_dir <outdir>/mapping/<sample>/"
     echo ""
     echo "SLURM flags:"
-    echo "  --slurm_account STR  SLURM --account [default: def-rec3141]"
+    echo "  --slurm_account STR  SLURM --account (required with -profile slurm)"
     echo "  --conda_path PATH    Path to conda/mamba bin/ dir for SLURM jobs"
     echo ""
     exit 0

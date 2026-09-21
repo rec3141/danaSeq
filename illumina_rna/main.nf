@@ -79,6 +79,10 @@ def validateParams() {
         helpMessage()
         System.exit(0)
     }
+    if (workflow.profile.tokenize(',').contains('slurm') && !params.slurm_account) {
+        log.error "ERROR: -profile slurm requires --slurm_account <account>. There is no default; SLURM rejects jobs submitted without a valid account."
+        System.exit(1)
+    }
     if (!params.input) {
         log.error "ERROR: --input is required. Run with --help for usage."
         System.exit(1)
