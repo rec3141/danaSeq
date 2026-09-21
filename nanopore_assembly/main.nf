@@ -167,6 +167,7 @@ workflow {
     if (barcode_dirs) {
         log.info "Detected nanopore barcode structure: ${barcode_dirs.size()} barcode directories"
         def all_pairs = []
+        def empty_barcodes = []
         for (dir in barcode_dirs) {
             def barcode = dir.name
             def run_name = dir.parent.parent.name
@@ -175,12 +176,29 @@ workflow {
             def sample_id = "${flowcell}_${barcode}"
             def fqs = file("${dir}/*.fastq.gz")
             if (fqs instanceof List) {
+                if (fqs.isEmpty()) { empty_barcodes.add(dir) }
                 for (fq in fqs) { all_pairs.add([sample_id, fq]) }
             } else if (fqs) {
                 all_pairs.add([sample_id, fqs])
+            } else {
+                empty_barcodes.add(dir)
             }
         }
         log.info "Found ${all_pairs.size()} FASTQ files across ${barcode_dirs.size()} barcodes"
+        // A barcode that contributes no file is dropped by groupTuple with no
+        // error, so it is missing from both the assembly and the depth matrix.
+        // The barcode-directory count above stays correct either way, which is
+        // what makes this invisible: on 2026-09-20 a freshwater run assembled
+        // 223 of 243 samples because the input symlinks for 20 barcodes still
+        // named per-chunk files that had since been concatenated.
+        if (empty_barcodes) {
+            log.warn "${empty_barcodes.size()} barcode director(ies) contain no *.fastq.gz and are ABSENT from the assembly and the depth matrix."
+            log.warn "  A dangling symlink farm is the usual cause (targets renamed, moved or concatenated)."
+            empty_barcodes.take(20).each { log.warn "    ${it}" }
+            if (empty_barcodes.size() > 20) {
+                log.warn "    ... and ${empty_barcodes.size() - 20} more"
+            }
+        }
         ch_barcode_raw = Channel.from(all_pairs)
             .groupTuple()
             .map { sample_id, fastqs -> [[id: sample_id], fastqs] }
