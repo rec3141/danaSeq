@@ -5,18 +5,21 @@
 // on large BAMs (github.com/samtools/htslib/issues/831).
 
 // Shared bash fragment: decompress the gzipped reads once into node-local
-// scratch (SLURM_TMPDIR) and point the assembler at the plain FASTQ.
+// scratch and point the assembler at the plain FASTQ. The scratch directory is
+// SLURM_TMPDIR when a scheduler provides one (node-local, job-scoped, wiped at
+// job end), otherwise TMPDIR, so this also works off a batch system.
 // Flye alone parses the read file 4-5 times (configure, assemble, repeat,
 // contigger, polish), and every pass is bottlenecked on single-threaded
 // gzip inflate (~22 min per pass on 148 Gbp). metaMDBG and myloasm also
-// make several passes. Falls back to the .gz when SLURM_TMPDIR is unset or
-// short on space. Sets $READS; the plain file is removed on exit.
+// make several passes. Falls back to the .gz when neither variable is set, the
+// directory is not writable, or it is short on space. Sets $READS; the plain
+// file is removed on exit.
 def stageReadsScript() {
     return '''
     READS="$IN"
     case "$IN" in
     *.gz)
-        TMP="${SLURM_TMPDIR:-}"
+        TMP="${SLURM_TMPDIR:-${TMPDIR:-}}"
         if [ -n "$TMP" ] && [ -d "$TMP" ] && [ -w "$TMP" ]; then
             gz_bytes=$(stat -Lc%s "$IN")
             need_kb=$(( gz_bytes / 1024 * 4 ))     # plain FASTQ ~3x gz, plus margin
@@ -30,10 +33,10 @@ def stageReadsScript() {
                 echo "[INFO] Decompressed $(stat -c%s "$PLAIN") bytes in ${SECONDS}s"
                 READS="$PLAIN"
             else
-                echo "[INFO] SLURM_TMPDIR=$TMP has ${avail_kb}K free, need ${need_kb}K; using gzipped reads"
+                echo "[INFO] scratch $TMP has ${avail_kb}K free, need ${need_kb}K; using gzipped reads"
             fi
         else
-            echo "[INFO] SLURM_TMPDIR not available; assembler will read gzipped input directly"
+            echo "[INFO] No writable scratch (SLURM_TMPDIR/TMPDIR); assembler will read gzipped input directly"
         fi
         ;;
     *)

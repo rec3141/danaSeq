@@ -295,8 +295,15 @@ if [[ "$USE_CONTAINER" == true ]]; then
     BINDS+=("${NF_CACHE}/dotdir:/home/dana/.nextflow")
     # Node-local scratch: assembler processes decompress reads there once
     # (see stageReadsScript in modules/assembly.nf). Same path inside and out.
-    if [[ -n "${SLURM_TMPDIR:-}" && -d "$SLURM_TMPDIR" ]]; then
-        BINDS+=("${SLURM_TMPDIR}:${SLURM_TMPDIR}")
+    # SLURM_TMPDIR where a scheduler provides it, else TMPDIR, so the staging
+    # also happens on a host without a batch system. TMPDIR is exported into
+    # the container because Docker does not inherit the host environment, and
+    # the fragment looks it up by name.
+    SCRATCH_HOST="${SLURM_TMPDIR:-${TMPDIR:-}}"
+    if [[ -n "$SCRATCH_HOST" && -d "$SCRATCH_HOST" && -w "$SCRATCH_HOST" ]]; then
+        BINDS+=("${SCRATCH_HOST}:${SCRATCH_HOST}")
+    else
+        SCRATCH_HOST=""
     fi
 
     CONTAINER_CMD=()
@@ -304,6 +311,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
         docker)
             CONTAINER_CMD+=(docker run --user "$(id -u):$(id -g)")
             CONTAINER_CMD+=("-e" "NXF_HOME=/home/dana/.nextflow")
+            [[ -n "$SCRATCH_HOST" ]] && CONTAINER_CMD+=("-e" "TMPDIR=${SCRATCH_HOST}")
             for bind in "${BINDS[@]}"; do
                 CONTAINER_CMD+=("-v" "$bind")
             done
@@ -313,6 +321,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             container_ca="/etc/ssl/certs/ca-certificates.crt"
             CONTAINER_CMD+=("$CONTAINER_RUNTIME" run)
             CONTAINER_CMD+=("--env" "NXF_HOME=/home/dana/.nextflow")
+            [[ -n "$SCRATCH_HOST" ]] && CONTAINER_CMD+=("--env" "TMPDIR=${SCRATCH_HOST}")
             CONTAINER_CMD+=("--env" "REQUESTS_CA_BUNDLE=${container_ca}")
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")
             CONTAINER_CMD+=("--env" "CURL_CA_BUNDLE=${container_ca}")
