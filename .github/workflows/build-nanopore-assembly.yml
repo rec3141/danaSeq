@@ -7,9 +7,12 @@ on:
       - 'nanopore_assembly/**'
       - '!nanopore_assembly/conda-envs/**'
       - '!nanopore_assembly/envs/**'
+      # the base build rebuilds this image once the new base exists
+      - '!nanopore_assembly/Dockerfile.base'
       - '!nanopore_assembly/Dockerfile.base-slim'
       - '.github/workflows/build-nanopore-assembly.yml'
   workflow_dispatch:
+  workflow_call:
 
 env:
   REGISTRY: ghcr.io

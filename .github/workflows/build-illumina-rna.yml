@@ -9,6 +9,7 @@ on:
       - '!illumina_rna/envs/**'
       - '.github/workflows/build-illumina-rna.yml'
   workflow_dispatch:
+  workflow_call:
 
 env:
   REGISTRY: ghcr.io

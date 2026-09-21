@@ -9,6 +9,7 @@ on:
       - '!illumina_assembly/envs/**'
       - '.github/workflows/build-illumina-assembly.yml'
   workflow_dispatch:
+  workflow_call:
 
 env:
   REGISTRY: ghcr.io

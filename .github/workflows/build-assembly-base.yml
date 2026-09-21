@@ -1,6 +1,16 @@
 name: Build assembly base image
 
 on:
+  # Editing Dockerfile.base or the env specs used to trigger only the leaf
+  # builds (they match nanopore_assembly/**), which rebuild a thin layer on top
+  # of an unchanged base — so the edit published a new :latest that did not
+  # contain it. A Flye pin bump shipped that way on 2026-09-20.
+  push:
+    branches: [main]
+    paths:
+      - 'nanopore_assembly/Dockerfile.base'
+      - 'nanopore_assembly/envs/**'
+      - '.github/workflows/build-assembly-base.yml'
   workflow_dispatch:
 
 env:
@@ -61,3 +71,24 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+  nanopore-assembly:
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-nanopore-assembly.yml
+
+  illumina-assembly:
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-illumina-assembly.yml
+
+  illumina-rna:
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-illumina-rna.yml
