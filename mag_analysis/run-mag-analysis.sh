@@ -147,8 +147,9 @@ usage() {
     echo "  --db_dir DIR       Auto-resolve database paths from download-databases.sh layout"
     echo ""
     echo "Caching & Resume:"
-    echo "  --workdir DIR      Nextflow work directory (default: /tmp/mag_analysis_work)"
-    echo "  --store_dir DIR    Persistent cache directory (storeDir)"
+    echo "  --workdir DIR      Nextflow work directory (default: \$SLURM_TMPDIR/mag_analysis_work, else /tmp/...)"
+    echo "  --store_dir DIR    Persistent cache directory (storeDir) [default: --outdir]"
+    echo "  --publish          Copy outputs instead of storing them; a resubmit then redoes everything"
     echo "  --resume [ID]      Resume a previous run"
     echo ""
     echo "Pipeline flags: --annotator, --run_metabolism, --run_genomad, --run_gtdbtk,"
@@ -168,11 +169,15 @@ ASSEMBLY_HOST=""
 DEPTHS_HOST=""
 BAM_DIR_HOST=""
 OUTDIR_HOST=""
-WORKDIR_HOST="/tmp/mag_analysis_work"
+WORKDIR_HOST="${SLURM_TMPDIR:-/tmp}/mag_analysis_work"
 RESUME_SESSION=""
 DO_RESUME=false
 DB_DIR_HOST=""
 STORE_DIR_HOST=""
+
+# Store mode keeps every finished stage in $OUTDIR (storeDir), so a timeout or
+# resubmit skips whatever already completed. --publish restores plain copies.
+STORE_MODE=true
 
 while (( $# )); do
     case "$1" in
@@ -232,6 +237,9 @@ while (( $# )); do
             STORE_DIR_HOST="$(realpath -m "$2")"
             NF_ARGS+=("--store_dir" "$STORE_DIR_HOST")
             shift 2 ;;
+        --publish)
+            STORE_MODE=false
+            shift ;;
         --tnf|--assembly_info)
             # Resolve to canonical path so container bind-path rewriting catches them.
             # Without realpath, /home/rec3141/scratch/X stays unresolved while
@@ -303,6 +311,17 @@ if [[ -z "$OUTDIR_HOST" && -n "$STORE_DIR_HOST" ]]; then
     NF_ARGS+=("--outdir" "$OUTDIR_HOST")
 fi
 [[ -z "$OUTDIR_HOST" ]] && die "--outdir (or --store_dir) is required."
+
+# Default to store mode. storeDir writes each module to the same place publishDir
+# did ($OUTDIR/annotation, $OUTDIR/taxonomy, ...), so the layout is unchanged --
+# what it adds is that a resubmit reuses whatever is already there instead of
+# redoing it. That is what makes a node-local work directory safe: $SLURM_TMPDIR
+# is erased when the job ends, and without this the finished bins, annotations
+# and GTDB-Tk placements would have nothing to resume from.
+if [[ "$STORE_MODE" == true && -z "$STORE_DIR_HOST" ]]; then
+    STORE_DIR_HOST="$OUTDIR_HOST"
+    NF_ARGS+=("--store_dir" "$STORE_DIR_HOST")
+fi
 
 [[ -f "$ASSEMBLY_HOST" ]] || die "Assembly file not found: $ASSEMBLY_HOST"
 [[ -f "$DEPTHS_HOST" ]] || die "Depths file not found: $DEPTHS_HOST"
@@ -436,7 +455,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=(docker run --user "$(id -u):$(id -g)")
             CONTAINER_CMD+=("-e" "NXF_HOME=/home/dana/.nextflow")
             for bind in "${BINDS[@]}"; do CONTAINER_CMD+=("-v" "$bind"); done
-            CONTAINER_CMD+=("$CONTAINER_IMAGE" run /pipeline/main.nf)
+            CONTAINER_CMD+=("$CONTAINER_IMAGE" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
         apptainer|singularity)
             container_ca="/etc/ssl/certs/ca-certificates.crt"
@@ -446,7 +465,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")
             CONTAINER_CMD+=("--env" "CURL_CA_BUNDLE=${container_ca}")
             for bind in "${BINDS[@]}"; do CONTAINER_CMD+=("--bind" "$bind"); done
-            CONTAINER_CMD+=("$SIF_PATH" run /pipeline/main.nf)
+            CONTAINER_CMD+=("$SIF_PATH" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
     esac
     CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}")
@@ -460,10 +479,14 @@ if [[ "$USE_CONTAINER" == true ]]; then
     echo "[INFO] Output:   $OUTDIR_HOST"
     echo ""
 
+    # Also holds nextflow.log: without -log, Nextflow writes .nextflow.log
+    # relative to the launch directory, so concurrent runs sharing a submit
+    # directory rotate each other out and the one that failed is gone.
     mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
     NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1)
+    [[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1)
     save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
     exit $NF_EXIT
 fi
@@ -500,7 +523,7 @@ fi
 
 LOCAL_CMD=(
     mamba run -p "$NF_ENV"
-    nextflow run "${SCRIPT_DIR}/main.nf"
+    nextflow -log "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" run "${SCRIPT_DIR}/main.nf"
     --outdir "$OUTDIR_HOST"
     "${WORKDIR_FLAG[@]}"
     "${NF_ARGS[@]}"
@@ -518,7 +541,7 @@ mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 "${LOCAL_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
 NF_SESSION=$(awk '{print $6}' .nextflow/history 2>/dev/null | tail -1)
-[[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' .nextflow.log 2>/dev/null | tail -1)
+[[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1)
 save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
 
 exit $NF_EXIT
