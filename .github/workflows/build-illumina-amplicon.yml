@@ -43,8 +43,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
             type=sha,prefix=
+            type=raw,value=${{ github.sha }}
 
       # Resolve papa2's HEAD so the pip layer's cache key moves when it does.
       # envs/python.yml installs papa2 from a git URL; without a build arg that
@@ -80,3 +80,23 @@ jobs:
             BUILD_DATE=${{ steps.deps.outputs.build_date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The pipeline is only compiled when Nextflow parses it, which until now
+      # first happened on a cluster, at a node allocation. A Groovy syntax error
+      # in a module therefore shipped as :latest, the clusters auto-pulled it,
+      # and the run died in 11 seconds having submitted nothing. The image's
+      # default CMD is `run /pipeline/main.nf --help`, so this is the whole
+      # check. Production sets the legacy parser; match it or the test passes on
+      # a grammar the runs do not use.
+      - name: Smoke test - the pipeline compiles
+        run: |
+          docker run --rm -e NXF_SYNTAX_PARSER=v1 \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+
+      # Only now does :latest move. A failed smoke test leaves it on the last
+      # image that passed, rather than on one that cannot start.
+      - name: Promote to latest
+        run: |
+          docker buildx imagetools create \
+            -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
