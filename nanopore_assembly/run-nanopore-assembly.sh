@@ -307,7 +307,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             for bind in "${BINDS[@]}"; do
                 CONTAINER_CMD+=("-v" "$bind")
             done
-            CONTAINER_CMD+=("$CONTAINER_IMAGE" run /pipeline/main.nf)
+            CONTAINER_CMD+=("$CONTAINER_IMAGE" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
         apptainer|singularity)
             container_ca="/etc/ssl/certs/ca-certificates.crt"
@@ -319,7 +319,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             for bind in "${BINDS[@]}"; do
                 CONTAINER_CMD+=("--bind" "$bind")
             done
-            CONTAINER_CMD+=("$SIF_PATH" run /pipeline/main.nf)
+            CONTAINER_CMD+=("$SIF_PATH" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
     esac
     CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}")
@@ -333,6 +333,9 @@ if [[ "$USE_CONTAINER" == true ]]; then
     echo "[INFO] Running: ${CONTAINER_CMD[*]}"
     echo ""
 
+    # Also holds nextflow.log: without -log, Nextflow writes .nextflow.log
+    # relative to the launch directory, so concurrent runs sharing a submit
+    # directory rotate each other out and the one that failed is gone.
     mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
@@ -346,7 +349,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
     fi
 
     NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1)
-    [[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1)
+    [[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1)
     save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
 
     exit $NF_EXIT
@@ -372,7 +375,7 @@ fi
 
 LOCAL_CMD=(
     mamba run -p "${SCRIPT_DIR}/conda-envs/dana-mag-assembly"
-    nextflow run "${SCRIPT_DIR}/main.nf"
+    nextflow -log "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" run "${SCRIPT_DIR}/main.nf"
     --input "$INPUT_HOST"
     --outdir "$OUTDIR_HOST"
     "${WORKDIR_FLAG[@]}"
@@ -392,7 +395,7 @@ mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
 # Capture session ID
 NF_SESSION=$(awk '{print $6}' .nextflow/history 2>/dev/null | tail -1)
-[[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' .nextflow.log 2>/dev/null | tail -1)
+[[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1)
 save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
 
 exit $NF_EXIT
