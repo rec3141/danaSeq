@@ -103,6 +103,13 @@ def writeReads(String basename, int cpus) {
 process PREPARE_READS {
     tag "prepare-reads"
     label 'process_high'
+    // The pipeline default is retry-once-then-'ignore'. Ignoring this stage
+    // leaves the reads channel empty and the run completes having assembled
+    // nothing -- the same silent success that let a truncated PREPARE_READS
+    // through on 2026-09-22. A transient fault should retry; a persistent one
+    // must stop the run, not be skipped.
+    errorStrategy 'retry'
+    maxRetries 2
     conda "${projectDir}/conda-envs/dana-mag-assembly"
     // No publishDir / storeDir — all_reads.fastq is a large transient
     // intermediate (see writeReads above), not a result.
@@ -129,6 +136,15 @@ process PREPARE_READS {
         filter_args += params.onepass_filter ? " --onepass" : " --spill_dir ."
     }
     """
+    # Nextflow runs this with `bash -ue`, which does NOT include pipefail, so
+    # the exit status of `... | fastq_filter | writeReads` is writeReads'.
+    # fastq_filter aborted mid-stream on both grex co-assemblies on 2026-09-22
+    # and this task still recorded .exitcode 0: marine reached Flye with 134 Gbp
+    # of ~338, freshwater with 65 Gbp of ~400, and the freshwater run went on to
+    # complete every downstream stage and report success on a 2.63 Gbp assembly.
+    # A filter that dies must fail the task.
+    set -o pipefail
+
     # Stream each input to fastq_filter. FASTA inputs (.fa/.fasta[.gz]) are
     # converted to FASTQ with a placeholder quality (Q40) on the fly — used for
     # pre-QC'd reads exported as fasta (e.g. nanopore_live fa/ store). zcat -f
@@ -192,6 +208,13 @@ process PREPARE_READS {
 process REMOVE_HUMAN {
     tag "remove-human"
     label 'process_high'
+    // The pipeline default is retry-once-then-'ignore'. Ignoring this stage
+    // leaves the reads channel empty and the run completes having assembled
+    // nothing -- the same silent success that let a truncated PREPARE_READS
+    // through on 2026-09-22. A transient fault should retry; a persistent one
+    // must stop the run, not be skipped.
+    errorStrategy 'retry'
+    maxRetries 2
     conda "${projectDir}/conda-envs/dana-mag-assembly"
     // No storeDir — nohuman_reads.fastq is a large transient intermediate.
 
