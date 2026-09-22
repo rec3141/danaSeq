@@ -48,6 +48,10 @@ def helpMessage() {
       --polish           Enable Flye polishing iterations [default: true for flye]
       --dedupe           Enable BBDuk deduplication before assembly
       --filtlong_size N  Filtlong target bases (e.g. 40000000000); skip if not set
+      --onepass_filter   Select those bases with the legacy single-pass streaming
+                         threshold. Cheaper on disk, but the kept subset depends on
+                         input order and is biased toward whatever streams first.
+                         Default is an order-independent two-pass bucket sort.
 
     Resources:
       --assembly_cpus N    CPUs for assembly [default: 16]
@@ -219,7 +223,25 @@ workflow {
     }
 
     // 2. Concatenate + dedupe + optional filtlong -> single all_reads.fastq.gz
-    ch_per_barcode = ch_reads.map { meta, fastq -> fastq }.collect()
+    //
+    // Order matters here and must not be left to chance. A plain collect()
+    // emits in CONCAT_READS *completion* order, which varies run to run, and
+    // fastq_filter's single-pass --target_bases mode decides accept/reject on
+    // arrival against a threshold built only from the reads seen so far. It is
+    // therefore lenient early and strict late: two groups with identical
+    // length and quality distributions keep 1518 vs 501 reads purely by
+    // position in the stream. Unsorted input made two production co-assemblies
+    // of the same data select ~50% different reads at identical base totals
+    // (rec3141/Flye issue #1).
+    //
+    // Largest file first, with the name as tiebreak so equal sizes cannot
+    // reintroduce the nondeterminism. This pins the selection; it does not make
+    // it unbiased; fastq_filter's default two-pass selection is what makes the
+    // choice order-independent. Only --onepass still depends on this ordering.
+    ch_per_barcode = ch_reads
+        .map { meta, fastq -> fastq }
+        .collect()
+        .map { files -> files.toSorted { a, b -> (b.size() <=> a.size()) ?: (a.name <=> b.name) } }
     PREPARE_READS(ch_per_barcode)
 
     if (params.run_remove_human) {

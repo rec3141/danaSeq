@@ -3,9 +3,13 @@
  *
  * Replaces: cat *.fastq.gz | dedup | filtlong -t TARGET
  *
- * Single pass, pipe-friendly. Reads are scored and immediately accepted or
- * rejected using a dynamically adjusted threshold that converges on
- * target_bases (biased to undershoot for memory safety).
+ * Pipe-friendly. With --target_bases the default is a two-pass bucket sort:
+ * reads are spilled to score buckets in one decompression pass, then buckets
+ * are emitted from the top down until the budget is met, so the kept subset
+ * depends only on read scores and never on input order. --onepass restores the
+ * legacy single-pass behaviour, which scores and immediately accepts or rejects
+ * against a dynamically adjusted threshold converging on target_bases (biased
+ * to undershoot for memory safety) and is therefore order-dependent.
  *
  * Scoring follows filtlong's algorithm (without global z-score normalization):
  *   length_score  = 100 * len / (len + 5000)
@@ -25,7 +29,11 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <algorithm>
+#include <cstdint>
+#include <cerrno>
 #include <getopt.h>
+#include <unistd.h>
 #include <zlib.h>
 #include <sys/stat.h>
 
@@ -109,8 +117,23 @@ static void usage(const char* prog) {
         "  -D, --no_dedupe        Skip deduplication (filtlong has no dedup)\n"
         "  -o, --output FILE      Output file (default: stdout, .gz for gzipped)\n"
         "  -h, --help             Show this help\n"
+        "\n  Selection mode (--target_bases only):\n"
+        "  --twopass              Default. Spill reads to score buckets, then emit\n"
+        "                         the best --target_bases. Output does not depend on\n"
+        "                         input order. Needs scratch space for one\n"
+        "                         uncompressed copy of the input.\n"
+        "  --onepass              Legacy streaming threshold. Lower disk use, but the\n"
+        "                         selected subset depends on input order.\n"
+        "  --spill_dir DIR        Bucket directory (default: $SLURM_TMPDIR, else /tmp)\n"
+        "  --buckets N            Score buckets for two-pass mode (default: 512)\n"
         "\nReads from stdin if no files given.\n"
-        "Deduplication is ON by default (unique to fastq_filter).\n", prog);
+        "Deduplication is ON by default (unique to fastq_filter).\n"
+        "\n--onepass decides each read on arrival against a threshold built only from\n"
+        "the reads seen so far, so it is lenient early and strict late: two groups\n"
+        "with identical length and quality distributions keep 1518 vs 501 reads\n"
+        "purely by position in the stream. Use it only where reproducibility and\n"
+        "even sampling across inputs do not matter.\n"
+        "\n--keep_percent always streams; it has no two-pass implementation.\n", prog);
 }
 
 int main(int argc, char** argv) {
@@ -124,6 +147,10 @@ int main(int argc, char** argv) {
     int window_size = 250;
     bool dedupe = true;
     const char* output_path = nullptr;
+    bool onepass = false;
+    bool twopass_explicit = false;
+    const char* spill_dir = nullptr;
+    int n_buckets = 512;
 
     static struct option long_opts[] = {
         {"target_bases",  required_argument, 0, 't'},
@@ -134,6 +161,10 @@ int main(int argc, char** argv) {
         {"window_size",   required_argument, 0, 'w'},
         {"no_dedupe",     no_argument,       0, 'D'},
         {"output",        required_argument, 0, 'o'},
+        {"onepass",       no_argument,       0, 'O'},
+        {"twopass",       no_argument,       0, 'T'},
+        {"spill_dir",     required_argument, 0, 'S'},
+        {"buckets",       required_argument, 0, 'B'},
         {"help",          no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
@@ -149,6 +180,10 @@ int main(int argc, char** argv) {
             case 'w': window_size = atoi(optarg); break;
             case 'D': dedupe = false; break;
             case 'o': output_path = optarg; break;
+            case 'O': onepass = true; break;
+            case 'T': twopass_explicit = true; break;
+            case 'S': spill_dir = optarg; break;
+            case 'B': n_buckets = atoi(optarg); break;
             case 'h': usage(argv[0]); return 0;
             default:  usage(argv[0]); return 1;
         }
@@ -158,6 +193,38 @@ int main(int argc, char** argv) {
     bool filter_by_pct = keep_percent > 0.0 && keep_percent < 100.0;
     bool filter_by_qual = min_mean_q > 0.0 || min_window_q > 0.0;
     bool filtering = filter_by_bases || filter_by_pct;
+
+    // Two-pass bucket selection is the DEFAULT wherever --target_bases applies,
+    // because it is the only mode whose output does not depend on input order.
+    // The single-pass streaming threshold remains available as --onepass: it
+    // decides each read on arrival against a bar built from the reads seen so
+    // far, so it is lenient early and strict late and the kept subset shifts
+    // with input order. Percentage mode has no two-pass implementation and
+    // always streams.
+    bool twopass = filter_by_bases && !filter_by_pct && !onepass;
+
+    if (onepass && twopass_explicit) {
+        fprintf(stderr, "[fastq_filter] --onepass and --twopass are mutually exclusive\n");
+        return 1;
+    }
+    if (twopass_explicit && !filter_by_bases) {
+        fprintf(stderr, "[fastq_filter] --twopass requires --target_bases\n");
+        return 1;
+    }
+    if (twopass_explicit && filter_by_pct) {
+        fprintf(stderr, "[fastq_filter] --twopass does not support --keep_percent\n");
+        return 1;
+    }
+    if (twopass) {
+        if (n_buckets < 2 || n_buckets > 65536) {
+            fprintf(stderr, "[fastq_filter] --buckets must be between 2 and 65536\n");
+            return 1;
+        }
+        if (!spill_dir) {
+            spill_dir = getenv("SLURM_TMPDIR");
+            if (!spill_dir || !*spill_dir) spill_dir = "/tmp";
+        }
+    }
 
     // For percentage mode, compute the z-score threshold for the target percentile.
     // Assuming roughly normal score distribution:
@@ -233,6 +300,51 @@ int main(int argc, char** argv) {
     char* seq_buf = (char*)malloc(MAXLINE);
     char* plus_buf = (char*)malloc(MAXLINE);
     char* qual_buf = (char*)malloc(MAXLINE);
+
+    // --twopass spill buckets.
+    //
+    // Reads are written to one of n_buckets plain-FASTQ files chosen by score,
+    // so the input is decompressed exactly once. Selection then walks buckets
+    // from the top down until target_bases is reached. Which reads are kept
+    // depends only on their scores, never on arrival order.
+    //
+    // Buckets hold ordinary FASTQ so whole buckets can be copied out verbatim.
+    // Only the one bucket straddling the budget needs per-read scores, and it
+    // is re-scored on read: it is a single bucket, so the cost is negligible
+    // next to a second decompress of the whole input.
+    std::vector<FILE*> bucket_fp;
+    std::vector<std::string> bucket_path;
+    std::vector<long long> bucket_bases, bucket_reads;
+    if (twopass) {
+        bucket_fp.assign(n_buckets, nullptr);
+        bucket_path.assign(n_buckets, std::string());
+        bucket_bases.assign(n_buckets, 0);
+        bucket_reads.assign(n_buckets, 0);
+        for (int b = 0; b < n_buckets; b++) {
+            char p[4096];
+            snprintf(p, sizeof(p), "%s/fastq_filter.%d.b%05d.fastq",
+                     spill_dir, (int)getpid(), b);
+            bucket_path[b] = p;
+            bucket_fp[b] = fopen(p, "w+");
+            if (!bucket_fp[b]) {
+                fprintf(stderr, "[fastq_filter] Cannot create spill file %s: %s\n",
+                        p, strerror(errno));
+                fprintf(stderr, "[fastq_filter] Lower --buckets or set --spill_dir "
+                                "to a directory with room for one uncompressed "
+                                "copy of the input.\n");
+                return 1;
+            }
+            setvbuf(bucket_fp[b], nullptr, _IOFBF, 1 << 16);
+        }
+        fprintf(stderr, "[fastq_filter] --twopass: %d buckets in %s\n",
+                n_buckets, spill_dir);
+    }
+    auto cleanup_buckets = [&]() {
+        for (int b = 0; b < (int)bucket_fp.size(); b++) {
+            if (bucket_fp[b]) fclose(bucket_fp[b]);
+            if (!bucket_path[b].empty()) unlink(bucket_path[b].c_str());
+        }
+    };
 
     auto write_record = [&](const char* hdr, int hlen,
                             const char* seq, int slen,
@@ -340,6 +452,25 @@ int main(int argc, char** argv) {
             // Score
             double score = score_read(qual_buf, slen, window_size);
 
+            // --twopass: spill to the score bucket and decide nothing yet.
+            if (twopass) {
+                int b = (int)(score / 100.0 * n_buckets);
+                if (b >= n_buckets) b = n_buckets - 1;
+                if (b < 0) b = 0;
+                FILE* bf = bucket_fp[b];
+                fwrite(hdr_buf, 1, hlen, bf);
+                fputc('\n', bf);
+                fwrite(seq_buf, 1, slen, bf);
+                fputs("\n+\n", bf);
+                fwrite(qual_buf, 1, qlen, bf);
+                fputc('\n', bf);
+                bucket_bases[b] += slen;
+                bucket_reads[b]++;
+                n_scored++;
+                scored_bases += slen;
+                continue;
+            }
+
             // Welford online stats + histogram
             n_scored++;
             scored_bases += slen;
@@ -414,6 +545,99 @@ int main(int argc, char** argv) {
         }
 
         gzclose(gz);
+    }
+
+    // --twopass selection: walk buckets from the highest score down, emitting
+    // whole buckets while they fit, then fill the remaining budget from the one
+    // bucket that straddles it. Nothing here consults input order.
+    if (twopass) {
+        for (int b = 0; b < n_buckets; b++) fflush(bucket_fp[b]);
+
+        // Find the straddling bucket. Buckets above it are emitted whole.
+        long long running = 0;
+        int boundary = -1;
+        for (int b = n_buckets - 1; b >= 0; b--) {
+            if (running + bucket_bases[b] > target_bases) { boundary = b; break; }
+            running += bucket_bases[b];
+        }
+
+        char* line = (char*)malloc(MAXLINE);
+        auto copy_bucket_whole = [&](int b) {
+            FILE* bf = bucket_fp[b];
+            rewind(bf);
+            while (fgets(line, MAXLINE, bf)) {
+                int n = strlen(line);
+                if (gz_out) gzwrite(gz_out, line, n);
+                else fwrite(line, 1, n, out);
+            }
+        };
+
+        for (int b = n_buckets - 1; b > boundary; b--) {
+            if (!bucket_bases[b]) continue;
+            copy_bucket_whole(b);
+            accepted_reads += bucket_reads[b];
+            accepted_bases += bucket_bases[b];
+        }
+
+        // The straddling bucket. Re-score its reads, order them by score (then
+        // by read-ID hash, so equal scores resolve the same way on every run
+        // regardless of how they were spilled), and take them until the budget
+        // is met. Only this one bucket is held in memory, and only as 24 bytes
+        // per read -- the records themselves stay on disk and are seeked to.
+        if (boundary >= 0 && bucket_bases[boundary] > 0 &&
+            accepted_bases < target_bases) {
+            struct Cand {
+                double   score;
+                uint64_t idhash;
+                long     off;
+                int      len;
+            };
+            std::vector<Cand> cands;
+            cands.reserve(bucket_reads[boundary]);
+
+            FILE* bf = bucket_fp[boundary];
+            rewind(bf);
+            while (true) {
+                long off = ftell(bf);
+                if (!fgets(hdr_buf, MAXLINE, bf)) break;
+                if (!fgets(seq_buf, MAXLINE, bf)) break;
+                if (!fgets(plus_buf, MAXLINE, bf)) break;
+                if (!fgets(qual_buf, MAXLINE, bf)) break;
+                int hl = strlen(hdr_buf); if (hl && hdr_buf[hl-1] == '\n') hdr_buf[--hl] = '\0';
+                int sl = strlen(seq_buf); if (sl && seq_buf[sl-1] == '\n') seq_buf[--sl] = '\0';
+                int ql = strlen(qual_buf); if (ql && qual_buf[ql-1] == '\n') qual_buf[--ql] = '\0';
+
+                // FNV-1a over the read ID (up to the first space/tab).
+                uint64_t h = 1469598103934665603ULL;
+                for (const char* p = hdr_buf + 1; *p && *p != ' ' && *p != '\t'; p++) {
+                    h ^= (unsigned char)*p;
+                    h *= 1099511628211ULL;
+                }
+                cands.push_back({score_read(qual_buf, sl, window_size), h, off, sl});
+            }
+
+            std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
+                if (a.score != b.score)   return a.score > b.score;
+                if (a.idhash != b.idhash) return a.idhash < b.idhash;
+                return a.off < b.off;
+            });
+
+            for (const Cand& cd : cands) {
+                if (accepted_bases + cd.len > target_bases) continue;
+                fseek(bf, cd.off, SEEK_SET);
+                for (int i = 0; i < 4; i++) {
+                    if (!fgets(line, MAXLINE, bf)) break;
+                    int n = strlen(line);
+                    if (gz_out) gzwrite(gz_out, line, n);
+                    else fwrite(line, 1, n, out);
+                }
+                accepted_reads++;
+                accepted_bases += cd.len;
+            }
+        }
+
+        free(line);
+        cleanup_buckets();
     }
 
     if (gz_out) gzclose(gz_out);

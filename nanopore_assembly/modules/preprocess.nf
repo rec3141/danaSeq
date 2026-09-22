@@ -118,6 +118,15 @@ process PREPARE_READS {
     def filter_args = params.dedupe ? "" : "--no_dedupe"
     if (params.filtlong_size) {
         filter_args += " --target_bases ${params.filtlong_size}"
+        // fastq_filter selects the best --target_bases with a two-pass bucket
+        // sort by default, so the kept reads depend only on their scores and
+        // not on the order the samples happen to arrive in. Spill into the task
+        // directory rather than the container's /tmp: it needs room for one
+        // uncompressed copy of the input (~700 GB for a 250 Gbp co-assembly),
+        // and the launcher already puts the work dir on node-local SLURM_TMPDIR.
+        // --onepass restores the legacy order-dependent streaming threshold,
+        // which is cheaper on disk and nothing else.
+        filter_args += params.onepass_filter ? " --onepass" : " --spill_dir ."
     }
     """
     # Stream each input to fastq_filter. FASTA inputs (.fa/.fasta[.gz]) are
