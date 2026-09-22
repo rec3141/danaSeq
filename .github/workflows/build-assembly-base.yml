@@ -81,6 +81,10 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
+  # These three rebuild over the base this run just published. Each one also
+  # runs on its own push, potentially over the previous base, so each re-checks
+  # the base digest before promoting :latest and stands down if it moved. The
+  # chained run below is the one that promotes.
   nanopore-assembly:
     needs: build
     permissions:
