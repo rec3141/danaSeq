@@ -32,12 +32,19 @@ LABEL org.opencontainers.image.source="https://github.com/rec3141/danaSeq"
 ARG GIT_SHA=unknown
 ARG GIT_REF=unknown
 ARG BUILD_DATE=unknown
+# Which base this leaf was actually built on. The source commit alone does not
+# identify an image: a leaf rebuilt over an unchanged base and the base's own
+# chained rebuild are different images from the same commit, and telling them
+# apart is exactly what went wrong on 2026-09-20 and 2026-09-22.
+ARG BASE_DIGEST=unknown
 ENV DANASEQ_GIT_SHA=${GIT_SHA} \
     DANASEQ_GIT_REF=${GIT_REF} \
-    DANASEQ_BUILD_DATE=${BUILD_DATE}
+    DANASEQ_BUILD_DATE=${BUILD_DATE} \
+    DANASEQ_BASE_DIGEST=${BASE_DIGEST}
 LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.version="${GIT_REF}" \
-      org.opencontainers.image.created="${BUILD_DATE}"
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      danaseq.base.digest="${BASE_DIGEST}"
 
 COPY . /pipeline/
 

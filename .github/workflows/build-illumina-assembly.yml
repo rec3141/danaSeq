@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -54,10 +54,26 @@ jobs:
           tags: |
             type=sha,prefix=
             type=raw,value=${{ github.sha }}
+            type=raw,value=${{ github.sha }}-${{ steps.base.outputs.short }}
 
       - name: Stamp build time
         id: stamp
         run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # Which base we are about to build on. Recorded in the tag and re-checked
+      # before promotion: this workflow runs both on its own push and again
+      # chained from the base build, and those two produce different images from
+      # the same commit.
+      - name: Resolve base image digest
+        id: base
+        run: |
+          d=$(docker buildx imagetools inspect \
+                ghcr.io/${{ github.repository_owner }}/danaseq-assembly-base:latest \
+                --format '{{.Manifest.Digest}}')
+          short=${d#sha256:}
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
+          echo "short=${short:0:12}" >> "$GITHUB_OUTPUT"
+          echo "base is $d"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -88,12 +104,54 @@ jobs:
       - name: Smoke test - the pipeline compiles
         run: |
           docker run --rm -e NXF_SYNTAX_PARSER=v1 \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-${{ steps.base.outputs.short }}"
 
       # Only now does :latest move. A failed smoke test leaves it on the last
       # image that passed, rather than on one that cannot start.
+      # Only promote if the base we built on is still current. Otherwise this is
+      # the stale-base run of a commit that also changed Dockerfile.base, and
+      # publishing it would ship a new git SHA over old base contents -- the
+      # failure seen on 2026-09-20 and 2026-09-22. The chained build promotes.
       - name: Promote to latest
+        id: promote
         run: |
-          docker buildx imagetools create \
-            -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          now=$(docker buildx imagetools inspect \
+                  ghcr.io/${{ github.repository_owner }}/danaseq-assembly-base:latest \
+                  --format '{{.Manifest.Digest}}')
+          if [ "$now" != "${{ steps.base.outputs.digest }}" ]; then
+            echo "base moved during this build; not promoting"
+            echo "promoted=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          src="${{ env.REGISTRY }}/${{ env.danaseq-illumina-assembly_NAME }}:${{ github.sha }}-${{ steps.base.outputs.short }}"
+          docker buildx imagetools create -t "${{ env.REGISTRY }}/${{ env.danaseq-illumina-assembly_NAME }}:latest" "$src"
+          digest=$(docker buildx imagetools inspect "$src" --format '{{.Manifest.Digest}}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "promoted=true" >> "$GITHUB_OUTPUT"
+
+      # Clusters pin to this digest instead of resolving :latest themselves, so
+      # a pull started just before a new publish still lands what it asked for.
+      - name: Record deployed digest
+        if: steps.promote.outputs.promoted == 'true'
+        run: |
+          mkdir -p deploy
+          cat > deploy/danaseq-illumina-assembly.json <<JSON
+          {
+            "image": "${{ env.danaseq-illumina-assembly_NAME }}",
+            "digest": "${{ steps.promote.outputs.digest }}",
+            "commit": "${{ github.sha }}",
+            "base_digest": "${{ steps.base.outputs.digest }}"
+          }
+          JSON
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/danaseq-illumina-assembly.json
+          git diff --cached --quiet && { echo "digest unchanged"; exit 0; }
+          git commit -m "deploy: danaseq-illumina-assembly ${{ github.sha }} [skip ci]"
+          for i in 1 2 3 4 5; do
+            git push && exit 0
+            git pull --rebase --autostash origin ${{ github.ref_name }} || true
+            sleep $((RANDOM % 5 + 2))
+          done
+          echo "could not push the deploy record after 5 attempts" >&2
+          exit 1

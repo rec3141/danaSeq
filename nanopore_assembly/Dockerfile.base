@@ -67,9 +67,20 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 #   - chimera coverage windows rounded asymmetrically by strand, first caller wins
 # Validated serial-deterministic: two 1-thread replicates of each build are
 # byte-identical, and the corrections add 0.20% bases / 0.55% sequences.
+#
+# The commit is an ARG so the pip install and the label below cannot disagree.
+# On 2026-09-20 and again on 2026-09-22 an image reported a new DANASEQ_GIT_SHA
+# while still carrying the previous Flye, and the only way to tell was to run
+# the container and read pip's direct_url.json. danaseq.flye.commit is derived
+# from the same ARG that installs it, so reading the label is now sufficient.
+ARG FLYE_COMMIT=15c9eb53
 RUN /opt/conda/envs/dana-mag-assembly/bin/pip install --force-reinstall --no-deps \
-    'flye @ git+https://github.com/rec3141/Flye.git@15c9eb53' \
+    "flye @ git+https://github.com/rec3141/Flye.git@${FLYE_COMMIT}" \
     && /opt/conda/envs/dana-mag-assembly/bin/flye-modules 2>&1 | head -1
+# Inherited by every image built FROM this one, so a leaf carries the Flye
+# commit of the base it was actually built on.
+LABEL danaseq.flye.commit="${FLYE_COMMIT}"
+ENV DANASEQ_FLYE_COMMIT=${FLYE_COMMIT}
 
 # --- Illumina assembly envs ---
 # BBTools + FastQC + samtools + Nextflow

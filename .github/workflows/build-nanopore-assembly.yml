@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -57,10 +57,26 @@ jobs:
           tags: |
             type=sha,prefix=
             type=raw,value=${{ github.sha }}
+            type=raw,value=${{ github.sha }}-${{ steps.base.outputs.short }}
 
       - name: Stamp build time
         id: stamp
         run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # Which base we are about to build on. Recorded in the tag, baked into the
+      # image, and re-checked before promotion: a source commit alone does not
+      # identify a leaf image, because this workflow runs both on its own push
+      # and again from the base build, and those two produce different images.
+      - name: Resolve base image digest
+        id: base
+        run: |
+          d=$(docker buildx imagetools inspect \
+                ghcr.io/${{ github.repository_owner }}/danaseq-assembly-base:latest \
+                --format '{{.Manifest.Digest}}')
+          short=${d#sha256:}
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
+          echo "short=${short:0:12}" >> "$GITHUB_OUTPUT"
+          echo "base is $d"
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -78,6 +94,7 @@ jobs:
             GIT_SHA=${{ github.sha }}
             GIT_REF=${{ github.ref_name }}
             BUILD_DATE=${{ steps.stamp.outputs.build_date }}
+            BASE_DIGEST=${{ steps.base.outputs.digest }}
 
       # The pipeline is only compiled when Nextflow parses it, which until now
       # first happened on a cluster, at a node allocation. A Groovy syntax error
@@ -89,12 +106,70 @@ jobs:
       - name: Smoke test - the pipeline compiles
         run: |
           docker run --rm -e NXF_SYNTAX_PARSER=v1 \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-${{ steps.base.outputs.short }}"
 
       # Only now does :latest move. A failed smoke test leaves it on the last
       # image that passed, rather than on one that cannot start.
+      #
+      # And only if the base we built on is still the current base. This
+      # workflow runs twice for a commit that touches both a leaf path and
+      # Dockerfile.base: once on its own push, over whatever base existed then,
+      # and once chained from the finished base build. Without this check the
+      # first one can publish an image that silently lacks the base change --
+      # a new DANASEQ_GIT_SHA over an old Flye, which shipped on 2026-09-20 and
+      # again on 2026-09-22. The chained build promotes; the stale one stands
+      # down and says so.
       - name: Promote to latest
+        id: promote
         run: |
-          docker buildx imagetools create \
-            -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          now=$(docker buildx imagetools inspect \
+                  ghcr.io/${{ github.repository_owner }}/danaseq-assembly-base:latest \
+                  --format '{{.Manifest.Digest}}')
+          if [ "$now" != "${{ steps.base.outputs.digest }}" ]; then
+            echo "base moved during this build:"
+            echo "  built on ${{ steps.base.outputs.digest }}"
+            echo "  current  $now"
+            echo "not promoting; the build chained from the new base will."
+            echo "promoted=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          src="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-${{ steps.base.outputs.short }}"
+          docker buildx imagetools create -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" "$src"
+          digest=$(docker buildx imagetools inspect "$src" --format '{{.Manifest.Digest}}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "promoted=true" >> "$GITHUB_OUTPUT"
+
+      # The deployable digest, in version control. Clusters pin to this rather
+      # than resolving :latest themselves, so a pull that starts just before a
+      # new publish still lands exactly the image it asked for -- a digest is
+      # immutable, a tag is not. omc-pickup read :latest mid-publish on
+      # 2026-09-22 and spent a 14-minute pull on the image that was about to be
+      # superseded.
+      - name: Record deployed digest
+        if: steps.promote.outputs.promoted == 'true'
+        run: |
+          mkdir -p deploy
+          cat > deploy/danaseq-nanopore-assembly.json <<JSON
+          {
+            "image": "${{ env.IMAGE_NAME }}",
+            "digest": "${{ steps.promote.outputs.digest }}",
+            "commit": "${{ github.sha }}",
+            "base_digest": "${{ steps.base.outputs.digest }}",
+            "built": "${{ steps.stamp.outputs.build_date }}"
+          }
+          JSON
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/danaseq-nanopore-assembly.json
+          git diff --cached --quiet && { echo "digest unchanged"; exit 0; }
+          git commit -m "deploy: danaseq-nanopore-assembly ${{ github.sha }} [skip ci]"
+          # The base build chains three leaves in parallel and each records its
+          # own file, so pushes collide. Rebase and retry rather than fail the
+          # build over a race on an accounting commit.
+          for i in 1 2 3 4 5; do
+            git push && exit 0
+            git pull --rebase --autostash origin ${{ github.ref_name }} || true
+            sleep $((RANDOM % 5 + 2))
+          done
+          echo "could not push the deploy record after 5 attempts" >&2
+          exit 1
