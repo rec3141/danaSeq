@@ -88,20 +88,29 @@ jobs:
   nanopore-assembly:
     needs: build
     permissions:
-      contents: read
+      # write, not read: the called workflow records the promoted digest to
+      # deploy/<image>.json. A called workflow cannot hold more permission than
+      # its caller grants, and granting less fails the whole run at startup.
+      contents: write
       packages: write
     uses: ./.github/workflows/build-nanopore-assembly.yml
 
   illumina-assembly:
     needs: build
     permissions:
-      contents: read
+      # write, not read: the called workflow records the promoted digest to
+      # deploy/<image>.json. A called workflow cannot hold more permission than
+      # its caller grants, and granting less fails the whole run at startup.
+      contents: write
       packages: write
     uses: ./.github/workflows/build-illumina-assembly.yml
 
   illumina-rna:
     needs: build
     permissions:
-      contents: read
+      # write, not read: the called workflow records the promoted digest to
+      # deploy/<image>.json. A called workflow cannot hold more permission than
+      # its caller grants, and granting less fails the whole run at startup.
+      contents: write
       packages: write
     uses: ./.github/workflows/build-illumina-rna.yml
