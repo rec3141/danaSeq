@@ -52,8 +52,23 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 #     was 5h53m), and stop hardcoding sort/index threads to 4
 #   - batch region queries so the bam header is parsed once per batch rather
 #     than once per contig (measured 107x on a 1.33M-reference bam)
+#
+# 15c9eb53 adds the bases-budget region batching and four order-sensitivity
+# corrections. A controlled A/B of 2ec1d6eb against the bases-budget build on
+# one marine co-assembly, each stage given byte-identical input, measured
+# consensus 4989s -> 4116s (-17.5%) and polish 22018s -> 18034s (-18.1%) at
+# unchanged peak RAM. The corrections fix defects that made assembly depend on
+# read order, all of which predate this fork:
+#   - low-coverage tip pruning checked only one physical end of an arbitrarily
+#     oriented path, so a tip was kept or pruned by strand ID
+#   - seed screening cached a chimera verdict from a capped, input-ID-ordered
+#     100-overlap prefix, flipping the verdict when the same reads were reordered
+#   - equal-length contained disjointigs deleted each other, losing both
+#   - chimera coverage windows rounded asymmetrically by strand, first caller wins
+# Validated serial-deterministic: two 1-thread replicates of each build are
+# byte-identical, and the corrections add 0.20% bases / 0.55% sequences.
 RUN /opt/conda/envs/dana-mag-assembly/bin/pip install --force-reinstall --no-deps \
-    'flye @ git+https://github.com/rec3141/Flye.git@2ec1d6eb' \
+    'flye @ git+https://github.com/rec3141/Flye.git@15c9eb53' \
     && /opt/conda/envs/dana-mag-assembly/bin/flye-modules 2>&1 | head -1
 
 # --- Illumina assembly envs ---

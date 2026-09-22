@@ -1,5 +1,5 @@
 /*
- * fastq_filter — Single-pass streaming FASTQ dedup + quality/length filter.
+ * fastq_filter — FASTQ dedup + quality/length filter.
  *
  * Replaces: cat *.fastq.gz | dedup | filtlong -t TARGET
  *
@@ -32,13 +32,80 @@
 #include <algorithm>
 #include <cstdint>
 #include <cerrno>
+#include <memory>
+#include <list>
+#include <stdexcept>
+#include <csignal>
 #include <getopt.h>
 #include <unistd.h>
 #include <zlib.h>
 #include <sys/stat.h>
+#include <sys/resource.h>
 
 // Precomputed Phred+33 -> P(correct) lookup
 static double PHRED_LUT[256];
+
+static void io_check(bool ok, const char* operation) {
+    if (!ok) throw std::runtime_error(std::string(operation) + ": " + strerror(errno));
+}
+
+// Private directory prevents collisions between concurrent processes on shared
+// scratch. A small LRU bounds descriptors and buffering independently of buckets.
+class SpillBuckets {
+    std::string directory;
+    std::vector<FILE*> files;
+    std::list<size_t> recent;
+    std::vector<std::list<size_t>::iterator> positions;
+    size_t opened = 0;
+    size_t max_open = 512;
+public:
+    std::vector<std::string> paths;
+    explicit SpillBuckets(int count, const char* parent)
+        : files(count, nullptr), positions(count), paths(count) {
+        if (!count) return;
+        struct rlimit limit;
+        io_check(getrlimit(RLIMIT_NOFILE, &limit) == 0, "get descriptor limit");
+        // Preserve the original default's buffering when possible, but leave
+        // descriptors for input/output/runtime and support low-limit systems.
+        max_open = std::min<rlim_t>(512, limit.rlim_cur > 16 ? limit.rlim_cur - 16 : 1);
+        std::string pattern = std::string(parent) + "/fastq_filter.XXXXXX";
+        std::vector<char> name(pattern.begin(), pattern.end());
+        name.push_back('\0');
+        io_check(mkdtemp(name.data()) != nullptr, "create spill directory");
+        directory = name.data();
+    }
+    void close_one(size_t b) {
+        FILE* fp = files[b];
+        files[b] = nullptr;
+        recent.erase(positions[b]);
+        --opened;
+        io_check(fclose(fp) == 0, "flush/close spill file");
+    }
+    FILE* writer(size_t b) {
+        if (!files[b]) {
+            if (opened == max_open) {
+                close_one(recent.back());
+            }
+            if (paths[b].empty()) paths[b] = directory + "/" + std::to_string(b);
+            files[b] = fopen(paths[b].c_str(), "ab");
+            io_check(files[b] != nullptr, "open spill file");
+            ++opened;
+            recent.push_front(b);
+            positions[b] = recent.begin();
+            setvbuf(files[b], nullptr, _IOFBF, 1 << 16);
+        }
+        recent.splice(recent.begin(), recent, positions[b]);
+        return files[b];
+    }
+    void finish() {
+        for (size_t b = 0; b < files.size(); ++b) if (files[b]) close_one(b);
+    }
+    ~SpillBuckets() {
+        for (auto fp : files) if (fp) fclose(fp);
+        for (const auto& path : paths) if (!path.empty()) unlink(path.c_str());
+        if (!directory.empty()) rmdir(directory.c_str());
+    }
+};
 
 static void init_phred_lut() {
     for (int i = 0; i < 256; i++) PHRED_LUT[i] = 0.0;
@@ -136,7 +203,7 @@ static void usage(const char* prog) {
         "\n--keep_percent always streams; it has no two-pass implementation.\n", prog);
 }
 
-int main(int argc, char** argv) {
+static int run_main(int argc, char** argv) {
     init_phred_lut();
 
     long long target_bases = 0;
@@ -193,6 +260,11 @@ int main(int argc, char** argv) {
     bool filter_by_pct = keep_percent > 0.0 && keep_percent < 100.0;
     bool filter_by_qual = min_mean_q > 0.0 || min_window_q > 0.0;
     bool filtering = filter_by_bases || filter_by_pct;
+
+    if (window_size <= 0) {
+        fprintf(stderr, "[fastq_filter] --window_size must be positive\n");
+        return 1;
+    }
 
     // Two-pass bucket selection is the DEFAULT wherever --target_bases applies,
     // because it is the only mode whose output does not depend on input order.
@@ -308,62 +380,26 @@ int main(int argc, char** argv) {
     // from the top down until target_bases is reached. Which reads are kept
     // depends only on their scores, never on arrival order.
     //
-    // Buckets hold ordinary FASTQ so whole buckets can be copied out verbatim.
-    // Only the one bucket straddling the budget needs per-read scores, and it
-    // is re-scored on read: it is a single bucket, so the cost is negligible
-    // next to a second decompress of the whole input.
-    std::vector<FILE*> bucket_fp;
-    std::vector<std::string> bucket_path;
-    std::vector<long long> bucket_bases, bucket_reads;
-    if (twopass) {
-        bucket_fp.assign(n_buckets, nullptr);
-        bucket_path.assign(n_buckets, std::string());
-        bucket_bases.assign(n_buckets, 0);
-        bucket_reads.assign(n_buckets, 0);
-        for (int b = 0; b < n_buckets; b++) {
-            char p[4096];
-            snprintf(p, sizeof(p), "%s/fastq_filter.%d.b%05d.fastq",
-                     spill_dir, (int)getpid(), b);
-            bucket_path[b] = p;
-            bucket_fp[b] = fopen(p, "w+");
-            if (!bucket_fp[b]) {
-                fprintf(stderr, "[fastq_filter] Cannot create spill file %s: %s\n",
-                        p, strerror(errno));
-                fprintf(stderr, "[fastq_filter] Lower --buckets or set --spill_dir "
-                                "to a directory with room for one uncompressed "
-                                "copy of the input.\n");
-                return 1;
-            }
-            setvbuf(bucket_fp[b], nullptr, _IOFBF, 1 << 16);
-        }
+    // Sort compact indices one bucket at a time; records remain on disk.
+    SpillBuckets buckets(twopass ? n_buckets : 0, spill_dir);
+    if (twopass)
         fprintf(stderr, "[fastq_filter] --twopass: %d buckets in %s\n",
                 n_buckets, spill_dir);
-    }
-    auto cleanup_buckets = [&]() {
-        for (int b = 0; b < (int)bucket_fp.size(); b++) {
-            if (bucket_fp[b]) fclose(bucket_fp[b]);
-            if (!bucket_path[b].empty()) unlink(bucket_path[b].c_str());
-        }
+
+    auto write_bytes = [&](const char* data, size_t length) {
+        if (gz_out) io_check(gzwrite(gz_out, data, length) == (int)length, "write gzip output");
+        else io_check(fwrite(data, 1, length, out) == length, "write output");
     };
 
     auto write_record = [&](const char* hdr, int hlen,
                             const char* seq, int slen,
                             const char* qual, int qlen) {
-        if (gz_out) {
-            gzwrite(gz_out, hdr, hlen);
-            gzwrite(gz_out, "\n", 1);
-            gzwrite(gz_out, seq, slen);
-            gzwrite(gz_out, "\n+\n", 3);
-            gzwrite(gz_out, qual, qlen);
-            gzwrite(gz_out, "\n", 1);
-        } else {
-            fwrite(hdr, 1, hlen, out);
-            fputc('\n', out);
-            fwrite(seq, 1, slen, out);
-            fputs("\n+\n", out);
-            fwrite(qual, 1, qlen, out);
-            fputc('\n', out);
-        }
+        write_bytes(hdr, hlen);
+        write_bytes("\n", 1);
+        write_bytes(seq, slen);
+        write_bytes("\n+\n", 3);
+        write_bytes(qual, qlen);
+        write_bytes("\n", 1);
     };
 
     for (auto& fname : inputs) {
@@ -374,16 +410,19 @@ int main(int argc, char** argv) {
             gz = gzopen(fname, "r");
         }
         if (!gz) {
-            fprintf(stderr, "[fastq_filter] Cannot open %s\n", fname);
-            continue;
+            throw std::runtime_error(std::string("Cannot open input ") + fname);
         }
         gzbuffer(gz, 1 << 18); // 256KB buffer
 
         while (true) {
             if (!gzgets(gz, hdr_buf, MAXLINE)) break;
-            if (!gzgets(gz, seq_buf, MAXLINE)) break;
-            if (!gzgets(gz, plus_buf, MAXLINE)) break;
-            if (!gzgets(gz, qual_buf, MAXLINE)) break;
+            if (!gzgets(gz, seq_buf, MAXLINE) || !gzgets(gz, plus_buf, MAXLINE) ||
+                !gzgets(gz, qual_buf, MAXLINE))
+                throw std::runtime_error("Incomplete FASTQ record");
+            if (!strchr(hdr_buf, '\n') || !strchr(seq_buf, '\n') ||
+                !strchr(plus_buf, '\n') ||
+                (!strchr(qual_buf, '\n') && !gzeof(gz)))
+                throw std::runtime_error("FASTQ line exceeds buffer limit");
 
             total_reads++;
 
@@ -394,9 +433,11 @@ int main(int argc, char** argv) {
             if (slen > 0 && seq_buf[slen-1] == '\n') seq_buf[--slen] = '\0';
             int qlen = strlen(qual_buf);
             if (qlen > 0 && qual_buf[qlen-1] == '\n') qual_buf[--qlen] = '\0';
+            if (hdr_buf[0] != '@' || plus_buf[0] != '+' || !slen || slen != qlen)
+                throw std::runtime_error("Invalid FASTQ record or sequence/quality length mismatch");
 
             // Dedup by read ID
-            if (dedupe) {
+            if (dedupe && !twopass) {
                 // Extract ID: skip '@', take up to first space/tab
                 const char* start = hdr_buf + 1;
                 const char* end = start;
@@ -457,15 +498,13 @@ int main(int argc, char** argv) {
                 int b = (int)(score / 100.0 * n_buckets);
                 if (b >= n_buckets) b = n_buckets - 1;
                 if (b < 0) b = 0;
-                FILE* bf = bucket_fp[b];
-                fwrite(hdr_buf, 1, hlen, bf);
-                fputc('\n', bf);
-                fwrite(seq_buf, 1, slen, bf);
-                fputs("\n+\n", bf);
-                fwrite(qual_buf, 1, qlen, bf);
-                fputc('\n', bf);
-                bucket_bases[b] += slen;
-                bucket_reads[b]++;
+                FILE* bf = buckets.writer(b);
+                io_check(fwrite(hdr_buf, 1, hlen, bf) == (size_t)hlen &&
+                         fputc('\n', bf) != EOF &&
+                         fwrite(seq_buf, 1, slen, bf) == (size_t)slen &&
+                         fputs("\n+\n", bf) != EOF &&
+                         fwrite(qual_buf, 1, qlen, bf) == (size_t)qlen &&
+                         fputc('\n', bf) != EOF, "write spill record");
                 n_scored++;
                 scored_bases += slen;
                 continue;
@@ -544,104 +583,94 @@ int main(int argc, char** argv) {
             }
         }
 
-        gzclose(gz);
+        int input_error = Z_OK;
+        const char* input_message = gzerror(gz, &input_error);
+        std::string message = input_message ? input_message : "input read failure";
+        int close_error = gzclose(gz);
+        if ((input_error != Z_OK && input_error != Z_STREAM_END) || close_error != Z_OK)
+            throw std::runtime_error("Read input: " + message);
     }
 
-    // --twopass selection: walk buckets from the highest score down, emitting
-    // whole buckets while they fit, then fill the remaining budget from the one
-    // bucket that straddles it. Nothing here consults input order.
+    // Global greedy order: descending score, ID hash, then exact record bytes.
+    // Every bucket is sorted, including fully accepted ones. Continue to lower
+    // buckets when a read does not fit: bucket boundaries never affect selection.
     if (twopass) {
-        for (int b = 0; b < n_buckets; b++) fflush(bucket_fp[b]);
-
-        // Find the straddling bucket. Buckets above it are emitted whole.
-        long long running = 0;
-        int boundary = -1;
-        for (int b = n_buckets - 1; b >= 0; b--) {
-            if (running + bucket_bases[b] > target_bases) { boundary = b; break; }
-            running += bucket_bases[b];
-        }
-
-        char* line = (char*)malloc(MAXLINE);
-        auto copy_bucket_whole = [&](int b) {
-            FILE* bf = bucket_fp[b];
-            rewind(bf);
-            while (fgets(line, MAXLINE, bf)) {
-                int n = strlen(line);
-                if (gz_out) gzwrite(gz_out, line, n);
-                else fwrite(line, 1, n, out);
-            }
+        buckets.finish(); // Detect buffered write failures before consuming spills.
+        struct Cand {
+            double score;
+            uint64_t idhash;
+            long off;
+            int len;
         };
-
-        for (int b = n_buckets - 1; b > boundary; b--) {
-            if (!bucket_bases[b]) continue;
-            copy_bucket_whole(b);
-            accepted_reads += bucket_reads[b];
-            accepted_bases += bucket_bases[b];
-        }
-
-        // The straddling bucket. Re-score its reads, order them by score (then
-        // by read-ID hash, so equal scores resolve the same way on every run
-        // regardless of how they were spilled), and take them until the budget
-        // is met. Only this one bucket is held in memory, and only as 24 bytes
-        // per read -- the records themselves stay on disk and are seeked to.
-        if (boundary >= 0 && bucket_bases[boundary] > 0 &&
-            accepted_bases < target_bases) {
-            struct Cand {
-                double   score;
-                uint64_t idhash;
-                long     off;
-                int      len;
+        for (int b = n_buckets - 1; b >= 0 && accepted_bases < target_bases; --b) {
+            if (buckets.paths[b].empty()) continue;
+            std::unique_ptr<FILE, decltype(&fclose)> file(
+                fopen(buckets.paths[b].c_str(), "rb"), fclose);
+            io_check(file != nullptr, "open spill for reading");
+            FILE* bf = file.get();
+            auto read_record = [&]() {
+                if (!fgets(hdr_buf, MAXLINE, bf)) {
+                    io_check(!ferror(bf), "read spill header");
+                    return false;
+                }
+                io_check(fgets(seq_buf, MAXLINE, bf) &&
+                         fgets(plus_buf, MAXLINE, bf) &&
+                         fgets(qual_buf, MAXLINE, bf), "read complete spill record");
+                return true;
+            };
+            auto at = [&](long off) {
+                io_check(fseek(bf, off, SEEK_SET) == 0, "seek spill record");
+                io_check(read_record(), "read indexed spill record");
             };
             std::vector<Cand> cands;
-            cands.reserve(bucket_reads[boundary]);
-
-            FILE* bf = bucket_fp[boundary];
-            rewind(bf);
             while (true) {
                 long off = ftell(bf);
-                if (!fgets(hdr_buf, MAXLINE, bf)) break;
-                if (!fgets(seq_buf, MAXLINE, bf)) break;
-                if (!fgets(plus_buf, MAXLINE, bf)) break;
-                if (!fgets(qual_buf, MAXLINE, bf)) break;
-                int hl = strlen(hdr_buf); if (hl && hdr_buf[hl-1] == '\n') hdr_buf[--hl] = '\0';
-                int sl = strlen(seq_buf); if (sl && seq_buf[sl-1] == '\n') seq_buf[--sl] = '\0';
-                int ql = strlen(qual_buf); if (ql && qual_buf[ql-1] == '\n') qual_buf[--ql] = '\0';
-
-                // FNV-1a over the read ID (up to the first space/tab).
+                io_check(off >= 0, "tell spill position");
+                if (!read_record()) break;
+                int sl = strlen(seq_buf) - 1;
                 uint64_t h = 1469598103934665603ULL;
-                for (const char* p = hdr_buf + 1; *p && *p != ' ' && *p != '\t'; p++) {
+                for (const char* p = hdr_buf + 1; *p && *p != ' ' &&
+                     *p != '\t' && *p != '\n'; ++p) {
                     h ^= (unsigned char)*p;
                     h *= 1099511628211ULL;
                 }
                 cands.push_back({score_read(qual_buf, sl, window_size), h, off, sl});
             }
-
-            std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
-                if (a.score != b.score)   return a.score > b.score;
-                if (a.idhash != b.idhash) return a.idhash < b.idhash;
-                return a.off < b.off;
+            std::sort(cands.begin(), cands.end(), [&](const Cand& a, const Cand& c) {
+                if (a.score != c.score) return a.score > c.score;
+                if (a.idhash != c.idhash) return a.idhash < c.idhash;
+                // Rare ID ties/hash collisions: compare full records, not spill
+                // offsets. Identical records are interchangeable.
+                at(a.off);
+                std::string left = std::string(hdr_buf) + seq_buf + plus_buf + qual_buf;
+                at(c.off);
+                return left < std::string(hdr_buf) + seq_buf + plus_buf + qual_buf;
             });
-
             for (const Cand& cd : cands) {
-                if (accepted_bases + cd.len > target_bases) continue;
-                fseek(bf, cd.off, SEEK_SET);
-                for (int i = 0; i < 4; i++) {
-                    if (!fgets(line, MAXLINE, bf)) break;
-                    int n = strlen(line);
-                    if (gz_out) gzwrite(gz_out, line, n);
-                    else fwrite(line, 1, n, out);
+                if (accepted_bases == target_bases) break;
+                at(cd.off);
+                if (dedupe) {
+                    const char* end = hdr_buf + 1;
+                    while (*end && *end != ' ' && *end != '\t' && *end != '\n') ++end;
+                    if (!seen_ids.emplace(hdr_buf + 1, end - hdr_buf - 1).second) {
+                        ++dup_reads;
+                        continue;
+                    }
                 }
-                accepted_reads++;
+                if (cd.len > target_bases - accepted_bases) continue;
+                write_bytes(hdr_buf, strlen(hdr_buf));
+                write_bytes(seq_buf, strlen(seq_buf));
+                write_bytes(plus_buf, strlen(plus_buf));
+                write_bytes(qual_buf, strlen(qual_buf));
+                ++accepted_reads;
                 accepted_bases += cd.len;
             }
         }
-
-        free(line);
-        cleanup_buckets();
     }
 
-    if (gz_out) gzclose(gz_out);
-    else if (out != stdout) fclose(out);
+    if (gz_out) io_check(gzclose(gz_out) == Z_OK, "close gzip output");
+    else if (out != stdout) io_check(fclose(out) == 0, "close output");
+    else io_check(fflush(out) == 0, "flush stdout");
 
     free(hdr_buf); free(seq_buf); free(plus_buf); free(qual_buf);
 
@@ -715,4 +744,16 @@ int main(int argc, char** argv) {
     }
 
     return 0;
+}
+
+int main(int argc, char** argv) {
+    // Turn a closed downstream pipe into a checked write failure so RAII can
+    // remove spill files before returning a nonzero exit status.
+    std::signal(SIGPIPE, SIG_IGN);
+    try {
+        return run_main(argc, argv);
+    } catch (const std::exception& error) {
+        fprintf(stderr, "[fastq_filter] ERROR: %s\n", error.what());
+        return 1;
+    }
 }

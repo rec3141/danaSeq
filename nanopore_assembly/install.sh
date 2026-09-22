@@ -82,7 +82,7 @@ do_install() {
     # headers) over the bioconda install. Drop once bioconda ships the fix.
     echo "[INFO] Installing patched Flye (mikolmogorov/Flye#795, #797, #799, #801) via pip..."
     "${ENV_PATH}/bin/pip" install --force-reinstall --no-deps \
-        'flye @ git+https://github.com/rec3141/Flye.git@1efed102' \
+        'flye @ git+https://github.com/rec3141/Flye.git@15c9eb53' \
         > /dev/null 2>&1 || echo "[WARNING] patched Flye install failed; bioconda Flye 2.9.6 left in place" >&2
 
     # Compile C binaries
