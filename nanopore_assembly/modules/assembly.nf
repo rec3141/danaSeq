@@ -69,6 +69,7 @@ process FLYE_ASSEMBLE {
     """
     # Auto-detect read type from median quality scores
     if [ "${params.read_type}" = "auto" ]; then
+        echo "[WARNING] --read_type auto: guessing Flye's mode from the first 10,000 reads only" >&2
         MEDIAN_Q=\$(zcat -f ${reads} | head -40000 | awk 'NR%4==0' | head -10000 | \
             python3 -c "
 import sys
@@ -150,6 +151,7 @@ process FLYE_POLISH {
     """
     # Determine read type
     if [ "${params.read_type}" = "auto" ]; then
+        echo "[WARNING] --read_type auto: guessing Flye's mode from the first 10,000 reads only" >&2
         MEDIAN_Q=\$(zcat -f ${reads} | head -40000 | awk 'NR%4==0' | head -10000 | \
             python3 -c "
 import sys

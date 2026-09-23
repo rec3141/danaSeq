@@ -44,6 +44,10 @@ def helpMessage() {
 
     Assembly:
       --assembler STR    Assembler to use: 'flye', 'metamdbg', or 'myloasm' [default: flye]
+      --read_type STR    Flye read mode, REQUIRED: nano-raw | nano-hq | nano-corr
+                         (nano-hq only when essentially all reads are R10/SUP;
+                         mixed chemistries -> nano-raw). 'auto' guesses from
+                         the first 10,000 reads and is not recommended.
       --min_overlap N    Flye --min-overlap [default: 1000]
       --polish           Enable Flye polishing iterations [default: true for flye]
       --dedupe           Enable BBDuk deduplication before assembly
@@ -79,6 +83,24 @@ def validateParams() {
     if (!params.input) {
         log.error "ERROR: --input is required. Provide path to directory containing *.fastq.gz files. Run with --help for usage."
         System.exit(1)
+    }
+    // Flye's read mode must be chosen, not inferred. Refusing here costs nothing:
+    // no node has been allocated to any task yet.
+    def readTypes = ['nano-raw', 'nano-hq', 'nano-corr', 'auto']
+    if (params.assembler == 'flye' && !params.read_type) {
+        log.error "ERROR: --read_type is required: nano-raw, nano-hq or nano-corr. " +
+                  "It sets Flye's index, overlap settings and error model, so it is not inferred " +
+                  "by default. Use nano-hq only when essentially all reads are R10/SUP (Q20+); " +
+                  "for a mix of chemistries or basecallers use nano-raw."
+        System.exit(1)
+    }
+    if (params.read_type && !(params.read_type in readTypes)) {
+        log.error "ERROR: Invalid --read_type '${params.read_type}'. Choose from: ${readTypes.join(', ')}"
+        System.exit(1)
+    }
+    if (params.read_type == 'auto') {
+        log.warn "--read_type auto: Flye's mode will be guessed from the first 10,000 reads " +
+                 "of the stream, which can be one barcode and unrepresentative of the rest"
     }
     if (!(params.assembler in ['flye', 'metamdbg', 'myloasm'])) {
         log.error "ERROR: Invalid --assembler '${params.assembler}'. Choose from: flye, metamdbg, myloasm"
