@@ -65,7 +65,7 @@ process MAP_READS {
     minimap2 -a -x map-ont --secondary=no -t ${task.cpus} \\
         --split-prefix "${meta.id}_split" \\
         "${assembly}" "${fastq}" \\
-        | samtools view -b -F 0x104 \\
+        | samtools view -u -F 0x104 \\
         | samtools sort -@ ${task.cpus} -o "${meta.id}.sorted.bam" -
 
     samtools index -@ ${task.cpus} "${meta.id}.sorted.bam"

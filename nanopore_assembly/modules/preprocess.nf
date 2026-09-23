@@ -270,31 +270,39 @@ process REMOVE_HUMAN {
 
     script:
     """
-    # Read counts are taken from the stream (primary records in = reads in,
-    # FASTQ records out = reads out) instead of re-reading both files
-    # afterwards, which cost two full decompressions of the read set.
-    minimap2 -a -x map-ont --secondary=no -t ${task.cpus} \\
-        "${params.human_ref}" "${reads}" \\
-        | samtools view -b - \\
-        | tee >(samtools view -c -F 0x900 - > input.count) \\
-        | samtools view -b -f 4 - \\
-        | samtools fastq -@ ${task.cpus} - \\
-        | tee >(awk 'NR%4==1' | wc -l > output.count) \\
-        | ${writeReads('nohuman_reads.fastq', task.cpus)}
+    # A failing stage in a pipe must fail the task (see PREPARE_READS).
+    set -o pipefail
 
-    # process substitutions may still be flushing after the pipeline returns
-    for i in \$(seq 1 120); do
-        [ -s input.count ] && [ -s output.count ] && break
-        sleep 1
-    done
+    # Find the human reads, then drop them -- rather than pushing every read
+    # through SAM. The old pipe emitted a SAM record for all ~97 M reads and
+    # ran `samtools view -b` twice, each on one core, so ~700 GB went through
+    # single-threaded BGZF deflate twice: on 2026-09-23 two samtools pinned at
+    # a core each while minimap2 sat blocked on its output at ~6-8 of 128
+    # threads, and the stage took 2.8 h at 338 Gbp.
+    #
+    # PAF prints a line only for reads that hit the reference, which for
+    # environmental samples is a sliver of the input. -c keeps base-level
+    # alignment so the calls match what the SAM path (-a) made; --secondary=no
+    # as before. A read with any line here is one the old -f 4 filter dropped.
+    minimap2 -c -x map-ont --secondary=no -t ${task.cpus} \\
+        "${params.human_ref}" "${reads}" > human.paf
+    cut -f1 human.paf | sort -u > human.ids
+
+    # fastq_filter streams the file once and drops the listed IDs. It opens the
+    # file itself, never a pipe (see PREPARE_READS), and reports its counts.
+    # Dedup already happened upstream.
+    fastq_filter --no_dedupe --exclude_ids human.ids "${reads}" 2> filter.log \\
+        | ${writeReads('nohuman_reads.fastq', task.cpus)}
+    cat filter.log >&2
+
     if [ ! -s nohuman_reads.fastq* ]; then
         echo "[ERROR] Human removal produced empty output" >&2
         exit 1
     fi
 
-    input_count=\$(cat input.count)
-    output_count=\$(cat output.count)
-    removed=\$((input_count - output_count))
-    echo "[INFO] Human removal: \${input_count} reads in, \${output_count} out, \${removed} removed (\$(( removed * 100 / (input_count + 1) ))%)" >&2
+    input_count=\$(awk '/Total reads:/ {print \$NF}' filter.log)
+    removed=\$(awk '/Excluded:/ {print \$NF}' filter.log)
+    output_count=\$((input_count - removed))
+    echo "[INFO] Human removal: \${input_count} reads in, \${output_count} out, \${removed} removed (\$(( removed * 100 / (input_count + 1) ))%), \$(wc -l < human.paf) alignments" >&2
     """
 }

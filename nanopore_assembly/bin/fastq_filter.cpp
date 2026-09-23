@@ -198,6 +198,8 @@ static void usage(const char* prog) {
         "\n  Additional options:\n"
         "  --window_size N        Quality scoring window (default: 250)\n"
         "  -D, --no_dedupe        Skip deduplication (filtlong has no dedup)\n"
+        "  --exclude_ids FILE     Drop reads whose ID (header up to the first space or\n"
+        "                         tab, without '@') is listed in FILE, one per line\n"
         "  -o, --output FILE      Output file (default: stdout, .gz for gzipped)\n"
         "  -h, --help             Show this help\n"
         "\n  Selection mode (--target_bases only):\n"
@@ -230,6 +232,7 @@ static int run_main(int argc, char** argv) {
     int window_size = 250;
     bool dedupe = true;
     const char* output_path = nullptr;
+    const char* exclude_path = nullptr;
     bool onepass = false;
     bool twopass_explicit = false;
     const char* spill_dir = nullptr;
@@ -243,6 +246,7 @@ static int run_main(int argc, char** argv) {
         {"min_window_q",  required_argument, 0, 'W'},
         {"window_size",   required_argument, 0, 'w'},
         {"no_dedupe",     no_argument,       0, 'D'},
+        {"exclude_ids",   required_argument, 0, 'X'},
         {"output",        required_argument, 0, 'o'},
         {"onepass",       no_argument,       0, 'O'},
         {"twopass",       no_argument,       0, 'T'},
@@ -262,6 +266,7 @@ static int run_main(int argc, char** argv) {
             case 'W': min_window_q = atof(optarg); break;
             case 'w': window_size = atoi(optarg); break;
             case 'D': dedupe = false; break;
+            case 'X': exclude_path = optarg; break;
             case 'o': output_path = optarg; break;
             case 'O': onepass = true; break;
             case 'T': twopass_explicit = true; break;
@@ -365,6 +370,24 @@ static int run_main(int argc, char** argv) {
     // Dedup set
     std::unordered_set<std::string> seen_ids;
 
+    // Reads to drop by ID. REMOVE_HUMAN maps in PAF mode, which emits a line
+    // only for reads that hit the reference, and hands the hit IDs here. That
+    // replaces pushing every read through SAM and two single-threaded BAM
+    // compressions, which held minimap2 at ~6-8 of 128 threads.
+    std::unordered_set<std::string> exclude_ids;
+    if (exclude_path) {
+        FILE* xf = fopen(exclude_path, "r");
+        io_check(xf != nullptr, "open --exclude_ids file");
+        char line[4096];
+        while (fgets(line, sizeof(line), xf)) {
+            size_t n = strcspn(line, " \t\r\n");
+            if (n) exclude_ids.emplace(line, n);
+        }
+        fclose(xf);
+        fprintf(stderr, "[fastq_filter] Excluding %zu read IDs from %s\n",
+                exclude_ids.size(), exclude_path);
+    }
+
     // Welford online stats
     long long n_scored = 0;
     double score_mean = 0.0, score_m2 = 0.0;
@@ -373,6 +396,7 @@ static int run_main(int argc, char** argv) {
 
     // Stats
     long long total_reads = 0, dup_reads = 0, short_reads = 0, qual_reads = 0;
+    long long excluded_reads = 0;
     long long accepted_reads = 0, accepted_bases = 0;
 
     // Score histograms (1000 bins from 0-100)
@@ -462,6 +486,17 @@ static int run_main(int argc, char** argv) {
             if (qlen > 0 && qual_buf[qlen-1] == '\n') qual_buf[--qlen] = '\0';
             if (hdr_buf[0] != '@' || plus_buf[0] != '+' || !slen || slen != qlen)
                 throw std::runtime_error("Invalid FASTQ record or sequence/quality length mismatch");
+
+            // Excluded IDs go first, before dedup, scoring or spilling, so the
+            // result is the same in every selection mode.
+            if (!exclude_ids.empty()) {
+                const char* end = hdr_buf + 1;
+                while (*end && *end != ' ' && *end != '\t') end++;
+                if (exclude_ids.count(std::string(hdr_buf + 1, end - hdr_buf - 1))) {
+                    excluded_reads++;
+                    continue;
+                }
+            }
 
             // Dedup by read ID
             if (dedupe && !twopass) {
@@ -712,6 +747,8 @@ static int run_main(int argc, char** argv) {
 
     // Report
     fprintf(stderr, "[fastq_filter] Total reads:  %lld\n", total_reads);
+    if (exclude_path)
+        fprintf(stderr, "[fastq_filter] Excluded:     %lld\n", excluded_reads);
     if (dup_reads)
         fprintf(stderr, "[fastq_filter] Dupes removed: %lld\n", dup_reads);
     if (short_reads)
