@@ -103,13 +103,6 @@ def writeReads(String basename, int cpus) {
 process PREPARE_READS {
     tag "prepare-reads"
     label 'process_high'
-    // The pipeline default is retry-once-then-'ignore'. Ignoring this stage
-    // leaves the reads channel empty and the run completes having assembled
-    // nothing -- the same silent success that let a truncated PREPARE_READS
-    // through on 2026-09-22. A transient fault should retry; a persistent one
-    // must stop the run, not be skipped.
-    errorStrategy 'retry'
-    maxRetries 2
     conda "${projectDir}/conda-envs/dana-mag-assembly"
     // No publishDir / storeDir — all_reads.fastq is a large transient
     // intermediate (see writeReads above), not a result.
@@ -194,6 +187,39 @@ process PREPARE_READS {
         esac
     done | fastq_filter ${filter_args} | ${writeReads('all_reads.fastq', task.cpus)}
 
+    # Say loudly when the filter emitted implausibly little. pipefail above
+    # catches a filter that dies; this catches one that returns 0 having
+    # stopped early, which is the failure that actually hurt: on 2026-09-22 a
+    # truncated stream reached Flye as 134 Gbp of 338 (marine) and 65 of ~400
+    # (freshwater), and the freshwater run went on to assemble 2.63 Gbp and
+    # report success. Deliberately a warning, not an exit -- see the
+    # errorStrategy note in nextflow.config.
+    IN_GZ=\$(stat -Lc%s ${fastqs} 2>/dev/null | awk '{s+=\$1} END{print s+0}')
+    OUT_B=\$(stat -c%s all_reads.fastq 2>/dev/null || echo 0)
+    TARGET=${params.filtlong_size ?: 0}
+    if [ "\$TARGET" -gt 0 ]; then
+        # Budgeted: the output is meant to be capped, so measure against the cap.
+        WANT=\$(awk -v t="\$TARGET" 'BEGIN{printf "%.0f", t*2.05*0.80}')
+        WHY="80% of the --target_bases budget"
+    else
+        # Unbudgeted: plain FASTQ runs ~2.1x its gzipped size for these reads,
+        # so anything under 1.5x means most of the stream never arrived.
+        WANT=\$(awk -v g="\$IN_GZ" 'BEGIN{printf "%.0f", g*1.5}')
+        WHY="1.5x the gzipped input (expect ~2.1x)"
+    fi
+    if [ "\$OUT_B" -lt "\$WANT" ]; then
+        echo "[WARNING] ================================================================" >&2
+        echo "[WARNING] PREPARE_READS emitted \$OUT_B bytes from \$IN_GZ bytes of gzip." >&2
+        echo "[WARNING] That is below \$WANT, \$WHY." >&2
+        echo "[WARNING] The read stream probably ended early. Everything downstream --" >&2
+        echo "[WARNING] the assembly, the depths, the bins -- will be built from a" >&2
+        echo "[WARNING] fraction of the data and will still look successful." >&2
+        echo "[WARNING] Check Flye's 'Total read length' before trusting any of it." >&2
+        echo "[WARNING] ================================================================" >&2
+    else
+        echo "[INFO] PREPARE_READS emitted \$OUT_B bytes from \$IN_GZ bytes of gzip" >&2
+    fi
+
     if [ -d read_map.d ]; then
         cat read_map.d/*.tsv | gzip -1 > read_map.tsv.gz
         n_parts=\$(ls read_map.d/*.tsv | wc -l)
@@ -208,13 +234,6 @@ process PREPARE_READS {
 process REMOVE_HUMAN {
     tag "remove-human"
     label 'process_high'
-    // The pipeline default is retry-once-then-'ignore'. Ignoring this stage
-    // leaves the reads channel empty and the run completes having assembled
-    // nothing -- the same silent success that let a truncated PREPARE_READS
-    // through on 2026-09-22. A transient fault should retry; a persistent one
-    // must stop the run, not be skipped.
-    errorStrategy 'retry'
-    maxRetries 2
     conda "${projectDir}/conda-envs/dana-mag-assembly"
     // No storeDir — nohuman_reads.fastq is a large transient intermediate.
 
