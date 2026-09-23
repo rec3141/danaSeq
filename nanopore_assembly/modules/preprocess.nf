@@ -138,12 +138,10 @@ process PREPARE_READS {
     # A filter that dies must fail the task.
     set -o pipefail
 
-    # Stream each input to fastq_filter. FASTA inputs (.fa/.fasta[.gz]) are
-    # converted to FASTQ with a placeholder quality (Q40) on the fly — used for
-    # pre-QC'd reads exported as fasta (e.g. nanopore_live fa/ store). zcat -f
-    # transparently handles both plain and gzipped inputs. awk accumulates
-    # multi-line fasta records so wrapped sequences are handled correctly.
-    for f in ${fastqs}; do
+    # Read map, if asked for: one file per sample, keyed on the staged filename.
+    # Independent of the record stream, so it runs as its own pass.
+    if [ "${params.emit_read_map}" = "true" ]; then
+        for f in ${fastqs}; do
         # The staged files are CONCAT_READS outputs named <meta.id>.fastq.gz, so
         # the filename IS the sample id -- the same value main.nf derives from the
         # barcode directory. Do NOT parse the sample out of read headers. Three
@@ -176,16 +174,43 @@ process PREPARE_READS {
             esac
         fi
 
-        case "\$f" in
-            *.fa|*.fasta|*.fa.gz|*.fasta.gz)
-                zcat -f "\$f" | awk '
-                    /^>/ { if (s) { print "@"n; print s; print "+"; q=s; gsub(/./,"I",q); print q } n=substr(\$0,2); s=""; next }
-                    { s=s\$0 }
-                    END { if (s) { print "@"n; print s; print "+"; q=s; gsub(/./,"I",q); print q } }' | gzip ;;
-            *)
-                cat "\$f" ;;
-        esac
-    done | fastq_filter ${filter_args} | ${writeReads('all_reads.fastq', task.cpus)}
+        done
+    fi
+
+    # Hand fastq_filter the files themselves rather than a pipe. Streaming them
+    # through `for f; do cat "\$f"; done | fastq_filter` failed on three of
+    # three grex co-assembly attempts on 2026-09-22/23: zlib's read() on the
+    # pipe returned ENODATA (zlib=-1 errno=61) partway through, at a different
+    # point each time on identical input, while a standalone replay of the same
+    # 276 files read all 338.1 Gbp cleanly. A pipe read cannot return ENODATA
+    # under POSIX, so whatever is happening is at the pipe layer inside the
+    # container, and opening regular files sidesteps it entirely. It also gives
+    # fastq_filter real file sizes, so its input estimate works again.
+    #
+    # FASTA inputs (.fa/.fasta[.gz], e.g. pre-QC'd reads from nanopore_live's
+    # fa/ store) still need converting to FASTQ with a placeholder Q40 quality,
+    # which only the stream can do, so that path keeps the loop.
+    HAS_FASTA=0
+    for f in ${fastqs}; do
+        case "\$f" in *.fa|*.fasta|*.fa.gz|*.fasta.gz) HAS_FASTA=1 ;; esac
+    done
+
+    if [ "\$HAS_FASTA" = "0" ]; then
+        fastq_filter ${filter_args} ${fastqs} | ${writeReads('all_reads.fastq', task.cpus)}
+    else
+        echo "[INFO] FASTA inputs present: streaming through the conversion loop" >&2
+        for f in ${fastqs}; do
+            case "\$f" in
+                *.fa|*.fasta|*.fa.gz|*.fasta.gz)
+                    zcat -f "\$f" | awk '
+                        /^>/ { if (s) { print "@"n; print s; print "+"; q=s; gsub(/./,"I",q); print q } n=substr(\$0,2); s=""; next }
+                        { s=s\$0 }
+                        END { if (s) { print "@"n; print s; print "+"; q=s; gsub(/./,"I",q); print q } }' | gzip ;;
+                *)
+                    cat "\$f" ;;
+            esac
+        done | fastq_filter ${filter_args} | ${writeReads('all_reads.fastq', task.cpus)}
+    fi
 
     # Say loudly when the filter emitted implausibly little. pipefail above
     # catches a filter that dies; this catches one that returns 0 having
