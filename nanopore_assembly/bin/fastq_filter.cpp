@@ -49,6 +49,22 @@ static void io_check(bool ok, const char* operation) {
     if (!ok) throw std::runtime_error(std::string(operation) + ": " + strerror(errno));
 }
 
+// A read failure has to say enough to diagnose itself from a log alone. On
+// 2026-09-22 two co-assemblies stopped mid-stream and the only evidence was
+// zlib's own text, "<fd:0>: No data available" -- no zlib code, no errno, and
+// no indication of how far the stream had got, which left the cause open after
+// a full replay. Report the numeric codes and the progress so far.
+static std::string stream_failure(const char* stage, const char* name,
+                                  const char* zmsg, int zerr, int saved_errno,
+                                  long long reads, long long bases) {
+    char buf[640];
+    snprintf(buf, sizeof(buf),
+             "%s: %s: %s (zlib=%d errno=%d %s) after %lld reads / %lld bases",
+             stage, name, zmsg && *zmsg ? zmsg : "no message",
+             zerr, saved_errno, strerror(saved_errno), reads, bases);
+    return std::string(buf);
+}
+
 // Private directory prevents collisions between concurrent processes on shared
 // scratch. A small LRU bounds descriptors and buffering independently of buckets.
 class SpillBuckets {
@@ -415,7 +431,18 @@ static int run_main(int argc, char** argv) {
         gzbuffer(gz, 1 << 18); // 256KB buffer
 
         while (true) {
-            if (!gzgets(gz, hdr_buf, MAXLINE)) break;
+            if (!gzgets(gz, hdr_buf, MAXLINE)) {
+                // gzgets returns NULL for a clean end of stream and for a read
+                // error alike. Treating them the same is precisely how a
+                // truncated read set reaches the assembler looking complete,
+                // so check which one this is before leaving the loop.
+                if (gzeof(gz)) break;
+                int zerr = Z_OK;
+                const char* zmsg = gzerror(gz, &zerr);
+                throw std::runtime_error(stream_failure(
+                    "Read input", fname, zmsg, zerr, errno,
+                    total_reads, accepted_bases));
+            }
             if (!gzgets(gz, seq_buf, MAXLINE) || !gzgets(gz, plus_buf, MAXLINE) ||
                 !gzgets(gz, qual_buf, MAXLINE))
                 throw std::runtime_error("Incomplete FASTQ record");
@@ -583,12 +610,21 @@ static int run_main(int argc, char** argv) {
             }
         }
 
+        // Report a close failure as a close failure. This block used to throw
+        // the *read* message whichever of the two had failed, so a bad close
+        // would be reported as a bad read.
         int input_error = Z_OK;
         const char* input_message = gzerror(gz, &input_error);
         std::string message = input_message ? input_message : "input read failure";
+        int saved_errno = errno;
         int close_error = gzclose(gz);
-        if ((input_error != Z_OK && input_error != Z_STREAM_END) || close_error != Z_OK)
-            throw std::runtime_error("Read input: " + message);
+        if (input_error != Z_OK && input_error != Z_STREAM_END)
+            throw std::runtime_error(stream_failure("Read input", fname,
+                message.c_str(), input_error, saved_errno,
+                total_reads, accepted_bases));
+        if (close_error != Z_OK)
+            throw std::runtime_error(stream_failure("Close input", fname,
+                "", close_error, saved_errno, total_reads, accepted_bases));
     }
 
     // Global greedy order: descending score, ID hash, then exact record bytes.
