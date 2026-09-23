@@ -45,9 +45,9 @@ def helpMessage() {
     Assembly:
       --assembler STR    Assembler to use: 'flye', 'metamdbg', or 'myloasm' [default: flye]
       --read_type STR    Flye read mode, REQUIRED: nano-raw | nano-hq | nano-corr
-                         (nano-hq only when essentially all reads are R10/SUP;
-                         mixed chemistries -> nano-raw). 'auto' guesses from
-                         the first 10,000 reads and is not recommended.
+                         (Flye: nano-hq for SUP reads under ~5% error, nano-raw
+                         for older reads up to ~20%). 'auto' guesses from the
+                         first 10,000 reads and is not recommended.
       --min_overlap N    Flye --min-overlap [default: 1000]
       --polish           Enable Flye polishing iterations [default: true for flye]
       --dedupe           Enable BBDuk deduplication before assembly
@@ -90,8 +90,9 @@ def validateParams() {
     if (params.assembler == 'flye' && !params.read_type) {
         log.error "ERROR: --read_type is required: nano-raw, nano-hq or nano-corr. " +
                   "It sets Flye's index, overlap settings and error model, so it is not inferred " +
-                  "by default. Use nano-hq only when essentially all reads are R10/SUP (Q20+); " +
-                  "for a mix of chemistries or basecallers use nano-raw."
+                  "by default. Flye's criterion is error rate: nano-hq for Guppy5+/Dorado SUP reads " +
+                  "under ~5% error, nano-raw for older reads up to ~20%. Judge by error-based " +
+                  "read quality across the whole set, not the first reads of one file."
         System.exit(1)
     }
     if (params.read_type && !(params.read_type in readTypes)) {
