@@ -46,6 +46,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Which base we are about to build on. Recorded in the tag and re-checked
+      # before promotion: this workflow runs both on its own push and again
+      # chained from the base build, and those two produce different images from
+      # the same commit.
+      - name: Resolve base image digest
+        id: base
+        run: |
+          d=$(docker buildx imagetools inspect \
+                ghcr.io/${{ github.repository_owner }}/danaseq-assembly-base:latest \
+                --format '{{.Manifest.Digest}}')
+          short=${d#sha256:}
+          # An empty digest here silently produced the tag "<sha>-" (trailing
+          # separator, no base), which pushed fine and then failed the smoke
+          # test with an image-not-found. Fail here instead, where the cause
+          # is legible.
+          if [ -z "$short" ]; then
+            echo "could not resolve danaseq-assembly-base:latest digest" >&2
+            exit 1
+          fi
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
+          echo "short=${short:0:12}" >> "$GITHUB_OUTPUT"
+          echo "base is $d"
+
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
@@ -59,21 +82,6 @@ jobs:
       - name: Stamp build time
         id: stamp
         run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
-      # Which base we are about to build on. Recorded in the tag and re-checked
-      # before promotion: this workflow runs both on its own push and again
-      # chained from the base build, and those two produce different images from
-      # the same commit.
-      - name: Resolve base image digest
-        id: base
-        run: |
-          d=$(docker buildx imagetools inspect \
-                ghcr.io/${{ github.repository_owner }}/danaseq-assembly-base:latest \
-                --format '{{.Manifest.Digest}}')
-          short=${d#sha256:}
-          echo "digest=$d" >> "$GITHUB_OUTPUT"
-          echo "short=${short:0:12}" >> "$GITHUB_OUTPUT"
-          echo "base is $d"
 
       - name: Build and push
         uses: docker/build-push-action@v6
