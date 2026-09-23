@@ -194,6 +194,10 @@ static void usage(const char* prog) {
         "  -p, --keep_percent F   Keep only this percentage of the best reads (1-100)\n"
         "  --min_length N         Minimum length threshold (default: 0)\n"
         "  --min_mean_q F         Minimum mean quality threshold (0-100, default: 0)\n"
+        "  --nano_hq              Drop reads unfit for Flye --nano-hq: sets --min_mean_q\n"
+        "                         to at least 95, i.e. per-read mean error at most 5%%\n"
+        "  --nano_hq_check        Keep every read, but report how many exceed nano-hq's\n"
+        "                         5%% mean-error envelope (implied by --nano_hq)\n"
         "  --min_window_q F       Minimum window quality threshold (0-100, default: 0)\n"
         "\n  Additional options:\n"
         "  --window_size N        Quality scoring window (default: 250)\n"
@@ -233,6 +237,8 @@ static int run_main(int argc, char** argv) {
     bool dedupe = true;
     const char* output_path = nullptr;
     const char* exclude_path = nullptr;
+    bool nano_hq = false;
+    bool nano_hq_check = false;
     bool onepass = false;
     bool twopass_explicit = false;
     const char* spill_dir = nullptr;
@@ -247,6 +253,8 @@ static int run_main(int argc, char** argv) {
         {"window_size",   required_argument, 0, 'w'},
         {"no_dedupe",     no_argument,       0, 'D'},
         {"exclude_ids",   required_argument, 0, 'X'},
+        {"nano_hq",       no_argument,       0, 'H'},
+        {"nano_hq_check", no_argument,       0, 'K'},
         {"output",        required_argument, 0, 'o'},
         {"onepass",       no_argument,       0, 'O'},
         {"twopass",       no_argument,       0, 'T'},
@@ -267,6 +275,8 @@ static int run_main(int argc, char** argv) {
             case 'w': window_size = atoi(optarg); break;
             case 'D': dedupe = false; break;
             case 'X': exclude_path = optarg; break;
+            case 'H': nano_hq = true; break;
+            case 'K': nano_hq_check = true; break;
             case 'o': output_path = optarg; break;
             case 'O': onepass = true; break;
             case 'T': twopass_explicit = true; break;
@@ -279,6 +289,17 @@ static int run_main(int argc, char** argv) {
 
     bool filter_by_bases = target_bases > 0;
     bool filter_by_pct = keep_percent > 0.0 && keep_percent < 100.0;
+    // Flye documents --nano-hq for reads under ~5% error. --min_mean_q is
+    // filtlong's mean per-base accuracy, mean(1 - 10^(-Q/10)) * 100, so a floor
+    // of 95 is exactly "mean error at most 5%". This is the error-based measure;
+    // the arithmetic mean of Phred scores reads far higher (Q38.8 against Q18.7
+    // on the marine co-assembly) and cannot be used for this.
+    if (nano_hq) nano_hq_check = true;
+    if (nano_hq) {
+        if (min_mean_q < 95.0) min_mean_q = 95.0;
+        fprintf(stderr, "[fastq_filter] --nano_hq: dropping reads with mean error above %.1f%%\n",
+                100.0 - min_mean_q);
+    }
     bool filter_by_qual = min_mean_q > 0.0 || min_window_q > 0.0;
     bool filtering = filter_by_bases || filter_by_pct;
 
@@ -397,6 +418,8 @@ static int run_main(int argc, char** argv) {
     // Stats
     long long total_reads = 0, dup_reads = 0, short_reads = 0, qual_reads = 0;
     long long excluded_reads = 0;
+    long long input_bases = 0, qual_bases = 0;
+    long long unfit_reads = 0, unfit_bases = 0;   // mean error > 5%
     long long accepted_reads = 0, accepted_bases = 0;
 
     // Score histograms (1000 bins from 0-100)
@@ -486,6 +509,7 @@ static int run_main(int argc, char** argv) {
             if (qlen > 0 && qual_buf[qlen-1] == '\n') qual_buf[--qlen] = '\0';
             if (hdr_buf[0] != '@' || plus_buf[0] != '+' || !slen || slen != qlen)
                 throw std::runtime_error("Invalid FASTQ record or sequence/quality length mismatch");
+            input_bases += slen;
 
             // Excluded IDs go first, before dedup, scoring or spilling, so the
             // result is the same in every selection mode.
@@ -517,13 +541,22 @@ static int run_main(int argc, char** argv) {
                 continue;
             }
 
+            // How much of the input sits outside nano-hq's envelope, counted
+            // whether or not those reads are then dropped, so a run that turns
+            // the filter off still finds out.
+            if (nano_hq_check) {
+                double acc = 0.0;
+                for (int i = 0; i < slen; i++) acc += PHRED_LUT[(unsigned char)qual_buf[i]];
+                if (acc / slen * 100.0 < 95.0) { unfit_reads++; unfit_bases += slen; }
+            }
+
             // Min quality thresholds (filtlong-compatible, applied before scoring)
             if (filter_by_qual) {
                 double total_q = 0.0;
                 for (int i = 0; i < slen; i++)
                     total_q += PHRED_LUT[(unsigned char)qual_buf[i]];
                 double mq = total_q / slen * 100.0;
-                if (mq < min_mean_q) { qual_reads++; continue; }
+                if (mq < min_mean_q) { qual_reads++; qual_bases += slen; continue; }
                 if (min_window_q > 0) {
                     double wq;
                     if (slen <= window_size) {
@@ -540,7 +573,7 @@ static int run_main(int argc, char** argv) {
                         }
                         wq = min_wsum / window_size * 100.0;
                     }
-                    if (wq < min_window_q) { qual_reads++; continue; }
+                    if (wq < min_window_q) { qual_reads++; qual_bases += slen; continue; }
                 }
             }
 
@@ -747,6 +780,11 @@ static int run_main(int argc, char** argv) {
 
     // Report
     fprintf(stderr, "[fastq_filter] Total reads:  %lld\n", total_reads);
+    fprintf(stderr, "[fastq_filter] Input bases:  %lld\n", input_bases);
+    if (nano_hq_check)
+        fprintf(stderr, "[fastq_filter] nano-hq fit:  %lld reads, %lld bases (%.1f%% of input bases) above 5%% mean error, %s\n",
+                unfit_reads, unfit_bases, input_bases ? 100.0 * unfit_bases / input_bases : 0.0,
+                nano_hq ? "dropped" : "kept");
     if (exclude_path)
         fprintf(stderr, "[fastq_filter] Excluded:     %lld\n", excluded_reads);
     if (dup_reads)
@@ -754,7 +792,8 @@ static int run_main(int argc, char** argv) {
     if (short_reads)
         fprintf(stderr, "[fastq_filter] Below min_len: %lld\n", short_reads);
     if (qual_reads)
-        fprintf(stderr, "[fastq_filter] Below min_q:   %lld\n", qual_reads);
+        fprintf(stderr, "[fastq_filter] Below min_q:   %lld reads, %lld bases (%.1f%% of input bases)\n",
+                qual_reads, qual_bases, input_bases ? 100.0 * qual_bases / input_bases : 0.0);
     fprintf(stderr, "[fastq_filter] Accepted:     %lld reads, %lld bases (%.1f Gbp)\n",
             accepted_reads, accepted_bases, accepted_bases / 1e9);
     if (filtering) {

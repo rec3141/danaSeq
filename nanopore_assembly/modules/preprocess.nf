@@ -113,6 +113,10 @@ process PREPARE_READS {
     output:
     path("all_reads.fastq*"),  emit: reads
     path("read_map.tsv.gz"),   emit: read_map, optional: true
+    // Present only when something needs a human's attention; main.nf copies
+    // each line into the Nextflow log, where it is seen, rather than leaving it
+    // in .command.err, where it is not.
+    path("prepare_reads.warnings.txt"), emit: warnings, optional: true
 
     script:
     def filter_args = params.dedupe ? "" : "--no_dedupe"
@@ -127,6 +131,11 @@ process PREPARE_READS {
         // --onepass restores the legacy order-dependent streaming threshold,
         // which is cheaper on disk and nothing else.
         filter_args += params.onepass_filter ? " --onepass" : " --spill_dir ."
+    }
+    // Flye documents --nano-hq for reads under ~5% error. Hold the reads to
+    // that unless told not to, and measure the fit either way.
+    if (params.read_type == 'nano-hq') {
+        filter_args += params.nano_hq_filter ? " --nano_hq" : " --nano_hq_check"
     }
     """
     # Nextflow runs this with `bash -ue`, which does NOT include pipefail, so
@@ -196,7 +205,7 @@ process PREPARE_READS {
     done
 
     if [ "\$HAS_FASTA" = "0" ]; then
-        fastq_filter ${filter_args} ${fastqs} | ${writeReads('all_reads.fastq', task.cpus)}
+        fastq_filter ${filter_args} ${fastqs} 2> filter.log | ${writeReads('all_reads.fastq', task.cpus)}
     else
         echo "[INFO] FASTA inputs present: streaming through the conversion loop" >&2
         for f in ${fastqs}; do
@@ -209,40 +218,41 @@ process PREPARE_READS {
                 *)
                     cat "\$f" ;;
             esac
-        done | fastq_filter ${filter_args} | ${writeReads('all_reads.fastq', task.cpus)}
+        done | fastq_filter ${filter_args} 2> filter.log | ${writeReads('all_reads.fastq', task.cpus)}
     fi
 
-    # Say loudly when the filter emitted implausibly little. pipefail above
-    # catches a filter that dies; this catches one that returns 0 having
-    # stopped early, which is the failure that actually hurt: on 2026-09-22 a
-    # truncated stream reached Flye as 134 Gbp of 338 (marine) and 65 of ~400
-    # (freshwater), and the freshwater run went on to assemble 2.63 Gbp and
-    # report success. Deliberately a warning, not an exit -- see the
+    cat filter.log >&2
+
+    # Warnings that need a human go to prepare_reads.warnings.txt, which main.nf
+    # copies into the Nextflow log. Deliberately warnings, not exits -- see the
     # errorStrategy note in nextflow.config.
+    warn() { echo "\$*" >> prepare_reads.warnings.txt; echo "[WARNING] \$*" >&2; }
+
+    # 1. Did the whole read set arrive? Compare the bases fastq_filter read
+    #    against the gzip it was given, which holds whatever the filtering does:
+    #    ONT FASTQ runs ~1 base per gzipped byte (338.1 Gbp from 330.1 GB on
+    #    marine) and FASTA runs higher. On 2026-09-22 truncated streams reached
+    #    Flye as 134 Gbp of 338 and 65 of 327, and the freshwater run went on
+    #    to assemble 2.63 Gbp and report success.
     IN_GZ=\$(stat -Lc%s ${fastqs} 2>/dev/null | awk '{s+=\$1} END{print s+0}')
-    OUT_B=\$(stat -c%s all_reads.fastq 2>/dev/null || echo 0)
-    TARGET=${params.filtlong_size ?: 0}
-    if [ "\$TARGET" -gt 0 ]; then
-        # Budgeted: the output is meant to be capped, so measure against the cap.
-        WANT=\$(awk -v t="\$TARGET" 'BEGIN{printf "%.0f", t*2.05*0.80}')
-        WHY="80% of the --target_bases budget"
-    else
-        # Unbudgeted: plain FASTQ runs ~2.1x its gzipped size for these reads,
-        # so anything under 1.5x means most of the stream never arrived.
-        WANT=\$(awk -v g="\$IN_GZ" 'BEGIN{printf "%.0f", g*1.5}')
-        WHY="1.5x the gzipped input (expect ~2.1x)"
+    IN_BASES=\$(awk '/Input bases:/ {print \$NF}' filter.log)
+    if [ -n "\$IN_BASES" ] && awk -v b="\$IN_BASES" -v g="\$IN_GZ" 'BEGIN{exit !(b < 0.6*g)}'; then
+        warn "PREPARE_READS read only \$IN_BASES bases from \$IN_GZ bytes of gzip (expect ~1 base per byte). The read stream probably ended early; everything downstream will be built from a fraction of the data and still look successful. Check Flye's 'Total read length'."
     fi
-    if [ "\$OUT_B" -lt "\$WANT" ]; then
-        echo "[WARNING] ================================================================" >&2
-        echo "[WARNING] PREPARE_READS emitted \$OUT_B bytes from \$IN_GZ bytes of gzip." >&2
-        echo "[WARNING] That is below \$WANT, \$WHY." >&2
-        echo "[WARNING] The read stream probably ended early. Everything downstream --" >&2
-        echo "[WARNING] the assembly, the depths, the bins -- will be built from a" >&2
-        echo "[WARNING] fraction of the data and will still look successful." >&2
-        echo "[WARNING] Check Flye's 'Total read length' before trusting any of it." >&2
-        echo "[WARNING] ================================================================" >&2
-    else
-        echo "[INFO] PREPARE_READS emitted \$OUT_B bytes from \$IN_GZ bytes of gzip" >&2
+
+    # 2. With --read_type nano-hq, how much of the data is outside the mode's
+    #    envelope? Past the threshold the data are saying nano-raw may fit better.
+    FIT=\$(grep 'nano-hq fit:' filter.log || true)
+    if [ -n "\$FIT" ]; then
+        PCT=\$(echo "\$FIT" | awk -F'[(%]' '{print \$2}')
+        if awk -v p="\$PCT" -v t="${params.nano_hq_warn_pct}" 'BEGIN{exit !(p > t)}'; then
+            if [ "${params.nano_hq_filter}" = "true" ]; then
+                warn "--read_type nano-hq: \${PCT}% of input bases are in reads above 5% mean error, beyond nano-hq's envelope, and were DROPPED before assembly (threshold ${params.nano_hq_warn_pct}%). That data is lost to the assembly; consider --read_type nano-raw, which keeps it."
+            else
+                warn "--read_type nano-hq with --nano_hq_filter false: \${PCT}% of input bases are in reads above 5% mean error, beyond nano-hq's envelope, and were KEPT (threshold ${params.nano_hq_warn_pct}%). Flye will treat them as under 5% error; consider --read_type nano-raw."
+            fi
+        fi
+        echo "[INFO] \$FIT" >&2
     fi
 
     if [ -d read_map.d ]; then

@@ -266,6 +266,9 @@ workflow {
         .collect()
         .map { files -> files.toSorted { a, b -> (b.size() <=> a.size()) ?: (a.name <=> b.name) } }
     PREPARE_READS(ch_per_barcode)
+    // Surface PREPARE_READS' warnings in the Nextflow log, not only in the
+    // task's .command.err, where two truncated read sets went unread.
+    PREPARE_READS.out.warnings.subscribe { f -> f.readLines().each { log.warn "PREPARE_READS: ${it}" } }
 
     if (params.run_remove_human) {
         REMOVE_HUMAN(PREPARE_READS.out.reads)
