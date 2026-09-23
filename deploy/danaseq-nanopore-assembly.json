@@ -1,7 +1,7 @@
 {
   "image": "rec3141/danaseq-nanopore-assembly",
-  "digest": "sha256:bbd38066e8a1b92ec8187e3dc68e584c09cf357c1120b8db652dfecdbcca5b09",
-  "commit": "aaa9d38f369063f8ea2a2748ad07dd873bf43e07",
+  "digest": "sha256:f82a43ca58fe632ee4b6e1b1258132df08156270108173527038057abcc5a7d8",
+  "commit": "ec69fc781a780ec6e46262e7890ddee5ce363f52",
   "base_digest": "sha256:62b70ed938bb5f30f1ae58edeb725aa993ed4e9bdeb7eed4d9aefdebf4801e7c",
-  "built": "2026-09-23T09:07:45Z"
+  "built": "2026-09-23T17:27:17Z"
 }
