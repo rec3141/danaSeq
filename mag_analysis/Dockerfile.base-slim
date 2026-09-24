@@ -68,9 +68,13 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-classify  -f /tmp/envs/classify.yml
 
 # 6. Genomic: defensefinder, macsyfinder, integron_finder, dbcan
+# MacSyFinder stays at 2.1.4: defense-finder 3.0.0 requires exactly that, and
+# 2.1.5+ moved its library from macsypy to macsylib, which defense-finder
+# cannot import (every run then reports 0 defense systems).
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-genomic   -f /tmp/envs/genomic.yml && \
-    /opt/conda/envs/dana-mag-genomic/bin/pip install --upgrade integron_finder macsyfinder
+    /opt/conda/envs/dana-mag-genomic/bin/pip install --upgrade integron_finder 'macsyfinder==2.1.4' && \
+    /opt/conda/envs/dana-mag-genomic/bin/python -c "import macsypy, defense_finder"
 
 # 7. Derep: galah, skani, sourmash, skder, drep
 RUN --mount=type=cache,target=/opt/conda/pkgs \
