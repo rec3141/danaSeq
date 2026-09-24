@@ -95,39 +95,8 @@ if $PREPROCESS; then
         --results "$OUTDIR" \
         --output "$VIZ_DATA/" \
         $store_flag $tsne_flag $umap_flag
-
-    # Regenerate genes.json
-    find_first() { for f in "$@"; do [ -f "$f" ] && echo "$f" && return; done; }
-    ANNOT_TSV=$(find_first \
-        ${STORE_DIR:+"${STORE_DIR}/annotation/bakta/extra/annotation.tsv"} \
-        "${OUTDIR}/annotation/bakta/extra/annotation.tsv" \
-        ${STORE_DIR:+"${STORE_DIR}/annotation/bakta/basic/annotation.tsv"} \
-        "${OUTDIR}/annotation/bakta/basic/annotation.tsv" \
-        ${STORE_DIR:+"${STORE_DIR}/annotation/prokka/annotation.tsv"} \
-        "${OUTDIR}/annotation/prokka/annotation.tsv")
-    RRNA_TSV=$(find_first \
-        ${STORE_DIR:+"${STORE_DIR}/taxonomy/rrna/rrna_genes.tsv"} \
-        "${OUTDIR}/taxonomy/rrna/rrna_genes.tsv") || true
-    TRNA_TSV=$(find_first \
-        ${STORE_DIR:+"${STORE_DIR}/taxonomy/rrna/trna_genes.tsv"} \
-        "${OUTDIR}/taxonomy/rrna/trna_genes.tsv") || true
-    GENE_DEPTHS=$(find_first \
-        ${STORE_DIR:+"${STORE_DIR}/mapping/gene_depths.tsv"} \
-        "${OUTDIR}/mapping/gene_depths.tsv") || true
-    ASSEMBLY=$(find_first \
-        ${STORE_DIR:+"${STORE_DIR}/assembly/assembly.fasta"} \
-        "${OUTDIR}/assembly/assembly.fasta") || true
-
-    if [[ -n "${ANNOT_TSV:-}" ]]; then
-        echo "==> Building genes.json..."
-        $PYTHON "${VIZ_DIR}/preprocess/genes_to_json.py" \
-            "$ANNOT_TSV" "${VIZ_DATA}/genes.json" \
-            "${RRNA_TSV:-}" "${TRNA_TSV:-}" "${GENE_DEPTHS:-}" "${ASSEMBLY:-}"
-    else
-        echo "Warning: no annotation TSV found, writing empty genes.json" >&2
-        echo '{}' > "${VIZ_DATA}/genes.json"
-        echo '{}' | gzip > "${VIZ_DATA}/genes.json.gz"
-    fi
+    # preprocess.py also writes the gene shards (genes_manifest.json +
+    # genes.part-NNN.json.gz).
 fi
 
 # --- Copy data into public/ for build ----------------------------------------

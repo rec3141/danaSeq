@@ -40,6 +40,8 @@ process VIZ_PREPROCESS {
         --output "\${VIZ_DIR}/data/" \
         ${storeFlag} \
         ${tsne_flag}
+    # preprocess.py writes the gene shards too (genes_manifest.json,
+    # genes.part-NNN.json.gz); there is no separate genes step.
 
     # Status snapshot for the dashboard's pipeline panel, published with the
     # rest of viz/data; the SPA polls this file. Never fails the task.
@@ -49,36 +51,9 @@ process VIZ_PREPROCESS {
         --work-dir "${workflow.workDir}" >/dev/null 2>&1 \
         || echo "[WARN] pipeline_status.json snapshot failed"
 
-    # Generate genes.json
     STORE="${storeRoot}"
     OUT="${params.outdir}"
     find_first() { for f in "\$@"; do [ -f "\${f}" ] && echo "\${f}" && return 0; done; return 0; }
-    ANNOT_TSV=\$(find_first \
-        "\${STORE:+\${STORE}/annotation/bakta/extra/annotation.tsv}" \
-        "\${OUT}/annotation/bakta/extra/annotation.tsv" \
-        "\${STORE:+\${STORE}/annotation/bakta/basic/annotation.tsv}" \
-        "\${OUT}/annotation/bakta/basic/annotation.tsv" \
-        "\${STORE:+\${STORE}/annotation/prokka/annotation.tsv}" \
-        "\${OUT}/annotation/prokka/annotation.tsv")
-    RRNA_TSV=\$(find_first \
-        "\${STORE:+\${STORE}/taxonomy/rrna/rrna_genes.tsv}" \
-        "\${OUT}/taxonomy/rrna/rrna_genes.tsv")
-    TRNA_TSV=\$(find_first \
-        "\${STORE:+\${STORE}/taxonomy/rrna/trna_genes.tsv}" \
-        "\${OUT}/taxonomy/rrna/trna_genes.tsv")
-    GENE_DEPTHS=\$(find_first \
-        "\${STORE:+\${STORE}/mapping/gene_depths.tsv}" \
-        "\${OUT}/mapping/gene_depths.tsv")
-    ASSEMBLY=\$(find_first \
-        "\${STORE:+\${STORE}/assembly/assembly.fasta}" \
-        "\${OUT}/assembly/assembly.fasta")
-    if [ -n "\${ANNOT_TSV}" ]; then
-        python3 ${projectDir}/viz/preprocess/genes_to_json.py \
-            "\${ANNOT_TSV}" "\${VIZ_DIR}/data/genes.json" "\${RRNA_TSV}" "\${TRNA_TSV}" "\${GENE_DEPTHS}" "\${ASSEMBLY}"
-    else
-        echo '{}' > "\${VIZ_DIR}/data/genes.json"
-        echo '{}' | gzip > "\${VIZ_DIR}/data/genes.json.gz"
-    fi
 
     # Copy ECOSSDB ecosystem services data if available
     ES_JSON=\$(find_first \

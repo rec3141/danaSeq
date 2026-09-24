@@ -2,13 +2,23 @@
 """
 Preprocess MAG pipeline TSV outputs into JSON for the web dashboard.
 
-Generates 12 JSON files from Nextflow pipeline results:
+Generates JSON files from Nextflow pipeline results:
   overview.json, mags.json, checkm2_all.json, taxonomy_sunburst.json,
   kegg_heatmap.json, coverage.json, mge_summary.json, mge_per_bin.json,
-  eukaryotic.json, contig_explorer.json, contig_lengths.json
+  eukaryotic.json, contig_lengths.json, ...
+
+Per-contig data (contig explorer with t-SNE/UMAP, per-sample depths, gene
+features) is written chunked and columnar -- *_manifest.json plus
+*.part-NNN.json.gz files -- by viz_chunks.py; see that module for the formats.
+The single-file contig_explorer.json, contig_tsne.json, contig_umap.json,
+contig_sample_depths.json and genes.json are no longer written, and copies left
+by older runs are removed. The SPA still reads them for runs that predate the
+chunked layout.
 
 Usage:
-  python3 preprocess.py --results <path> --output <path> [--store-dir <path>] [--skip-tsne] [--skip-umap]
+  python3 preprocess.py --results <path> --output <path> [--store-dir <path>]
+      [--skip-tsne] [--skip-umap] [--min-contig-length N]
+      [--contig-chunk-size N] [--gene-shard-size N]
 """
 
 import argparse
@@ -24,6 +34,8 @@ import numpy as np
 import pandas as pd
 from scipy.cluster.hierarchy import linkage, leaves_list
 from scipy.spatial.distance import pdist
+
+import viz_chunks
 
 
 def load_tsv(path, **kwargs):
@@ -191,6 +203,15 @@ def parse_args():
                    help='Persistent storeDir overlay (checked first for each file)')
     p.add_argument('--skip-tsne', action='store_true', help='Skip t-SNE (saves ~5 min)')
     p.add_argument('--skip-umap', action='store_true', help='Skip UMAP (saves ~5-15 min)')
+    p.add_argument('--min-contig-length', type=int, default=0,
+                   help='Leave contigs shorter than this out of the per-contig viz files '
+                        '(contig explorer, per-sample depths, genes). Default 0 keeps every contig.')
+    p.add_argument('--contig-chunk-size', type=int, default=viz_chunks.DEFAULT_CONTIG_CHUNK_SIZE,
+                   help='Maximum contigs per contig explorer / sample depth chunk file '
+                        f'(default {viz_chunks.DEFAULT_CONTIG_CHUNK_SIZE})')
+    p.add_argument('--gene-shard-size', type=int, default=viz_chunks.DEFAULT_GENE_SHARD_SIZE,
+                   help='Maximum gene features per genes shard file '
+                        f'(default {viz_chunks.DEFAULT_GENE_SHARD_SIZE})')
     p.add_argument('--gtdbtk-db', default=None,
                    help='GTDB-Tk database dir (for reference genome taxonomy labels)')
     return p.parse_args()
@@ -1893,7 +1914,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
         except Exception as e:
             print(f"  [WARNING] t-SNE failed: {e}", file=sys.stderr)
     else:
-        print("  --skip-tsne: skipping t-SNE (existing contig_tsne.json preserved)")
+        print("  --skip-tsne: skipping t-SNE (reusing the previously written embedding)")
 
     if not skip_umap:
         try:
@@ -1910,7 +1931,7 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
         except Exception as e:
             print(f"  [WARNING] UMAP failed: {e}", file=sys.stderr)
     else:
-        print("  --skip-umap: skipping UMAP (existing contig_umap.json preserved)")
+        print("  --skip-umap: skipping UMAP (reusing the previously written embedding)")
 
     # Build final sample_depths keyed by explorer's contig_ids (authoritative IDs)
     # so keys are guaranteed to match contig_explorer.json records
@@ -2143,6 +2164,28 @@ def build_phylotree(results_dir, checkm2_df, gtdbtk_db=None):
             'tree_metadata': tree_metadata, 'leaf_info': leaf_info}
 
 
+def write_contig_viz(output_dir, contig_explorer, tsne_emb, umap_emb, sample_depths, args):
+    """Write the chunked contig explorer, reusing earlier embeddings where none was computed.
+
+    An embedding is None when its step was skipped (--skip-tsne / --skip-umap,
+    used by later pipeline stages) or failed; the coordinates written by the
+    previous run are then carried over by contig id, from either layout.
+    """
+    embeddings = {'tsne': tsne_emb, 'umap': umap_emb}
+    if tsne_emb is None or umap_emb is None:
+        previous = viz_chunks.load_existing_embeddings(output_dir)
+        for method in viz_chunks.EMBEDDINGS:
+            if embeddings[method] is None and previous[method]:
+                embeddings[method] = previous[method]
+                print(f"  Reusing {len(previous[method])} previous {method} coordinates")
+    man = viz_chunks.write_contig_explorer(
+        output_dir, contig_explorer, embeddings, sample_depths,
+        chunk_size=args.contig_chunk_size, min_length=args.min_contig_length)
+    print(f"  Wrote contig explorer: {man['n_contigs']} contigs in {len(man['chunks'])} chunks "
+          f"(t-SNE: {man['has_tsne']}, UMAP: {man['has_umap']}"
+          f"{', per-sample depths' if sample_depths is not None else ''})")
+
+
 def main():
     args = parse_args()
     results_dir = args.results
@@ -2208,8 +2251,9 @@ def main():
     write_json_gz(os.path.join(output_dir, 'mags.json'), mags)
     print(f"  Wrote mags.json ({len(mags)} MAGs)")
 
-    # 3b. genes.json (compact gene features for contig detail view)
-    print("Building genes.json ...")
+    # 3b. genes (compact gene features for contig detail view), sharded
+    print("Building gene shards ...")
+    len_map = dict(zip(assembly_info['#seq_name'], assembly_info['length']))
     from genes_to_json import load_bakta, load_rrna, load_trna, load_gene_depths, merge_depths, load_assembly, compute_gene_gc
     annot_candidates = [
         resolve_path(results_dir, 'annotation', 'bakta', 'extra', 'annotation.tsv'),
@@ -2246,11 +2290,15 @@ def main():
             print(f"  Gene GC: {n_gc} features annotated with GC%")
         for contig in genes:
             genes[contig].sort(key=lambda f: f['s'])
-        write_json_gz(os.path.join(output_dir, 'genes.json'), genes, separators=(',', ':'))
-        print(f"  Wrote genes.json ({len(genes)} contigs)")
+        gman = viz_chunks.write_gene_shards(output_dir, genes, len_map,
+                                            shard_size=args.gene_shard_size,
+                                            min_length=args.min_contig_length)
+        print(f"  Wrote {len(gman['shards'])} gene shards ({gman['n_contigs']} contigs, "
+              f"{gman['n_genes']} features)")
+        del genes
     else:
-        write_json_gz(os.path.join(output_dir, 'genes.json'), {})
-        print("  No annotation found — wrote empty genes.json")
+        viz_chunks.write_gene_shards(output_dir, {}, len_map)
+        print("  No annotation found — wrote empty genes manifest")
 
     # 4. checkm2_all.json
     checkm2_all = build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
@@ -2316,25 +2364,12 @@ def main():
     n_trees = len(phylotree.get('newick', {}))
     print(f"  Wrote phylotree.json ({n_bins} bins, {n_trees} placement trees)")
 
-    # 11. contig_explorer.json (largest, do last)
+    # 11. contig explorer + embeddings + per-sample depths (largest, do last)
     contig_explorer, tsne_emb, umap_emb, sample_depths = build_contig_explorer(
         results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
         skip_tsne=args.skip_tsne, skip_umap=args.skip_umap, output_dir=output_dir,
         sendsketch_df=sendsketch_df)
-    write_json_gz(os.path.join(output_dir, 'contig_explorer.json'), contig_explorer)
-    print(f"  Wrote contig_explorer.json ({len(contig_explorer['contigs'])} contigs)")
-    if tsne_emb is not None:
-        write_json_gz(os.path.join(output_dir, 'contig_tsne.json'), tsne_emb,
-                      separators=(',', ':'))
-        print(f"  Wrote contig_tsne.json ({len(tsne_emb)} contigs)")
-    if umap_emb is not None:
-        write_json_gz(os.path.join(output_dir, 'contig_umap.json'), umap_emb,
-                      separators=(',', ':'))
-        print(f"  Wrote contig_umap.json ({len(umap_emb)} contigs)")
-    if sample_depths is not None:
-        write_json_gz(os.path.join(output_dir, 'contig_sample_depths.json'), sample_depths,
-                      separators=(',', ':'))
-        print(f"  Wrote contig_sample_depths.json ({len(sample_depths['samples'])} samples, {len(sample_depths['depths'])} contigs)")
+    write_contig_viz(output_dir, contig_explorer, tsne_emb, umap_emb, sample_depths, args)
 
     print("\nDone! All JSON files written to", output_dir)
 
