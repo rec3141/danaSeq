@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Convert Bakta annotation TSV + barrnap rRNA + Aragorn tRNA to compact JSON for viz.
 
-Output format: { "contig_1": [{ s, e, d, t, g, p }, ...], ... }
+Feature format: { "contig_1": [{ s, e, d, t, g, p }, ...], ... }
   s = start, e = end, d = strand (+1/-1), t = type, g = gene name, p = product
 
+preprocess.py imports the loaders below and writes the gene shards itself. Run
+standalone, this writes genes_manifest.json + genes.part-NNN.json.gz (see
+viz_chunks.py) into <output_dir>; a path ending in .json means its directory.
+
 Usage:
-  python genes_to_json.py <bakta_annotation.tsv> <output.json> [rrna_genes.tsv] [trna_genes.tsv]
+  python genes_to_json.py <bakta_annotation.tsv> <output_dir> [rrna_genes.tsv]
+      [trna_genes.tsv] [gene_depths.tsv] [assembly.fasta]
 """
-import gzip
-import json
 import os
 import sys
 
@@ -289,7 +292,7 @@ def merge_depths(genes, depth_map):
 
 def main():
     if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <bakta.tsv> <output.json> [rrna_genes.tsv] [trna_genes.tsv] [gene_depths.tsv] [assembly.fasta]", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <bakta.tsv> <output_dir> [rrna_genes.tsv] [trna_genes.tsv] [gene_depths.tsv] [assembly.fasta]", file=sys.stderr)
         sys.exit(1)
 
     tsv_path = sys.argv[1]
@@ -322,29 +325,32 @@ def main():
         n_merged = merge_depths(genes, depth_map)
         print(f"  Gene depths: {n_merged} features annotated with depth ({len(depth_map)} genes in depths file)")
 
-    # Compute per-gene GC%
+    # Compute per-gene GC%; contig lengths order the shards
+    len_map = None
     if assembly_path and os.path.isfile(assembly_path):
         print(f"  Loading assembly for GC% computation...")
         assembly = load_assembly(assembly_path)
         n_gc = compute_gene_gc(genes, assembly)
+        len_map = {c: len(seq) for c, seq in assembly.items()}
         del assembly  # free memory
         print(f"  Gene GC: {n_gc} features annotated with GC%")
+    if len_map is None:
+        # The SPA finds a contig's shard by its true length, so without the
+        # assembly lookups can miss contigs whose last feature ends early.
+        print("  [WARNING] No assembly: ordering shards by last feature end, "
+              "not contig length", file=sys.stderr)
+        len_map = {c: max((f['e'] for f in feats), default=0) for c, feats in genes.items()}
 
     # Sort features by start position within each contig
     for contig in genes:
         genes[contig].sort(key=lambda f: f['s'])
 
-    text = json.dumps(genes, separators=(',', ':'))
-    with open(out_path, 'w') as f:
-        f.write(text)
-    with gzip.open(out_path + '.gz', 'wt', compresslevel=6) as f:
-        f.write(text)
-
-    n_contigs = len(genes)
-    n_features = n_bakta + n_rrna + n_trna
-    size_mb = os.path.getsize(out_path) / 1e6
-    size_gz_mb = os.path.getsize(out_path + '.gz') / 1e6
-    print(f"  Wrote {out_path}: {n_contigs} contigs, {n_features} features, {size_mb:.1f} MB ({size_gz_mb:.1f} MB gzipped)")
+    from viz_chunks import write_gene_shards
+    out_dir = os.path.dirname(out_path) or '.' if out_path.endswith('.json') else out_path
+    os.makedirs(out_dir, exist_ok=True)
+    man = write_gene_shards(out_dir, genes, len_map)
+    print(f"  Wrote {len(man['shards'])} gene shards to {out_dir}: "
+          f"{man['n_contigs']} contigs, {man['n_genes']} features")
 
 
 if __name__ == '__main__':

@@ -4,7 +4,7 @@
   import DataTable from '../components/ui/DataTable.svelte';
   import QualityBadge from '../components/ui/QualityBadge.svelte';
   import D3Heatmap from '../components/charts/D3Heatmap.svelte';
-  import { binQuality, loadBinQuality, contigExplorer, loadContigExplorer, scgHeatmap } from '../stores/data.js';
+  import { binQuality, loadBinQuality, contigExplorer, loadContigExplorer, ensureContigsForBin, scgHeatmap } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
 
   let allBins = $derived($binQuality);
@@ -235,6 +235,12 @@
     return diagDefs.find(d => d.key === diagMetric)?.label || diagMetric;
   }
 
+  // Large runs load contigs by length, longest first: fetch down to the
+  // shortest member of the selected bin so its contig list is complete.
+  $effect(() => {
+    if (selected && contigs?.chunked && !contigs.complete) ensureContigsForBin(selected);
+  });
+
   // Find contigs belonging to selected bin
   let selectedBinContigs = $derived.by(() => {
     if (!selected || !contigs?.contigs) return [];
@@ -321,7 +327,9 @@
 
     const traces = [{
       type: 'bar',
-      name: 'All contigs',
+      name: contigs.chunked && !contigs.complete
+        ? `Contigs \u2265 ${(contigs.loaded_min_length / 1000).toFixed(1)} kb`
+        : 'All contigs',
       x: centers,
       y: bgPct,
       text: hoverX,

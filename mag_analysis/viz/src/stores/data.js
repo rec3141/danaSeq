@@ -1,4 +1,5 @@
 import { writable, get } from 'svelte/store';
+import { fetchJSON } from './fetchJson.js';
 
 // Individual data stores
 export const overview = writable(null);
@@ -12,8 +13,7 @@ export const mgeSummary = writable(null);
 export const mgePerBin = writable(null);
 export const eukaryotic = writable(null);
 export const contigLengths = writable(null);
-// Lazy-loaded (large files)
-export const contigExplorer = writable(null);
+// Lazy-loaded (large files); per-contig stores live in contigData.js
 export const phyloTree = writable(null);
 export const biosynthetic = writable(null);
 export const ecosystemServices = writable(null);
@@ -25,76 +25,63 @@ export const error = writable(null);
 export const pipelineStatus = writable(null);
 
 let statusPollTimer = null;
+let statusPolling = false;
+let statusFailures = 0;
 
 export async function startStatusPolling(intervalMs = 30000) {
-  if (statusPollTimer) return;
+  if (statusPolling) return;
+  statusPolling = true;
+  statusFailures = 0;
   await refreshPipelineStatus();
-  statusPollTimer = setInterval(refreshPipelineStatus, intervalMs);
+  if (statusPolling) statusPollTimer = setInterval(refreshPipelineStatus, intervalMs);
 }
 
 export function stopStatusPolling() {
+  statusPolling = false;
   if (statusPollTimer) {
     clearInterval(statusPollTimer);
     statusPollTimer = null;
   }
 }
 
+// Polling stops when the run is finished (pipeline_active false), when the file
+// is absent (404: published runs often have none), or after two consecutive
+// unusable responses (other HTTP errors, or an HTML fallback page instead of
+// JSON). A network error that yields no response at all is treated as
+// transient and polling continues.
 async function refreshPipelineStatus() {
+  let res;
   try {
     // Cache-bust so vite preview doesn't serve stale data
-    const res = await fetch('data/pipeline_status.json?t=' + Date.now());
-    if (res.ok) {
-      const data = await res.json();
-      pipelineStatus.set(data);
-      // Update overview store's process statuses for DAG coloring
-      overview.update(curr => curr ? {
-        ...curr,
-        processes: Object.fromEntries(
-          Object.entries(data.processes).map(([k, v]) => [k, v.status])
-        ),
-        pipeline_total: data.pipeline_total,
-        pipeline_completed: data.pipeline_completed,
-        pipeline_running: data.pipeline_running,
-        pipeline_pending: data.pipeline_pending,
-        pipeline_failed: data.pipeline_failed,
-        pipeline_skipped: data.pipeline_skipped,
-      } : curr);
-      if (!data.pipeline_active) stopStatusPolling();
-    }
-  } catch (e) { /* pipeline_status.json may not exist yet */ }
-}
-
-async function fetchJSON(url) {
-  // Try pre-compressed .json.gz first — works with any static server, no server config needed.
-  // If the server sets Content-Encoding: gzip (e.g. vite preview), the browser auto-decompresses
-  // and we can just parse directly. Otherwise we decompress manually via DecompressionStream.
-  const gzRes = await fetch(url + '.gz?t=' + Date.now());
-  const gzContentType = (gzRes.headers.get('Content-Type') || '').toLowerCase();
-  if (gzRes.ok && !gzContentType.includes('text/html')) {
-    const ce = (gzRes.headers.get('Content-Encoding') || '').toLowerCase();
-    if (ce.includes('gzip') || ce.includes('br') || ce.includes('deflate')) {
-      // Browser already decompressed transparently
-      return gzRes.json();
-    }
-    // Sniff first two bytes — if they match the gzip magic number (1f 8b),
-    // decompress manually; otherwise the server already decoded for us.
-    const buf = await gzRes.arrayBuffer();
-    const header = new Uint8Array(buf, 0, 2);
-    if (header[0] === 0x1f && header[1] === 0x8b) {
-      const ds = new DecompressionStream('gzip');
-      const text = await new Response(
-        new Blob([buf]).stream().pipeThrough(ds)
-      ).text();
-      return JSON.parse(text);
-    }
-    // Not actually gzipped (server decoded it) — parse as plain JSON
-    const text = new TextDecoder().decode(buf);
-    return JSON.parse(text);
+    res = await fetch('data/pipeline_status.json?t=' + Date.now());
+  } catch (e) {
+    return;
   }
-  // Fall back to plain JSON (older preprocess runs, dev environments)
-  const res = await fetch(url + '?t=' + Date.now());
-  if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
-  return res.json();
+  let data = null;
+  if (res.ok) {
+    try { data = await res.json(); } catch (e) { data = null; }
+  }
+  if (!data?.processes) {
+    statusFailures++;
+    if (res.status === 404 || statusFailures >= 2) stopStatusPolling();
+    return;
+  }
+  statusFailures = 0;
+  pipelineStatus.set(data);
+  // Update overview store's process statuses for DAG coloring
+  overview.update(curr => curr ? {
+    ...curr,
+    processes: Object.fromEntries(
+      Object.entries(data.processes).map(([k, v]) => [k, v.status])
+    ),
+    pipeline_total: data.pipeline_total,
+    pipeline_completed: data.pipeline_completed,
+    pipeline_running: data.pipeline_running,
+    pipeline_pending: data.pipeline_pending,
+    pipeline_failed: data.pipeline_failed,
+    pipeline_skipped: data.pipeline_skipped,
+  } : curr);
+  if (!data.pipeline_active) stopStatusPolling();
 }
 
 export async function loadAllData() {
@@ -158,87 +145,6 @@ export async function loadBinQuality() {
   }
 }
 
-// Lazy load gene features (12MB+ keyed by contig ID)
-let genesData = null;
-let genesLoading = false;
-export async function loadContigGenes(contigId) {
-  if (!genesData && !genesLoading) {
-    genesLoading = true;
-    try {
-      genesData = await fetchJSON('data/genes.json');
-    } catch (e) {
-      console.warn('Gene data not available:', e.message);
-      genesData = {};
-    } finally {
-      genesLoading = false;
-    }
-  }
-  // Wait if another call is loading
-  while (genesLoading) {
-    await new Promise(r => setTimeout(r, 50));
-  }
-  return genesData?.[contigId] || null;
-}
-
-// Load all genes at once (for search index). Reuses genesData closure.
-let genesLoadPromise = null;
-export async function loadAllGenes() {
-  if (genesData) return genesData;
-  if (genesLoadPromise) return genesLoadPromise;
-  genesLoadPromise = (async () => {
-    if (!genesData && !genesLoading) {
-      genesLoading = true;
-      try {
-        genesData = await fetchJSON('data/genes.json');
-      } catch (e) {
-        console.warn('Gene data not available:', e.message);
-        genesData = {};
-      } finally {
-        genesLoading = false;
-      }
-    }
-    while (genesLoading) {
-      await new Promise(r => setTimeout(r, 50));
-    }
-    return genesData;
-  })();
-  return genesLoadPromise;
-}
-
-// Build search index: Map<contigId, string> where string = lowercased gene names + products joined by \0
-export function buildGeneSearchIndex(allGenes) {
-  const index = new Map();
-  for (const [contigId, genes] of Object.entries(allGenes)) {
-    const parts = [];
-    for (const gene of genes) {
-      if (gene.g) parts.push(gene.g);
-      if (gene.p) parts.push(gene.p);
-    }
-    if (parts.length) {
-      index.set(contigId, parts.join('\0').toLowerCase());
-    }
-  }
-  return index;
-}
-
-// Lazy load per-sample depth data (sidecar to contig_explorer)
-export const sampleDepths = writable(null);
-
-let sampleDepthsLoading = false;
-export async function loadSampleDepths() {
-  if (sampleDepthsLoading || get(sampleDepths) !== null) return;
-  sampleDepthsLoading = true;
-  try {
-    const data = await fetchJSON('data/contig_sample_depths.json');
-    sampleDepths.set(data);
-  } catch (e) {
-    console.warn('Per-sample depth data not available:', e.message);
-    sampleDepths.set({ samples: [], depths: {} });
-  } finally {
-    sampleDepthsLoading = false;
-  }
-}
-
 // Lazy load biosynthetic data (antiSMASH BGC regions)
 let biosyntheticLoading = false;
 export async function loadBiosynthetic() {
@@ -294,31 +200,4 @@ export async function loadPhyloTree() {
   }
 }
 
-// Lazy load contig explorer + embeddings (separate files per method)
-let contigLoading = false;
-export async function loadContigExplorer() {
-  if (contigLoading || get(contigExplorer) !== null) return;
-  contigLoading = true;
-  try {
-    const [data, tsneEmb, umapEmb] = await Promise.all([
-      fetchJSON('data/contig_explorer.json'),
-      fetchJSON('data/contig_tsne.json').catch(() => null),
-      fetchJSON('data/contig_umap.json').catch(() => null),
-    ]);
-    // Merge embeddings into contig records (each file is {contig_id: [x, y]})
-    if (data?.contigs) {
-      let nTsne = 0, nUmap = 0;
-      for (const c of data.contigs) {
-        if (tsneEmb?.[c.id]) { c.tsne_x = tsneEmb[c.id][0]; c.tsne_y = tsneEmb[c.id][1]; nTsne++; }
-        if (umapEmb?.[c.id]) { c.umap_x = umapEmb[c.id][0]; c.umap_y = umapEmb[c.id][1]; nUmap++; }
-      }
-      data.has_tsne = nTsne > 0;
-      data.has_umap = nUmap > 0;
-    }
-    contigExplorer.set(data);
-  } catch (e) {
-    console.error('Failed to load contig explorer:', e);
-  } finally {
-    contigLoading = false;
-  }
-}
+export * from './contigData.js';

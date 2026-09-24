@@ -40,9 +40,9 @@
     const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
     const binLine = isBin ? `<br>${BIN_LABELS[colorBy] || colorBy}: ${c[colorBy] || 'none'}` : '';
     let depthLine = `Depth: ${c.depth}x`;
-    if (colorBy === 'sample_depth' && sampleDepthData?.depths && selectedSample) {
+    if (colorBy === 'sample_depth' && sampleDepthData?.depthOf && selectedSample) {
       const sIdx = sampleDepthData.samples.indexOf(selectedSample);
-      const sDepth = sIdx >= 0 ? (sampleDepthData.depths[c.id]?.[sIdx] ?? 0) : 0;
+      const sDepth = sIdx >= 0 ? sampleDepthData.depthOf(c, sIdx) : 0;
       depthLine = `${selectedSample}: ${sDepth.toFixed(2)}x | Total: ${c.depth}x`;
     }
     return `${c.id}<br>Length: ${c.length.toLocaleString()} bp<br>${depthLine}<br>GC: ${c.gc ?? '?'}%${binLine}<br>Tax: ${tax}`;
@@ -67,12 +67,12 @@
       gc:     { fn: c => c.gc,                        title: 'GC%',                     scale: 'Viridis' },
     };
     // Dynamic sample_depth mode
-    if (colorBy === 'sample_depth' && sampleDepthData?.depths && selectedSample) {
+    if (colorBy === 'sample_depth' && sampleDepthData?.depthOf && selectedSample) {
       const sIdx = sampleDepthData.samples.indexOf(selectedSample);
       if (sIdx >= 0) {
         const globalLogMax = Math.log10((sampleDepthData.maxDepth ?? 0) + 0.01);
         continuousModes['sample_depth'] = {
-          fn: c => Math.log10((sampleDepthData.depths[c.id]?.[sIdx] ?? 0) + 0.01),
+          fn: c => Math.log10(sampleDepthData.depthOf(c, sIdx) + 0.01),
           title: `log\u2081\u2080(sample depth)`,
           scale: 'Viridis',
           fixedRange: [Math.log10(0.01), globalLogMax],

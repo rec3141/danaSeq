@@ -3,14 +3,19 @@
   import ReglScatter from '../components/charts/ReglScatter.svelte';
   import ContigDetail from '../components/ContigDetail.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
-  import { contigExplorer, loadContigExplorer, loadContigGenes, loadAllGenes, buildGeneSearchIndex, sampleDepths, loadSampleDepths } from '../stores/data.js';
+  import { contigExplorer, loadContigExplorer, loadContigGenes, sampleDepths, loadSampleDepths,
+           contigLoadState, geneSearch, ensureGeneSearchIndex, DEFAULT_MIN_CONTIG_LENGTH } from '../stores/data.js';
   import { onMount } from 'svelte';
 
   let explorerData = $derived($contigExplorer);
   let sizeBy = $state('length');
   let sizeScale = $state(1.0);
   let mode = $state('tsne');
-  let renderer = $state('plotly');  // 'plotly' | 'regl'
+  // 'plotly' | 'regl'. Plotly builds a hover string per point and stalls on
+  // large sets, so those start on WebGL; the Renderer button overrides.
+  let rendererChoice = $state(null);
+  let renderer = $derived(rendererChoice ?? ((explorerData?.n_total ?? 0) > 100000 ? 'regl' : 'plotly'));
+  let loadState = $derived($contigLoadState);
 
   // Color state: separate mode, binner source, taxonomy source + rank, metric, replicon
   let colorMode = $state('metric');   // 'bins' | 'taxa' | 'metric' | 'replicon'
@@ -26,21 +31,8 @@
   let sampleNames = $derived(sampleDepthData?.samples?.length ? sampleDepthData.samples : []);
   let hasSamples = $derived(sampleNames.length > 0);
 
-  // Per-sample nonzero contig counts for dropdown labels
-  let sampleCounts = $derived.by(() => {
-    if (!sampleDepthData?.depths || !sampleNames.length) return {};
-    const depths = sampleDepthData.depths;
-    const keys = Object.keys(depths);
-    const counts = {};
-    for (let si = 0; si < sampleNames.length; si++) {
-      let nz = 0;
-      for (const k of keys) {
-        if (depths[k][si] > 0) nz++;
-      }
-      counts[sampleNames[si]] = nz;
-    }
-    return counts;
-  });
+  // Per-sample nonzero contig counts (over loaded contigs) for dropdown labels
+  let sampleCounts = $derived(sampleDepthData?.counts ?? {});
 
   // Trigger lazy load of per-sample depths when user enters depth metric mode
   $effect(() => {
@@ -105,6 +97,8 @@
                    '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8',
                    '#94a3b8','#d4d4d8','#78716c'];
 
+  // (chunked runs: from the manifest vocabulary, which covers every contig,
+  // so colors also stay put as more contigs load)
   let stableColorMap = $derived.by(() => {
     if (!explorerData?.contigs) return {};
     const isCont = ['depth', 'length', 'gc', 'sample_depth'].includes(colorBy);
@@ -112,7 +106,9 @@
     const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
     const bgLabel = isBin ? 'unbinned' : 'Unknown';
     const names = new Set();
-    for (const c of explorerData.contigs) names.add(c[colorBy] || bgLabel);
+    const vocab = explorerData.vocab?.[colorBy];
+    if (vocab) for (const v of vocab) names.add(v || bgLabel);
+    else for (const c of explorerData.contigs) names.add(c[colorBy] || bgLabel);
     const sorted = [...names].filter(n => n !== bgLabel).sort();
     const map = { [bgLabel]: '#475569' };
     for (let i = 0; i < sorted.length; i++) map[sorted[i]] = PALETTE[i % PALETTE.length];
@@ -120,12 +116,18 @@
   });
 
   // Stable coordinate extents: full-dataset bounds so filtering doesn't re-zoom
+  // (chunked runs: from the manifest, which covers every contig)
   let coordExtents = $derived.by(() => {
     if (!explorerData?.contigs?.length) return null;
     const contigs = explorerData.contigs;
     const modes = [['pca', 'pca_x', 'pca_y'], ['tsne', 'tsne_x', 'tsne_y'], ['umap', 'umap_x', 'umap_y']];
     const result = {};
+    const ext = explorerData.extents;
     for (const [name, xKey, yKey] of modes) {
+      if (ext?.[xKey] && ext?.[yKey]) {
+        result[name] = { xMin: ext[xKey][0], xMax: ext[xKey][1], yMin: ext[yKey][0], yMax: ext[yKey][1] };
+        continue;
+      }
       let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
       for (const c of contigs) {
         const x = c[xKey] || 0, y = c[yKey] || 0;
@@ -140,6 +142,13 @@
   // Stable size extents: pre-transformed min/max from full dataset so sizes don't jump on filter
   let fullSizeRange = $derived.by(() => {
     if (!explorerData?.contigs) return null;
+    const ext = explorerData.extents;
+    if (ext?.depth && ext?.length) {
+      return {
+        depth: [Math.sqrt(ext.depth[0] + 0.01), Math.sqrt(ext.depth[1] + 0.01)],
+        length: [Math.pow(ext.length[0], 0.3), Math.pow(ext.length[1], 0.3)],
+      };
+    }
     let sqrtDepMin = Infinity, sqrtDepMax = -Infinity;
     let powLenMin = Infinity, powLenMax = -Infinity;
     for (const c of explorerData.contigs) {
@@ -159,10 +168,16 @@
   let depMinPct = $state(0);
   let depMaxPct = $state(100);
 
+  // Slider scales span every contig (chunked runs: from the manifest), not
+  // just the loaded ones.
   let dataExtents = $derived.by(() => {
     if (!explorerData?.contigs?.length) return null;
     let lMin = Infinity, lMax = -Infinity, dMin = Infinity, dMax = -Infinity;
-    for (const c of explorerData.contigs) {
+    const ext = explorerData.extents;
+    if (ext?.length && ext?.depth) {
+      [lMin, lMax] = ext.length;
+      [dMin, dMax] = ext.depth;
+    } else for (const c of explorerData.contigs) {
       if (c.length < lMin) lMin = c.length;
       if (c.length > lMax) lMax = c.length;
       if (c.depth < dMin) dMin = c.depth;
@@ -177,6 +192,23 @@
   function pctToLog(pct, logMin, logMax) {
     return Math.pow(10, logMin + (logMax - logMin) * pct / 100);
   }
+
+  // Minimum-length slider position for DEFAULT_MIN_CONTIG_LENGTH (0 when every
+  // contig is shorter).
+  let defaultLenMinPct = $derived.by(() => {
+    if (!dataExtents) return 0;
+    const lo = Math.log10(dataExtents.lMin), hi = Math.log10(dataExtents.lMax);
+    if (hi <= lo) return 0;
+    const pct = (Math.log10(DEFAULT_MIN_CONTIG_LENGTH) - lo) / (hi - lo) * 100;
+    return Math.max(0, Math.min(98, pct));
+  });
+  let lenDefaultApplied = false;
+  $effect(() => {
+    if (!lenDefaultApplied && dataExtents) {
+      lenDefaultApplied = true;
+      lenMinPct = defaultLenMinPct;
+    }
+  });
 
   let lenRange = $derived.by(() => {
     if (!dataExtents) return [0, Infinity];
@@ -198,11 +230,26 @@
 
   let isFiltered = $derived(lenMinPct > 0 || lenMaxPct < 100 || depMinPct > 0 || depMaxPct < 100);
 
+  // Chunked runs: fetch the contigs the minimum-length slider now admits
+  // (debounced so dragging does not start a fetch per step).
+  let lenLoadTimer;
+  $effect(() => {
+    const minLen = lenRange[0];
+    if (!explorerData?.chunked || explorerData.complete || minLen >= explorerData.loaded_min_length) return;
+    clearTimeout(lenLoadTimer);
+    lenLoadTimer = setTimeout(() => loadContigExplorer(minLen), 400);
+    return () => clearTimeout(lenLoadTimer);
+  });
+
   let filteredData = $derived.by(() => {
     if (!explorerData?.contigs) return null;
     if (!isFiltered) return explorerData;
-    const [lMin, lMax] = lenRange;
-    const [dMin, dMax] = depRange;
+    // A handle at its end of the scale means no bound on that side, so
+    // contigs below the log-scale floor (e.g. depth 0) are not dropped.
+    const lMin = lenMinPct > 0 ? lenRange[0] : -Infinity;
+    const lMax = lenMaxPct < 100 ? lenRange[1] : Infinity;
+    const dMin = depMinPct > 0 ? depRange[0] : -Infinity;
+    const dMax = depMaxPct < 100 ? depRange[1] : Infinity;
     const filtered = explorerData.contigs.filter(c =>
       c.length >= lMin && c.length <= lMax &&
       c.depth >= dMin && c.depth <= dMax
@@ -223,7 +270,7 @@
   }
 
   function resetFilters() {
-    lenMinPct = 0; lenMaxPct = 100;
+    lenMinPct = defaultLenMinPct; lenMaxPct = 100;
     depMinPct = 0; depMaxPct = 100;
     searchQuery = '';
   }
@@ -231,8 +278,10 @@
   // ---- Search state ----
   let searchQuery = $state('');
   let searchDebounced = $state('');
-  let geneIndex = $state(null);
-  let geneIndexLoading = $state(false);
+  let geneSearchState = $derived($geneSearch);
+  let geneIndexVersion = $derived(geneSearchState.version);
+  let geneIndexLoading = $derived(geneSearchState.loading);
+  let geneSearchActive = $state(false);
   let debounceTimer;
 
   // Debounce search input (300ms)
@@ -243,15 +292,14 @@
     return () => clearTimeout(debounceTimer);
   });
 
-  // Trigger gene loading on first keystroke
+  // Gene search covers the genes of the loaded contigs: the first keystroke
+  // starts indexing their gene shards, and contigs loaded later (slider
+  // lowered) have their shards indexed too. Legacy runs index genes.json whole.
   $effect(() => {
-    if (searchQuery.length > 0 && !geneIndex && !geneIndexLoading) {
-      geneIndexLoading = true;
-      loadAllGenes().then(allGenes => {
-        geneIndex = buildGeneSearchIndex(allGenes);
-        geneIndexLoading = false;
-      });
-    }
+    if (searchQuery.length > 0) geneSearchActive = true;
+  });
+  $effect(() => {
+    if (geneSearchActive && explorerData) ensureGeneSearchIndex();
   });
 
   // Search fields on each contig to check (contig ID + 24 taxonomy + 6 bin + replicon/tiara/whokaryote)
@@ -284,6 +332,7 @@
     }
 
     // Phase 2: search gene index (for contigs not already matched)
+    const geneIndex = geneIndexVersion && geneSearchState.index;
     if (geneIndex) {
       for (const c of contigs) {
         if (matched.has(c.id)) continue;
@@ -319,7 +368,8 @@
     detailContigId = contigId;
     detailGenes = null;
     detailLoading = true;
-    loadContigGenes(contigId).then(genes => {
+    const row = explorerData?.contigs?.find(c => c.id === contigId);
+    loadContigGenes(row || contigId).then(genes => {
       // Only update if still showing this contig
       if (detailContigId === contigId) {
         detailGenes = genes;
@@ -340,7 +390,8 @@
   $effect(() => {
     if (explorerData?.contigs?.length && !autoOpened) {
       autoOpened = true;
-      const longest = explorerData.contigs.reduce((a, b) => a.length > b.length ? a : b);
+      let longest = explorerData.contigs[0];
+      for (const c of explorerData.contigs) if (c.length > longest.length) longest = c;
       handleContigClick(longest.id);
     }
   });
@@ -516,7 +567,7 @@
   <button
     class="px-3 py-1 rounded-md border transition-colors text-center border-cyan-400 bg-cyan-400/10 text-cyan-400"
     style="min-width: {BW.renderer}"
-    onclick={() => renderer = cycle(rendererGroup.values, renderer)}
+    onclick={() => rendererChoice = cycle(rendererGroup.values, renderer)}
     title={`Click to cycle: ${rendererGroup.labels.join(' → ')}`}
   >
     {getLabel(rendererGroup.values, rendererGroup.labels, renderer)} &#x25BE;
@@ -582,7 +633,13 @@
         </button>
       {/if}
     </div>
-    {#if geneIndexLoading}
+    {#if geneSearchActive && geneSearchState.shardsTotal > 1}
+      <span class="text-slate-500 text-xs italic"
+        title="Gene names and products are searched for the loaded contigs only; lower the length filter to load and search more.">
+        genes: {geneSearchState.minLength ? `contigs \u2265 ${fmtLen(geneSearchState.minLength)}` : 'all contigs'}
+        ({geneSearchState.shardsDone}/{geneSearchState.shardsNeeded} shards{geneIndexLoading ? ', loading' : ''})
+      </span>
+    {:else if geneIndexLoading}
       <span class="text-slate-500 text-xs italic">loading genes...</span>
     {/if}
     {#if searchMatchIds}
@@ -591,9 +648,14 @@
 
     {#if isFiltered || searchMatchIds}
       {#if isFiltered}
-        <span class="text-cyan-400 font-medium">{filteredData.contigs.length.toLocaleString()} / {explorerData.contigs.length.toLocaleString()}</span>
+        <span class="text-cyan-400 font-medium">{filteredData.contigs.length.toLocaleString()} / {explorerData.n_total.toLocaleString()}</span>
       {/if}
       <button class="text-slate-500 hover:text-slate-300 underline" onclick={resetFilters}>reset</button>
+    {/if}
+    {#if loadState.loading}
+      <span class="text-slate-500 italic">loading contigs ({loadState.done}/{loadState.total} chunks)...</span>
+    {:else if loadState.error}
+      <span class="text-red-400">contig load failed: {loadState.error}</span>
     {/if}
   </div>
 {/if}
@@ -602,7 +664,10 @@
 {#if !explorerData}
   <div class="flex flex-col items-center justify-center py-20">
     <div class="w-10 h-10 border-4 border-slate-700 border-t-cyan-400 rounded-full animate-spin"></div>
-    <p class="text-slate-400 text-sm mt-4">Loading contig data...</p>
+    <p class="text-slate-400 text-sm mt-4">
+      {#if loadState.error}Failed to load contig data: {loadState.error}
+      {:else}Loading contig data{loadState.total > 1 ? ` (${loadState.done}/${loadState.total} chunks)` : ''}...{/if}
+    </p>
   </div>
 {:else}
   <div class="flex gap-4 mb-6">
