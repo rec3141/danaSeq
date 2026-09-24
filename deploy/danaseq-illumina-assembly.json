@@ -1,0 +1,9 @@
+{
+  "image": "danaseq-illumina-assembly",
+  "digest": "sha256:1a5ecac1c2e07d1a74fa5dd864a21601f8b358030a4c7b80f9f6a8806f1eab28",
+  "commit": "93a513eaf6e7b55e6981965b975f8ebeaaa58e0b",
+  "base_digest": "sha256:9b993bddb619dba72074d58f921c822004360b8311d60307b067de9fcf62f325",
+  "built": "2026-09-24T23:10:54Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-illumina-assembly:sif-93a513eaf6e7b55e6981965b975f8ebeaaa58e0b",
+  "sif_sha256": "8b9175a0d478708e762abfc23f605b1710cff2be509b13ed6caa0b5063209495"
+}
