@@ -25,43 +25,63 @@ export const error = writable(null);
 export const pipelineStatus = writable(null);
 
 let statusPollTimer = null;
+let statusPolling = false;
+let statusFailures = 0;
 
 export async function startStatusPolling(intervalMs = 30000) {
-  if (statusPollTimer) return;
+  if (statusPolling) return;
+  statusPolling = true;
+  statusFailures = 0;
   await refreshPipelineStatus();
-  statusPollTimer = setInterval(refreshPipelineStatus, intervalMs);
+  if (statusPolling) statusPollTimer = setInterval(refreshPipelineStatus, intervalMs);
 }
 
 export function stopStatusPolling() {
+  statusPolling = false;
   if (statusPollTimer) {
     clearInterval(statusPollTimer);
     statusPollTimer = null;
   }
 }
 
+// Polling stops when the run is finished (pipeline_active false), when the file
+// is absent (404: published runs often have none), or after two consecutive
+// unusable responses (other HTTP errors, or an HTML fallback page instead of
+// JSON). A network error that yields no response at all is treated as
+// transient and polling continues.
 async function refreshPipelineStatus() {
+  let res;
   try {
     // Cache-bust so vite preview doesn't serve stale data
-    const res = await fetch('data/pipeline_status.json?t=' + Date.now());
-    if (res.ok) {
-      const data = await res.json();
-      pipelineStatus.set(data);
-      // Update overview store's process statuses for DAG coloring
-      overview.update(curr => curr ? {
-        ...curr,
-        processes: Object.fromEntries(
-          Object.entries(data.processes).map(([k, v]) => [k, v.status])
-        ),
-        pipeline_total: data.pipeline_total,
-        pipeline_completed: data.pipeline_completed,
-        pipeline_running: data.pipeline_running,
-        pipeline_pending: data.pipeline_pending,
-        pipeline_failed: data.pipeline_failed,
-        pipeline_skipped: data.pipeline_skipped,
-      } : curr);
-      if (!data.pipeline_active) stopStatusPolling();
-    }
-  } catch (e) { /* pipeline_status.json may not exist yet */ }
+    res = await fetch('data/pipeline_status.json?t=' + Date.now());
+  } catch (e) {
+    return;
+  }
+  let data = null;
+  if (res.ok) {
+    try { data = await res.json(); } catch (e) { data = null; }
+  }
+  if (!data?.processes) {
+    statusFailures++;
+    if (res.status === 404 || statusFailures >= 2) stopStatusPolling();
+    return;
+  }
+  statusFailures = 0;
+  pipelineStatus.set(data);
+  // Update overview store's process statuses for DAG coloring
+  overview.update(curr => curr ? {
+    ...curr,
+    processes: Object.fromEntries(
+      Object.entries(data.processes).map(([k, v]) => [k, v.status])
+    ),
+    pipeline_total: data.pipeline_total,
+    pipeline_completed: data.pipeline_completed,
+    pipeline_running: data.pipeline_running,
+    pipeline_pending: data.pipeline_pending,
+    pipeline_failed: data.pipeline_failed,
+    pipeline_skipped: data.pipeline_skipped,
+  } : curr);
+  if (!data.pipeline_active) stopStatusPolling();
 }
 
 async function fetchJSON(url) {
