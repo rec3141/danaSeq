@@ -120,5 +120,17 @@ LAUNCHER
     else
         echo "[INFO] Data-only stage (no site build)"
     fi
+
+    # Optional per-run deploy hook, as in nanopore_live's DB_SYNC: if
+    # <outdir>/deploy.sh exists and is executable, run it with this viz dir after
+    # every snapshot, so a published run follows the pipeline stage by stage.
+    # run-mag-analysis.sh --deploy_slug writes it; viz/deploy.sh does the work.
+    # Failures are logged and never fail the task.
+    DEPLOY_HOOK="${params.outdir}/deploy.sh"
+    if [ -x "\${DEPLOY_HOOK}" ]; then
+        echo "[INFO] Running deploy hook \${DEPLOY_HOOK}"
+        "\${DEPLOY_HOOK}" "\${VIZ_DIR}" 2>&1 | sed 's/^/  [DEPLOY] /' \\
+            || echo "[WARN] deploy hook exited non-zero"
+    fi
     """
 }

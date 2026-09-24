@@ -182,3 +182,5 @@ nclb/
 # Node viz
 **/viz/node_modules/
 **/viz/dist/
+# Staged into the mag_analysis image by CI from tools/
+mag_analysis/viz/microscape_deploy.sh

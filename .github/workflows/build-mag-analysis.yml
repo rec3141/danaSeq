@@ -9,6 +9,7 @@ on:
       - '!mag_analysis/envs/**'
       - '!mag_analysis/Dockerfile.base-slim'
       - '.github/workflows/build-mag-analysis.yml'
+      - 'tools/microscape_deploy.sh'
   workflow_dispatch:
 
 env:
@@ -51,6 +52,11 @@ jobs:
       - name: Stamp build time
         id: stamp
         run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # The image is built from mag_analysis/ alone; viz/deploy.sh (the
+      # microscape.app deploy hook's target) needs the shared deployer beside it.
+      - name: Stage shared deploy tool
+        run: cp tools/microscape_deploy.sh mag_analysis/viz/microscape_deploy.sh
 
       - name: Build and push
         uses: docker/build-push-action@v6

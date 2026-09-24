@@ -161,6 +161,14 @@ usage() {
     echo "  --publish          Copy outputs instead of storing them; a resubmit then redoes everything"
     echo "  --resume [ID]      Resume a previous run"
     echo ""
+    echo "microscape.app deploy (needs --run_viz or --all):"
+    echo "  --deploy_slug SLUG        URL slug for the run on microscape.app"
+    echo "  --deploy_name NAME        Display name [default: slug]"
+    echo "  --deploy_visibility V     private (default) | shared | public"
+    echo "  Writes <outdir>/deploy.sh, which each viz stage runs, so the published"
+    echo "  run updates as results arrive. Needs \$MICROSCAPE_API_KEY or"
+    echo "  ~/.config/microscape/api-key."
+    echo ""
     echo "Pipeline flags: --annotator, --run_metabolism, --run_genomad, --run_gtdbtk,"
     echo "  --run_kaiju, --run_kraken2, --run_sendsketch, --run_rrna, --run_eukaryotic,"
     echo "  --run_antismash, --run_viz, --run_semibin, --run_maxbin, --run_lorbin,"
@@ -187,6 +195,9 @@ STORE_DIR_HOST=""
 # Store mode keeps every finished stage in $OUTDIR (storeDir), so a timeout or
 # resubmit skips whatever already completed. --publish restores plain copies.
 STORE_MODE=true
+DEPLOY_SLUG=""
+DEPLOY_NAME=""
+DEPLOY_VISIBILITY="private"
 
 while (( $# )); do
     case "$1" in
@@ -288,6 +299,15 @@ while (( $# )); do
                 --run_viz true
             )
             shift ;;
+        --deploy_slug)
+            [[ -z "${2:-}" ]] && die "--deploy_slug requires a slug"
+            DEPLOY_SLUG="$2"; shift 2 ;;
+        --deploy_name)
+            [[ -z "${2:-}" ]] && die "--deploy_name requires a name"
+            DEPLOY_NAME="$2"; shift 2 ;;
+        --deploy_visibility)
+            case "${2:-}" in private|shared|public) ;; *) die "--deploy_visibility must be private|shared|public" ;; esac
+            DEPLOY_VISIBILITY="$2"; shift 2 ;;
         --resume)
             DO_RESUME=true
             if [[ -n "${2:-}" && "${2}" != --* ]]; then
@@ -338,6 +358,33 @@ fi
 if [[ ! -d "$OUTDIR_HOST" ]]; then
     echo "[INFO] Creating output directory: $OUTDIR_HOST"
     mkdir -p "$OUTDIR_HOST" || die "Cannot create output directory: $OUTDIR_HOST"
+fi
+
+# microscape.app deploy hook: VIZ_PREPROCESS runs <outdir>/deploy.sh after each
+# viz snapshot. The hook runs where the pipeline runs, so in a container it
+# names the image's copy of viz/deploy.sh and the API key bound in below.
+if [[ -n "$DEPLOY_SLUG" ]]; then
+    [[ -z "$DEPLOY_NAME" ]] && DEPLOY_NAME="$DEPLOY_SLUG"
+    if [[ "$USE_CONTAINER" == true ]]; then
+        hook_deployer=/pipeline/viz/deploy.sh
+        hook_key=(--api-key-file /data/microscape/api-key)
+    else
+        hook_deployer="${SCRIPT_DIR}/viz/deploy.sh"
+        hook_key=()
+    fi
+    {
+        echo '#!/usr/bin/env bash'
+        echo "# Written by run-mag-analysis.sh; run by each viz stage with the viz dir as \$1."
+        printf 'exec %q --preprocess-dir "$1/data" --slug %q --name %q --visibility %q' \
+            "$hook_deployer" "$DEPLOY_SLUG" "$DEPLOY_NAME" "$DEPLOY_VISIBILITY"
+        [[ ${#hook_key[@]} -gt 0 ]] && printf ' %q' "${hook_key[@]}"
+        echo
+    } > "${OUTDIR_HOST}/deploy.sh"
+    chmod +x "${OUTDIR_HOST}/deploy.sh"
+    echo "[INFO] Wrote deploy hook: ${OUTDIR_HOST}/deploy.sh (slug=$DEPLOY_SLUG, visibility=$DEPLOY_VISIBILITY)"
+    if [[ -z "${MICROSCAPE_API_KEY:-}" && ! -f "${HOME}/.config/microscape/api-key" ]]; then
+        echo "[WARNING] No \$MICROSCAPE_API_KEY and no ~/.config/microscape/api-key; deploys will fail until one is set." >&2
+    fi
 fi
 
 # ============================================================================
@@ -393,6 +440,9 @@ if [[ "$USE_CONTAINER" == true ]]; then
     BINDS+=("$(dirname "$ASSEMBLY_HOST"):/data/assembly:ro")
     BINDS+=("$(dirname "$DEPTHS_HOST"):/data/depths:ro")
     BINDS+=("${OUTDIR_HOST}:/data/output")
+    if [[ -n "$DEPLOY_SLUG" && -f "${HOME}/.config/microscape/api-key" ]]; then
+        BINDS+=("${HOME}/.config/microscape:/data/microscape:ro")
+    fi
 
     # Rewrite assembly/depths paths
     for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
