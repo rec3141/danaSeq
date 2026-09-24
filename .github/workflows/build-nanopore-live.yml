@@ -20,6 +20,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.promote.outputs.digest }}
+      build_date: ${{ steps.stamp.outputs.build_date }}
 
     steps:
       - name: Maximize build space
@@ -92,7 +95,23 @@ jobs:
       # Only now does :latest move. A failed smoke test leaves it on the last
       # image that passed, rather than on one that cannot start.
       - name: Promote to latest
+        id: promote
         run: |
-          docker buildx imagetools create \
-            -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
-            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          src="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker buildx imagetools create -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" "$src"
+          echo "digest=$(docker buildx imagetools inspect "$src" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
+
+  # A ready-made SIF of the promoted image and the deploy record that pins the
+  # clusters to it. `image` names deploy/<image>.json, which omc-pickup looks
+  # up by the cluster's SIF name (.danaseq-live.sif), so the two must match.
+  # See publish-sif.yml for the permissions it needs.
+  publish:
+    needs: build
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/publish-sif.yml
+    with:
+      image: danaseq-live
+      digest: ${{ needs.build.outputs.digest }}
+      build_date: ${{ needs.build.outputs.build_date }}

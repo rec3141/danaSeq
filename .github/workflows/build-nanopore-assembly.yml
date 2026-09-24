@@ -32,8 +32,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write
+      contents: read
       packages: write
+    outputs:
+      promoted: ${{ steps.promote.outputs.promoted }}
+      digest: ${{ steps.promote.outputs.digest }}
+      base_digest: ${{ steps.base.outputs.digest }}
+      build_date: ${{ steps.stamp.outputs.build_date }}
 
     steps:
       - name: Checkout repository
@@ -145,14 +150,21 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "promoted=true" >> "$GITHUB_OUTPUT"
 
-      # The deployable digest, in version control. Clusters pin to this rather
-      # than resolving :latest themselves, so a pull that starts just before a
-      # new publish still lands exactly the image it asked for -- a digest is
-      # immutable, a tag is not.
-      - name: Record deployed digest
-        if: steps.promote.outputs.promoted == 'true'
-        run: >
-          bash .github/scripts/record-deploy.sh danaseq-nanopore-assembly
-          "${{ steps.promote.outputs.digest }}"
-          "${{ steps.base.outputs.digest }}"
-          "${{ steps.stamp.outputs.build_date }}"
+  # A ready-made SIF of the promoted image and the deploy record that pins the
+  # clusters to it. Only for a build that promoted: one that stood down because
+  # its base moved did not produce the deployed image.
+  publish:
+    needs: build
+    if: needs.build.outputs.promoted == 'true'
+    permissions:
+      # publish-sif.yml pushes the deploy record and the SIF. A called workflow
+      # cannot hold more than its caller grants, so build-assembly-base.yml
+      # grants the same to its call of this workflow.
+      contents: write
+      packages: write
+    uses: ./.github/workflows/publish-sif.yml
+    with:
+      image: danaseq-nanopore-assembly
+      digest: ${{ needs.build.outputs.digest }}
+      base_digest: ${{ needs.build.outputs.base_digest }}
+      build_date: ${{ needs.build.outputs.build_date }}
