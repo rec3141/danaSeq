@@ -1,0 +1,8 @@
+{
+  "image": "danaseq-live",
+  "digest": "sha256:037079df9ec9f84dbca3c5ed0a1712e7b6c5614282d18b120b57aefdf4db94af",
+  "commit": "93a513eaf6e7b55e6981965b975f8ebeaaa58e0b",
+  "built": "2026-09-24T23:10:38Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-live:sif-93a513eaf6e7b55e6981965b975f8ebeaaa58e0b",
+  "sif_sha256": "17342c600e57e516df4ca3a3ae84af28734353f4cb1e622f50188a05a27d12aa"
+}
