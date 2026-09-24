@@ -77,9 +77,9 @@
       const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
       const binPart = isBin ? ` | ${BIN_LABELS[colorBy] || colorBy}: ${c[colorBy] || 'none'}` : '';
       let depthPart = `depth: ${c.depth}x`;
-      if (colorBy === 'sample_depth' && sampleDepthData?.depths && selectedSample) {
+      if (colorBy === 'sample_depth' && sampleDepthData?.depthOf && selectedSample) {
         const sIdx = sampleDepthData.samples.indexOf(selectedSample);
-        const sDepth = sIdx >= 0 ? (sampleDepthData.depths[c.id]?.[sIdx] ?? 0) : 0;
+        const sDepth = sIdx >= 0 ? sampleDepthData.depthOf(c, sIdx) : 0;
         depthPart = `${selectedSample}: ${sDepth.toFixed(2)}x | total: ${c.depth}x`;
       }
       tipText = `${c.id} | ${c.length.toLocaleString()} bp | ${depthPart} | GC: ${c.gc ?? '?'}%${binPart} | ${tax}`;
@@ -125,12 +125,12 @@
 
     // Build effective continuous map (add sample_depth dynamically)
     let effectiveContinuous = CONTINUOUS;
-    if (colorBy === 'sample_depth' && sampleDepthData?.depths && selectedSample) {
+    if (colorBy === 'sample_depth' && sampleDepthData?.depthOf && selectedSample) {
       const sIdx = sampleDepthData.samples.indexOf(selectedSample);
       if (sIdx >= 0) {
         effectiveContinuous = {
           ...CONTINUOUS,
-          sample_depth: c => Math.log10((sampleDepthData.depths[c.id]?.[sIdx] ?? 0) + 0.01),
+          sample_depth: c => Math.log10(sampleDepthData.depthOf(c, sIdx) + 0.01),
         };
       }
     }
