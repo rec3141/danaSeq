@@ -15,19 +15,9 @@ process MAP_READS {
     label 'process_medium'
     // minimap2's peak RSS is set by the INDEX BATCH, not the whole reference:
     // with --split-prefix it builds the index in -I sized chunks (4 Gbp by
-    // default), so an 8.9 Gbp assembly still peaks at ~48 GB, not ~90 GB.
-    // Measured: 48.05 GB peak on a 8.9 Gbp / 1.18M-contig marine assembly.
-    //
-    // process_medium declares 16 GB. Nextflow's local executor derives
-    // concurrency from the DECLARED value, so it packed ~3x too many tasks onto
-    // the node, they exhausted 750 GB between them, and samtools sort -- the
-    // last stage to allocate -- died with exit 1. 116 task failures across 39
-    // of 276 samples, each retried once and then silently ignored.
-    //
-    // batch*10+16 alone (56 GB) had no headroom: 276 marine tasks on grex peaked
-    // at 44-57 GB (median 51), so the largest samples overran their declaration,
-    // and the freshwater metaMDBG run still lost 41 of 232 samples to 115 OOM
-    // kills. 1.25x puts the 4 Gbp-batch case at 70 GB.
+    // default). Nextflow's local executor packs tasks by DECLARED memory, so an
+    // underestimate here lets concurrent tasks OOM-kill each other. The 1.25x
+    // is headroom over the batch*10+16 GB estimate for the largest samples.
     memory { def refGb  = (assembly.size() / (1024L**3)) as double
              def batch  = Math.min(refGb, 4.0d)          // minimap2 -I default
              def needed = Math.ceil((batch * 10.0d + 16.0d) * 1.25d) as int
