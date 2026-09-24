@@ -161,6 +161,15 @@ usage() {
     echo "  --publish          Copy outputs instead of storing them; a resubmit then redoes everything"
     echo "  --resume [ID]      Resume a previous run"
     echo ""
+    echo "Hybrid Slurm execution:"
+    echo "  --slurm                   Run Nextflow on this host and send the heavy steps"
+    echo "                            (Bakta, the big binners, GTDB-Tk, Kaiju, eggNOG,"
+    echo "                            MetaEuk, geNomad) out as their own Slurm jobs; the"
+    echo "                            rest run here. Every task runs in the pipeline image."
+    echo "  --slurm_account ACCT      sbatch --account for those jobs (required)"
+    echo "  --slurm_queue P, --slurm_time T, --slurm_extra 'OPTS'  passed through"
+    echo "  Needs nextflow on PATH and a --workdir on shared storage [default: <outdir>/work]."
+    echo ""
     echo "microscape.app deploy (needs --run_viz or --all):"
     echo "  --deploy_slug SLUG        URL slug for the run on microscape.app"
     echo "  --deploy_name NAME        Display name [default: slug]"
@@ -195,6 +204,8 @@ STORE_DIR_HOST=""
 # Store mode keeps every finished stage in $OUTDIR (storeDir), so a timeout or
 # resubmit skips whatever already completed. --publish restores plain copies.
 STORE_MODE=true
+SLURM_MODE=false
+SLURM_ACCOUNT=""
 DEPLOY_SLUG=""
 DEPLOY_NAME=""
 DEPLOY_VISIBILITY="private"
@@ -299,6 +310,15 @@ while (( $# )); do
                 --run_viz true
             )
             shift ;;
+        --slurm)
+            # Implies the container: every task runs in the pipeline image.
+            SLURM_MODE=true; USE_CONTAINER=true
+            [[ "$CONTAINER_RUNTIME" == "docker" ]] && die "--slurm needs apptainer or singularity"
+            [[ -z "${CONTAINER_RUNTIME:-}" || "$CONTAINER_RUNTIME" == "auto" ]] && CONTAINER_RUNTIME=auto
+            shift ;;
+        --slurm_account)
+            [[ -z "${2:-}" ]] && die "--slurm_account requires an account"
+            SLURM_ACCOUNT="$2"; NF_ARGS+=("--slurm_account" "$2"); shift 2 ;;
         --deploy_slug)
             [[ -z "${2:-}" ]] && die "--deploy_slug requires a slug"
             DEPLOY_SLUG="$2"; shift 2 ;;
@@ -429,6 +449,84 @@ if [[ "$USE_CONTAINER" == true ]]; then
             fi
         fi
     fi
+fi
+
+# ============================================================================
+# Hybrid Slurm mode (--slurm)
+# ============================================================================
+# Nextflow runs on this host (sbatch is not available inside the image) and
+# every task runs in the image; -profile slurm_hybrid sends the heavy steps out
+# as their own Slurm jobs. The pipeline code is copied out of the image, so the
+# code and the tools always come from the same build.
+
+if [[ "$SLURM_MODE" == true ]]; then
+    [[ "$CONTAINER_RUNTIME" == "apptainer" || "$CONTAINER_RUNTIME" == "singularity" ]] \
+        || die "--slurm needs apptainer or singularity (found: ${CONTAINER_RUNTIME})"
+    command -v nextflow >/dev/null 2>&1 \
+        || die "--slurm runs Nextflow on the host; put nextflow on PATH (e.g. module load nextflow)"
+    [[ -n "$SLURM_ACCOUNT" ]] || die "--slurm needs --slurm_account"
+
+    # Slurm-run steps land on other nodes, so node-local work is invisible to them.
+    case "$WORKDIR_HOST" in
+        "${SLURM_TMPDIR:-/nonexistent}"*|/tmp/*) WORKDIR_HOST="${OUTDIR_HOST}/work" ;;
+    esac
+    mkdir -p "$WORKDIR_HOST" || die "Cannot create work directory: $WORKDIR_HOST"
+
+    img_sha=$("$CONTAINER_RUNTIME" exec "$SIF_PATH" printenv DANASEQ_GIT_SHA 2>/dev/null | cut -c1-12)
+    PIPE_DIR="${OUTDIR_HOST}/.pipeline-${img_sha:-unknown}"
+    if [[ ! -f "$PIPE_DIR/main.nf" ]]; then
+        mkdir -p "$PIPE_DIR"
+        "$CONTAINER_RUNTIME" exec -B "$PIPE_DIR" "$SIF_PATH" cp -r /pipeline/. "$PIPE_DIR"/ \
+            || die "Could not copy the pipeline out of $SIF_PATH"
+    fi
+
+    # Tasks see everything at its host path, plus the squashed DB images at
+    # /data/dbimg/<sub> with their --*_db arguments rewritten, as in container mode.
+    RUNOPTS=()
+    for d in "$(dirname "$ASSEMBLY_HOST")" "$(dirname "$DEPTHS_HOST")" "$OUTDIR_HOST" \
+             "$WORKDIR_HOST" "$PIPE_DIR" ${BAM_DIR_HOST:+"$BAM_DIR_HOST"} \
+             ${DB_DIR_HOST:+"$DB_DIR_HOST"} ${STORE_DIR_HOST:+"$STORE_DIR_HOST"}; do
+        RUNOPTS+=(-B "$d")
+    done
+    for e in "${SQSH_IMAGES[@]}"; do
+        img="${e%%|*}"; sub="${e#*|}"
+        RUNOPTS+=(-B "${img}:/data/dbimg/${sub}:image-src=/")
+        for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+            case "${NF_ARGS[$i]}" in
+                "${DB_DIR_HOST}/${sub}"|"${DB_DIR_HOST}/${sub}"/*)
+                    NF_ARGS[$i]="/data/dbimg/${sub}${NF_ARGS[$i]#${DB_DIR_HOST}/${sub}}" ;;
+            esac
+        done
+    done
+    if [[ -n "$DEPLOY_SLUG" && -f "${HOME}/.config/microscape/api-key" ]]; then
+        RUNOPTS+=(-B "${HOME}/.config/microscape:/data/microscape:ro")
+    fi
+    # Slurm jobs inherit the submitting environment, and the container passes it on.
+    if [[ -n "${DB_DIR_HOST:-}" && -f "${DB_DIR_HOST}/checkm_data/taxon_marker_sets.tsv" ]]; then
+        export CHECKM_DATA_PATH="${DB_DIR_HOST}/checkm_data"
+    fi
+
+    mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info"
+    RUNTIME_CFG="${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/slurm_hybrid.runtime.config"
+    {
+        echo "// Written by run-mag-analysis.sh --slurm"
+        printf "process.container = '%s'\n" "$SIF_PATH"
+        printf "singularity.runOptions = '%s'\n" "${RUNOPTS[*]}"
+    } > "$RUNTIME_CFG"
+
+    NF_CMD=(nextflow -log "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log"
+            run "$PIPE_DIR/main.nf" -profile slurm_hybrid
+            -c "$PIPE_DIR/docker.config" -c "$RUNTIME_CFG"
+            -w "$WORKDIR_HOST" --outdir "$OUTDIR_HOST" "${NF_ARGS[@]}")
+    [[ "$DO_RESUME" == true ]] && NF_CMD+=(-resume ${RESUME_SESSION})
+
+    echo "[INFO] Mode:     Hybrid Slurm (image ${img_sha:-unknown}, account ${SLURM_ACCOUNT})"
+    echo "[INFO] Work:     $WORKDIR_HOST"
+    echo "[INFO] Running: ${NF_CMD[*]}"
+    "${NF_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
+    NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1) || true
+    save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION" || echo "[WARN] Could not record run_command.txt"
+    exit $NF_EXIT
 fi
 
 # ============================================================================
