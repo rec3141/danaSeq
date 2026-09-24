@@ -44,6 +44,10 @@
       pointSize: 4,
       deselectOnDblClick: true,
       deselectOnEscape: true,
+      // Above a million points the library builds its spatial index in a worker
+      // made from Function.toString(), which the minified bundle breaks (the
+      // worker dies with a SyntaxError); build it on the main thread instead.
+      spatialIndexUseWorker: false,
       opacityInactiveMax: 0.3,
       opacityInactiveScale: 0.5,
     });
@@ -271,7 +275,7 @@
     }).then(() => {
       // Restore camera after redraw (only if coordinates didn't change)
       if (savedView) {
-        scatterplot.lookAt(savedView, { preventEvent: true });
+        scatterplot.view(savedView, { preventEvent: true });
       }
       applySearchFilter();
     });
