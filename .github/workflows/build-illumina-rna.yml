@@ -118,8 +118,8 @@ jobs:
             echo "promoted=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          src="${{ env.REGISTRY }}/${{ env.danaseq-illumina-rna_NAME }}:${{ github.sha }}-${{ steps.base.outputs.short }}"
-          docker buildx imagetools create -t "${{ env.REGISTRY }}/${{ env.danaseq-illumina-rna_NAME }}:latest" "$src"
+          src="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-${{ steps.base.outputs.short }}"
+          docker buildx imagetools create -t "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" "$src"
           digest=$(docker buildx imagetools inspect "$src" --format '{{.Manifest.Digest}}')
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "promoted=true" >> "$GITHUB_OUTPUT"
