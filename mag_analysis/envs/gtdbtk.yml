@@ -5,4 +5,4 @@ channels:
 dependencies:
   - python>=3.9,<3.13
   - numpy<2
-  - gtdbtk=2.4.0
+  - gtdbtk=2.4.1                # first release that reads r226 reference data

@@ -2,11 +2,11 @@
 # Dana MAG Analysis Pipeline - Pipeline Image
 # ============================================================================
 #
-# Thin layer on top of the pre-built base image (Dockerfile.base-slim) which
-# contains all conda environments and wrapper scripts.
-#
-# This image only adds the Nextflow pipeline code, so it rebuilds in seconds
-# on every push to main.
+# Layer on top of the pre-built base image (Dockerfile.base-slim), which holds
+# most conda environments and wrapper scripts. This image adds the tools the
+# base lacks (VAMB, Binette, GTDB-Tk envs; the COMEBin code) and the Nextflow
+# pipeline code. Edits to envs/vamb.yml, binette.yml or gtdbtk.yml do not
+# trigger a rebuild on their own (build-mag-analysis.yml ignores envs/**).
 #
 # Build:
 #   docker build -t danaseq-mag-analysis .
@@ -52,6 +52,23 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}" \
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Tools the slim base never carried: each has its own env in the modules
+# (conda "dana-mag-vamb" etc.), which a container run ignores, so without
+# these the binners and GTDB-Tk were missing from PATH.
+COPY envs/vamb.yml envs/binette.yml envs/gtdbtk.yml /tmp/envs-extra/
+RUN for e in vamb binette gtdbtk; do \
+        mamba env create -y -p /opt/conda/envs/dana-mag-$e -f /tmp/envs-extra/$e.yml || exit 1; \
+    done \
+    && mamba clean -afy \
+    && rm -rf /tmp/envs-extra \
+    && for pair in vamb:vamb binette:binette gtdbtk:gtdbtk; do \
+        env="${pair%%:*}"; tool="${pair#*:}"; \
+        test -x "/opt/conda/envs/dana-mag-$env/bin/$tool" || exit 1; \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-%s/bin:$PATH\nexec /opt/conda/envs/dana-mag-%s/bin/%s "$@"\n' "$env" "$env" "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done
 
 # COMEBin: the base image has its dependencies in dana-mag-binning and a
 # dana-tools wrapper that execs run_comebin.sh from that env, but not the code.
