@@ -470,11 +470,18 @@ if [[ "$USE_CONTAINER" == true ]]; then
         SCRATCH_HOST=""
     fi
 
+    # CheckM v1 marker sets for COMEBin, from the bound database directory.
+    CONTAINER_ENV=()
+    if [[ -n "${DB_DIR_HOST:-}" && -f "${DB_DIR_HOST}/checkm_data/taxon_marker_sets.tsv" ]]; then
+        CONTAINER_ENV+=("CHECKM_DATA_PATH=/data/db/checkm_data")
+    fi
+
     CONTAINER_CMD=()
     case "$CONTAINER_RUNTIME" in
         docker)
             CONTAINER_CMD+=(docker run --user "$(id -u):$(id -g)")
             CONTAINER_CMD+=("-e" "NXF_HOME=/home/dana/.nextflow")
+            for e in "${CONTAINER_ENV[@]}"; do CONTAINER_CMD+=("-e" "$e"); done
             [[ -n "$SCRATCH_HOST" ]] && CONTAINER_CMD+=("-e" "TMPDIR=${SCRATCH_HOST}")
             for bind in "${BINDS[@]}"; do CONTAINER_CMD+=("-v" "$bind"); done
             CONTAINER_CMD+=("$CONTAINER_IMAGE" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
@@ -483,6 +490,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             container_ca="/etc/ssl/certs/ca-certificates.crt"
             CONTAINER_CMD+=("$CONTAINER_RUNTIME" run)
             CONTAINER_CMD+=("--env" "NXF_HOME=/home/dana/.nextflow")
+            for e in "${CONTAINER_ENV[@]}"; do CONTAINER_CMD+=("--env" "$e"); done
             [[ -n "$SCRATCH_HOST" ]] && CONTAINER_CMD+=("--env" "TMPDIR=${SCRATCH_HOST}")
             CONTAINER_CMD+=("--env" "REQUESTS_CA_BUNDLE=${container_ca}")
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")

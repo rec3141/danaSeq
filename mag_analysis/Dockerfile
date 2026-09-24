@@ -4,9 +4,10 @@
 #
 # Layer on top of the pre-built base image (Dockerfile.base-slim), which holds
 # most conda environments and wrapper scripts. This image adds the tools the
-# base lacks (VAMB, Binette, GTDB-Tk envs; the COMEBin code) and the Nextflow
-# pipeline code. Edits to envs/vamb.yml, binette.yml or gtdbtk.yml do not
-# trigger a rebuild on their own (build-mag-analysis.yml ignores envs/**).
+# base lacks (VAMB, Binette, GTDB-Tk and COMEBin envs) and the Nextflow
+# pipeline code. Edits to envs/vamb.yml, binette.yml, gtdbtk.yml or
+# comebin-cpu.yml do not trigger a rebuild on their own
+# (build-mag-analysis.yml ignores envs/**).
 #
 # Build:
 #   docker build -t danaseq-mag-analysis .
@@ -70,38 +71,21 @@ RUN for e in vamb binette gtdbtk; do \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done
 
-# COMEBin: the base image has its dependencies in dana-mag-binning and a
-# dana-tools wrapper that execs run_comebin.sh from that env, but not the code.
-# Install it the way install.sh does: the rec3141 fork under the env's share/,
-# a run_comebin.sh that makes -a/-o/-p absolute against the caller's directory
-# before changing into the source tree, and gen_cov_file.sh on PATH. Symlinks
-# are left unresolved (-s): COMEBin writes <assembly>_lengths.txt beside its
-# input, and a staged input resolves into a read-only mount.
-ARG COMEBIN_COMMIT=8fab9d73268d134b2d33b3d9ea5853a327a5ed70
-RUN E=/opt/conda/envs/dana-mag-binning \
-    && git init -q "$E/share/COMEBin" \
-    && git -C "$E/share/COMEBin" fetch -q --depth 1 https://github.com/rec3141/COMEBin.git "${COMEBIN_COMMIT}" \
-    && git -C "$E/share/COMEBin" checkout -q FETCH_HEAD \
-    && rm -rf "$E/share/COMEBin/.git" \
-    && printf '%s\n' \
-        '#!/usr/bin/env bash' \
-        'COMEBIN_ROOT="$(dirname "$(dirname "$(readlink -f "$0")")")/share/COMEBin/COMEBin"' \
-        'ORIG_CWD="$(pwd)"' \
-        'RESOLVED_ARGS=()' \
-        'while (( $# )); do' \
-        '    case "$1" in' \
-        '        -a|-o|-p) RESOLVED_ARGS+=("$1"); shift' \
-        '                  RESOLVED_ARGS+=("$(cd "${ORIG_CWD}" && realpath -ms "$1")"); shift ;;' \
-        '        *) RESOLVED_ARGS+=("$1"); shift ;;' \
-        '    esac' \
-        'done' \
-        'cd "${COMEBIN_ROOT}" && exec bash run_comebin.sh "${RESOLVED_ARGS[@]}"' \
-        > "$E/bin/run_comebin.sh" \
-    && chmod +x "$E/bin/run_comebin.sh" \
-    && test -f "$E/share/COMEBin/COMEBin/run_comebin.sh" \
-    && ln -sf "$E/share/COMEBin/COMEBin/scripts/gen_cov_file.sh" "$E/bin/gen_cov_file.sh" \
-    && chmod +x "$E/share/COMEBin/COMEBin/scripts/gen_cov_file.sh" \
-    && chmod -R a+rX "$E/share/COMEBin"
+# COMEBin in its own env from the bioconda package, which pins the full
+# dependency set (checkm-genome, biolib, atomicwrites, tensorboard, ...) that the
+# merged binning env lacks. The base image's dana-tools wrapper pointed at a
+# run_comebin.sh that was never installed; docker/run_comebin.sh replaces it.
+# CheckM marker sets come from CHECKM_DATA_PATH, which the launcher sets from
+# --db_dir.
+COPY envs/comebin-cpu.yml /tmp/comebin.yml
+RUN mamba env create -y -p /opt/conda/envs/dana-mag-comebin -f /tmp/comebin.yml \
+    && mamba clean -afy \
+    && rm -f /tmp/comebin.yml \
+    && test -x /opt/conda/envs/dana-mag-comebin/bin/run_comebin.sh
+COPY docker/run_comebin.sh /usr/local/bin/dana-tools/run_comebin.sh
+RUN printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-comebin/bin:$PATH\nexec /opt/conda/envs/dana-mag-comebin/bin/gen_cov_file.sh "$@"\n' \
+        > /usr/local/bin/dana-tools/gen_cov_file.sh \
+    && chmod +x /usr/local/bin/dana-tools/run_comebin.sh /usr/local/bin/dana-tools/gen_cov_file.sh
 
 COPY . /pipeline/
 
