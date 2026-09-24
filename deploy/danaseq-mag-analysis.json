@@ -1,6 +1,6 @@
 {
   "image": "danaseq-mag-analysis",
-  "digest": "sha256:c31449cae279e53fecf99990ac1a7c5c3ddceadf635e0b889190de000eb400a9",
-  "commit": "e4f120416b1b2edbca0dc03b7abbab2eadeaa9bb",
-  "built": "2026-09-24T20:20:28Z"
+  "digest": "sha256:5c5d62454006cc42ef709025649223a3d312ee60925ab15d4fb79d74c91e1ec4",
+  "commit": "bed956c1eb2496a4502ab971d0bf233dbeb2990f",
+  "built": "2026-09-24T20:24:42Z"
 }
