@@ -37,7 +37,8 @@ process BIN_SEMIBIN2 {
         -i "${assembly}" \\
         -b *.sorted.bam \\
         -o semibin_out \\
-        --sequencing-type long_read
+        --sequencing-type long_read \\
+        --threads ${task.cpus}
     semibin_exit=\$?
     set -e
 
