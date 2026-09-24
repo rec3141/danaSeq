@@ -2,12 +2,9 @@
 # Dana MAG Analysis Pipeline - Pipeline Image
 # ============================================================================
 #
-# Layer on top of the pre-built base image (Dockerfile.base-slim), which holds
-# most conda environments and wrapper scripts. This image adds the tools the
-# base lacks (VAMB, Binette, GTDB-Tk and COMEBin envs) and the Nextflow
-# pipeline code. Edits to envs/vamb.yml, binette.yml, gtdbtk.yml or
-# comebin-cpu.yml do not trigger a rebuild on their own
-# (build-mag-analysis.yml ignores envs/**).
+# Thin layer on top of the pre-built base image (Dockerfile.base-slim), which
+# contains all conda environments and wrapper scripts. This image adds Node for
+# the viz build and the Nextflow pipeline code.
 #
 # Build:
 #   docker build -t danaseq-mag-analysis .
@@ -53,39 +50,6 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}" \
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
-
-# Tools the slim base never carried: each has its own env in the modules
-# (conda "dana-mag-vamb" etc.), which a container run ignores, so without
-# these the binners and GTDB-Tk were missing from PATH.
-COPY envs/vamb.yml envs/binette.yml envs/gtdbtk.yml /tmp/envs-extra/
-RUN for e in vamb binette gtdbtk; do \
-        mamba env create -y -p /opt/conda/envs/dana-mag-$e -f /tmp/envs-extra/$e.yml || exit 1; \
-    done \
-    && mamba clean -afy \
-    && rm -rf /tmp/envs-extra \
-    && for pair in vamb:vamb binette:binette gtdbtk:gtdbtk; do \
-        env="${pair%%:*}"; tool="${pair#*:}"; \
-        test -x "/opt/conda/envs/dana-mag-$env/bin/$tool" || exit 1; \
-        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-%s/bin:$PATH\nexec /opt/conda/envs/dana-mag-%s/bin/%s "$@"\n' "$env" "$env" "$tool" \
-            > "/usr/local/bin/dana-tools/$tool" \
-        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
-    done
-
-# COMEBin in its own env from the bioconda package, which pins the full
-# dependency set (checkm-genome, biolib, atomicwrites, tensorboard, ...) that the
-# merged binning env lacks. The base image's dana-tools wrapper pointed at a
-# run_comebin.sh that was never installed; docker/run_comebin.sh replaces it.
-# CheckM marker sets come from CHECKM_DATA_PATH, which the launcher sets from
-# --db_dir.
-COPY envs/comebin-cpu.yml /tmp/comebin.yml
-RUN mamba env create -y -p /opt/conda/envs/dana-mag-comebin -f /tmp/comebin.yml \
-    && mamba clean -afy \
-    && rm -f /tmp/comebin.yml \
-    && test -x /opt/conda/envs/dana-mag-comebin/bin/run_comebin.sh
-COPY docker/run_comebin.sh /usr/local/bin/dana-tools/run_comebin.sh
-RUN printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-comebin/bin:$PATH\nexec /opt/conda/envs/dana-mag-comebin/bin/gen_cov_file.sh "$@"\n' \
-        > /usr/local/bin/dana-tools/gen_cov_file.sh \
-    && chmod +x /usr/local/bin/dana-tools/run_comebin.sh /usr/local/bin/dana-tools/gen_cov_file.sh
 
 COPY . /pipeline/
 
