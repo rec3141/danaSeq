@@ -73,8 +73,10 @@ RUN for e in vamb binette gtdbtk; do \
 # COMEBin: the base image has its dependencies in dana-mag-binning and a
 # dana-tools wrapper that execs run_comebin.sh from that env, but not the code.
 # Install it the way install.sh does: the rec3141 fork under the env's share/,
-# a run_comebin.sh that resolves -a/-o/-p against the caller's directory before
-# changing into the source tree, and gen_cov_file.sh on PATH.
+# a run_comebin.sh that makes -a/-o/-p absolute against the caller's directory
+# before changing into the source tree, and gen_cov_file.sh on PATH. Symlinks
+# are left unresolved (-s): COMEBin writes <assembly>_lengths.txt beside its
+# input, and a staged input resolves into a read-only mount.
 ARG COMEBIN_COMMIT=8fab9d73268d134b2d33b3d9ea5853a327a5ed70
 RUN E=/opt/conda/envs/dana-mag-binning \
     && git init -q "$E/share/COMEBin" \
@@ -89,7 +91,7 @@ RUN E=/opt/conda/envs/dana-mag-binning \
         'while (( $# )); do' \
         '    case "$1" in' \
         '        -a|-o|-p) RESOLVED_ARGS+=("$1"); shift' \
-        '                  RESOLVED_ARGS+=("$(cd "${ORIG_CWD}" && realpath -m "$1")"); shift ;;' \
+        '                  RESOLVED_ARGS+=("$(cd "${ORIG_CWD}" && realpath -ms "$1")"); shift ;;' \
         '        *) RESOLVED_ARGS+=("$1"); shift ;;' \
         '    esac' \
         'done' \
