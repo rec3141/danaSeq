@@ -87,9 +87,10 @@ jobs:
   nanopore-assembly:
     needs: build
     permissions:
-      # write, not read: the called workflow records the promoted digest to
-      # deploy/<image>.json. A called workflow cannot hold more permission than
-      # its caller grants, and granting less fails the whole run at startup.
+      # write, not read: the called workflow calls publish-sif.yml, which
+      # pushes the SIF and records the promoted digest to deploy/<image>.json.
+      # A called workflow cannot hold more permission than its caller grants,
+      # at any depth, and granting less fails the whole run at startup.
       contents: write
       packages: write
     uses: ./.github/workflows/build-nanopore-assembly.yml
@@ -97,9 +98,10 @@ jobs:
   illumina-assembly:
     needs: build
     permissions:
-      # write, not read: the called workflow records the promoted digest to
-      # deploy/<image>.json. A called workflow cannot hold more permission than
-      # its caller grants, and granting less fails the whole run at startup.
+      # write, not read: the called workflow calls publish-sif.yml, which
+      # pushes the SIF and records the promoted digest to deploy/<image>.json.
+      # A called workflow cannot hold more permission than its caller grants,
+      # at any depth, and granting less fails the whole run at startup.
       contents: write
       packages: write
     uses: ./.github/workflows/build-illumina-assembly.yml
@@ -107,9 +109,10 @@ jobs:
   illumina-rna:
     needs: build
     permissions:
-      # write, not read: the called workflow records the promoted digest to
-      # deploy/<image>.json. A called workflow cannot hold more permission than
-      # its caller grants, and granting less fails the whole run at startup.
+      # write, not read: the called workflow calls publish-sif.yml, which
+      # pushes the SIF and records the promoted digest to deploy/<image>.json.
+      # A called workflow cannot hold more permission than its caller grants,
+      # at any depth, and granting less fails the whole run at startup.
       contents: write
       packages: write
     uses: ./.github/workflows/build-illumina-rna.yml
