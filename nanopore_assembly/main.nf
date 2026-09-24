@@ -56,10 +56,6 @@ def helpMessage() {
                          threshold. Cheaper on disk, but the kept subset depends on
                          input order and is biased toward whatever streams first.
                          Default is an order-independent two-pass bucket sort.
-      --map_only         Skip read preparation and assembly: map every sample to the
-                         existing <outdir>/assembly/assembly.fasta and rebuild the
-                         depth table. BAMs already in the store are kept, so only
-                         missing samples are mapped. Move depths.txt aside first.
 
     Resources:
       --assembly_cpus N    CPUs for assembly [default: 16]
@@ -91,7 +87,7 @@ def validateParams() {
     // Flye's read mode must be chosen, not inferred. Refusing here costs nothing:
     // no node has been allocated to any task yet.
     def readTypes = ['nano-raw', 'nano-hq', 'nano-corr', 'auto']
-    if (params.assembler == 'flye' && !params.read_type && !params.map_only) {
+    if (params.assembler == 'flye' && !params.read_type) {
         log.error "ERROR: --read_type is required: nano-raw, nano-hq or nano-corr. " +
                   "It sets Flye's index, overlap settings and error model, so it is not inferred " +
                   "by default. Flye's criterion is error rate: nano-hq for Guppy5+/Dorado SUP reads " +
@@ -249,84 +245,73 @@ workflow {
         error "ERROR: No reads found in ${params.input}. Expected *.fastq.gz / *.fasta[.gz] or a fastq_pass/barcode*/ structure.\nRun with --help for usage."
     }
 
-    // --map_only: the assembly already exists (for instance a run whose
-    // MAP_READS tasks were lost), so go straight to mapping against it.
-    def do_polish = (params.polish != null) ? params.polish : (params.assembler == 'flye')
-    if (params.map_only) {
-        def asm = file("${params.store_dir ?: params.outdir}/assembly/assembly.fasta")
-        if (!asm.exists() || asm.size() == 0) {
-            error "ERROR: --map_only needs an existing assembly at ${asm}"
-        }
-        log.info "Map-only: mapping against ${asm}"
-        ch_assembly = Channel.value(asm)
+    // 2. Concatenate + dedupe + optional filtlong -> single all_reads.fastq.gz
+    //
+    // Order matters here and must not be left to chance. A plain collect()
+    // emits in CONCAT_READS *completion* order, which varies run to run, and
+    // fastq_filter's single-pass --target_bases mode decides accept/reject on
+    // arrival against a threshold built only from the reads seen so far. It is
+    // therefore lenient early and strict late: two groups with identical
+    // length and quality distributions keep 1518 vs 501 reads purely by
+    // position in the stream. Unsorted input made two production co-assemblies
+    // of the same data select ~50% different reads at identical base totals
+    // (rec3141/Flye issue #1).
+    //
+    // Largest file first, with the name as tiebreak so equal sizes cannot
+    // reintroduce the nondeterminism. This pins the selection; it does not make
+    // it unbiased; fastq_filter's default two-pass selection is what makes the
+    // choice order-independent. Only --onepass still depends on this ordering.
+    ch_per_barcode = ch_reads
+        .map { meta, fastq -> fastq }
+        .collect()
+        .map { files -> files.toSorted { a, b -> (b.size() <=> a.size()) ?: (a.name <=> b.name) } }
+    PREPARE_READS(ch_per_barcode)
+    // Surface PREPARE_READS' warnings in the Nextflow log, not only in the
+    // task's .command.err, where two truncated read sets went unread.
+    PREPARE_READS.out.warnings.subscribe { f -> f.readLines().each { log.warn "PREPARE_READS: ${it}" } }
+
+    if (params.run_remove_human) {
+        REMOVE_HUMAN(PREPARE_READS.out.reads)
+        ch_asm_input = REMOVE_HUMAN.out.reads
     } else {
-        // 2. Concatenate + dedupe + optional filtlong -> single all_reads.fastq.gz
-        //
-        // Order matters here and must not be left to chance. A plain collect()
-        // emits in CONCAT_READS *completion* order, which varies run to run, and
-        // fastq_filter's single-pass --target_bases mode decides accept/reject on
-        // arrival against a threshold built only from the reads seen so far. It is
-        // therefore lenient early and strict late: two groups with identical
-        // length and quality distributions keep 1518 vs 501 reads purely by
-        // position in the stream. Unsorted input made two production co-assemblies
-        // of the same data select ~50% different reads at identical base totals
-        // (rec3141/Flye issue #1).
-        //
-        // Largest file first, with the name as tiebreak so equal sizes cannot
-        // reintroduce the nondeterminism. This pins the selection; it does not make
-        // it unbiased; fastq_filter's default two-pass selection is what makes the
-        // choice order-independent. Only --onepass still depends on this ordering.
-        ch_per_barcode = ch_reads
-            .map { meta, fastq -> fastq }
-            .collect()
-            .map { files -> files.toSorted { a, b -> (b.size() <=> a.size()) ?: (a.name <=> b.name) } }
-        PREPARE_READS(ch_per_barcode)
-        // Surface PREPARE_READS' warnings in the Nextflow log, not only in the
-        // task's .command.err, where two truncated read sets went unread.
-        PREPARE_READS.out.warnings.subscribe { f -> f.readLines().each { log.warn "PREPARE_READS: ${it}" } }
-
-        if (params.run_remove_human) {
-            REMOVE_HUMAN(PREPARE_READS.out.reads)
-            ch_asm_input = REMOVE_HUMAN.out.reads
-        } else {
-            ch_asm_input = PREPARE_READS.out.reads
-        }
-
-        if (params.assembler == 'flye') {
-            FLYE_ASSEMBLE(ch_asm_input)
-            ch_raw_assembly = FLYE_ASSEMBLE.out.assembly
-            ch_asm_info     = FLYE_ASSEMBLE.out.info
-            ch_asm_graph    = FLYE_ASSEMBLE.out.graph
-        } else if (params.assembler == 'metamdbg') {
-            ASSEMBLY_METAMDBG(ch_asm_input)
-            ch_raw_assembly = ASSEMBLY_METAMDBG.out.assembly
-            ch_asm_info     = ASSEMBLY_METAMDBG.out.info
-            ch_asm_graph    = ASSEMBLY_METAMDBG.out.graph
-        } else if (params.assembler == 'myloasm') {
-            ASSEMBLY_MYLOASM(ch_asm_input)
-            ch_raw_assembly = ASSEMBLY_MYLOASM.out.assembly
-            ch_asm_info     = ASSEMBLY_MYLOASM.out.info
-            ch_asm_graph    = ASSEMBLY_MYLOASM.out.graph
-        }
-
-        // Optional polishing (default: true for flye, false for others)
-        if (do_polish) {
-            FLYE_POLISH(ch_raw_assembly, ch_asm_info, ch_asm_graph, ch_asm_input)
-            ch_assembly  = FLYE_POLISH.out.assembly
-            ch_asm_info  = FLYE_POLISH.out.info
-            ch_asm_graph = FLYE_POLISH.out.graph
-        } else {
-            // No polishing: the draft IS the final assembly, so republish it under the
-            // plain name rather than leaving only draft_assembly.fasta behind.
-            PUBLISH_UNPOLISHED(ch_raw_assembly, ch_asm_info, ch_asm_graph)
-            ch_assembly  = PUBLISH_UNPOLISHED.out.assembly
-            ch_asm_info  = PUBLISH_UNPOLISHED.out.info
-            ch_asm_graph = PUBLISH_UNPOLISHED.out.graph
-        }
-
-        // Tetranucleotide frequencies from assembly
-        CALCULATE_TNF(ch_assembly)
+        ch_asm_input = PREPARE_READS.out.reads
     }
+
+    if (params.assembler == 'flye') {
+        FLYE_ASSEMBLE(ch_asm_input)
+        ch_raw_assembly = FLYE_ASSEMBLE.out.assembly
+        ch_asm_info     = FLYE_ASSEMBLE.out.info
+        ch_asm_graph    = FLYE_ASSEMBLE.out.graph
+    } else if (params.assembler == 'metamdbg') {
+        ASSEMBLY_METAMDBG(ch_asm_input)
+        ch_raw_assembly = ASSEMBLY_METAMDBG.out.assembly
+        ch_asm_info     = ASSEMBLY_METAMDBG.out.info
+        ch_asm_graph    = ASSEMBLY_METAMDBG.out.graph
+    } else if (params.assembler == 'myloasm') {
+        ASSEMBLY_MYLOASM(ch_asm_input)
+        ch_raw_assembly = ASSEMBLY_MYLOASM.out.assembly
+        ch_asm_info     = ASSEMBLY_MYLOASM.out.info
+        ch_asm_graph    = ASSEMBLY_MYLOASM.out.graph
+    }
+
+    // Optional polishing (default: true for flye, false for others)
+    def do_polish = (params.polish != null) ? params.polish : (params.assembler == 'flye')
+    if (do_polish) {
+        FLYE_POLISH(ch_raw_assembly, ch_asm_info, ch_asm_graph, ch_asm_input)
+        ch_assembly  = FLYE_POLISH.out.assembly
+        ch_asm_info  = FLYE_POLISH.out.info
+        ch_asm_graph = FLYE_POLISH.out.graph
+    } else {
+        // No polishing: the draft IS the final assembly, so republish it under the
+        // plain name rather than leaving only draft_assembly.fasta behind.
+        PUBLISH_UNPOLISHED(ch_raw_assembly, ch_asm_info, ch_asm_graph)
+        ch_assembly  = PUBLISH_UNPOLISHED.out.assembly
+        ch_asm_info  = PUBLISH_UNPOLISHED.out.info
+        ch_asm_graph = PUBLISH_UNPOLISHED.out.graph
+    }
+
+    // Tetranucleotide frequencies from assembly
+    CALCULATE_TNF(ch_assembly)
 
     // 3. Map each sample back to assembly: fan-out
     ch_map_input = ch_reads.combine(ch_assembly)
