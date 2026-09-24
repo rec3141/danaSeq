@@ -44,7 +44,6 @@ resolve_db_dir() {
         [--bakta_light_db]="bakta/db-light"
         [--genomad_db]="genomad_db"
         [--checkv_db]="checkv_db"
-        [--checkm2_db]="checkm2"
         [--kofam_db]="kofam_db"
         [--eggnog_db]="eggnog_db"
         [--dbcan_db]="dbcan_db"
@@ -77,8 +76,16 @@ resolve_db_dir() {
         if [[ -e "$path" ]] || sqsh_covers "$path"; then DB_ARGS+=("$flag" "$path"); fi
     done
 
+    # Names written by download-databases.sh first, older layouts after.
+    # CheckM2
+    for path in "${base}/checkm2_db" "${base}/checkm2"; do
+        [[ -e "$path" ]] && { DB_ARGS+=(--checkm2_db "$path"); break; }
+    done
+
     # Kaiju
-    if [[ -d "${base}/kaiju/refseq_ref" ]]; then
+    if [[ -f "${base}/kaiju_db/nodes.dmp" ]]; then
+        DB_ARGS+=(--kaiju_db "${base}/kaiju_db")
+    elif [[ -d "${base}/kaiju/refseq_ref" ]]; then
         DB_ARGS+=(--kaiju_db "${base}/kaiju/refseq_ref")
     elif [[ -d "${base}/kaiju" ]]; then
         path=$(ls -d "${base}/kaiju"/*/2>/dev/null | head -1 || true)
@@ -86,7 +93,9 @@ resolve_db_dir() {
     fi
 
     # Kraken2
-    if [[ -d "${base}/krakendb/pluspfp_08gb" ]]; then
+    if [[ -f "${base}/kraken2_db/hash.k2d" ]]; then
+        DB_ARGS+=(--kraken2_db "${base}/kraken2_db")
+    elif [[ -d "${base}/krakendb/pluspfp_08gb" ]]; then
         DB_ARGS+=(--kraken2_db "${base}/krakendb/pluspfp_08gb")
     elif [[ -f "${base}/krakendb/hash.k2d" ]]; then
         DB_ARGS+=(--kraken2_db "${base}/krakendb")
