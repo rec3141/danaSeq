@@ -41,6 +41,14 @@ process VIZ_PREPROCESS {
         ${storeFlag} \
         ${tsne_flag}
 
+    # Status snapshot for the dashboard's pipeline panel, published with the
+    # rest of viz/data; the SPA polls this file. Never fails the task.
+    python3 ${projectDir}/viz/preprocess/watch_status.py --once \
+        --results "${params.store_dir ?: params.outdir}" \
+        --output "\${VIZ_DIR}/data" \
+        --work-dir "${workflow.workDir}" >/dev/null 2>&1 \
+        || echo "[WARN] pipeline_status.json snapshot failed"
+
     # Generate genes.json
     STORE="${storeRoot}"
     OUT="${params.outdir}"

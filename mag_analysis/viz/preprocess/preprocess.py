@@ -222,8 +222,9 @@ def build_pipeline_status(results_dir):
 
     with open(log_path, 'r', errors='replace') as f:
         for line in f:
-            # Full process list: "Workflow process names [dsl2]: A, B, C"
-            m = re.search(r'Workflow process names \[dsl2\]:\s*(.+)', line)
+            # Full process list. Nextflow up to 25.x logs "Workflow process
+            # names [dsl2]: A, B, C"; 26.x logs "Session - Process names: A, B, C".
+            m = re.search(r'(?:Workflow process names \[dsl2\]|Session - Process names):\s*(.+)', line)
             if m:
                 all_processes = {p.strip() for p in m.group(1).split(',')}
 
@@ -256,6 +257,11 @@ def build_pipeline_status(results_dir):
                     pass  # keep COMPLETED
         except Exception as e:
             print(f"  [WARNING] Could not parse trace.txt: {e}", file=sys.stderr)
+
+    # Neither form in the log (another Nextflow version): fall back to every
+    # process the run has shown, so the status is partial rather than empty.
+    if not all_processes:
+        all_processes = stored | submitted | set(trace_status)
 
     # 3. Merge: build final status for each process
     # Exclude internal VIZ_STAGE processes (they're aliases for VIZ_PREPROCESS)
@@ -793,7 +799,7 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
 def _build_sunburst_tree(tax_map, len_map):
     """Build a D3 hierarchy tree from a contig->taxonomy dict."""
     tree = {}
-    ranks = ['domain', 'phylum', 'class', 'order']
+    ranks = RANKS
 
     for contig_id, tax in tax_map.items():
         contig_len = len_map.get(contig_id, 1000)
@@ -809,13 +815,18 @@ def _build_sunburst_tree(tax_map, len_map):
         return {'name': 'Life', 'children': []}
 
     total_size = sum(v['_size'] for v in tree.values())
-    threshold = total_size * 0.005
+    # Fold a taxon into "Other" when it is small both within its parent and
+    # overall. A cut on the total alone empties the family and genus rings,
+    # where every taxon is a sliver of a large assembly.
+    min_total = total_size * 0.0005
+    min_of_parent = 0.02
 
     def to_hierarchy(node_dict):
         children = []
         other_size = 0
+        parent_size = sum(d['_size'] for d in node_dict.values())
         for name, data in sorted(node_dict.items(), key=lambda x: -x[1]['_size']):
-            if data['_size'] < threshold:
+            if data['_size'] < min_total or data['_size'] < parent_size * min_of_parent:
                 other_size += data['_size']
             else:
                 child = {'name': name, 'value': data['_size']}

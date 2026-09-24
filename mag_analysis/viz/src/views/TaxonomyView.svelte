@@ -134,7 +134,7 @@
   let taxonColorMap = $derived(allRankColors[rank] || {});
 
   // Sunburst gets a per-depth color map: {1: {Bacteria: '#...', ...}, 2: {Actinomycetota: '#...', ...}, ...}
-  const sunburstRanks = ['domain', 'phylum', 'class', 'order'];
+  const sunburstRanks = ['domain', 'phylum', 'class', 'order', 'family', 'genus'];
   let sunburstColorMaps = $derived.by(() => {
     const maps = {};
     sunburstRanks.forEach((rk, i) => {

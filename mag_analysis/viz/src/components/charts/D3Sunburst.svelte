@@ -73,7 +73,7 @@
         if (colorMap && colorMap[name]) return colorMap[name];
         return fallbackColor(name);
       })
-      .attr('fill-opacity', d => 1 - d.depth * 0.15)
+      .attr('fill-opacity', d => Math.max(0.35, 1 - d.depth * 0.1))
       .attr('d', arc)
       .style('cursor', 'pointer')
       .on('mouseover', function (event, d) {
@@ -91,7 +91,7 @@
           .style('top', (event.clientY - rect.top - 10) + 'px');
       })
       .on('mouseout', function (event, d) {
-        d3.select(this).attr('fill-opacity', 1 - d.depth * 0.15);
+        d3.select(this).attr('fill-opacity', Math.max(0.35, 1 - d.depth * 0.1));
         tooltip.style('opacity', 0);
       });
 
