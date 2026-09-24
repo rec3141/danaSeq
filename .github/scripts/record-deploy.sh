@@ -4,6 +4,10 @@
 #
 #   record-deploy.sh <image> <digest> [base_digest] [built]
 #
+# With SIF_REF and SIF_SHA256 set, the record also names a prebuilt SIF (an
+# ORAS artifact) and its checksum, so clusters download that instead of
+# building a SIF from the image themselves.
+#
 # Several builds can finish close together (a base build chains every leaf,
 # and pushes to one leaf can overlap), so each attempt starts from the current
 # branch head and rewrites the file rather than rebasing onto another build's
@@ -35,9 +39,11 @@ for i in 1 2 3 4 5; do
     mkdir -p deploy
     jq -n --arg image "$image" --arg digest "$digest" --arg commit "$sha" \
           --arg base "$base" --arg built "$built" \
+          --arg sif "${SIF_REF:-}" --arg sifsha "${SIF_SHA256:-}" \
           '{image: $image, digest: $digest, commit: $commit}
            + (if $base  != "" then {base_digest: $base} else {} end)
-           + (if $built != "" then {built: $built} else {} end)' > "$file"
+           + (if $built != "" then {built: $built} else {} end)
+           + (if $sif != "" and $sifsha != "" then {sif: $sif, sif_sha256: $sifsha} else {} end)' > "$file"
     git add "$file"
     if git diff --cached --quiet; then echo "digest unchanged"; exit 0; fi
     git commit -q -m "deploy: ${image} ${sha} [skip ci]"
