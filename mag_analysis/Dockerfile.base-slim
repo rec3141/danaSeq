@@ -90,6 +90,24 @@ RUN /opt/conda/envs/dana-mag-pathviz/bin/pip install --no-deps KEGGDecoder && \
         /opt/conda/envs/dana-mag-pathviz/share/minpath && \
     chmod +x /opt/conda/envs/dana-mag-pathviz/share/minpath/MinPath.py
 
+# 10. Standalone envs the merged ones do not cover. Their modules name their
+# own conda env (dana-mag-vamb etc.), and a container run ignores conda, so
+# each needs its env and a dana-tools wrapper here. COMEBin comes from the
+# bioconda package, which pins its full dependency set (checkm-genome,
+# biolib, atomicwrites, tensorboard, ...); it is built before the CheckM stub
+# below is removed. GTDB-Tk is 2.4.1, the first release that reads r226.
+COPY envs/vamb.yml envs/binette.yml envs/gtdbtk.yml envs/comebin-cpu.yml /tmp/envs-standalone/
+RUN --mount=type=cache,target=/opt/conda/pkgs \
+    for e in vamb binette gtdbtk; do \
+        mamba env create -y -p /opt/conda/envs/dana-mag-$e -f /tmp/envs-standalone/$e.yml || exit 1; \
+    done \
+    && mamba env create -y -p /opt/conda/envs/dana-mag-comebin -f /tmp/envs-standalone/comebin-cpu.yml \
+    && test -x /opt/conda/envs/dana-mag-vamb/bin/vamb \
+    && test -x /opt/conda/envs/dana-mag-binette/bin/binette \
+    && test -x /opt/conda/envs/dana-mag-gtdbtk/bin/gtdbtk \
+    && test -x /opt/conda/envs/dana-mag-comebin/bin/run_comebin.sh \
+    && rm -rf /tmp/envs-standalone
+
 # Remove CheckM sentinel stub
 ENV CHECKM_DATA_DIR=
 RUN rm -rf /opt/checkm_data_stub
@@ -122,7 +140,7 @@ RUN mkdir -p /usr/local/bin/dana-tools \
     done \
     # --- binning env ---
     && for tool in metabat2 run_MaxBin.pl DAS_Tool jgi_summarize_bam_contig_depths \
-                   SemiBin2 LorBin run_comebin.sh gen_cov_file.sh; do \
+                   SemiBin2 LorBin; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-binning/bin:$PATH\nexec /opt/conda/envs/dana-mag-binning/bin/%s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
@@ -177,7 +195,18 @@ RUN mkdir -p /usr/local/bin/dana-tools \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-pathviz/bin:$PATH\nexec /opt/conda/envs/dana-mag-pathviz/bin/%s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    # --- standalone envs: env:tool ---
+    && for pair in vamb:vamb binette:binette gtdbtk:gtdbtk comebin:gen_cov_file.sh; do \
+        env="${pair%%:*}"; tool="${pair#*:}"; \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-%s/bin:$PATH\nexec /opt/conda/envs/dana-mag-%s/bin/%s "$@"\n' "$env" "$env" "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done
+
+# COMEBin resolves -a with realpath and writes beside the resolved assembly,
+# a read-only mount in a pipeline run; this wrapper copies it in first.
+COPY docker/run_comebin.sh /usr/local/bin/dana-tools/run_comebin.sh
 
 ENV PATH="/usr/local/bin/dana-tools:${PATH}"
 
