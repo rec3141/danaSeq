@@ -23,9 +23,14 @@ process MAP_READS {
     // the node, they exhausted 750 GB between them, and samtools sort -- the
     // last stage to allocate -- died with exit 1. 116 task failures across 39
     // of 276 samples, each retried once and then silently ignored.
+    //
+    // batch*10+16 alone (56 GB) had no headroom: 276 marine tasks on grex peaked
+    // at 44-57 GB (median 51), so the largest samples overran their declaration,
+    // and the freshwater metaMDBG run still lost 41 of 232 samples to 115 OOM
+    // kills. 1.25x puts the 4 Gbp-batch case at 70 GB.
     memory { def refGb  = (assembly.size() / (1024L**3)) as double
              def batch  = Math.min(refGb, 4.0d)          // minimap2 -I default
-             def needed = Math.ceil(batch * 10.0d + 16.0d) as int
+             def needed = Math.ceil((batch * 10.0d + 16.0d) * 1.25d) as int
              (Math.max(needed, 24) * task.attempt).GB }
     conda "${projectDir}/conda-envs/dana-mag-assembly"
     publishDir "${params.outdir}/mapping", mode: 'copy', enabled: !params.store_dir, pattern: '*.{bam,bai}'
