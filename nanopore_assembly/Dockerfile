@@ -34,8 +34,7 @@ ARG GIT_REF=unknown
 ARG BUILD_DATE=unknown
 # Which base this leaf was actually built on. The source commit alone does not
 # identify an image: a leaf rebuilt over an unchanged base and the base's own
-# chained rebuild are different images from the same commit, and telling them
-# apart is exactly what went wrong on 2026-09-20 and 2026-09-22.
+# chained rebuild are different images from the same commit.
 ARG BASE_DIGEST=unknown
 ENV DANASEQ_GIT_SHA=${GIT_SHA} \
     DANASEQ_GIT_REF=${GIT_REF} \

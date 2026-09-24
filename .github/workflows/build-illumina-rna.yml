@@ -90,10 +90,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # The pipeline is only compiled when Nextflow parses it, which until now
-      # first happened on a cluster, at a node allocation. A Groovy syntax error
-      # in a module therefore shipped as :latest, the clusters auto-pulled it,
-      # and the run died in 11 seconds having submitted nothing. The image's
+      # Nextflow compiles the pipeline only when it parses it, so without this a
+      # Groovy syntax error would first surface on a cluster, after a node
+      # allocation, in an image the clusters had already auto-pulled. The image's
       # default CMD is `run /pipeline/main.nf --help`, so this is the whole
       # check. Production sets the legacy parser; match it or the test passes on
       # a grammar the runs do not use.
@@ -106,8 +105,8 @@ jobs:
       # image that passed, rather than on one that cannot start.
       # Only promote if the base we built on is still current. Otherwise this is
       # the stale-base run of a commit that also changed Dockerfile.base, and
-      # publishing it would ship a new git SHA over old base contents -- the
-      # failure seen on 2026-09-20 and 2026-09-22. The chained build promotes.
+      # publishing it would ship a new git SHA over old base contents. The
+      # chained build promotes.
       - name: Promote to latest
         id: promote
         run: |

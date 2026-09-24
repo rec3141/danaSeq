@@ -214,10 +214,9 @@ workflow {
         log.info "Found ${all_pairs.size()} FASTQ files across ${barcode_dirs.size()} barcodes"
         // A barcode that contributes no file is dropped by groupTuple with no
         // error, so it is missing from both the assembly and the depth matrix.
-        // The barcode-directory count above stays correct either way, which is
-        // what makes this invisible: on 2026-09-20 a freshwater run assembled
-        // 223 of 243 samples because the input symlinks for 20 barcodes still
-        // named per-chunk files that had since been concatenated.
+        // The barcode-directory count above stays correct either way, so warn
+        // explicitly; stale symlinks to renamed or concatenated files are the
+        // usual cause.
         if (empty_barcodes) {
             log.warn "${empty_barcodes.size()} barcode director(ies) contain no *.fastq.gz and are ABSENT from the assembly and the depth matrix."
             log.warn "  A dangling symlink farm is the usual cause (targets renamed, moved or concatenated)."
@@ -251,11 +250,8 @@ workflow {
     // emits in CONCAT_READS *completion* order, which varies run to run, and
     // fastq_filter's single-pass --target_bases mode decides accept/reject on
     // arrival against a threshold built only from the reads seen so far. It is
-    // therefore lenient early and strict late: two groups with identical
-    // length and quality distributions keep 1518 vs 501 reads purely by
-    // position in the stream. Unsorted input made two production co-assemblies
-    // of the same data select ~50% different reads at identical base totals
-    // (rec3141/Flye issue #1).
+    // therefore lenient early and strict late, and reads with identical length
+    // and quality are kept or dropped by their position in the stream.
     //
     // Largest file first, with the name as tiebreak so equal sizes cannot
     // reintroduce the nondeterminism. This pins the selection; it does not make

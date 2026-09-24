@@ -49,11 +49,9 @@ static void io_check(bool ok, const char* operation) {
     if (!ok) throw std::runtime_error(std::string(operation) + ": " + strerror(errno));
 }
 
-// A read failure has to say enough to diagnose itself from a log alone. On
-// 2026-09-22 two co-assemblies stopped mid-stream and the only evidence was
-// zlib's own text, "<fd:0>: No data available" -- no zlib code, no errno, and
-// no indication of how far the stream had got, which left the cause open after
-// a full replay. Report the numeric codes and the progress so far.
+// A read failure has to say enough to diagnose itself from a log alone:
+// zlib's own text carries no zlib code, no errno and no position, so report
+// the numeric codes and the progress so far.
 static std::string stream_failure(const char* stage, const char* name,
                                   const char* zmsg, int zerr, int saved_errno,
                                   long long reads, long long bases) {
@@ -292,8 +290,8 @@ static int run_main(int argc, char** argv) {
     // Flye documents --nano-hq for reads under ~5% error. --min_mean_q is
     // filtlong's mean per-base accuracy, mean(1 - 10^(-Q/10)) * 100, so a floor
     // of 95 is exactly "mean error at most 5%". This is the error-based measure;
-    // the arithmetic mean of Phred scores reads far higher (Q38.8 against Q18.7
-    // on the marine co-assembly) and cannot be used for this.
+    // the arithmetic mean of Phred scores reads far higher and cannot be used
+    // for this.
     if (nano_hq) nano_hq_check = true;
     if (nano_hq) {
         if (min_mean_q < 95.0) min_mean_q = 95.0;
@@ -678,9 +676,8 @@ static int run_main(int argc, char** argv) {
             }
         }
 
-        // Report a close failure as a close failure. This block used to throw
-        // the *read* message whichever of the two had failed, so a bad close
-        // would be reported as a bad read.
+        // Report a read failure and a close failure separately, each with its
+        // own message, so a bad close is not reported as a bad read.
         int input_error = Z_OK;
         const char* input_message = gzerror(gz, &input_error);
         std::string message = input_message ? input_message : "input read failure";

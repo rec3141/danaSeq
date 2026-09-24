@@ -35,8 +35,8 @@ process MAP_READS {
     script:
     """
     # Refuse to map against an empty-reference fasta. A header-only fasta would
-    # produce a 0-@SQ BAM that minimap2/samtools still exit 0 on (the original
-    # silent-failure mode), with downstream coverm panicking on the result.
+    # produce a 0-@SQ BAM that minimap2/samtools still exit 0 on, with
+    # downstream coverm panicking on the result.
     if [ ! -s "${assembly}" ]; then
         echo "[ERROR] Reference assembly is empty: ${assembly}" >&2
         exit 1
@@ -55,8 +55,7 @@ process MAP_READS {
     # index. WITHOUT --split-prefix, minimap2 silently drops @SQ records from the
     # SAM output ("For a multi-part index, no \\@SQ lines will be outputted"),
     # samtools view then errors with "no SQ lines present", and the resulting
-    # BAM has 0 references / 0 reads while exiting 0 — the exact silent failure
-    # that wasted 6.5 days of the original myloasm run. Always pass it.
+    # BAM has 0 references / 0 reads while exiting 0. Always pass it.
     minimap2 -a -x map-ont --secondary=no -t ${task.cpus} \\
         --split-prefix "${meta.id}_split" \\
         "${assembly}" "${fastq}" \\

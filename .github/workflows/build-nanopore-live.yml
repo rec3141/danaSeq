@@ -78,10 +78,9 @@ jobs:
             GIT_REF=${{ github.ref_name }}
             BUILD_DATE=${{ steps.stamp.outputs.build_date }}
 
-      # The pipeline is only compiled when Nextflow parses it, which until now
-      # first happened on a cluster, at a node allocation. A Groovy syntax error
-      # in a module therefore shipped as :latest, the clusters auto-pulled it,
-      # and the run died in 11 seconds having submitted nothing. The image's
+      # Nextflow compiles the pipeline only when it parses it, so without this a
+      # Groovy syntax error would first surface on a cluster, after a node
+      # allocation, in an image the clusters had already auto-pulled. The image's
       # default CMD is `run /pipeline/main.nf --help`, so this is the whole
       # check. Production sets the legacy parser; match it or the test passes on
       # a grammar the runs do not use.

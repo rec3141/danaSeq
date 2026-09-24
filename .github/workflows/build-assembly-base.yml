@@ -1,10 +1,9 @@
 name: Build assembly base image
 
 on:
-  # Editing Dockerfile.base or the env specs used to trigger only the leaf
-  # builds (they match nanopore_assembly/**), which rebuild a thin layer on top
-  # of an unchanged base — so the edit published a new :latest that did not
-  # contain it. A Flye pin bump shipped that way on 2026-09-20.
+  # Base inputs must trigger this build. The leaf builds also match
+  # nanopore_assembly/**, but they only add a thin layer over the existing
+  # base, so on their own they would publish an image without the change.
   push:
     branches: [main]
     paths:

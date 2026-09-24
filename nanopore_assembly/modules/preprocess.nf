@@ -139,12 +139,9 @@ process PREPARE_READS {
     }
     """
     # Nextflow runs this with `bash -ue`, which does NOT include pipefail, so
-    # the exit status of `... | fastq_filter | writeReads` is writeReads'.
-    # fastq_filter aborted mid-stream on both grex co-assemblies on 2026-09-22
-    # and this task still recorded .exitcode 0: marine reached Flye with 134 Gbp
-    # of ~338, freshwater with 65 Gbp of ~400, and the freshwater run went on to
-    # complete every downstream stage and report success on a 2.63 Gbp assembly.
-    # A filter that dies must fail the task.
+    # the exit status of `... | fastq_filter | writeReads` is writeReads', and a
+    # filter that dies mid-stream would pass a truncated read set downstream as
+    # success. A filter that dies must fail the task.
     set -o pipefail
 
     # Read map, if asked for: one file per sample, keyed on the staged filename.
@@ -186,15 +183,10 @@ process PREPARE_READS {
         done
     fi
 
-    # Hand fastq_filter the files themselves rather than a pipe. Streaming them
-    # through `for f; do cat "\$f"; done | fastq_filter` failed on three of
-    # three grex co-assembly attempts on 2026-09-22/23: zlib's read() on the
-    # pipe returned ENODATA (zlib=-1 errno=61) partway through, at a different
-    # point each time on identical input, while a standalone replay of the same
-    # 276 files read all 338.1 Gbp cleanly. A pipe read cannot return ENODATA
-    # under POSIX, so whatever is happening is at the pipe layer inside the
-    # container, and opening regular files sidesteps it entirely. It also gives
-    # fastq_filter real file sizes, so its input estimate works again.
+    # Hand fastq_filter the files themselves rather than a pipe. Reading a
+    # concatenating pipe inside the container can fail partway with ENODATA,
+    # which a pipe read cannot return under POSIX; regular files avoid it and
+    # give fastq_filter real file sizes for its input estimate.
     #
     # FASTA inputs (.fa/.fasta[.gz], e.g. pre-QC'd reads from nanopore_live's
     # fa/ store) still need converting to FASTQ with a placeholder Q40 quality,
@@ -230,10 +222,8 @@ process PREPARE_READS {
 
     # 1. Did the whole read set arrive? Compare the bases fastq_filter read
     #    against the gzip it was given, which holds whatever the filtering does:
-    #    ONT FASTQ runs ~1 base per gzipped byte (338.1 Gbp from 330.1 GB on
-    #    marine) and FASTA runs higher. On 2026-09-22 truncated streams reached
-    #    Flye as 134 Gbp of 338 and 65 of 327, and the freshwater run went on
-    #    to assemble 2.63 Gbp and report success.
+    #    ONT FASTQ runs ~1 base per gzipped byte and FASTA runs higher. A
+    #    truncated stream otherwise reaches Flye and still reports success.
     IN_GZ=\$(stat -Lc%s ${fastqs} 2>/dev/null | awk '{s+=\$1} END{print s+0}')
     IN_BASES=\$(awk '/Input bases:/ {print \$NF}' filter.log)
     if [ -n "\$IN_BASES" ] && awk -v b="\$IN_BASES" -v g="\$IN_GZ" 'BEGIN{exit !(b < 0.6*g)}'; then
@@ -284,11 +274,8 @@ process REMOVE_HUMAN {
     set -o pipefail
 
     # Find the human reads, then drop them -- rather than pushing every read
-    # through SAM. The old pipe emitted a SAM record for all ~97 M reads and
-    # ran `samtools view -b` twice, each on one core, so ~700 GB went through
-    # single-threaded BGZF deflate twice: on 2026-09-23 two samtools pinned at
-    # a core each while minimap2 sat blocked on its output at ~6-8 of 128
-    # threads, and the stage took 2.8 h at 338 Gbp.
+    # through SAM and single-threaded BGZF compression, which left minimap2
+    # blocked on its output at a few of its threads.
     #
     # PAF prints a line only for reads that hit the reference, which for
     # environmental samples is a sliver of the input. -c keeps base-level

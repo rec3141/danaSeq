@@ -34,45 +34,24 @@ COPY envs/ /tmp/envs/
 # Flye, metaMDBG, myloasm, minimap2, samtools, CoverM, BBMap, filtlong, Nextflow
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-assembly -f /tmp/envs/merged/assembly.yml
-# Flye 2.9.6 with the repeat-graph fixes from mikolmogorov/Flye#795 (pairhash
-# collisions made "Initializing edges" quadratic and single-threaded; also
-# parallelized) and #797 (superbubble search copied the looped-edge set per
-# candidate; haplotype masking now parallel), the quadratic
-# findHeterozygousLoops scan fix (#798/#799) and the repeat-stage
-# reproducibility work (#640/#801, byte-identical output run to run and
-# across thread counts), merged on the rec3141/Flye
-# "flye" branch and pinned by commit. Builds flye-modules from source over the
-# bioconda 2.9.6 install. Drop this line once the fixes ship in bioconda.
+# Flye 2.9.6 from the rec3141/Flye "flye" branch, pinned by commit, built over
+# the bioconda 2.9.6 install. Drop this once the fixes ship in bioconda. The
+# fork carries:
+#   - repeat-graph speedups: pairhash collisions in "Initializing edges"
+#     (mikolmogorov/Flye#795), per-candidate set copies in the superbubble
+#     search (#797), the quadratic findHeterozygousLoops scan (#798/#799)
+#   - reproducibility: byte-identical output run to run and across thread
+#     counts (#640/#801), and corrections for assembly depending on read
+#     order (tip pruning by strand, chimera verdicts from an ID-ordered
+#     overlap prefix, equal-length contained disjointigs deleting each other,
+#     asymmetric chimera coverage windows)
+#   - polishing/consensus speedups: samtools from PATH, bam index written
+#     during sorting, region queries batched by bases so the bam header is
+#     parsed once per batch
 #
-# 2ec1d6eb additionally carries three polishing/consensus speedups, aimed at
-# the two stages that dominate a metagenome run (assembly-stage consensus
-# 11h36m, polish 11h42m on an 8.9 Gbp / 1.18M-contig co-assembly):
-#   - prefer a samtools from PATH over the vendored 1.9
-#   - write the bam index during sorting instead of a second pass (that pass
-#     was 5h53m), and stop hardcoding sort/index threads to 4
-#   - batch region queries so the bam header is parsed once per batch rather
-#     than once per contig (measured 107x on a 1.33M-reference bam)
-#
-# 15c9eb53 adds the bases-budget region batching and four order-sensitivity
-# corrections. A controlled A/B of 2ec1d6eb against the bases-budget build on
-# one marine co-assembly, each stage given byte-identical input, measured
-# consensus 4989s -> 4116s (-17.5%) and polish 22018s -> 18034s (-18.1%) at
-# unchanged peak RAM. The corrections fix defects that made assembly depend on
-# read order, all of which predate this fork:
-#   - low-coverage tip pruning checked only one physical end of an arbitrarily
-#     oriented path, so a tip was kept or pruned by strand ID
-#   - seed screening cached a chimera verdict from a capped, input-ID-ordered
-#     100-overlap prefix, flipping the verdict when the same reads were reordered
-#   - equal-length contained disjointigs deleted each other, losing both
-#   - chimera coverage windows rounded asymmetrically by strand, first caller wins
-# Validated serial-deterministic: two 1-thread replicates of each build are
-# byte-identical, and the corrections add 0.20% bases / 0.55% sequences.
-#
-# The commit is an ARG so the pip install and the label below cannot disagree.
-# On 2026-09-20 and again on 2026-09-22 an image reported a new DANASEQ_GIT_SHA
-# while still carrying the previous Flye, and the only way to tell was to run
-# the container and read pip's direct_url.json. danaseq.flye.commit is derived
-# from the same ARG that installs it, so reading the label is now sufficient.
+# The commit is an ARG so the pip install and the danaseq.flye.commit label
+# below come from the same value; reading the label is enough to know which
+# Flye an image carries.
 ARG FLYE_COMMIT=15c9eb53
 RUN /opt/conda/envs/dana-mag-assembly/bin/pip install --force-reinstall --no-deps \
     "flye @ git+https://github.com/rec3141/Flye.git@${FLYE_COMMIT}" \
