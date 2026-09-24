@@ -1,0 +1,8 @@
+{
+  "image": "danaseq-illumina-amplicon",
+  "digest": "sha256:f1cd4244e22db59aa44b48a32f2eee7d7d1c50b044403d9fe90f3d634e3cb304",
+  "commit": "93a513eaf6e7b55e6981965b975f8ebeaaa58e0b",
+  "built": "2026-09-24T23:07:38Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-illumina-amplicon:sif-93a513eaf6e7b55e6981965b975f8ebeaaa58e0b",
+  "sif_sha256": "a77b4283f2dc71fc62b87ae760701ac62054a5f1c1fe81874e226c8cafd67e14"
+}
