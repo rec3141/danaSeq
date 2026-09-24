@@ -53,6 +53,37 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# COMEBin: the base image has its dependencies in dana-mag-binning and a
+# dana-tools wrapper that execs run_comebin.sh from that env, but not the code.
+# Install it the way install.sh does: the rec3141 fork under the env's share/,
+# a run_comebin.sh that resolves -a/-o/-p against the caller's directory before
+# changing into the source tree, and gen_cov_file.sh on PATH.
+ARG COMEBIN_COMMIT=8fab9d73268d134b2d33b3d9ea5853a327a5ed70
+RUN E=/opt/conda/envs/dana-mag-binning \
+    && git init -q "$E/share/COMEBin" \
+    && git -C "$E/share/COMEBin" fetch -q --depth 1 https://github.com/rec3141/COMEBin.git "${COMEBIN_COMMIT}" \
+    && git -C "$E/share/COMEBin" checkout -q FETCH_HEAD \
+    && rm -rf "$E/share/COMEBin/.git" \
+    && printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'COMEBIN_ROOT="$(dirname "$(dirname "$(readlink -f "$0")")")/share/COMEBin/COMEBin"' \
+        'ORIG_CWD="$(pwd)"' \
+        'RESOLVED_ARGS=()' \
+        'while (( $# )); do' \
+        '    case "$1" in' \
+        '        -a|-o|-p) RESOLVED_ARGS+=("$1"); shift' \
+        '                  RESOLVED_ARGS+=("$(cd "${ORIG_CWD}" && realpath -m "$1")"); shift ;;' \
+        '        *) RESOLVED_ARGS+=("$1"); shift ;;' \
+        '    esac' \
+        'done' \
+        'cd "${COMEBIN_ROOT}" && exec bash run_comebin.sh "${RESOLVED_ARGS[@]}"' \
+        > "$E/bin/run_comebin.sh" \
+    && chmod +x "$E/bin/run_comebin.sh" \
+    && test -f "$E/share/COMEBin/COMEBin/run_comebin.sh" \
+    && ln -sf "$E/share/COMEBin/COMEBin/scripts/gen_cov_file.sh" "$E/bin/gen_cov_file.sh" \
+    && chmod +x "$E/share/COMEBin/COMEBin/scripts/gen_cov_file.sh" \
+    && chmod -R a+rX "$E/share/COMEBin"
+
 COPY . /pipeline/
 
 # Pre-install the viz app's node_modules, so a later `vite build` needs nothing

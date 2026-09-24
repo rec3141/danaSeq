@@ -289,8 +289,16 @@ process KRAKEN2_CLASSIFY {
         exit 0
     fi
 
-    if [ ! -f "\$nodes" ] || [ ! -f "\$names" ]; then
-        echo "[ERROR] nodes.dmp or names.dmp not found in ${db_dir}" >&2
+    # Taxonomy for lineage strings: NCBI nodes.dmp + names.dmp, or the
+    # ktaxonomy.tsv that the prebuilt genome-idx databases ship instead.
+    if [ -f "\$nodes" ] && [ -f "\$names" ]; then
+        taxfmt=dmp
+    elif [ -f "${db_dir}/ktaxonomy.tsv" ]; then
+        taxfmt=ktax
+        nodes="${db_dir}/ktaxonomy.tsv"
+        names="${db_dir}/ktaxonomy.tsv"
+    else
+        echo "[ERROR] no taxonomy in ${db_dir}: need nodes.dmp + names.dmp or ktaxonomy.tsv" >&2
         printf 'contig_id\\tstatus\\ttaxon_id\\tname\\tlineage\\n' > kraken2_contigs.tsv
         printf '' > kraken2_report.txt
         exit 0
@@ -318,34 +326,44 @@ process KRAKEN2_CLASSIFY {
     fi
 
     # Post-process: build full GTDB-style lineage strings from nodes.dmp + names.dmp
-    python3 - kraken2_raw.tsv "\$nodes" "\$names" <<'PYEOF'
+    python3 - kraken2_raw.tsv "\$taxfmt" "\$nodes" "\$names" <<'PYEOF'
 import sys
 from collections import defaultdict
 
-kraken2_path, nodes_path, names_path = sys.argv[1], sys.argv[2], sys.argv[3]
+kraken2_path, taxfmt, nodes_path, names_path = sys.argv[1:5]
 
-# Parse NCBI taxonomy nodes.dmp: taxid -> (parent_taxid, rank)
 parent = {}
 rank = {}
-with open(nodes_path) as f:
-    for line in f:
-        parts = line.split('|')
-        tid = int(parts[0].strip())
-        pid = int(parts[1].strip())
-        r = parts[2].strip()
-        parent[tid] = pid
-        rank[tid] = r
-
-# Parse names.dmp: taxid -> scientific name
 sci_name = {}
-with open(names_path) as f:
-    for line in f:
-        parts = line.split('|')
-        tid = int(parts[0].strip())
-        name = parts[1].strip()
-        name_class = parts[3].strip()
-        if name_class == 'scientific name':
-            sci_name[tid] = name
+if taxfmt == 'ktax':
+    # ktaxonomy.tsv: taxid | parent | rank code | depth | name. Codes are
+    # single letters (D, P, C, O, F, G, S); a digit suffix marks an
+    # intermediate rank below them, which the lineage skips.
+    code_rank = {'D': 'superkingdom', 'P': 'phylum', 'C': 'class', 'O': 'order',
+                 'F': 'family', 'G': 'genus', 'S': 'species'}
+    with open(nodes_path) as f:
+        for line in f:
+            parts = [p.strip() for p in line.split('|')]
+            if len(parts) < 5:
+                continue
+            tid = int(parts[0])
+            parent[tid] = int(parts[1])
+            rank[tid] = code_rank.get(parts[2], parts[2])
+            sci_name[tid] = parts[4]
+else:
+    # NCBI nodes.dmp: taxid -> (parent_taxid, rank)
+    with open(nodes_path) as f:
+        for line in f:
+            parts = line.split('|')
+            tid = int(parts[0].strip())
+            parent[tid] = int(parts[1].strip())
+            rank[tid] = parts[2].strip()
+    # names.dmp: taxid -> scientific name
+    with open(names_path) as f:
+        for line in f:
+            parts = line.split('|')
+            if parts[3].strip() == 'scientific name':
+                sci_name[int(parts[0].strip())] = parts[1].strip()
 
 # NCBI rank -> GTDB prefix
 rank_prefix = {
