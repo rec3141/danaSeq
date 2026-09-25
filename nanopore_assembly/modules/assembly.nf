@@ -226,11 +226,15 @@ process ASSEMBLY_METAMDBG {
         --in-ont "\$READS" \\
         --threads ${task.cpus}
 
-    # Generate GFA (separate metaMDBG command)
-    # Find the highest available k value for the most resolved graph
-    MAX_K=\$(metaMDBG gfa --assembly-dir metamdbg_out --k 0 2>&1 | awk '/^\\t- /{k=\$2} END{print k}')
-    if [ -n "\$MAX_K" ]; then
-        metaMDBG gfa --assembly-dir metamdbg_out --k "\$MAX_K" --threads ${task.cpus} || true
+    # Optional base-space assembly graph (--metamdbg_gfa). `metaMDBG gfa`
+    # realigns every read to the graph, so it is off by default; the graph
+    # published below comes from `metaMDBG asm` and does not need it.
+    if [ "${params.metamdbg_gfa}" = "true" ]; then
+        # Highest available k gives the most resolved graph
+        MAX_K=\$(metaMDBG gfa --assembly-dir metamdbg_out --k 0 2>&1 | awk '/^\\t- /{k=\$2} END{print k}')
+        if [ -n "\$MAX_K" ]; then
+            metaMDBG gfa --assembly-dir metamdbg_out --k "\$MAX_K" --threads ${task.cpus} || true
+        fi
     fi
 
     # Validate assembly — metaMDBG outputs contigs.fasta.gz

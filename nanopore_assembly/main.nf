@@ -44,6 +44,8 @@ def helpMessage() {
 
     Assembly:
       --assembler STR    Assembler to use: 'flye', 'metamdbg', or 'myloasm' [default: flye]
+      --metamdbg_gfa     Also build metaMDBG's base-space assembly graph (realigns all
+                         reads; about as slow as the assembly) [default: false]
       --read_type STR    Flye read mode, REQUIRED: nano-raw | nano-hq | nano-corr
                          (Flye: nano-hq for SUP reads under ~5% error, nano-raw
                          for older reads up to ~20%). 'auto' guesses from the
