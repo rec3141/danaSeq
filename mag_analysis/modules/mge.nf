@@ -6,7 +6,8 @@
 //   CHECKV_QUALITY     — CheckV viral QA: AAI + HMM completeness, host trimming.
 //                         Requires geNomad virus FASTA as input.
 //   INTEGRONFINDER     — Integron detection: integrase + attC/attI + gene cassettes.
-//                         Runs on assembly; no annotation dependency.
+//                         Runs on assembly; no annotation dependency. A subworkflow:
+//                         the assembly is split into chunks run as separate tasks.
 //   ISLANDPATH_DIMOB   — Genomic island detection via dinucleotide bias + mobility
 //                         gene HMMs. Requires annotation GFF + FAA.
 //   MACSYFINDER        — Secretion systems (TXSScan) + conjugation (CONJScan).
@@ -157,21 +158,55 @@ process CHECKV_QUALITY {
     """
 }
 
-process INTEGRONFINDER {
+// IntegronFinder writes a .integrons and a .summary for every replicon into one
+// directory and merges them only when the whole input is done, so a single run
+// peaks at two files per contig: ~3.1M on a 1.55M-contig co-assembly (#69).
+// The assembly is therefore split into chunks of params.integron_chunk_size
+// contigs, each chunk is its own task that deletes its per-contig files before
+// it ends, and at most params.integron_max_forks chunks run at once. The peak
+// is about 2 x chunk size x max forks files, whatever the assembly's size.
+
+process INTEGRONFINDER_SPLIT {
     tag "integronfinder"
-    label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-mag-genomic"
-    publishDir "${params.outdir}/mge/integrons", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/mge/integrons" : null
+    label 'process_low'
 
     input:
     path(assembly)
 
     output:
-    path("integrons.tsv"),     emit: integrons
-    path("summary.tsv"),       emit: summary
+    path("chunks/chunk_*.fa"), emit: chunks
 
     script:
+    """
+    mkdir -p chunks
+    awk -v n=${params.integron_chunk_size} '
+        /^>/ { if (c % n == 0) { if (out) close(out); out = sprintf("chunks/chunk_%05d.fa", ++k) } c++ }
+        out  { print > out }
+    ' "${assembly}"
+    n_contigs=\$(grep -c '^>' "${assembly}" || true)
+    if [ "\${n_contigs:-0}" -lt 1 ]; then
+        echo "[ERROR] ${assembly} contains no contigs" >&2
+        exit 1
+    fi
+    echo "[INFO] \${n_contigs} contigs in \$(ls chunks | wc -l) chunks of up to ${params.integron_chunk_size}"
+    """
+}
+
+process INTEGRONFINDER_CHUNK {
+    tag "${chunk.baseName}"
+    label 'process_low'
+    maxForks params.integron_max_forks
+    conda "${projectDir}/conda-envs/dana-mag-genomic"
+
+    input:
+    path(chunk)
+
+    output:
+    path("${chunk.baseName}.integrons.tsv"), emit: integrons
+    path("${chunk.baseName}.summary.tsv"),   emit: summary
+
+    script:
+    def base = chunk.baseName
     """
     # IntegronFinder: detect integrons (integrase + attC/attI sites + gene cassettes)
     # --local-max:     thorough local detection of attC sites (more sensitive)
@@ -179,8 +214,6 @@ process INTEGRONFINDER {
     # --promoter-attI: also search for Pc promoter and attI recombination sites
     # --linear:        contigs from Flye assembly are linear, not circular replicons
     # --cpu:           threading for INFERNAL (cmsearch) and HMMER (hmmsearch)
-
-    set +e
     integron_finder \\
         --local-max \\
         --func-annot \\
@@ -188,35 +221,102 @@ process INTEGRONFINDER {
         --linear \\
         --cpu ${task.cpus} \\
         --outdir integron_out \\
-        "${assembly}"
-    if_exit=\$?
-    set -e
+        "${chunk}"
 
-    # IntegronFinder output directory: integron_out/Results_Integron_Finder_<basename>/
-    input_base=\$(basename "${assembly}" | sed 's/\\.[^.]*\$//')
-    results_dir="integron_out/Results_Integron_Finder_\${input_base}"
+    results_dir="integron_out/Results_Integron_Finder_${base}"
+    cp "\${results_dir}/${base}.integrons" ${base}.integrons.tsv
+    cp "\${results_dir}/${base}.summary"   ${base}.summary.tsv
 
-    if [ \$if_exit -ne 0 ] || [ ! -d "\${results_dir}" ]; then
-        echo "[WARNING] IntegronFinder exited with code \$if_exit" >&2
-        printf 'ID_integron\\tID_replicon\\telement\\tpos_beg\\tpos_end\\tstrand\\tevalue\\ttype_elt\\tmodel\\ttype\\tannotation\\n' > integrons.tsv
-        printf 'ID_replicon\\tComplete\\tIn0\\tCALIN\\n' > summary.tsv
-        exit 0
+    # IntegronFinder writes one summary row per replicon; fewer means it did
+    # not get through the chunk.
+    n_contigs=\$(grep -c '^>' "${chunk}")
+    n_rows=\$(grep -v -e '^#' -e '^ID_replicon' ${base}.summary.tsv | grep -c . || true)
+    if [ "\${n_rows}" -ne "\${n_contigs}" ]; then
+        echo "[ERROR] ${base}: \${n_rows} summary rows for \${n_contigs} contigs" >&2
+        exit 1
     fi
 
-    # Main results: per-element annotations (integrase, attC, attI, gene cassettes)
-    if [ -f "\${results_dir}/\${input_base}.integrons" ]; then
-        cp "\${results_dir}/\${input_base}.integrons" integrons.tsv
-    else
-        printf 'ID_integron\\tID_replicon\\telement\\tpos_beg\\tpos_end\\tstrand\\tevalue\\ttype_elt\\tmodel\\ttype\\tannotation\\n' > integrons.tsv
-    fi
-
-    # Summary: counts of complete integrons, In0, and CALIN per replicon
-    if [ -f "\${results_dir}/\${input_base}.summary" ]; then
-        cp "\${results_dir}/\${input_base}.summary" summary.tsv
-    else
-        printf 'ID_replicon\\tComplete\\tIn0\\tCALIN\\n' > summary.tsv
-    fi
+    # The per-contig files this bounds (#69).
+    rm -rf integron_out
     """
+}
+
+process INTEGRONFINDER_MERGE {
+    tag "integronfinder"
+    label 'process_low'
+    publishDir "${params.outdir}/mge/integrons", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/mge/integrons" : null
+
+    input:
+    path(integrons, stageAs: 'chunks/*')
+    path(summaries, stageAs: 'chunks/*')
+    val(n_chunks)
+
+    output:
+    path("integrons.tsv"), emit: integrons
+    path("summary.tsv"),   emit: summary
+
+    script:
+    """
+    # A chunk that failed twice is ignored by the global errorStrategy, so a
+    # missing one must fail here rather than drop its contigs from the result.
+    n_int=\$(ls chunks/*.integrons.tsv | wc -l)
+    n_sum=\$(ls chunks/*.summary.tsv | wc -l)
+    if [ "\${n_int}" -ne ${n_chunks} ] || [ "\${n_sum}" -ne ${n_chunks} ]; then
+        echo "[ERROR] expected ${n_chunks} chunks, got \${n_int} integron and \${n_sum} summary tables" >&2
+        exit 1
+    fi
+
+    # One header per table, comment lines dropped ("# No Integron found" is the
+    # whole file for a chunk without integrons). Chunk order is contig order.
+    merge() {  # \$1=first header field  \$2=header to use if no chunk has one
+        awk -v key="\$1" -v fallback="\$2" '
+            /^#/ { next }
+            \$1 == key { if (!hdr) { hdr = \$0; print } next }
+            NF { if (!hdr) { hdr = fallback; print hdr } print }
+            END { if (!hdr) print fallback }
+        ' FS='\\t' "\${@:3}"
+    }
+    merge ID_integron \\
+        "\$(printf 'ID_integron\\tID_replicon\\telement\\tpos_beg\\tpos_end\\tstrand\\tevalue\\ttype_elt\\tannotation\\tmodel\\ttype\\tdefault\\tdistance_2attC\\tconsidered_topology')" \\
+        \$(ls chunks/*.integrons.tsv | sort) > integrons.tsv
+    merge ID_replicon \\
+        "\$(printf 'ID_replicon\\tCALIN\\tcomplete\\tIn0\\ttopology\\tsize')" \\
+        \$(ls chunks/*.summary.tsv | sort) > summary.tsv
+
+    echo "[INFO] \$(grep -vc '^ID_replicon' summary.tsv) contigs, \$(awk -F'\\t' 'NR > 1 { print \$2 }' integrons.tsv | sort -u | grep -c . || true) with integron elements"
+    """
+}
+
+workflow INTEGRONFINDER {
+    take:
+    assembly
+
+    main:
+    def stored = params.store_dir ? file("${params.store_dir}/mge/integrons") : null
+    if (stored && stored.resolve('integrons.tsv').exists() && stored.resolve('summary.tsv').exists()) {
+        // Store mode skips a finished process by its outputs, but a subworkflow
+        // has none of its own: without this, a resubmission would split and
+        // rerun every chunk before the merge found its outputs stored.
+        integrons = Channel.value(stored.resolve('integrons.tsv'))
+        summary   = Channel.value(stored.resolve('summary.tsv'))
+    } else {
+        INTEGRONFINDER_SPLIT(assembly)
+        chunks   = INTEGRONFINDER_SPLIT.out.chunks.flatten()
+        n_chunks = INTEGRONFINDER_SPLIT.out.chunks.map { it instanceof List ? it.size() : 1 }
+        INTEGRONFINDER_CHUNK(chunks)
+        INTEGRONFINDER_MERGE(
+            INTEGRONFINDER_CHUNK.out.integrons.collect(),
+            INTEGRONFINDER_CHUNK.out.summary.collect(),
+            n_chunks
+        )
+        integrons = INTEGRONFINDER_MERGE.out.integrons
+        summary   = INTEGRONFINDER_MERGE.out.summary
+    }
+
+    emit:
+    integrons
+    summary
 }
 
 process ISLANDPATH_DIMOB {
