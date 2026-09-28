@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         procps \
         curl \
         build-essential \
+        cmake \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -60,6 +61,22 @@ RUN /opt/conda/envs/dana-mag-assembly/bin/pip install --force-reinstall --no-dep
 # commit of the base it was actually built on.
 LABEL danaseq.flye.commit="${FLYE_COMMIT}"
 ENV DANASEQ_FLYE_COMMIT=${FLYE_COMMIT}
+
+# metaMDBG 1.4 from the rec3141/metaMDBG "danaseq" branch, pinned by commit,
+# built over the bioconda 1.4 binary (the bioconda package still provides the
+# dependencies). Drop this once the fixes ship in bioconda. The fork carries
+# the `metaMDBG gfa` speedups from GaetanBenoitDev/metaMDBG#45 (per-submap
+# locks instead of one critical section in alignReads) and #47 (parallel
+# createBaseContigs); their output is byte-identical to 1.4.
+ARG METAMDBG_COMMIT=eb769212b486359a80e2e93073743e5e92bd3d3c
+RUN curl -fsSL "https://github.com/rec3141/metaMDBG/archive/${METAMDBG_COMMIT}.tar.gz" | tar -xz -C /tmp \
+    && cmake -S "/tmp/metaMDBG-${METAMDBG_COMMIT}" -B /tmp/metaMDBG-build -DCMAKE_BUILD_TYPE=Release > /dev/null \
+    && cmake --build /tmp/metaMDBG-build -j "$(nproc)" \
+    && install -m 755 /tmp/metaMDBG-build/bin/metaMDBG /opt/conda/envs/dana-mag-assembly/bin/metaMDBG \
+    && rm -rf "/tmp/metaMDBG-${METAMDBG_COMMIT}" /tmp/metaMDBG-build \
+    && /opt/conda/envs/dana-mag-assembly/bin/metaMDBG 2>&1 | grep "Version: 1.4"
+LABEL danaseq.metamdbg.commit="${METAMDBG_COMMIT}"
+ENV DANASEQ_METAMDBG_COMMIT=${METAMDBG_COMMIT}
 
 # --- Illumina assembly envs ---
 # BBTools + FastQC + samtools + Nextflow

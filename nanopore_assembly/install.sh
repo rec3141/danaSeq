@@ -85,6 +85,24 @@ do_install() {
         'flye @ git+https://github.com/rec3141/Flye.git@15c9eb53' \
         > /dev/null 2>&1 || echo "[WARNING] patched Flye install failed; bioconda Flye 2.9.6 left in place" >&2
 
+    # metaMDBG with the `metaMDBG gfa` speedups from GaetanBenoitDev/metaMDBG#45
+    # and #47 (see Dockerfile.base), built from source over the bioconda 1.4
+    # binary. Needs cmake, g++ and zlib headers. Drop once bioconda ships them.
+    echo "[INFO] Building patched metaMDBG (GaetanBenoitDev/metaMDBG#45, #47)..."
+    local mdbg_commit=eb769212b486359a80e2e93073743e5e92bd3d3c
+    local mdbg_tmp
+    mdbg_tmp=$(mktemp -d)
+    if command -v cmake > /dev/null 2>&1 \
+        && curl -fsSL "https://github.com/rec3141/metaMDBG/archive/${mdbg_commit}.tar.gz" | tar -xz -C "${mdbg_tmp}" \
+        && cmake -S "${mdbg_tmp}/metaMDBG-${mdbg_commit}" -B "${mdbg_tmp}/build" -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1 \
+        && cmake --build "${mdbg_tmp}/build" -j "$(nproc)" > /dev/null 2>&1 \
+        && install -m 755 "${mdbg_tmp}/build/bin/metaMDBG" "${ENV_PATH}/bin/metaMDBG"; then
+        echo "[INFO] Patched metaMDBG installed"
+    else
+        echo "[WARNING] patched metaMDBG build failed (needs cmake, g++, zlib headers); bioconda metaMDBG 1.4 left in place" >&2
+    fi
+    rm -rf "${mdbg_tmp}"
+
     # Compile C binaries
     compile_binaries
 

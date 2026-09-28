@@ -68,7 +68,7 @@ Feed these into mag_analysis:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--assembler` | `flye` | `flye`, `metamdbg`, or `myloasm` |
-| `--metamdbg_gfa` | false | Also run `metaMDBG gfa` (base-space graph; realigns all reads, slow on large co-assemblies) |
+| `--metamdbg_gfa` | true | Run `metaMDBG gfa`: publishes `assembly_graph_basespace.gfa.gz` and `assembly_graph_basespace_paths.tsv` (realigns all reads; ~1 h at 32 threads for 300 Gbp) |
 | `--polish` | auto | Flye polishing (auto: true for flye, false for others) |
 | `--dedupe` | true | BBDuk deduplication before assembly |
 | `--filtlong_size` | null | Filtlong target bases (e.g. `40000000000`) |

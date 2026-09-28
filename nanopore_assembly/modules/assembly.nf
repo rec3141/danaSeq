@@ -204,8 +204,9 @@ process ASSEMBLY_METAMDBG {
     // Draft (pre-polish) outputs publish as draft_* and store separately, so they
     // cannot collide with FLYE_POLISH's assembly.fasta. The draft exists for
     // rescue/-resume, not as a final result; it is removed on success (main.nf).
+    // The base-space graph (--metamdbg_gfa) is a deliverable, so it keeps its name.
     publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir,
-               saveAs: { fn -> "draft_${fn}" }
+               saveAs: { fn -> fn.startsWith('assembly_graph_basespace') ? fn : "draft_${fn}" }
     storeDir params.store_dir ? "${params.store_dir}/assembly_draft" : null
 
     input:
@@ -215,6 +216,8 @@ process ASSEMBLY_METAMDBG {
     path("assembly.fasta"),      emit: assembly
     path("assembly_info.txt"),   emit: info
     path("assembly_graph.gfa"),  emit: graph
+    path("assembly_graph_basespace.gfa.gz"),    optional: true, emit: graph_basespace
+    path("assembly_graph_basespace_paths.tsv"), optional: true, emit: graph_basespace_paths
 
     script:
     """
@@ -226,14 +229,18 @@ process ASSEMBLY_METAMDBG {
         --in-ont "\$READS" \\
         --threads ${task.cpus}
 
-    # Optional base-space assembly graph (--metamdbg_gfa). `metaMDBG gfa`
-    # realigns every read to the graph, so it is off by default; the graph
-    # published below comes from `metaMDBG asm` and does not need it.
+    # Base-space assembly graph (--metamdbg_gfa): unitig sequences plus the
+    # path of each contig through the graph. `metaMDBG gfa` realigns every
+    # read to the graph. assembly_graph.gfa below comes from `metaMDBG asm`
+    # and does not need this step.
+    GFA_BS=""
     if [ "${params.metamdbg_gfa}" = "true" ]; then
         # Highest available k gives the most resolved graph
         MAX_K=\$(metaMDBG gfa --assembly-dir metamdbg_out --k 0 2>&1 | awk '/^\\t- /{k=\$2} END{print k}')
         if [ -n "\$MAX_K" ]; then
-            metaMDBG gfa --assembly-dir metamdbg_out --k "\$MAX_K" --threads ${task.cpus} || true
+            metaMDBG gfa --assembly-dir metamdbg_out --k "\$MAX_K" --threads ${task.cpus} \\
+                || echo "[WARNING] metaMDBG gfa failed; no base-space graph" >&2
+            GFA_BS="metamdbg_out/assemblyGraph_k\${MAX_K}.gfa"
         fi
     fi
 
@@ -280,6 +287,19 @@ with open('assembly.fasta','rb') as fin, open('assembly_graph.gfa','wb') as fout
     if name:
         fout.write(b'S\\t' + name + b'\\t' + bytes(seq) + b'\\n')
 "
+    fi
+
+    # Publish the base-space graph, with contig paths renamed to the final
+    # contig names; contigs dropped by --min-len are dropped from the paths.
+    if [ -n "\$GFA_BS" ] && [ -s "\$GFA_BS" ]; then
+        pigz -p ${task.cpus} -c "\$GFA_BS" > assembly_graph_basespace.gfa.gz
+        CONTIG_PATHS="\${GFA_BS%.gfa}_contigPath.tsv"
+        if [ -s "\$CONTIG_PATHS" ]; then
+            awk -F'\\t' -v OFS='\\t' 'NR==FNR { m[\$1] = \$2; next } (\$1 in m) { \$1 = m[\$1]; print }' \\
+                name_map.tsv "\$CONTIG_PATHS" > assembly_graph_basespace_paths.tsv
+        fi
+    elif [ -n "\$GFA_BS" ]; then
+        echo "[WARNING] --metamdbg_gfa set but \$GFA_BS is missing or empty" >&2
     fi
 
     rm -f name_map.tsv metamdbg_raw.fasta
