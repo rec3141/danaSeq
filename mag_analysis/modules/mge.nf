@@ -227,14 +227,19 @@ process INTEGRONFINDER_CHUNK {
     cp "\${results_dir}/${base}.integrons" ${base}.integrons.tsv
     cp "\${results_dir}/${base}.summary"   ${base}.summary.tsv
 
-    # IntegronFinder writes one summary row per replicon; fewer means it did
-    # not get through the chunk.
+    # IntegronFinder writes one summary row per replicon it searched. It skips,
+    # with no row, a sequence of 50 bp or less ("is too short") and a replicon
+    # with no predicted proteins ("Skip replicon"); any other shortfall means it
+    # did not get through the chunk.
     n_contigs=\$(grep -c '^>' "${chunk}")
     n_rows=\$(grep -v -e '^#' -e '^ID_replicon' ${base}.summary.tsv | grep -c . || true)
-    if [ "\${n_rows}" -ne "\${n_contigs}" ]; then
-        echo "[ERROR] ${base}: \${n_rows} summary rows for \${n_contigs} contigs" >&2
+    n_short=\$(grep -c 'is too short' "\${results_dir}/integron_finder.out" || true)
+    n_noprot=\$(grep -c 'Skip replicon' "\${results_dir}/integron_finder.out" || true)
+    if [ "\$((n_rows + n_short + n_noprot))" -ne "\${n_contigs}" ]; then
+        echo "[ERROR] ${base}: \${n_rows} summary rows + \${n_short} too short + \${n_noprot} without proteins, for \${n_contigs} contigs" >&2
         exit 1
     fi
+    [ "\$((n_short + n_noprot))" -eq 0 ] || echo "[INFO] ${base}: skipped \${n_short} contigs of 50 bp or less and \${n_noprot} without predicted proteins"
 
     # The per-contig files this bounds (#69).
     rm -rf integron_out
