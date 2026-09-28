@@ -183,6 +183,8 @@ cd mag_analysis
 | `--run_checkv` | `false` | Run CheckV quality assessment |
 | `--checkv_db` | (required if checkv) | CheckV database path |
 | `--run_integronfinder` | `false` | Run IntegronFinder |
+| `--integron_chunk_size` | `2000` | Contigs per IntegronFinder task. IntegronFinder keeps two files per contig until its input is done, so this, times `--integron_max_forks`, bounds the files it holds at once |
+| `--integron_max_forks` | `16` | IntegronFinder chunks run at once |
 | `--run_islandpath` | `false` | Run IslandPath-DIMOB |
 | `--run_macsyfinder` | `false` | Run MacSyFinder |
 | `--run_defensefinder` | `false` | Run DefenseFinder |
