@@ -112,18 +112,26 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
     && test -x /opt/conda/envs/dana-mag-comebin/bin/run_comebin.sh \
     && rm -rf /tmp/envs-standalone
 
-# Keep the CheckM v1 stub as its configured data folder. COMEBin's final bin
-# selection imports checkm (never runs it); on import CheckM resets any data
-# folder lacking a .dmanifest, which rewrites DATA_CONFIG and crashes in the
-# read-only container, so COMEBin reports no bins.
-RUN touch /opt/checkm_data_stub/.dmanifest \
+# Point every CheckM v1 install at /data/db/checkm_data, where
+# run-mag-analysis.sh mounts <db_dir>/checkm_data. COMEBin's final bin
+# selection runs `checkm analyze`/`qa` with CheckM 1.1.3, which ignores
+# CHECKM_DATA_PATH and reads only DATA_CONFIG. On import CheckM also tries to
+# rewrite DATA_CONFIG if the data folder lacks a .dmanifest, which crashes in
+# the read-only container, so a placeholder .dmanifest stays in the image for
+# runs without the database mounted. The build fails only if COMEBin's CheckM
+# cannot import.
+RUN rm -rf /opt/checkm_data_stub \
+    && mkdir -p /data/db/checkm_data && touch /data/db/checkm_data/.dmanifest \
     && for cfg in /opt/conda/envs/*/lib/python3*/site-packages/checkm/DATA_CONFIG; do \
         [ -e "$cfg" ] || continue; \
-        /opt/conda/bin/python -c 'import json,sys; p=sys.argv[1]; c=json.load(open(p)); c["dataRoot"]="/opt/checkm_data_stub"; open(p,"w").write(json.dumps(c))' "$cfg"; \
+        /opt/conda/bin/python -c 'import json,sys; p=sys.argv[1]; c=json.load(open(p)); c["dataRoot"]="/data/db/checkm_data"; open(p,"w").write(json.dumps(c))' "$cfg"; \
         env_py="${cfg%%/lib/python3*}/bin/python"; \
-        out=$("$env_py" -c 'from checkm.defaultValues import DefaultValues' 2>&1) || { echo "$out"; exit 1; }; \
-        case "$out" in *setRoot*|*"data folder"*) echo "$cfg: $out"; exit 1 ;; esac; \
+        if out=$("$env_py" -c 'from checkm.defaultValues import DefaultValues' 2>&1) \
+            && case "$out" in *setRoot*|*"data folder"*) false ;; esac; then continue; fi; \
+        echo "[WARNING] CheckM import in ${cfg%%/lib/python3*}: $out"; \
+        case "$cfg" in */dana-mag-comebin/*) exit 1 ;; esac; \
     done
+ENV CHECKM_DATA_DIR=
 
 # ============================================================================
 # Strip packaging cruft (~500+ MB savings)
