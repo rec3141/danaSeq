@@ -38,11 +38,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY envs/merged/ /tmp/envs/
 COPY envs/whokaryote.yml /tmp/envs/whokaryote.yml
+COPY envs/vamb.yml envs/comebin.yml /tmp/envs/
 COPY docker/torch_variant.sh /tmp/torch_variant.sh
-# The solver cannot see a GPU during the build; CONDA_OVERRIDE_CUDA stands in
-# for the host driver so CUDA builds resolve. Set per env, not image-wide, so
-# no other env picks up CUDA packages.
-RUN sh /tmp/torch_variant.sh "$TORCH_VARIANT" /tmp/envs/binning.yml
+RUN sh /tmp/torch_variant.sh "$TORCH_VARIANT" \
+    /tmp/envs/binning.yml /tmp/envs/vamb.yml /tmp/envs/comebin.yml
 
 # Pre-create CheckM v1 data sentinel (comebin/drep pull checkm-genome transitively)
 RUN mkdir -p /opt/checkm_data_stub/genome_tree \
@@ -53,10 +52,19 @@ ENV CHECKM_DATA_DIR=/opt/checkm_data_stub
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-assembly  -f /tmp/envs/assembly.yml
 
-# 2. Binning: metabat2, maxbin2, das_tool, semibin, comebin deps
-RUN --mount=type=cache,target=/opt/conda/pkgs \
-    if [ "$TORCH_VARIANT" = cuda ]; then export CONDA_OVERRIDE_CUDA=12.9; fi \
-    && mamba env create -y -p /opt/conda/envs/dana-mag-binning   -f /tmp/envs/binning.yml
+# 2. The PyTorch envs: binning (metabat2, maxbin2, das_tool, SemiBin2,
+# LorBin), vamb and comebin. Built in one step from a package cache on the
+# image's own filesystem, not a cache mount, so conda hardlinks their shared
+# files (the CUDA libraries above all) instead of copying them into each env:
+# the cuda variant's three envs take 16 GB this way against 35 GB copied.
+# The solver cannot see a GPU during the build; CONDA_OVERRIDE_CUDA stands in
+# for the host driver so CUDA builds resolve. It is set here only, so no other
+# env picks up CUDA packages.
+RUN if [ "$TORCH_VARIANT" = cuda ]; then export CONDA_OVERRIDE_CUDA=12.9; fi \
+    && for e in binning vamb comebin; do \
+        mamba env create -y -p /opt/conda/envs/dana-mag-$e -f /tmp/envs/$e.yml || exit 1; \
+    done \
+    && mamba clean -afy
 RUN /opt/conda/envs/dana-mag-binning/bin/pip install --no-deps \
     'lorbin @ git+https://github.com/rec3141/LorBin.git' hnswlib
 
@@ -110,18 +118,13 @@ RUN /opt/conda/envs/dana-mag-pathviz/bin/pip install --no-deps KEGGDecoder && \
 
 # 10. Standalone envs the merged ones do not cover. Their modules name their
 # own conda env (dana-mag-vamb etc.), and a container run ignores conda, so
-# each needs its env and a dana-tools wrapper here. COMEBin comes from the
-# bioconda package, which pins its full dependency set (checkm-genome,
-# biolib, atomicwrites, tensorboard, ...); it is built before the CheckM stub
-# below is removed. GTDB-Tk is 2.4.1, the first release that reads r226.
-COPY envs/vamb.yml envs/binette.yml envs/gtdbtk.yml envs/comebin.yml /tmp/envs-standalone/
+# each needs its env and a dana-tools wrapper here (vamb and comebin are built
+# with the PyTorch envs in step 2). COMEBin comes from the bioconda package,
+# which pins its full dependency set (checkm-genome, biolib, atomicwrites,
+# tensorboard, ...). GTDB-Tk is 2.4.1, the first release that reads r226.
+COPY envs/binette.yml envs/gtdbtk.yml /tmp/envs-standalone/
 RUN --mount=type=cache,target=/opt/conda/pkgs \
-    sh /tmp/torch_variant.sh "$TORCH_VARIANT" /tmp/envs-standalone/vamb.yml /tmp/envs-standalone/comebin.yml \
-    && for e in binette gtdbtk; do \
-        mamba env create -y -p /opt/conda/envs/dana-mag-$e -f /tmp/envs-standalone/$e.yml || exit 1; \
-    done \
-    && if [ "$TORCH_VARIANT" = cuda ]; then export CONDA_OVERRIDE_CUDA=12.9; fi \
-    && for e in vamb comebin; do \
+    for e in binette gtdbtk; do \
         mamba env create -y -p /opt/conda/envs/dana-mag-$e -f /tmp/envs-standalone/$e.yml || exit 1; \
     done \
     && test -x /opt/conda/envs/dana-mag-vamb/bin/vamb \
