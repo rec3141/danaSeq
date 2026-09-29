@@ -1,0 +1,8 @@
+{
+  "image": "danaseq-mag-analysis-gpu",
+  "digest": "sha256:227dcf8cd1ed401d51f42cbe96bfe4189c26455f55f14546b16670a95df11461",
+  "commit": "6deb2e9f43542c60afe6349871dc4a6fcda7dd58",
+  "built": "2026-09-29T19:36:18Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-mag-analysis-gpu:sif-6deb2e9f43542c60afe6349871dc4a6fcda7dd58",
+  "sif_sha256": "593b1f1b42cceace223b508309cc4d0b5bfbd67fb2c652e5b515e4eec576499d"
+}
