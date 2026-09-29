@@ -17,6 +17,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag-analysis:latest"
+IMAGE_SET=false
+GPU_MODE=auto
 USE_CONTAINER=false
 CONTAINER_RUNTIME=""
 SIF_PATH=""
@@ -33,6 +35,7 @@ MOUNTS=()
 ORIGINAL_ARGS=("$@")
 
 die() { echo "[ERROR] $1" >&2; exit 1; }
+warn() { echo "[WARNING] $1" >&2; }
 
 # Resolve database paths from a standard base directory
 resolve_db_dir() {
@@ -150,6 +153,10 @@ usage() {
     echo "  --docker           Run in Docker container"
     echo "  --apptainer        Run in Apptainer/Singularity container"
     echo "  --container        Auto-detect container runtime"
+    echo "  --gpu auto|true|false"
+    echo "                     Train SemiBin2, LorBin, COMEBin and VAMB on a GPU [auto]."
+    echo "                     auto: use one if nvidia-smi sees it. In a container this"
+    echo "                     picks the -gpu image and passes --nv / --gpus all."
     echo ""
     echo "Shortcuts:"
     echo "  --all              Enable all optional modules (still requires DB paths)"
@@ -214,7 +221,11 @@ while (( $# )); do
             shift ;;
         --image)
             [[ -z "${2:-}" ]] && die "--image requires an image name"
-            CONTAINER_IMAGE="$2"
+            CONTAINER_IMAGE="$2"; IMAGE_SET=true
+            shift 2 ;;
+        --gpu)
+            case "${2:-}" in auto|true|false) GPU_MODE="$2" ;;
+                *) die "--gpu takes auto, true or false" ;; esac
             shift 2 ;;
         --sif)
             [[ -z "${2:-}" ]] && die "--sif requires a path"
@@ -419,8 +430,32 @@ if [[ "$USE_CONTAINER" == true ]]; then
         else die "No container runtime found"; fi
     fi
 
+    # GPU: the -gpu image carries CUDA PyTorch for the binners. An explicit
+    # --image or --sif is used as given. Without a usable GPU image the run
+    # continues on the CPU image, with a warning when a GPU was asked for.
+    USE_GPU=false
+    if [[ "$GPU_MODE" != false ]]; then
+        if nvidia-smi -L &>/dev/null; then
+            USE_GPU=true
+        elif [[ "$GPU_MODE" == true ]]; then
+            warn "--gpu true but nvidia-smi finds no GPU on this host; running on CPU"
+        fi
+    fi
+    GPU_SUFFIX=""
+    if [[ "$USE_GPU" == true ]]; then
+        GPU_SUFFIX="-gpu"
+        [[ "$IMAGE_SET" == false ]] && CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag-analysis-gpu:latest"
+    fi
+
     if [[ "$CONTAINER_RUNTIME" == "apptainer" || "$CONTAINER_RUNTIME" == "singularity" ]]; then
-        [[ -z "$SIF_PATH" ]] && SIF_PATH="${SCRIPT_DIR}/.danaseq-mag-analysis.sif"
+        if [[ -z "$SIF_PATH" ]]; then
+            SIF_PATH="${SCRIPT_DIR}/.danaseq-mag-analysis${GPU_SUFFIX}.sif"
+            if [[ "$USE_GPU" == true && ! -f "$SIF_PATH" && "$PULL_SIF" != true ]]; then
+                warn "GPU found but ${SIF_PATH} is missing (fetch it with --pull); running on the CPU image"
+                USE_GPU=false
+                SIF_PATH="${SCRIPT_DIR}/.danaseq-mag-analysis.sif"
+            fi
+        fi
         if [[ ! -f "$SIF_PATH" ]]; then
             if [[ "$PULL_SIF" == true ]]; then
                 "$CONTAINER_RUNTIME" pull "$SIF_PATH" "docker://${CONTAINER_IMAGE}"
@@ -534,6 +569,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             for e in "${CONTAINER_ENV[@]}"; do CONTAINER_CMD+=("-e" "$e"); done
             [[ -n "$SCRATCH_HOST" ]] && CONTAINER_CMD+=("-e" "TMPDIR=${SCRATCH_HOST}")
             for bind in "${BINDS[@]}"; do CONTAINER_CMD+=("-v" "$bind"); done
+            [[ "$USE_GPU" == true ]] && CONTAINER_CMD+=(--gpus all)
             CONTAINER_CMD+=("$CONTAINER_IMAGE" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
         apptainer|singularity)
@@ -546,10 +582,13 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")
             CONTAINER_CMD+=("--env" "CURL_CA_BUNDLE=${container_ca}")
             for bind in "${BINDS[@]}"; do CONTAINER_CMD+=("--bind" "$bind"); done
+            [[ "$USE_GPU" == true ]] && CONTAINER_CMD+=(--nv)
             CONTAINER_CMD+=("$SIF_PATH" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
     esac
-    CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}")
+    # Without a GPU in the container the binners skip the device probe.
+    if [[ "$USE_GPU" == true ]]; then gpu_param="$GPU_MODE"; else gpu_param=false; fi
+    CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}" --gpu "$gpu_param")
     if [[ "$DO_RESUME" == true ]]; then
         CONTAINER_CMD+=(-resume ${RESUME_SESSION})
     fi
@@ -608,6 +647,7 @@ LOCAL_CMD=(
     --outdir "$OUTDIR_HOST"
     "${WORKDIR_FLAG[@]}"
     "${NF_ARGS[@]}"
+    --gpu "$GPU_MODE"
     "${RESUME_FLAG[@]}"
 )
 
