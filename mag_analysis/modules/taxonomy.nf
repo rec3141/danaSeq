@@ -464,7 +464,7 @@ process SENDSKETCH_CLASSIFY {
             -Xmx4g \\
             in="\$chunk" \\
             address="${address}" \\
-            k=31 \\
+            k=32,24 \\
             format=2 \\
             persequence \\
             records=1 \\
