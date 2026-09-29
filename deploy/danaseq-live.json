@@ -1,8 +1,8 @@
 {
   "image": "danaseq-live",
-  "digest": "sha256:037079df9ec9f84dbca3c5ed0a1712e7b6c5614282d18b120b57aefdf4db94af",
-  "commit": "93a513eaf6e7b55e6981965b975f8ebeaaa58e0b",
-  "built": "2026-09-24T23:10:38Z",
-  "sif": "oras://ghcr.io/rec3141/danaseq-live:sif-93a513eaf6e7b55e6981965b975f8ebeaaa58e0b",
-  "sif_sha256": "17342c600e57e516df4ca3a3ae84af28734353f4cb1e622f50188a05a27d12aa"
+  "digest": "sha256:18ae2722960b78fc43e45247bf10b9b5192ff154c6de49b288c74481b26f2d50",
+  "commit": "56d705c5214b2c7a9c1f9316223062886dbf0989",
+  "built": "2026-09-29T13:35:04Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-live:sif-56d705c5214b2c7a9c1f9316223062886dbf0989",
+  "sif_sha256": "9d94461c16a2aff3d767cbf961e7006830ebd715a41e0f66c8a31979978c6d7a"
 }
