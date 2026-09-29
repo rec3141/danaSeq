@@ -258,11 +258,14 @@ process BIN_COMEBIN {
     # COMEBin (contrastive multi-view binning) — deep learning binner
     # run_comebin.sh wraps the two-step generate_coverage + run_comebin workflow
     # -p . because BAMs are staged in the working directory
+    # -d: COMEBin trains on cuda unless told otherwise, and the image's PyTorch
+    # is CPU-only
     set +e
     run_comebin.sh \\
         -a "${assembly}" \\
         -o comebin_out \\
         -p . \\
+        -d ${params.comebin_device} \\
         -t ${task.cpus}
     comebin_exit=\$?
     set -e
