@@ -131,7 +131,7 @@ cd mag_analysis
 | `--run_maxbin` | `false` | Include MaxBin2 |
 | `--run_lorbin` | `false` | Include LorBin (needs `--bam_dir`) |
 | `--run_comebin` | `false` | Include COMEBin (needs `--bam_dir`) |
-| `--comebin_device` | `cpu` | COMEBin training device: `cpu`, `cuda` or `cuda:N`. The container's PyTorch is CPU-only |
+| `--gpu` | `auto` | Train SemiBin2, LorBin, COMEBin and VAMB on a GPU: `auto` uses one when the tool's PyTorch sees it, `true` also warns when none is usable, `false` forces CPU. Needs the GPU image (`--gpu` in `run-mag-analysis.sh`) or a CUDA conda install |
 | `--run_vamb` | `false` | Include VAMB |
 | `--run_vamb_tax` | `false` | Include taxonomy-guided VAMB |
 | `--run_binette` | `false` | Run Binette consensus (needs `--checkm2_db`) |

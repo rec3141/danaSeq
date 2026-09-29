@@ -21,7 +21,10 @@
 #
 # ============================================================================
 
-FROM ghcr.io/rec3141/danaseq-mag-base-slim:latest
+# danaseq-mag-base-slim-gpu (CUDA PyTorch in the binning envs) builds the
+# danaseq-mag-analysis-gpu variant.
+ARG BASE_IMAGE=ghcr.io/rec3141/danaseq-mag-base-slim:latest
+FROM ${BASE_IMAGE}
 
 LABEL maintainer="rec3141@gmail.com"
 LABEL description="Dana MAG Analysis Pipeline — Technology-agnostic downstream MAG analysis"

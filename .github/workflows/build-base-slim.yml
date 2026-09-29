@@ -5,15 +5,26 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/danaseq-mag-base-slim
 
 jobs:
+  # cpu and cuda builds of the same Dockerfile (TORCH_VARIANT); the cuda one
+  # is the base of danaseq-mag-analysis-gpu.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            image: danaseq-mag-base-slim
+          - variant: cuda
+            image: danaseq-mag-base-slim-gpu
+    env:
+      IMAGE_NAME: ${{ github.repository_owner }}/${{ matrix.image }}
 
     steps:
       - name: Maximize build disk space
@@ -59,6 +70,8 @@ jobs:
         with:
           context: mag_analysis
           file: mag_analysis/Dockerfile.base-slim
+          build-args: |
+            TORCH_VARIANT=${{ matrix.variant }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

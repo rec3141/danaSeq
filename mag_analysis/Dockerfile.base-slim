@@ -7,10 +7,18 @@
 #
 # Build:
 #   docker build -f Dockerfile.base-slim -t danaseq-mag-base-slim .
+#   docker build -f Dockerfile.base-slim --build-arg TORCH_VARIANT=cuda \
+#       -t danaseq-mag-base-slim-gpu .
+#
+# TORCH_VARIANT picks the PyTorch build in the envs whose tools can train on a
+# GPU: binning (SemiBin2, LorBin), vamb and comebin. cuda adds ~4 GB per env.
 #
 # ============================================================================
 
 FROM condaforge/miniforge3:latest
+
+ARG TORCH_VARIANT=cpu
+LABEL danaseq.torch.variant="${TORCH_VARIANT}"
 
 LABEL maintainer="rec3141@gmail.com"
 LABEL description="Dana MAG Assembly Pipeline - Slim base image (9 merged conda envs)"
@@ -30,6 +38,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY envs/merged/ /tmp/envs/
 COPY envs/whokaryote.yml /tmp/envs/whokaryote.yml
+COPY docker/torch_variant.sh /tmp/torch_variant.sh
+# The solver cannot see a GPU during the build; CONDA_OVERRIDE_CUDA stands in
+# for the host driver so CUDA builds resolve. Set per env, not image-wide, so
+# no other env picks up CUDA packages.
+RUN sh /tmp/torch_variant.sh "$TORCH_VARIANT" /tmp/envs/binning.yml
 
 # Pre-create CheckM v1 data sentinel (comebin/drep pull checkm-genome transitively)
 RUN mkdir -p /opt/checkm_data_stub/genome_tree \
@@ -42,7 +55,8 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 
 # 2. Binning: metabat2, maxbin2, das_tool, semibin, comebin deps
 RUN --mount=type=cache,target=/opt/conda/pkgs \
-    mamba env create -y -p /opt/conda/envs/dana-mag-binning   -f /tmp/envs/binning.yml
+    if [ "$TORCH_VARIANT" = cuda ]; then export CONDA_OVERRIDE_CUDA=12.9; fi \
+    && mamba env create -y -p /opt/conda/envs/dana-mag-binning   -f /tmp/envs/binning.yml
 RUN /opt/conda/envs/dana-mag-binning/bin/pip install --no-deps \
     'lorbin @ git+https://github.com/rec3141/LorBin.git' hnswlib
 
@@ -100,17 +114,29 @@ RUN /opt/conda/envs/dana-mag-pathviz/bin/pip install --no-deps KEGGDecoder && \
 # bioconda package, which pins its full dependency set (checkm-genome,
 # biolib, atomicwrites, tensorboard, ...); it is built before the CheckM stub
 # below is removed. GTDB-Tk is 2.4.1, the first release that reads r226.
-COPY envs/vamb.yml envs/binette.yml envs/gtdbtk.yml envs/comebin-cpu.yml /tmp/envs-standalone/
+COPY envs/vamb.yml envs/binette.yml envs/gtdbtk.yml envs/comebin.yml /tmp/envs-standalone/
 RUN --mount=type=cache,target=/opt/conda/pkgs \
-    for e in vamb binette gtdbtk; do \
+    sh /tmp/torch_variant.sh "$TORCH_VARIANT" /tmp/envs-standalone/vamb.yml /tmp/envs-standalone/comebin.yml \
+    && for e in binette gtdbtk; do \
         mamba env create -y -p /opt/conda/envs/dana-mag-$e -f /tmp/envs-standalone/$e.yml || exit 1; \
     done \
-    && mamba env create -y -p /opt/conda/envs/dana-mag-comebin -f /tmp/envs-standalone/comebin-cpu.yml \
+    && if [ "$TORCH_VARIANT" = cuda ]; then export CONDA_OVERRIDE_CUDA=12.9; fi \
+    && for e in vamb comebin; do \
+        mamba env create -y -p /opt/conda/envs/dana-mag-$e -f /tmp/envs-standalone/$e.yml || exit 1; \
+    done \
     && test -x /opt/conda/envs/dana-mag-vamb/bin/vamb \
     && test -x /opt/conda/envs/dana-mag-binette/bin/binette \
     && test -x /opt/conda/envs/dana-mag-gtdbtk/bin/gtdbtk \
     && test -x /opt/conda/envs/dana-mag-comebin/bin/run_comebin.sh \
     && rm -rf /tmp/envs-standalone
+
+# Each PyTorch env must carry the build this variant promises: a CUDA image
+# whose torch fell back to CPU would silently train on CPU everywhere.
+RUN for e in binning vamb comebin; do \
+        built=$(/opt/conda/envs/dana-mag-$e/bin/python -c 'import torch; print(torch.version.cuda or "cpu")') || exit 1; \
+        echo "dana-mag-$e: torch cuda=$built"; \
+        case "$TORCH_VARIANT:$built" in cpu:cpu|cuda:12.*) ;; *) exit 1 ;; esac; \
+    done
 
 # Point every CheckM v1 install at /data/db/checkm_data, where
 # run-mag-analysis.sh mounts <db_dir>/checkm_data. COMEBin's final bin

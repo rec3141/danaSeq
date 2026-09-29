@@ -32,6 +32,8 @@ set -euo pipefail
 #   ./install.sh --prefix /custom/path
 #   ./install.sh --check      # Verify existing installations
 #   ./install.sh --clean      # Remove all pipeline environments
+#   ./install.sh --gpu true   # CUDA PyTorch for SemiBin2, LorBin, COMEBin, VAMB
+#                             # (default auto: CUDA when nvidia-smi sees a GPU)
 #
 # Requirements: conda or mamba must be on $PATH
 # ============================================================================
@@ -56,9 +58,11 @@ echo "[INFO] Using: $CONDA_CMD ($(${CONDA_CMD} --version 2>&1))"
 
 # Parse arguments
 ACTION="install"
+GPU_MODE=auto
 while (( $# )); do
     case "$1" in
         --prefix)  ENV_DIR="$2"; shift 2 ;;
+        --gpu)     GPU_MODE="$2"; shift 2 ;;
         --check)   ACTION="check"; shift ;;
         --clean)   ACTION="clean"; shift ;;
         -h|--help)
@@ -67,6 +71,32 @@ while (( $# )); do
         *) echo "[ERROR] Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
+
+# The envs whose tools can train on a GPU get CPU or CUDA PyTorch; the image
+# build pins them the same way (docker/torch_variant.sh).
+case "$GPU_MODE" in
+    true)  TORCH_VARIANT=cuda ;;
+    false) TORCH_VARIANT=cpu ;;
+    auto)  if nvidia-smi -L &>/dev/null; then TORCH_VARIANT=cuda; else TORCH_VARIANT=cpu; fi ;;
+    *) echo "[ERROR] --gpu takes auto, true or false" >&2; exit 1 ;;
+esac
+TORCH_YAMLS=" binning.yml vamb.yml comebin.yml "
+
+# Print the YAML to create an env from: a copy with the PyTorch pin for the
+# torch envs, the file itself otherwise.
+env_yaml() {
+    local src="$1" base
+    base=$(basename "$src")
+    if [[ "$TORCH_YAMLS" == *" $base "* ]]; then
+        local tmp
+        tmp="$(mktemp -d)/$base"
+        cp "$src" "$tmp"
+        sh "${SCRIPT_DIR}/docker/torch_variant.sh" "$TORCH_VARIANT" "$tmp"
+        echo "$tmp"
+    else
+        echo "$src"
+    fi
+}
 
 # ============================================================================
 # Environment definitions
@@ -90,6 +120,7 @@ STANDALONE_YAMLS=(
     prokka.yml
     gtdbtk.yml
     vamb.yml
+    comebin.yml
     binette.yml
     antismash.yml
     whokaryote.yml
@@ -111,6 +142,7 @@ declare -A ENV_CHECK=(
     [dana-mag-prokka]="prokka"
     [dana-mag-gtdbtk]="gtdbtk"
     [dana-mag-vamb]="vamb"
+    [dana-mag-comebin]="run_comebin.sh"
     [dana-mag-binette]="binette"
     [dana-mag-antismash]="antismash"
     [dana-mag-whokaryote]="whokaryote.py"
@@ -143,6 +175,7 @@ do_install() {
     echo "Installing ${total} conda environments into: ${ENV_DIR}"
     echo "  Merged envs from: ${MERGED_YAML_DIR}"
     echo "  Standalone envs from: ${STANDALONE_YAML_DIR}"
+    echo "  PyTorch for SemiBin2/LorBin/COMEBin/VAMB: ${TORCH_VARIANT} (--gpu ${GPU_MODE})"
     echo ""
 
     # --- Install merged environments ---
@@ -168,7 +201,7 @@ do_install() {
         echo "  Creating environment from ${yaml}..."
         local log_file
         log_file=$(mktemp)
-        if ! ${CONDA_CMD} env create -y -p "${env_path}" -f "${yaml_path}" \
+        if ! ${CONDA_CMD} env create -y -p "${env_path}" -f "$(env_yaml "${yaml_path}")" \
             > "${log_file}" 2>&1; then
             echo "  [ERROR] Failed to create ${env_name}" >&2
             sed 's/^/  /' "${log_file}" >&2
@@ -207,7 +240,7 @@ do_install() {
         echo "  Creating environment from ${yaml}..."
         local log_file
         log_file=$(mktemp)
-        if ! ${CONDA_CMD} env create -y -p "${env_path}" -f "${yaml_path}" \
+        if ! ${CONDA_CMD} env create -y -p "${env_path}" -f "$(env_yaml "${yaml_path}")" \
             > "${log_file}" 2>&1; then
             echo "  [ERROR] Failed to create ${env_name}" >&2
             sed 's/^/  /' "${log_file}" >&2
@@ -258,35 +291,6 @@ post_install_merged() {
             'lorbin @ git+https://github.com/rec3141/LorBin.git' hnswlib \
             > /dev/null 2>&1
         echo "  LorBin installed"
-
-        # Clone COMEBin fork and wire up bin/ scripts
-        echo "  Installing COMEBin from fork..."
-        local comebin_repo="https://github.com/rec3141/COMEBin.git"
-        local comebin_branch="codex/recent-dependencies-fix"
-        local comebin_dir="${env_path}/share/COMEBin"
-        git clone --depth 1 -b "${comebin_branch}" "${comebin_repo}" "${comebin_dir}" \
-            > /dev/null 2>&1
-        cat > "${env_path}/bin/run_comebin.sh" <<'WRAPPER'
-#!/usr/bin/env bash
-# Resolve path args (-a/-o/-p) in caller's CWD before cd into source tree
-COMEBIN_ROOT="$(dirname "$(dirname "$(readlink -f "$0")")")/share/COMEBin/COMEBin"
-ORIG_CWD="$(pwd)"
-RESOLVED_ARGS=()
-while (( $# )); do
-    case "$1" in
-        -a|-o|-p) RESOLVED_ARGS+=("$1"); shift
-                  RESOLVED_ARGS+=("$(cd "${ORIG_CWD}" && realpath "$1")"); shift ;;
-        *) RESOLVED_ARGS+=("$1"); shift ;;
-    esac
-done
-cd "${COMEBIN_ROOT}" && exec bash run_comebin.sh "${RESOLVED_ARGS[@]}"
-WRAPPER
-        chmod +x "${env_path}/bin/run_comebin.sh"
-        if [[ -f "${comebin_dir}/COMEBin/scripts/gen_cov_file.sh" ]]; then
-            ln -sf "${comebin_dir}/COMEBin/scripts/gen_cov_file.sh" "${env_path}/bin/gen_cov_file.sh"
-            chmod +x "${env_path}/bin/gen_cov_file.sh"
-        fi
-        echo "  COMEBin installed from ${comebin_repo}@${comebin_branch}"
     fi
 
     if [[ "${env_name}" == "dana-mag-quality" ]]; then

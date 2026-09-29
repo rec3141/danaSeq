@@ -32,12 +32,14 @@ process BIN_SEMIBIN2 {
 
     # SemiBin2 can crash on very small datasets (0 bins → empty ORFs → hmmsearch fail)
     # Catch failures and produce an empty output so the pipeline can continue
+    engine=\$(torch_device.sh binning ${params.gpu} | sed 's/cuda/gpu/')
     set +e
     SemiBin2 single_easy_bin \\
         -i "${assembly}" \\
         -b *.sorted.bam \\
         -o semibin_out \\
         --sequencing-type long_read \\
+        --engine \$engine \\
         --threads ${task.cpus}
     semibin_exit=\$?
     set -e
@@ -199,13 +201,16 @@ process BIN_LORBIN {
     # Note: --multi is only for concatenated per-sample assemblies (LorBin concat)
     # where contig names have a sample prefix delimited by '-'.
     # Co-assemblies (Flye) use plain contig names, so we omit --multi.
+    cuda_flag=""
+    [ "\$(torch_device.sh binning ${params.gpu})" = cuda ] && cuda_flag=--cuda
     set +e
     LorBin bin \\
         -o lorbin_out \\
         -fa "${assembly}" \\
         -b *.sorted.bam \\
         --num_process ${task.cpus} \\
-        --bin_length ${params.lorbin_min_length}
+        --bin_length ${params.lorbin_min_length} \\
+        \$cuda_flag
     lorbin_exit=\$?
     set -e
 
@@ -239,7 +244,7 @@ process BIN_LORBIN {
 process BIN_COMEBIN {
     tag "comebin"
     label 'process_gpu'
-    conda "${projectDir}/conda-envs/dana-mag-binning"
+    conda "${projectDir}/conda-envs/dana-mag-comebin"
     publishDir "${params.outdir}/binning/comebin", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/binning/comebin" : null
 
@@ -258,14 +263,17 @@ process BIN_COMEBIN {
     # COMEBin (contrastive multi-view binning) — deep learning binner
     # run_comebin.sh wraps the two-step generate_coverage + run_comebin workflow
     # -p . because BAMs are staged in the working directory
-    # -d: COMEBin trains on cuda unless told otherwise, and the image's PyTorch
-    # is CPU-only
+    # COMEBin writes its length and marker-seed files beside the resolved
+    # assembly, so give it a copy in the task directory, not the staged input
+    cp -L "${assembly}" comebin_input.fasta
+    # -d is always passed: COMEBin 1.1.0 defaults to cuda and fails without one
+    device=\$(torch_device.sh comebin ${params.gpu})
     set +e
     run_comebin.sh \\
-        -a "${assembly}" \\
+        -a comebin_input.fasta \\
         -o comebin_out \\
         -p . \\
-        -d ${params.comebin_device} \\
+        -d \$device \\
         -t ${task.cpus}
     comebin_exit=\$?
     set -e
@@ -368,14 +376,8 @@ with open('vamb_abundance.tsv', 'w') as out:
         touch vamb_bins.tsv
     else
 
-    # Auto-detect GPU: use --cuda if available, fall back to CPU
     CUDA_FLAG=""
-    if python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
-        CUDA_FLAG="--cuda"
-        echo "[INFO] VAMB: GPU detected, using CUDA" >&2
-    else
-        echo "[INFO] VAMB: No GPU detected, using CPU" >&2
-    fi
+    [ "\$(torch_device.sh vamb ${params.gpu})" = cuda ] && CUDA_FLAG="--cuda"
 
     set +e
     vamb bin default \
@@ -535,12 +537,7 @@ with open('vamb_abundance.tsv', 'w') as out:
     else
 
     CUDA_FLAG=""
-    if python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
-        CUDA_FLAG="--cuda"
-        echo "[INFO] VAMB-tax: GPU detected, using CUDA" >&2
-    else
-        echo "[INFO] VAMB-tax: No GPU detected, using CPU" >&2
-    fi
+    [ "\$(torch_device.sh vamb ${params.gpu})" = cuda ] && CUDA_FLAG="--cuda"
 
     set +e
     vamb bin taxvamb \
