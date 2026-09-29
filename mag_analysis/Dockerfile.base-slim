@@ -112,9 +112,18 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
     && test -x /opt/conda/envs/dana-mag-comebin/bin/run_comebin.sh \
     && rm -rf /tmp/envs-standalone
 
-# Remove CheckM sentinel stub
-ENV CHECKM_DATA_DIR=
-RUN rm -rf /opt/checkm_data_stub
+# Keep the CheckM v1 stub as its configured data folder. COMEBin's final bin
+# selection imports checkm (never runs it); on import CheckM resets any data
+# folder lacking a .dmanifest, which rewrites DATA_CONFIG and crashes in the
+# read-only container, so COMEBin reports no bins.
+RUN touch /opt/checkm_data_stub/.dmanifest \
+    && for cfg in /opt/conda/envs/*/lib/python3*/site-packages/checkm/DATA_CONFIG; do \
+        [ -e "$cfg" ] || continue; \
+        /opt/conda/bin/python -c 'import json,sys; p=sys.argv[1]; c=json.load(open(p)); c["dataRoot"]="/opt/checkm_data_stub"; open(p,"w").write(json.dumps(c))' "$cfg"; \
+        env_py="${cfg%%/lib/python3*}/bin/python"; \
+        out=$("$env_py" -c 'from checkm.defaultValues import DefaultValues' 2>&1) || { echo "$out"; exit 1; }; \
+        case "$out" in *setRoot*|*"data folder"*) echo "$cfg: $out"; exit 1 ;; esac; \
+    done
 
 # ============================================================================
 # Strip packaging cruft (~500+ MB savings)
