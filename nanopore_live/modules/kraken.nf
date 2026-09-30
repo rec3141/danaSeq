@@ -23,9 +23,12 @@ process KRAKEN2_CLASSIFY {
     input:
     tuple val(meta), path("fastas/*")
 
+    // Not optional: with storeDir, a task whose outputs are all optional counts
+    // as already stored once the directory exists, so every file after the
+    // first per barcode would be skipped unclassified.
     output:
-    tuple val(meta), path("${meta.id}.tsv"),    emit: parsed,  optional: true
-    tuple val(meta), path("${meta.id}.report"), emit: report,  optional: true
+    tuple val(meta), path("${meta.id}.tsv"),    emit: parsed
+    tuple val(meta), path("${meta.id}.report"), emit: report
 
     script:
     """
