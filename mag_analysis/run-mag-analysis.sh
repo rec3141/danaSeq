@@ -605,8 +605,12 @@ if [[ "$USE_CONTAINER" == true ]]; then
     mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
-    NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1)
-    [[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1)
+    # Only for the saved resume command, so a missing file must not become the
+    # launcher's exit status under set -e/pipefail: Nextflow keeps history in
+    # its launch directory, not the bound NXF_HOME, so the first lookup usually
+    # finds nothing.
+    NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1 || true)
+    [[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1 || true)
     save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
     exit $NF_EXIT
 fi
@@ -661,8 +665,9 @@ mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
 "${LOCAL_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
-NF_SESSION=$(awk '{print $6}' .nextflow/history 2>/dev/null | tail -1)
-[[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1)
+# As above: the lookups must not decide the launcher's exit status.
+NF_SESSION=$(awk '{print $6}' .nextflow/history 2>/dev/null | tail -1 || true)
+[[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1 || true)
 save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
 
 exit $NF_EXIT
