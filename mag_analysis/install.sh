@@ -288,7 +288,7 @@ post_install_merged() {
     if [[ "${env_name}" == "dana-mag-binning" ]]; then
         echo "  Installing LorBin via pip..."
         "${env_path}/bin/pip" install --no-deps \
-            'lorbin @ git+https://github.com/rec3141/LorBin.git' hnswlib \
+            'lorbin @ git+https://github.com/rec3141/LorBin.git@907d4238144b390e33b7f8ba0b22b1f16eaeb977' hnswlib \
             > /dev/null 2>&1
         echo "  LorBin installed"
     fi

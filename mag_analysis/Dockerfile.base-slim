@@ -66,7 +66,7 @@ RUN if [ "$TORCH_VARIANT" = cuda ]; then export CONDA_OVERRIDE_CUDA=12.9; fi \
     done \
     && mamba clean -afy
 RUN /opt/conda/envs/dana-mag-binning/bin/pip install --no-deps \
-    'lorbin @ git+https://github.com/rec3141/LorBin.git' hnswlib
+    'lorbin @ git+https://github.com/rec3141/LorBin.git@907d4238144b390e33b7f8ba0b22b1f16eaeb977' hnswlib
 
 # 3. Quality: genomad, checkm2, checkv, whokaryote+tiara (pip)
 RUN --mount=type=cache,target=/opt/conda/pkgs \
