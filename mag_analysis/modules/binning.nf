@@ -927,6 +927,25 @@ process CHECKM2 {
         exit 0
     fi
 
+    # Bins far larger than any prokaryotic genome are catch-all clusters, not
+    # genomes. Gene calling aborts on multi-gigabase inputs and fails the whole
+    # CheckM2 run, so they are left out (file size approximates length).
+    MAX_BYTES=${params.checkm2_max_bin_bp}
+    N_BIG=0
+    for f in all_bins/*.fa; do
+        if [ "\$(stat -Lc %s "\$f")" -gt "\$MAX_BYTES" ]; then
+            echo "[WARNING] CheckM2: skipping \$(basename "\$f") (\$(( \$(stat -Lc %s "\$f") / 1000000 )) MB > ${params.checkm2_max_bin_bp} bp)" >&2
+            rm -f "\$f"
+            N_BIG=\$((N_BIG + 1))
+        fi
+    done
+    [ \$N_BIG -gt 0 ] && echo "[WARNING] CheckM2: \$N_BIG oversized bins have no quality estimate" >&2
+    if [ -z "\$(ls all_bins/*.fa 2>/dev/null)" ]; then
+        echo "[WARNING] No bins left after the size filter -- skipping CheckM2" >&2
+        printf 'Name\\tCompleteness\\tContamination\\n' > quality_report.tsv
+        exit 0
+    fi
+
     N_BINS=\$(ls all_bins/*.fa | wc -l)
     echo "[INFO] CheckM2: \$N_BINS bins" >&2
 
