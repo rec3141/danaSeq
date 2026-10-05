@@ -95,6 +95,13 @@ print(int(quals[len(quals)//2]) if quals else 10)
     echo "[INFO] Flye read type: \$FLYE_READ_TYPE"
     IN="${reads}"
     ${stageReadsScript()}
+    # Flye rejects --threads above 128 and exits at once, so larger
+    # allocations are capped.
+    FLYE_THREADS=${task.cpus}
+    if [ "\$FLYE_THREADS" -gt 128 ]; then
+        echo "[WARNING] Flye accepts at most 128 threads; using 128 of ${task.cpus} CPUs" >&2
+        FLYE_THREADS=128
+    fi
     # Run Flye assembly without polishing (handled by FLYE_POLISH downstream)
     flye \\
         --meta \\
@@ -102,7 +109,7 @@ print(int(quals[len(quals)//2]) if quals else 10)
         --iterations 0 \\
         \$FLYE_READ_TYPE "\$READS" \\
         --out-dir flye_out \\
-        --threads ${task.cpus}
+        --threads \$FLYE_THREADS
 
     # Validate assembly
     if [ ! -s flye_out/assembly.fasta ]; then
@@ -174,12 +181,19 @@ print(int(quals[len(quals)//2]) if quals else 10)
         FLYE_READ_TYPE="--${params.read_type}"
     fi
 
+    # Flye rejects --threads above 128 and exits at once, so larger
+    # allocations are capped.
+    FLYE_THREADS=${task.cpus}
+    if [ "\$FLYE_THREADS" -gt 128 ]; then
+        echo "[WARNING] Flye accepts at most 128 threads; using 128 of ${task.cpus} CPUs" >&2
+        FLYE_THREADS=128
+    fi
     # Polish assembly with Flye's standalone polisher
     flye \\
         --polish-target ${assembly} \\
         \$FLYE_READ_TYPE ${reads} \\
         --out-dir polish_out \\
-        --threads ${task.cpus}
+        --threads \$FLYE_THREADS
 
     # Use polished output if it exists, otherwise keep original
     if [ -s polish_out/polished_1.fasta ]; then
