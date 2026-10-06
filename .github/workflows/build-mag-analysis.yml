@@ -38,6 +38,20 @@ jobs:
       build_date: ${{ steps.stamp.outputs.build_date }}
 
     steps:
+      # The gpu base alone fills most of a stock runner's disk once unpacked.
+      - name: Maximize build disk space
+        uses: easimon/maximize-build-space@v10
+        with:
+          build-mount-path: /var/lib/docker
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Restart Docker daemon
+        run: sudo systemctl restart docker
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
