@@ -122,14 +122,15 @@ RUN /opt/conda/envs/dana-mag-pathviz/bin/pip install --no-deps KEGGDecoder && \
 # with the PyTorch envs in step 2). COMEBin comes from the bioconda package,
 # which pins its full dependency set (checkm-genome, biolib, atomicwrites,
 # tensorboard, ...). GTDB-Tk is 2.4.1, the first release that reads r226.
-COPY envs/binette.yml envs/gtdbtk.yml /tmp/envs-standalone/
+COPY envs/binette.yml envs/gtdbtk.yml envs/antismash.yml /tmp/envs-standalone/
 RUN --mount=type=cache,target=/opt/conda/pkgs \
-    for e in binette gtdbtk; do \
+    for e in binette gtdbtk antismash; do \
         mamba env create -y -p /opt/conda/envs/dana-mag-$e -f /tmp/envs-standalone/$e.yml || exit 1; \
     done \
     && test -x /opt/conda/envs/dana-mag-vamb/bin/vamb \
     && test -x /opt/conda/envs/dana-mag-binette/bin/binette \
     && test -x /opt/conda/envs/dana-mag-gtdbtk/bin/gtdbtk \
+    && test -x /opt/conda/envs/dana-mag-antismash/bin/antismash \
     && test -x /opt/conda/envs/dana-mag-comebin/bin/run_comebin.sh \
     && rm -rf /tmp/envs-standalone
 
@@ -247,7 +248,8 @@ RUN mkdir -p /usr/local/bin/dana-tools \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
     # --- standalone envs: env:tool ---
-    && for pair in vamb:vamb binette:binette gtdbtk:gtdbtk comebin:gen_cov_file.sh; do \
+    && for pair in vamb:vamb binette:binette gtdbtk:gtdbtk comebin:gen_cov_file.sh \
+                antismash:antismash antismash:download-antismash-databases; do \
         env="${pair%%:*}"; tool="${pair#*:}"; \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-%s/bin:$PATH\nexec /opt/conda/envs/dana-mag-%s/bin/%s "$@"\n' "$env" "$env" "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \

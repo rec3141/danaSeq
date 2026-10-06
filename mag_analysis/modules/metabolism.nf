@@ -465,13 +465,15 @@ process ANTISMASH {
     antismash_exit=\$?
     set -e
 
-    mkdir -p antismash_geneclusters antismash_json
-
+    # A failed run must not leave outputs: storeDir would keep an empty result
+    # and skip antiSMASH on every resume. The task is recorded as failed and
+    # the pipeline carries on (errorStrategy).
     if [ \$antismash_exit -ne 0 ]; then
-        echo "[WARNING] antiSMASH exited with code \$antismash_exit" >&2
-        printf 'region\\tcontig\\tstart\\tend\\ttype\\tmost_similar_known_cluster\\tsimilarity\\n' > antismash_summary.tsv
-        exit 0
+        echo "[WARNING] antiSMASH exited with code \$antismash_exit; no results stored, it reruns on resume" >&2
+        exit \$antismash_exit
     fi
+
+    mkdir -p antismash_geneclusters antismash_json
 
     # Collect region GenBank files
     find antismash_out -name "*.region*.gbk" -exec cp {} antismash_geneclusters/ \\; 2>/dev/null || true

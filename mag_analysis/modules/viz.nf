@@ -57,6 +57,7 @@ process VIZ_PREPROCESS {
 
     # Copy ECOSSDB ecosystem services data if available
     ES_JSON=\$(find_first \
+        "\${STORE:+\${STORE}/metabolism/ecossdb_viz/ecosystem_services.json}" \
         "\${STORE:+\${STORE}/metabolism/ecossdb/ecosystem_services.json}" \
         "\${OUT}/metabolism/ecossdb/ecosystem_services.json")
     ES_SDG=\$(find_first \
