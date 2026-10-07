@@ -134,6 +134,18 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
     && test -x /opt/conda/envs/dana-mag-comebin/bin/run_comebin.sh \
     && rm -rf /tmp/envs-standalone
 
+# antiSMASH builds some model files (bgc_seeds.hmm, the RiPP classifiers'
+# .pkl files) inside its own package when its data is first prepared, and
+# the package is read-only at run time, so they are built here. The
+# databases themselves stay outside the image (--antismash_db); this
+# download is only to drive the preparation and is removed in the same step.
+RUN export PATH=/opt/conda/envs/dana-mag-antismash/bin:$PATH \
+    && download-antismash-databases --database-dir /tmp/asdb \
+    && rm -rf /tmp/asdb \
+    && P=$(/opt/conda/envs/dana-mag-antismash/bin/python -c 'import antismash, os; print(os.path.dirname(antismash.__file__))') \
+    && test -s "$P/detection/hmm_detection/data/bgc_seeds.hmm.h3f" \
+    && test -s "$P/modules/lanthipeptides/data/lanthipeptide.scaler.pkl"
+
 # Each PyTorch env must carry the build this variant promises: a CUDA image
 # whose torch fell back to CPU would silently train on CPU everywhere.
 RUN for e in binning vamb comebin; do \
