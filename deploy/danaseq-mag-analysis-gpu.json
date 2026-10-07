@@ -1,8 +1,8 @@
 {
   "image": "danaseq-mag-analysis-gpu",
-  "digest": "sha256:0950bbf5e098c1b60a6b126ff6ccc38ff33308bcfac919cba7900fb9fda996ff",
-  "commit": "8ad2527d328f73de02c0e12339c89563a02fa66b",
-  "built": "2026-10-06T21:33:17Z",
-  "sif": "oras://ghcr.io/rec3141/danaseq-mag-analysis-gpu:sif-8ad2527d328f73de02c0e12339c89563a02fa66b",
-  "sif_sha256": "7b3a4a1219ef350732857793f9e0cb301e1a5c9a6383e9e5e038bf72926e8bab"
+  "digest": "sha256:072b5e1c93affebae517089c9e51d2afd5d6aef77795ea0e3898ea6714c866c9",
+  "commit": "0d389613ebe488d6787c5debfff6e1f759d959fc",
+  "built": "2026-10-06T22:57:52Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-mag-analysis-gpu:sif-0d389613ebe488d6787c5debfff6e1f759d959fc",
+  "sif_sha256": "7ffb5830f19e55bb3a6833345fa1940018ef1924d1e9ae9f299438b1b221cc72"
 }
