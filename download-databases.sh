@@ -32,7 +32,7 @@ set -euo pipefail
 #   ./download-databases.sh --silva132        # Download SILVA 132 train set (pre-2021 names, ~60 MB)
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
 #   ./download-databases.sh --gtdbtk          # Download GTDB-Tk r226 reference data (~132 GB)
-#   ./download-databases.sh --antismash      # Download antiSMASH databases (~2 GB)
+#   ./download-databases.sh --antismash      # Download antiSMASH databases (~7 GB, more once indexed)
 #   ./download-databases.sh --docker            # Use Docker to run tool CLIs
 #   ./download-databases.sh --apptainer         # Use Apptainer/Singularity (auto-pulls SIF)
 #   ./download-databases.sh --container         # Auto-detect: apptainer > singularity > docker
@@ -88,7 +88,9 @@ container_run() {
         apptainer|singularity)
             # Ensure SIF image exists
             if [[ -z "$SIF_PATH" ]]; then
-                SIF_PATH="${SCRIPT_DIR}/.danaseq-mag.sif"
+                # The SIF omc-pickup keeps current, when there is one.
+                SIF_PATH="${SCRIPT_DIR}/mag_analysis/.danaseq-mag-analysis.sif"
+                [[ -e "$SIF_PATH" ]] || SIF_PATH="${SCRIPT_DIR}/.danaseq-mag.sif"
                 if [[ ! -f "$SIF_PATH" ]]; then
                     echo "[INFO] Pulling container image (one-time download)..."
                     echo "  Source: docker://${CONTAINER_IMAGE}"
@@ -1328,14 +1330,18 @@ download_antismash() {
     echo "[INFO] Downloading antiSMASH databases..."
     echo "  Destination: ${db_path}"
 
-    local antismash_bin="${ENV_DIR}/dana-mag-antismash/bin/download-antismash-databases"
-    if [ ! -x "$antismash_bin" ]; then
-        echo "[ERROR] antiSMASH conda env not found. Install it first:" >&2
-        echo "  mamba create -p ${ENV_DIR}/dana-mag-antismash -y -c bioconda -c conda-forge --override-channels --channel-priority flexible 'antismash>=8.0'" >&2
-        return 1
+    # The download ends by pre-building the search indexes inside db_path, so a
+    # finished download is ready to use read-only (or to squash into a .sqsh).
+    if $USE_CONTAINER; then
+        container_run download-antismash-databases --database-dir /data/db/antismash_db || return 1
+    else
+        local antismash_bin="${ENV_DIR}/dana-mag-antismash/bin/download-antismash-databases"
+        if [ ! -x "$antismash_bin" ]; then
+            echo "[ERROR] antiSMASH not installed. Run ./install.sh first or use --docker/--apptainer." >&2
+            return 1
+        fi
+        "$antismash_bin" --database-dir "${db_path}" || return 1
     fi
-
-    "$antismash_bin" --database-dir "${db_path}" || return 1
 
     echo "[SUCCESS] antiSMASH databases downloaded to ${db_path}"
     echo "  Use with: --antismash_db ${db_path}"
