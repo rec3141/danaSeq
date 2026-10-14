@@ -1242,6 +1242,22 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     depth_cols = [c for c in depths_df.columns if c.endswith('.sorted.bam') and not c.endswith('-var')]
     sample_names = [re.sub(r'\.sorted\.bam$', '', c) for c in depth_cols]
 
+    # Per-sample relative abundance of each contig: its mapped bases (depth x length)
+    # as a fraction of all mapped bases in that sample. A bin's relabund is the sum
+    # over its contigs; the viz fourth-root transforms it for the sample t-SNE.
+    contig_bases = depths_df[depth_cols].mul(depths_df['contigLen'], axis=0)
+    sample_totals = contig_bases.sum(axis=0).replace(0, 1)
+    contig_relabund = contig_bases.div(sample_totals, axis=1)
+    contig_relabund.index = depths_df['contigName'].values
+
+    def compute_bin_relabund(c2b_map, bin_names):
+        """Per-bin per-sample sum of contig relative abundances."""
+        s = pd.Series(c2b_map)
+        s = s[s.index.isin(contig_relabund.index)]
+        summed = contig_relabund.loc[s.index].groupby(s.values).sum()
+        summed = summed.reindex(bin_names, fill_value=0)
+        return summed.values.tolist()
+
     def compute_bin_depths(c2b_map, bin_names):
         """Compute per-bin per-sample mean depth matrix."""
         rows = []
@@ -1268,12 +1284,14 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     binners = ['semibin', 'metabat', 'maxbin', 'lorbin', 'comebin', 'vamb', 'vamb_tax']
     all_bins = []   # list of {id, binner, depths: []}
     all_matrix = []
+    all_relabund = []  # parallel to all_matrix
 
     # Add DAS Tool bins
     dastool_depths = compute_bin_depths(dastool_c2b, dastool_bins)
     for name, depths in zip(dastool_bins, dastool_depths):
         all_bins.append({'id': name, 'binner': 'dastool'})
         all_matrix.append(depths)
+    all_relabund.extend(compute_bin_relabund(dastool_c2b, dastool_bins))
 
     # Add per-binner bins
     for binner in binners:
@@ -1284,6 +1302,7 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
         c2b_map = dict(zip(bdf['contig'], bdf['bin']))
         bin_names = sorted(set(c2b_map.values()))
         depths = compute_bin_depths(c2b_map, bin_names)
+        all_relabund.extend(compute_bin_relabund(c2b_map, bin_names))
         for name, d in zip(bin_names, depths):
             all_bins.append({'id': name, 'binner': binner})
             all_matrix.append(d)
@@ -1298,6 +1317,7 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
         c2b_map = dict(zip(bdf['contig'], bdf['bin']))
         bin_names = sorted(set(c2b_map.values()))
         depths = compute_bin_depths(c2b_map, bin_names)
+        all_relabund.extend(compute_bin_relabund(c2b_map, bin_names))
         for name, d in zip(bin_names, depths):
             all_bins.append({'id': name, 'binner': consensus})
             all_matrix.append(d)
@@ -1333,11 +1353,14 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     reordered_samples = [sample_names[i] for i in col_order]
     reordered_matrix = mat[row_order][:, col_order].tolist()
     reordered_matrix = [[round(v, 4) for v in row] for row in reordered_matrix]
+    relabund = np.array(all_relabund).reshape(len(all_bins), len(sample_names))[row_order][:, col_order]
+    reordered_relabund = [[float(f'{v:.4g}') for v in row] for row in relabund]
 
     return {
         'bins': reordered_bins,         # [{id, binner}, ...]
         'sample_names': reordered_samples,
-        'matrix': reordered_matrix,
+        'matrix': reordered_matrix,     # mean depth
+        'relabund': reordered_relabund, # fraction of sample's mapped bases
     }
 
 

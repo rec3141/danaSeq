@@ -4,6 +4,7 @@
   import { onMount } from 'svelte';
   import { coverage, binQuality, loadBinQuality } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
+  import { tsne, brayCurtis } from '../lib/tsne.js';
 
   let covData = $derived($coverage);
   let allBins = $derived($binQuality);
@@ -296,6 +297,56 @@
     }];
   });
 
+  // Sample t-SNE: Bray-Curtis on fourth-root relative abundance of the filtered
+  // bins (a bin's relabund = summed share of the sample's mapped contig bases).
+  // Samples with nothing in the filtered bins are left out.
+  let sampleTsne = $derived.by(() => {
+    if (!covData?.relabund || !sortedIndices.length) return null;
+    const samples = [];
+    covData.sample_names.forEach((name, j) => {
+      const ra = sortedIndices.map(i => covData.relabund[i][j]);
+      const binned = ra.reduce((a, b) => a + b, 0);
+      if (binned > 0) samples.push({ name, ra, binned });
+    });
+    if (samples.length < 4) return { tooFew: true, n: samples.length };
+    const coords = tsne(brayCurtis(samples.map(s => s.ra.map(v => Math.pow(v, 0.25)))));
+    const ids = sortedIndices.map(i => covData.bins[i].id);
+    const hover = samples.map(s => {
+      const top = s.ra.map((v, k) => [v, ids[k]]).sort((a, b) => b[0] - a[0]).slice(0, 3)
+        .map(([v, id]) => `${id}: ${(v * 100).toFixed(1)}%`).join('<br>');
+      return `<b>${s.name}</b><br>In shown bins: ${(s.binned * 100).toFixed(1)}%<br>${top}`;
+    });
+    // Short labels: drop a shared prefix like "FAZ84459_" (full name stays in the hover)
+    let pre = samples[0].name;
+    for (const s of samples) while (!s.name.startsWith(pre)) pre = pre.slice(0, -1);
+    pre = pre.slice(0, pre.lastIndexOf('_') + 1);
+    // Pad the ranges so edge labels aren't clipped
+    const pad = (v) => { const lo = Math.min(...v), hi = Math.max(...v), p = (hi - lo) * 0.12 || 1; return [lo - p, hi + p]; };
+    return {
+      n: samples.length,
+      xrange: pad(coords.map(c => c[0])),
+      yrange: pad(coords.map(c => c[1])),
+      traces: [{
+        type: 'scatter',
+        mode: 'markers+text',
+        x: coords.map(c => c[0]),
+        y: coords.map(c => c[1]),
+        text: samples.map(s => s.name.slice(pre.length)),
+        textposition: 'top center',
+        textfont: { size: 9, color: '#94a3b8' },
+        hovertext: hover,
+        hovertemplate: '%{hovertext}<extra></extra>',
+        marker: {
+          size: 11,
+          color: samples.map(s => s.binned * 100),
+          colorscale: 'Viridis',
+          colorbar: { title: { text: '% in bins', side: 'right' }, thickness: 10 },
+          line: { color: '#0f172a', width: 1 },
+        },
+      }],
+    };
+  });
+
   let showDetail = $state(false);
 
   function handleRowClick(magId) {
@@ -454,6 +505,26 @@
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    {#if sampleTsne}
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+      {#if sampleTsne.tooFew}
+        <h3 class="text-sm font-medium text-slate-400 mb-2">Sample t-SNE</h3>
+        <p class="text-slate-500 text-sm py-12 text-center">
+          Needs at least 4 samples with reads in the shown bins ({sampleTsne.n} now)
+        </p>
+      {:else}
+      <PlotlyChart
+        data={sampleTsne.traces}
+        layout={{
+          title: { text: `Sample t-SNE (${sampleTsne.n} samples, Bray-Curtis on \u2074\u221A relabund)`, font: { size: 14 } },
+          xaxis: { showticklabels: false, zeroline: false, title: 't-SNE 1', range: sampleTsne.xrange },
+          yaxis: { showticklabels: false, zeroline: false, title: 't-SNE 2', range: sampleTsne.yrange },
+          showlegend: false,
+        }}
+      />
+      {/if}
+    </div>
+    {/if}
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
       <PlotlyChart
         data={boxData}
@@ -464,7 +535,7 @@
         }}
       />
     </div>
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 {sampleTsne ? 'lg:col-span-2' : ''}">
       <PlotlyChart
         data={barData}
         layout={{
