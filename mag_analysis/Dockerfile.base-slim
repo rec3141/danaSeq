@@ -121,7 +121,7 @@ RUN /opt/conda/envs/dana-mag-pathviz/bin/pip install --no-deps KEGGDecoder && \
 # each needs its env and a dana-tools wrapper here (vamb and comebin are built
 # with the PyTorch envs in step 2). COMEBin comes from the bioconda package,
 # which pins its full dependency set (checkm-genome, biolib, atomicwrites,
-# tensorboard, ...). GTDB-Tk is 2.4.1, the first release that reads r226.
+# tensorboard, ...). GTDB-Tk is 2.8.0, which reads the R232 reference data.
 COPY envs/binette.yml envs/gtdbtk.yml envs/antismash.yml /tmp/envs-standalone/
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     for e in binette gtdbtk antismash; do \

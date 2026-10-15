@@ -615,9 +615,29 @@ process BINETTE_CONSENSUS {
     fi
     echo "[INFO] Using CheckM2 DIAMOND db: \$CHECKM2_DMND" >&2
 
+    # Binette builds its union/difference/intersection graph from every input
+    # bin, and with several binners on a large co-assembly that graph has run
+    # out of memory at over 1 TB. Only bins inside the size window Binette
+    # itself keeps (--min_length/--max_length) are passed in.
+    filtered=()
+    for d in ${dirs_list}; do
+        mkdir -p "\${d}_in"
+        for f in "\$d"/*.fa "\$d"/*.fasta "\$d"/*.fna; do
+            [ -e "\$f" ] || continue
+            size=\$(stat -Lc %s "\$f")
+            if [ "\$size" -ge ${params.binette_min_bin_bp} ] && [ "\$size" -le ${params.binette_max_bin_bp} ]; then
+                ln -s "\$(readlink -f "\$f")" "\${d}_in/"
+            fi
+        done
+        echo "[INFO] Binette input \$d: \$(ls "\${d}_in" | wc -l) of \$(ls "\$d" | wc -l) bins within ${params.binette_min_bin_bp}-${params.binette_max_bin_bp} bp" >&2
+        filtered+=("\${d}_in")
+    done
+
     set +e
     binette \\
-        --bin_dirs ${dirs_list} \\
+        --bin_dirs "\${filtered[@]}" \\
+        --min_length ${params.binette_min_bin_bp} \\
+        --max_length ${params.binette_max_bin_bp} \\
         --contigs ${assembly} \\
         --checkm2_db "\$CHECKM2_DMND" \\
         --threads ${task.cpus} \\
@@ -625,9 +645,11 @@ process BINETTE_CONSENSUS {
     binette_exit=\$?
     set -e
 
+    # A failed run must not leave outputs: storeDir would keep an empty result
+    # and skip Binette on every resume (errorStrategy carries on).
     if [ \$binette_exit -ne 0 ]; then
-        echo "[WARNING] Binette exited with code \$binette_exit" >&2
-        touch binette_bins.tsv
+        echo "[WARNING] Binette exited with code \$binette_exit; no results stored, it reruns on resume" >&2
+        exit \$binette_exit
     elif [ -d binette_out/final_bins ]; then
         > binette_bins.tsv
         bin_num=0
@@ -722,17 +744,25 @@ process MAGSCOT_CONSENSUS {
         touch magscot_bins.tsv
     else
         # 5. Run MAGScoT (Python port — no R dependency)
+        # The container ignores the conda directive, and its python3 is another
+        # env's; use the binning env's interpreter, which has pandas.
+        PY=python3
+        if [ -z "\${CONDA_PREFIX:-}" ] && [ -x /opt/conda/envs/dana-mag-binning/bin/python ]; then
+            PY=/opt/conda/envs/dana-mag-binning/bin/python
+        fi
         set +e
-        python3 ${projectDir}/bin/magscot.py \
+        "\$PY" ${projectDir}/bin/magscot.py \
             -i contig2bin.tsv --hmm markers.tsv \
             --profile_dir ${projectDir}/bin/profiles \
             -o magscot_out
         magscot_exit=\$?
         set -e
 
+        # A failed run must not leave outputs: storeDir would keep an empty
+        # result and skip MAGScoT on every resume (errorStrategy carries on).
         if [ \$magscot_exit -ne 0 ]; then
-            echo "[WARNING] MAGScoT exited with code \$magscot_exit" >&2
-            touch magscot_bins.tsv
+            echo "[WARNING] MAGScoT exited with code \$magscot_exit; no results stored, it reruns on resume" >&2
+            exit \$magscot_exit
         elif [ -f magscot_out.refined.contig_to_bin.out ]; then
             # MAGScoT output: header + bin\\tcontig
             # Skip header, extract bin\\tcontig pairs

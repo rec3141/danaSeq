@@ -5,4 +5,5 @@ channels:
 dependencies:
   - python>=3.9,<3.13
   - numpy<2
-  - gtdbtk=2.4.1                # first release that reads r226 reference data
+  - gtdbtk=2.8.0                # reads R232 reference data (pre-sketched skani)
+  - skani=0.3.1                 # the sketch format GTDB-Tk fixed in 2.6.0; bioconda allows newer

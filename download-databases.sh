@@ -1252,20 +1252,26 @@ download_marferret() {
 }
 
 download_gtdbtk() {
+    # The release must match the GTDB-Tk in the image (2.8.0 reads R232 only);
+    # the unpacked directory records its release in .gtdbtk_release.
+    local release=r232
     local db_path="${DB_DIR}/gtdbtk_db"
     if [ -d "${db_path}/taxonomy" ] && [ -d "${db_path}/markers" ]; then
-        echo "[INFO] GTDB-Tk database already exists at ${db_path}"
-        echo "  Delete ${db_path} and re-run to force re-download."
-        return 0
+        if [ "$(cat "${db_path}/.gtdbtk_release" 2>/dev/null)" = "$release" ]; then
+            echo "[INFO] GTDB-Tk ${release} database already exists at ${db_path}"
+            return 0
+        fi
+        echo "[ERROR] ${db_path} holds an older GTDB-Tk release; GTDB-Tk 2.8.0 needs ${release}." >&2
+        echo "  Move it aside (e.g. to ${db_path}.r226) and re-run." >&2
+        return 1
     fi
 
     echo ""
-    echo "[INFO] Downloading GTDB-Tk r226 reference data..."
+    echo "[INFO] Downloading GTDB-Tk ${release} reference data..."
     echo "  Destination: ${db_path}"
     echo ""
-    echo "  The full package is ~132 GB (~85 GB extracted)."
-    echo "  The skani/ directory (~100 GB compressed) is required for species-level"
-    echo "  ANI classification even when using --skip_ani_screen."
+    echo "  The full package is ~61 GB (~98 GB extracted, skani sketches included)."
+    echo "  Classification needs at least 140 GB of RAM with this release."
     echo ""
     echo "  Mirrors (Denmark is fastest worldwide):"
     echo "    EU:  https://data.gtdb.aau.ecogenomic.org/releases/"
@@ -1274,8 +1280,8 @@ download_gtdbtk() {
 
     mkdir -p "${db_path}"
 
-    local tarball="gtdbtk_r226_data.tar.gz"
-    local rel_path="release226/226.0/auxillary_files/gtdbtk_package/full_package/${tarball}"
+    local tarball="gtdbtk_${release}_data.tar.gz"
+    local rel_path="release232/232.0/auxillary_files/gtdbtk_package/full_package/${tarball}"
     # Australian mirrors are fastest from most locations; Denmark as fallback
     local urls=(
         "https://data.gtdb.ecogenomic.org/releases/${rel_path}"
@@ -1284,7 +1290,7 @@ download_gtdbtk() {
     )
 
     if [ ! -f "${db_path}/${tarball}" ]; then
-        echo "[INFO] Downloading ${tarball} (~132 GB)..."
+        echo "[INFO] Downloading ${tarball} (~61 GB)..."
         local downloaded=false
         if command -v aria2c &>/dev/null; then
             # aria2 supports multi-source parallel download + auto-resume
@@ -1313,6 +1319,7 @@ download_gtdbtk() {
 
     echo "[INFO] Removing tarball to free disk space..."
     rm -f "${db_path}/${tarball}"
+    echo "$release" > "${db_path}/.gtdbtk_release"
 
     echo "[SUCCESS] GTDB-Tk database downloaded to ${db_path}"
     echo "  Use with: --gtdbtk_db ${db_path}"
