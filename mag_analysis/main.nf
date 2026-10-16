@@ -56,6 +56,8 @@ def helpMessage() {
       --run_vamb_tax     Include taxonomy-guided VAMB [default: false]
       --run_binette      Run Binette consensus (needs --checkm2_db) [default: false]
       --run_magscot      Run MAGScoT consensus [default: false]
+      --run_derep        Dereplicate consensus bins with galah (needs --checkm2_db)
+                         [default: false]
 
     Annotation:
       --annotator STR    'prokka', 'bakta', or 'none' [default: bakta]
@@ -118,6 +120,9 @@ def validateParams() {
     if (ann != 'none') {
         log.info "Annotator: ${ann}"
     }
+    if (params.run_derep && !params.checkm2_db) {
+        log.warn "--run_derep needs --checkm2_db to rank genomes by quality; dereplication is skipped."
+    }
 }
 
 // ============================================================================
@@ -135,6 +140,7 @@ include { DASTOOL_CONSENSUS }   from './modules/binning'
 include { BINETTE_CONSENSUS }   from './modules/binning'
 include { MAGSCOT_CONSENSUS }   from './modules/binning'
 include { CHECKM2 }             from './modules/binning'
+include { DEREP_GALAH }         from './modules/derep'
 include { GTDBTK_CLASSIFY }     from './modules/phylogeny'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
 include { BAKTA_BASIC }          from './modules/annotation'
@@ -563,6 +569,19 @@ workflow {
         ch_all_bins = ch_all_bins.collect()
 
         CHECKM2(ch_all_bins)
+
+        // 5b. Species-level dereplication of the consensus bins, keeping the
+        // best-scoring CheckM2 genome of each cluster
+        if (params.run_derep) {
+            ch_derep_bins = DASTOOL_CONSENSUS.out.bins
+            if (params.run_binette) {
+                ch_derep_bins = ch_derep_bins.mix(BINETTE_CONSENSUS.out.fastas)
+            }
+            if (params.run_magscot) {
+                ch_derep_bins = ch_derep_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
+            }
+            DEREP_GALAH(ch_derep_bins.collect(), CHECKM2.out.report)
+        }
     }
 
     // 6. GTDB-Tk phylogenetic classification

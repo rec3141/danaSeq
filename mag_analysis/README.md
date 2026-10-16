@@ -119,6 +119,7 @@ All modules are optional and controlled via `--run_*` flags. Use `--all` to enab
 | **Metabolism** | KofamScan, eggNOG, dbCAN, KEGG modules, MinPath, KEGG-Decoder, antiSMASH | `--run_metabolism` |
 | **Ecosystem** | ECOSSDB (CICES 5.2 + UN SDG targets) | `--run_ecossdb` |
 | **Quality** | CheckM2 | `--checkm2_db` |
+| **Dereplication** | galah + skani (species-level, CheckM2-ranked) | `--run_derep` |
 | **Phylogenetics** | GTDB-Tk | `--run_gtdbtk` |
 | **Visualization** | Interactive Svelte dashboard | `--run_viz` |
 
