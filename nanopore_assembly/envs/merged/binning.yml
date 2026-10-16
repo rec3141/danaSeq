@@ -4,7 +4,7 @@ channels:
   - bioconda
 dependencies:
   # Binning tools
-  - metabat2=2.17
+  - metabat2==2.18
   - maxbin2=2.2.7
   - das_tool=1.1.7
   # SemiBin + LorBin

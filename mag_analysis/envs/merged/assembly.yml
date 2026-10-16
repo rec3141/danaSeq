@@ -11,6 +11,6 @@ dependencies:
   - bbmap>=39.12
   - pigz
   - metamdbg=1.4
-  - myloasm=0.5.0
+  - myloasm=0.7.0
   - nextflow>=25.10.3,<26
   - openjdk>=17
