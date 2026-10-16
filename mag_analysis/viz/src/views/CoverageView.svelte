@@ -2,7 +2,7 @@
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import D3Heatmap from '../components/charts/D3Heatmap.svelte';
   import { onMount } from 'svelte';
-  import { coverage, binQuality, loadBinQuality } from '../stores/data.js';
+  import { coverage, binQuality, loadBinQuality, samples, sampleMetadata } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
   import { tsne, brayCurtis } from '../lib/tsne.js';
 
@@ -299,41 +299,104 @@
 
   // Sample t-SNE: Bray-Curtis on fourth-root relative abundance of the filtered
   // bins (a bin's relabund = summed share of the sample's mapped contig bases).
-  // Samples with nothing in the filtered bins are left out.
-  let sampleTsne = $derived.by(() => {
+  // Samples with nothing in the filtered bins are left out. Colouring is kept
+  // separate so changing it doesn't rerun the embedding.
+  let tsneEmbedding = $derived.by(() => {
     if (!covData?.relabund || !sortedIndices.length) return null;
-    const samples = [];
+    const rows = [];
     covData.sample_names.forEach((name, j) => {
       const ra = sortedIndices.map(i => covData.relabund[i][j]);
       const binned = ra.reduce((a, b) => a + b, 0);
-      if (binned > 0) samples.push({ name, ra, binned });
+      if (binned > 0) rows.push({ name, ra, binned });
     });
-    if (samples.length < 4) return { tooFew: true, n: samples.length };
-    const coords = tsne(brayCurtis(samples.map(s => s.ra.map(v => Math.pow(v, 0.25)))));
+    if (rows.length < 4) return { tooFew: true, n: rows.length };
+    const coords = tsne(brayCurtis(rows.map(s => s.ra.map(v => Math.pow(v, 0.25)))));
     const ids = sortedIndices.map(i => covData.bins[i].id);
-    const hover = samples.map(s => {
-      const top = s.ra.map((v, k) => [v, ids[k]]).sort((a, b) => b[0] - a[0]).slice(0, 3)
+    for (const s of rows) {
+      s.top = s.ra.map((v, k) => [v, ids[k]]).sort((a, b) => b[0] - a[0]).slice(0, 3)
         .map(([v, id]) => `${id}: ${(v * 100).toFixed(1)}%`).join('<br>');
-      return `<b>${s.name}</b><br>In shown bins: ${(s.binned * 100).toFixed(1)}%<br>${top}`;
+    }
+    return { n: rows.length, samples: rows, coords };
+  });
+
+  // Sample metadata by coverage sample name (samples.json maps the name to the
+  // FLOWCELL:barcodeNN id metadata.json is keyed on).
+  let metaBySample = $derived.by(() => {
+    if (!$samples || !$sampleMetadata) return {};
+    const out = {};
+    for (const s of $samples) {
+      const m = $sampleMetadata[s.id];
+      if (m) out[s.name] = m;
+    }
+    return out;
+  });
+
+  // Colour-by choices: the binned fraction, then every metadata column that
+  // has a value for at least one sample in the embedding.
+  let tsneColorOptions = $derived.by(() => {
+    const cols = new Set();
+    for (const s of tsneEmbedding?.samples ?? []) {
+      for (const k of Object.keys(metaBySample[s.name] ?? {})) cols.add(k);
+    }
+    return [...cols].sort();
+  });
+  let tsneColorBy = $state('');
+  let tsneColorCol = $derived(tsneColorOptions.includes(tsneColorBy) ? tsneColorBy : '');
+
+  const categoryPalette = ['#22d3ee', '#f472b6', '#fbbf24', '#34d399', '#a78bfa', '#fb923c',
+    '#60a5fa', '#f87171', '#a3e635', '#e879f9', '#2dd4bf', '#facc15', '#c084fc', '#4ade80'];
+
+  let sampleTsne = $derived.by(() => {
+    const emb = tsneEmbedding;
+    if (!emb || emb.tooFew) return emb;
+    const col = tsneColorCol;
+    const marker = { size: 11, line: { color: '#0f172a', width: 1 } };
+    const point = (idx) => ({
+      type: 'scatter',
+      mode: 'markers',
+      x: idx.map(i => emb.coords[i][0]),
+      y: idx.map(i => emb.coords[i][1]),
+      hovertext: idx.map(i => {
+        const s = emb.samples[i];
+        const v = col ? metaBySample[s.name]?.[col] : null;
+        return `<b>${s.name}</b>${col ? `<br>${col}: ${v ?? '\u2013'}` : ''}` +
+          `<br>In shown bins: ${(s.binned * 100).toFixed(1)}%<br>${s.top}`;
+      }),
+      hovertemplate: '%{hovertext}<extra></extra>',
     });
-    return {
-      n: samples.length,
-      traces: [{
-        type: 'scatter',
-        mode: 'markers',
-        x: coords.map(c => c[0]),
-        y: coords.map(c => c[1]),
-        hovertext: hover,
-        hovertemplate: '%{hovertext}<extra></extra>',
-        marker: {
-          size: 11,
-          color: samples.map(s => s.binned * 100),
-          colorscale: 'Viridis',
-          colorbar: { title: { text: '% in bins', side: 'right' }, thickness: 10 },
-          line: { color: '#0f172a', width: 1 },
-        },
-      }],
-    };
+    const all = emb.samples.map((_, i) => i);
+    if (!col) {
+      return { n: emb.n, showlegend: false, traces: [{ ...point(all), marker: {
+        ...marker,
+        color: emb.samples.map(s => s.binned * 100),
+        colorscale: 'Viridis',
+        colorbar: { title: { text: '% in bins', side: 'right' }, thickness: 10 },
+      } }] };
+    }
+    const value = (i) => metaBySample[emb.samples[i].name]?.[col];
+    const has = all.filter(i => value(i) != null && value(i) !== '');
+    const missing = all.filter(i => !has.includes(i));
+    const missingTrace = missing.length
+      ? [{ ...point(missing), name: 'No value', marker: { ...marker, color: '#475569' } }]
+      : [];
+    if (has.every(i => typeof value(i) === 'number')) {
+      return { n: emb.n, showlegend: false, traces: [...missingTrace, { ...point(has), marker: {
+        ...marker,
+        color: has.map(value),
+        colorscale: 'Viridis',
+        colorbar: { title: { text: col, side: 'right' }, thickness: 10 },
+      } }] };
+    }
+    const groups = new Map();
+    for (const i of has) {
+      const k = String(value(i));
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(i);
+    }
+    const traces = [...groups.keys()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map((k, g) => ({ ...point(groups.get(k)), name: k,
+        marker: { ...marker, color: categoryPalette[g % categoryPalette.length] } }));
+    return { n: emb.n, showlegend: true, traces: [...traces, ...missingTrace] };
   });
 
   let showDetail = $state(false);
@@ -502,13 +565,28 @@
           Needs at least 4 samples with reads in the shown bins ({sampleTsne.n} now)
         </p>
       {:else}
+      {#if tsneColorOptions.length}
+        <label class="flex items-center gap-2 text-xs text-slate-400 mb-1">
+          Color by:
+          <select
+            class="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1"
+            bind:value={tsneColorBy}
+          >
+            <option value="">% in shown bins</option>
+            {#each tsneColorOptions as c}
+              <option value={c}>{c}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       <PlotlyChart
         data={sampleTsne.traces}
         layout={{
           title: { text: `Sample t-SNE (${sampleTsne.n} samples, Bray-Curtis on \u2074\u221A relabund)`, font: { size: 14 } },
           xaxis: { showticklabels: false, zeroline: false, title: 't-SNE 1' },
           yaxis: { showticklabels: false, zeroline: false, title: 't-SNE 2' },
-          showlegend: false,
+          showlegend: sampleTsne.showlegend,
+          legend: { font: { size: 10 } },
         }}
       />
       {/if}
