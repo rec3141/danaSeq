@@ -749,6 +749,24 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
     if gtdbtk_quality:
         print(f"  Loaded GTDB-Tk marker quality for {len(gtdbtk_quality)} bins")
 
+    # GTDB-Tk classification per bin, offered as the 'gtdbtk' taxonomy source
+    gtdb_ranks = {'d': 'domain', 'p': 'phylum', 'c': 'class', 'o': 'order',
+                  'f': 'family', 'g': 'genus', 's': 'species'}
+    gtdbtk_lineage = {}  # bin_name -> {rank: taxon}
+    gtdbtk_tax_df = load_tsv(resolve_path(results_dir, 'taxonomy', 'gtdbtk', 'gtdbtk_taxonomy.tsv'))
+    if gtdbtk_tax_df is not None:
+        for _, trow in gtdbtk_tax_df.iterrows():
+            cls = trow.get('classification')
+            if pd.isna(cls):
+                continue
+            lineage = {}
+            for part in str(cls).split(';'):
+                prefix, _, taxon = part.strip().partition('__')
+                if prefix in gtdb_ranks and taxon:
+                    lineage[gtdb_ranks[prefix]] = taxon
+            if lineage:
+                gtdbtk_lineage[trow['user_genome']] = lineage
+
     # DAS Tool's own SCG quality (the 51 bac / 38 arc markers the SCG heatmap
     # shows): bin_quality.tsv has raw binner bins, summary.tsv dastool- bins.
     dastool_quality = {}  # bin_name -> (completeness, redundancy)
@@ -784,6 +802,8 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
             tax = majority_vote_taxonomy(contigs, tmap, len_map)
             if tax:
                 taxonomy[source] = tax
+        if name in gtdbtk_lineage:
+            taxonomy['gtdbtk'] = gtdbtk_lineage[name]
 
         # Per-source per-rank length-weighted composition
         composition = {}
