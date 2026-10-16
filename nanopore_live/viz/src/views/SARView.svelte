@@ -102,6 +102,12 @@
   //                    assembly.
   //   carmineshiner  — Notropis percobromus, MB-endangered. Direct
   //                    species reference (scaffold-level WGS).
+  //   beluga         — Delphinapterus leucas (RefSeq GCF_002288925.2).
+  //                    Direct species reference.
+  //   narwhal        — Monodon monoceros (GCA_005190385.4, chromosome
+  //                    level). Direct species reference; beluga and
+  //                    narwhal are sister species and cross-map, so only
+  //                    high-identity hits separate them.
   //
   // `id` must match the mapping reference name (the .idx basename used
   // by run-nanopore-mapping.sh) AND the JSON filename suffix
@@ -110,6 +116,8 @@
     { id: 'namaovirus',    label: 'Namao virus',         latin: 'Namao virus' },
     { id: 'megalonaias',   label: 'Megalonaias nervosa', latin: 'Megalonaias nervosa' },
     { id: 'carmineshiner', label: 'Carmine shiner',      latin: 'Notropis percobromus' },
+    { id: 'beluga',        label: 'Beluga whale',        latin: 'Delphinapterus leucas' },
+    { id: 'narwhal',       label: 'Narwhal',             latin: 'Monodon monoceros' },
   ];
   let speciesIdx = $state(0);
   let species = $derived(SAR_SPECIES[speciesIdx]);
