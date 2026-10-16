@@ -21,6 +21,8 @@ process VIZ_PREPROCESS {
     def storeRoot = params.store_dir ?: ''
     def storeFlag = storeRoot ? "--store-dir ${storeRoot}" : ""
     def tsne_flag = skip_tsne ? '--skip-tsne --skip-umap' : ''
+    // GTDB reference taxonomy, to name reference leaves in the trees by species
+    def gtdbtkFlag = params.gtdbtk_db ? "--gtdbtk-db ${params.gtdbtk_db}" : ''
     def vizDir = params.store_dir ? "${params.store_dir}/viz" : "${params.outdir}/viz"
     def vizPort = params.viz_port ?: 5174
     """
@@ -39,6 +41,7 @@ process VIZ_PREPROCESS {
         --results "${params.store_dir ?: params.outdir}" \
         --output "\${VIZ_DIR}/data/" \
         ${storeFlag} \
+        ${gtdbtkFlag} \
         ${tsne_flag}
     # preprocess.py writes the gene shards too (genes_manifest.json,
     # genes.part-NNN.json.gz); there is no separate genes step.

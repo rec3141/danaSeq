@@ -7,6 +7,8 @@
     styles = {},
     selectedIds = [],
     collapsedIds = [],
+    showInternalLabels = false,
+    leafTooltip = null,
     onNodeClick = null,
     onSelectionChange = null,
   } = $props();
@@ -49,6 +51,7 @@
       interactive: true,
       showLabels: true,
       showLeafLabels: true,
+      showInternalLabels,
       showShapes: true,
       fontSize: 12,
       nodeSize: 6,
@@ -87,7 +90,7 @@
       if (node) {
         lastHoveredNode = node;
         const label = node.label ?? node.id;
-        tipText = node.isLeaf ? label : `${label} (${node.totalLeaves} leaves)`;
+        tipText = node.isLeaf ? (leafTooltip?.(node.id) ?? label) : `${label} (${node.totalLeaves} leaves)`;
         const rect = container.getBoundingClientRect();
         tipX = (event?.srcEvent?.clientX ?? 0) - rect.left;
         tipY = (event?.srcEvent?.clientY ?? 0) - rect.top - 16;
@@ -138,7 +141,7 @@
   });
 
   $effect(() => {
-    const _deps = [newick, treeType, styles, collapsedIds];
+    const _deps = [newick, treeType, styles, collapsedIds, showInternalLabels];
     if (!container || !newick) return;
 
     if (!tree || newick !== prevNewick) {
@@ -150,6 +153,7 @@
         type: treeType,
         styles,
         collapsedIds,
+        showInternalLabels,
       });
     }
   });

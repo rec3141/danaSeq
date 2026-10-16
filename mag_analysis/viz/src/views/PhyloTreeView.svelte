@@ -4,6 +4,7 @@
   import { onMount } from 'svelte';
   import { phyloTree, loadPhyloTree, binQuality, loadBinQuality } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
+  import { parseGtdbTree, commonLineage, lineageString } from '../lib/gtdbTree.js';
 
   let treeData = $derived($phyloTree);
 
@@ -36,7 +37,20 @@
     treeSelectedBins = new Set();
   });
 
-  let currentNewick = $derived(treeData?.newick?.[selectedTree] || '');
+  // The tree's internal labels carry the GTDB taxonomy; parsing them gives each
+  // leaf a lineage and a copy of the tree whose labels are just the taxa.
+  let parsedTree = $derived.by(() => {
+    const nwk = treeData?.newick?.[selectedTree];
+    return nwk ? parseGtdbTree(nwk) : null;
+  });
+  let currentNewick = $derived(parsedTree?.newick || '');
+  let showTaxa = $state(true);
+
+  // Hover text for a leaf: its name and the lowest taxon the tree gives it
+  function leafTooltip(id) {
+    const lowest = parsedTree?.leafLineage.get(id)?.at(-1);
+    return lowest ? `${id} \u2014 ${lowest}` : id;
+  }
 
   function treeLabel(name) {
     const meta = treeData?.tree_metadata?.[name];
@@ -315,15 +329,23 @@
       const quality = qualityByName[nodeId];
       clickedNode = { type: 'bin', nodeId, bin, quality };
       selectedMag.set(bin.name);
+    } else if (node && !node.isLeaf) {
+      // An internal node's taxonomy is what all the leaves under it share
+      const lineages = [];
+      (function walk(n) {
+        if (!n.children?.length || n.isLeaf) lineages.push(parsedTree?.leafLineage.get(n.id));
+        else for (const c of n.children) walk(c);
+      })(node);
+      clickedNode = { type: 'internal', nodeId, node, lineage: lineageString(commonLineage(lineages)) };
     } else {
+      // Reference genome: GTDB's own lineage when preprocess had the database
+      // (it includes the species), else the lineage the tree's labels give.
       const info = treeData?.leaf_info?.[nodeId];
-      if (info) {
-        clickedNode = { type: 'ref', nodeId, info };
-      } else if (node && !node.isLeaf) {
-        clickedNode = { type: 'internal', nodeId, node };
-      } else {
-        clickedNode = { type: 'unknown', nodeId };
-      }
+      const treeLineage = parsedTree?.leafLineage.get(nodeId);
+      clickedNode = { type: 'ref', nodeId, info: {
+        id: info?.id ?? nodeId,
+        lineage: info?.lineage || (treeLineage?.length ? lineageString(treeLineage) : ''),
+      } };
     }
   }
 
@@ -514,6 +536,13 @@
   >
     Collapse refs
   </button>
+  <button
+    class="px-3 py-1 rounded-md border transition-colors text-center {showTaxa ? 'border-cyan-400 bg-cyan-400/20 text-cyan-400' : 'border-slate-600 bg-slate-800 text-slate-400'}"
+    onclick={() => showTaxa = !showTaxa}
+    title="Label internal nodes with their GTDB taxon"
+  >
+    Taxa
+  </button>
 
   {#if treeData?.bins}
     <span class="text-slate-500">{filteredBins.length}/{treeData.bins.length} bins</span>
@@ -539,6 +568,8 @@
       </h3>
       <PhylocanvasTree
         newick={currentNewick}
+        showInternalLabels={showTaxa}
+        {leafTooltip}
         treeType={treeType}
         styles={nodeStyles}
         selectedIds={[]}
@@ -704,16 +735,17 @@
                   <dd class="font-mono">{n.totalNodes}</dd>
                 </div>
               {/if}
-              {#if n.label}
-                <div class="flex justify-between">
-                  <dt class="text-slate-400">Label</dt>
-                  <dd class="font-mono text-slate-200">{n.label}</dd>
+              {#if clickedNode.lineage}
+                <div class="border-t border-slate-700 pt-2 mt-2">
+                  <dt class="text-slate-400 mb-1 font-medium">GTDB Taxonomy (shared by all leaves)</dt>
+                  <dd class="font-mono text-xs">
+                    {#each parseLineage(clickedNode.lineage) as row}
+                      <div><span class="text-slate-500">{row.rank}:</span> {row.name}</div>
+                    {/each}
+                  </dd>
                 </div>
               {/if}
             </dl>
-          {:else}
-            <h3 class="text-slate-300 font-semibold mb-1 text-sm">{clickedNode.nodeId}</h3>
-            <p class="text-xs text-slate-500">Unknown node type</p>
           {/if}
         </div>
       </div>
