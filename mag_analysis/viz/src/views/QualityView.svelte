@@ -4,7 +4,7 @@
   import DataTable from '../components/ui/DataTable.svelte';
   import QualityBadge from '../components/ui/QualityBadge.svelte';
   import D3Heatmap from '../components/charts/D3Heatmap.svelte';
-  import { binQuality, loadBinQuality, contigExplorer, loadContigExplorer, ensureContigsForBin, scgHeatmap } from '../stores/data.js';
+  import { binQuality, loadBinQuality, contigExplorer, loadContigExplorer, ensureContigsForBin, scgHeatmap, ensureGtdbTaxonomy } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
 
   let allBins = $derived($binQuality);
@@ -178,7 +178,10 @@
     { key: 'kraken2', label: 'Kraken2' },
     { key: 'sendsketch', label: 'BBSketch' },
     { key: 'rrna', label: 'rRNA' },
+    { key: 'gtdbtk', label: 'GTDB-Tk' },
   ];
+  // GTDB-Tk lineages may need filling in from phylotree.json (ensureGtdbTaxonomy)
+  $effect(() => { if (taxSource === 'gtdbtk') ensureGtdbTaxonomy(); });
 
   function cycleSource() {
     const keys = taxSources.map(s => s.key);

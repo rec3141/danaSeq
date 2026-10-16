@@ -2,7 +2,7 @@
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import D3Heatmap from '../components/charts/D3Heatmap.svelte';
   import { onMount } from 'svelte';
-  import { coverage, binQuality, loadBinQuality, samples, sampleMetadata } from '../stores/data.js';
+  import { coverage, binQuality, loadBinQuality, samples, sampleMetadata, ensureGtdbTaxonomy } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
   import { tsne, brayCurtis } from '../lib/tsne.js';
 
@@ -22,7 +22,10 @@
     { key: 'kraken2', label: 'Kraken2' },
     { key: 'sendsketch', label: 'BBSketch' },
     { key: 'rrna', label: 'rRNA' },
+    { key: 'gtdbtk', label: 'GTDB-Tk' },
   ];
+  // GTDB-Tk lineages may need filling in from phylotree.json (ensureGtdbTaxonomy)
+  $effect(() => { if (taxSource === 'gtdbtk') ensureGtdbTaxonomy(); });
 
   function cycleSource() {
     const keys = taxSources.map(s => s.key);

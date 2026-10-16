@@ -141,18 +141,15 @@ export async function loadAllData() {
 }
 
 // Lazy load bin quality data (3MB+ with all binner bins)
-let binQualityLoading = false;
-export async function loadBinQuality() {
-  if (binQualityLoading || get(binQuality) !== null) return;
-  binQualityLoading = true;
-  try {
-    const data = await fetchJSON('data/checkm2_all.json');
-    binQuality.set(data);
-  } catch (e) {
-    console.error('Failed to load checkm2_all:', e);
-  } finally {
-    binQualityLoading = false;
-  }
+// One shared load, so a caller that needs the data can await one in flight
+let binQualityLoading = null;
+export function loadBinQuality() {
+  if (get(binQuality) !== null) return Promise.resolve();
+  binQualityLoading ??= fetchJSON('data/checkm2_all.json')
+    .then(data => binQuality.set(data))
+    .catch(e => console.error('Failed to load checkm2_all:', e))
+    .finally(() => { binQualityLoading = null; });
+  return binQualityLoading;
 }
 
 // Lazy load biosynthetic data (antiSMASH BGC regions)
@@ -195,19 +192,35 @@ export async function loadEcosystemServices() {
 }
 
 // Lazy load phylotree (GTDB-Tk phylogenetic classification)
-let phyloLoading = false;
-export async function loadPhyloTree() {
-  if (phyloLoading || get(phyloTree) !== null) return;
-  phyloLoading = true;
-  try {
-    const data = await fetchJSON('data/phylotree.json');
-    phyloTree.set(data);
-  } catch (e) {
-    console.warn('Phylotree data not available:', e.message);
-    phyloTree.set({ hierarchy: null, bins: [], newick: {} });
-  } finally {
-    phyloLoading = false;
-  }
+let phyloLoading = null;
+export function loadPhyloTree() {
+  if (get(phyloTree) !== null) return Promise.resolve();
+  phyloLoading ??= fetchJSON('data/phylotree.json')
+    .then(data => phyloTree.set(data))
+    .catch(e => {
+      console.warn('Phylotree data not available:', e.message);
+      phyloTree.set({ hierarchy: null, bins: [], newick: {} });
+    })
+    .finally(() => { phyloLoading = null; });
+  return phyloLoading;
+}
+
+// GTDB-Tk classification as a bin taxonomy source (taxonomy.gtdbtk). Bundles
+// preprocessed before it was written there carry it only in phylotree.json's
+// bins, so fill it in from there the first time it's asked for.
+export async function ensureGtdbTaxonomy() {
+  await loadBinQuality();
+  const bins = get(binQuality);
+  if (!bins?.length || bins.some(b => b.taxonomy?.gtdbtk)) return;
+  await loadPhyloTree();
+  const lineageByName = new Map((get(phyloTree)?.bins || []).map(b => [b.name, b.lineage]));
+  if (!lineageByName.size) return;
+  binQuality.set(bins.map(b => {
+    const lineage = lineageByName.get(b.name);
+    return lineage && Object.keys(lineage).length
+      ? { ...b, taxonomy: { ...b.taxonomy, gtdbtk: lineage } }
+      : b;
+  }));
 }
 
 export * from './contigData.js';
