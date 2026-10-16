@@ -18,7 +18,7 @@ set -euo pipefail
 #   dana-mag-genomic   - IntegronFinder, IslandPath, MacSyFinder, DefenseFinder, dbCAN
 #   dana-mag-pathviz   - MinPath, KEGG-Decoder, viz dashboard (Node.js + Python)
 #   dana-mag-strain    - Strainy, Floria, InStrain
-#   dana-mag-derep     - galah, skani, sourmash
+#   dana-mag-derep     - galah, skani, sourmash, skDER, dRep
 #
 # Standalone environments (too large or conflicting to merge):
 #   dana-mag-prokka    - Prokka gene annotation

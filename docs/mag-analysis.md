@@ -48,6 +48,7 @@ cd mag_analysis
 | 2b | `BINETTE_CONSENSUS` | Binette | CheckM2-guided bin refinement |
 | 2c | `MAGSCOT_CONSENSUS` | MAGScoT | Marker-gene-based consensus |
 | 3 | `CHECKM2` | CheckM2 | Completeness and contamination assessment |
+| 3b | `DEREP_GALAH` | galah + skani | Species-level dereplication of the consensus bins, ranked by CheckM2 |
 
 ### Annotation
 
@@ -139,6 +140,30 @@ cd mag_analysis
 | `--metabat_min_cls` | `50000` | MetaBAT2 minimum cluster size |
 | `--lorbin_min_length` | `80000` | LorBin minimum contig length |
 
+### Dereplication
+
+`--run_derep` clusters the consensus bins (DAS Tool, plus Binette and MAGScoT
+when they run) at species-level ANI with galah, and keeps one representative
+per cluster: the genome with the highest completeness − 5 × contamination, less
+small penalties for contig count and ambiguous bases (galah's
+`Parks2020_reduced`). It needs `--checkm2_db`, and clusters only bins that
+CheckM2 scored. Within one run, it picks the best of the refiners' versions of
+each genome; it does not dereplicate across runs or co-assemblies.
+
+`binning/derep/derep_clusters.tsv` lists every consensus bin. Its `status` is
+`representative`, `member` (with its skani ANI and aligned fractions against
+the representative; `NA` if the pair falls below skani's 80% ANI screen),
+`failed_quality` (outside the completeness/contamination thresholds), or
+`no_checkm2` (no CheckM2 estimate, e.g. a bin above `--checkm2_max_bin_bp`).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--run_derep` | `false` | Dereplicate the consensus bins with galah (needs `--checkm2_db`) |
+| `--derep_ani` | `95` | ANI (%) at which genomes are clustered |
+| `--derep_min_af` | `15` | Minimum aligned fraction (%) for two genomes to cluster |
+| `--derep_min_completeness` | `50` | CheckM2 completeness (%) below which a bin is not clustered |
+| `--derep_max_contamination` | `10` | CheckM2 contamination (%) above which a bin is not clustered |
+
 ### Annotation
 
 | Parameter | Default | Description |
@@ -226,7 +251,12 @@ results/
 │   ├── dastool/                DAS Tool consensus bins
 │   ├── binette/                Binette refined bins
 │   ├── magscot/                MAGScoT consensus bins
-│   └── checkm2/                Quality assessment (completeness/contamination)
+│   ├── checkm2/                Quality assessment (completeness/contamination)
+│   └── derep/                  Dereplicated consensus bins (--run_derep):
+│                                 representatives/ (one FASTA per species cluster) and
+│                                 derep_clusters.tsv (genome, representative, ani,
+│                                 af_genome, af_representative, completeness,
+│                                 contamination, status)
 ├── annotation/
 │   ├── prokka/ or bakta/       Gene annotations (GFF, FAA, FFN)
 │   └── bakta_extra/            Full Bakta output (if enabled)

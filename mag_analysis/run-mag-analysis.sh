@@ -179,7 +179,7 @@ usage() {
     echo "Pipeline flags: --annotator, --run_metabolism, --run_genomad, --run_gtdbtk,"
     echo "  --run_kaiju, --run_kraken2, --run_sendsketch, --run_rrna, --run_eukaryotic,"
     echo "  --run_antismash, --run_viz, --run_semibin, --run_maxbin, --run_lorbin,"
-    echo "  --run_comebin, --run_vamb, --run_binette, --run_magscot, etc."
+    echo "  --run_comebin, --run_vamb, --run_binette, --run_magscot, --run_derep, etc."
     echo ""
     echo "Run '$0 --help-pipeline' for full Nextflow help."
     exit 0
@@ -291,6 +291,7 @@ while (( $# )); do
                 --run_vamb_tax true
                 --run_binette true
                 --run_magscot true
+                --run_derep true
                 --run_kraken2 true
                 --run_sendsketch true
                 --run_rrna true
