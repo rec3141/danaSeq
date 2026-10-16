@@ -601,12 +601,14 @@
   // TSV export for bin quality table
   function exportTableTsv() {
     if (!tableRows.length) return;
-    const header = tableColumns.map(c => c.label).join('\t');
+    // Units go in the header so the cells stay numbers a spreadsheet can sort
+    const units = { size: ' (Mb)', n50: ' (Kb)' };
+    const header = tableColumns.map(c => c.label + (units[c.key] ?? '')).join('\t');
     const body = tableRows.map(r =>
       tableColumns.map(c => {
         const v = r[c.key];
-        if (c.key === 'size') return (v / 1e6).toFixed(2) + ' Mb';
-        if (c.key === 'n50') return (v / 1e3).toFixed(1) + ' Kb';
+        if (c.key === 'size') return (v / 1e6).toFixed(2);
+        if (c.key === 'n50') return (v / 1e3).toFixed(1);
         return v;
       }).join('\t')
     ).join('\n');
