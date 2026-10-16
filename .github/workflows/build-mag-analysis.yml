@@ -57,8 +57,14 @@ jobs:
         with:
           submodules: true
 
+      # The docker driver builds straight into the runner's image store, so the
+      # smoke test below runs the image without pulling it back from GHCR
+      # (a 5-10 GB download per variant). It cannot attach provenance
+      # attestations, hence provenance: false on the build.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -91,6 +97,7 @@ jobs:
           context: mag_analysis
           file: mag_analysis/Dockerfile
           push: true
+          provenance: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Baked into the image so a run launched from the .sif can report what
@@ -166,9 +173,11 @@ jobs:
       digest: ${{ needs.digests.outputs.cpu }}
       build_date: ${{ needs.build.outputs.build_date }}
 
-  # After the cpu record, not beside it: both push to deploy/ on main.
+  # Beside the cpu publish: each writes only its own deploy/<image>.json, and
+  # record-deploy.sh rebuilds its commit on the current head and retries when
+  # the other push lands first.
   publish-gpu:
-    needs: [build, digests, publish]
+    needs: [build, digests]
     if: ${{ !cancelled() && needs.digests.outputs.gpu != '' }}
     permissions:
       contents: write
