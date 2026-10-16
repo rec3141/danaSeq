@@ -13,6 +13,10 @@ export const mgeSummary = writable(null);
 export const mgePerBin = writable(null);
 export const eukaryotic = writable(null);
 export const contigLengths = writable(null);
+// Sample rows (samples.json) and sample metadata keyed by their FLOWCELL:barcodeNN
+// id (metadata.json: shipped in the bundle or uploaded by a lab admin).
+export const samples = writable(null);
+export const sampleMetadata = writable(null);
 // Lazy-loaded (large files); per-contig stores live in contigData.js
 export const phyloTree = writable(null);
 export const biosynthetic = writable(null);
@@ -99,6 +103,8 @@ export async function loadAllData() {
       mgePerBinData,
       eukData,
       contigLenData,
+      samplesData,
+      metadataData,
     ] = await Promise.all([
       fetchJSON('data/overview.json'),
       fetchJSON('data/mags.json').catch(() => null),
@@ -110,6 +116,8 @@ export async function loadAllData() {
       fetchJSON('data/mge_per_bin.json').catch(() => null),
       fetchJSON('data/eukaryotic.json').catch(() => null),
       fetchJSON('data/contig_lengths.json').catch(() => null),
+      fetchJSON('data/samples.json').catch(() => null),
+      fetchJSON('data/metadata.json').catch(() => null),
     ]);
 
     overview.set(overviewData);
@@ -122,6 +130,8 @@ export async function loadAllData() {
     if (mgePerBinData) mgePerBin.set(mgePerBinData);
     if (eukData) eukaryotic.set(eukData);
     if (contigLenData) contigLengths.set(contigLenData);
+    if (samplesData) samples.set(samplesData);
+    if (metadataData) sampleMetadata.set(metadataData);
   } catch (e) {
     error.set(e.message);
     console.error('Data loading error:', e);

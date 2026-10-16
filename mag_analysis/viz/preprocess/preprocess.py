@@ -1253,6 +1253,23 @@ def build_gtdbtk_scg_heatmap(results_dir):
     return result
 
 
+def build_samples(sample_names):
+    """Sample rows for samples.json. `name` is the sample as coverage.json and
+    the depth table spell it (FLOWCELL_barcodeNN); `id` is the FLOWCELL:barcodeNN
+    key sample metadata is matched on. A name that isn't FLOWCELL_barcodeNN
+    keeps its name as its id."""
+    samples = []
+    for name in sample_names:
+        m = re.match(r'^(.+)[_:-]barcode(\d+)$', name)
+        if m:
+            flowcell, barcode = m.group(1), 'barcode' + m.group(2).zfill(2)
+            samples.append({'id': f'{flowcell}:{barcode}', 'name': name,
+                            'flowcell': flowcell, 'barcode': barcode})
+        else:
+            samples.append({'id': name, 'name': name})
+    return samples
+
+
 def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     """Build coverage.json with per-bin per-sample depth for all binners, Bray-Curtis clustered."""
     print("Building coverage.json ...")
@@ -2380,6 +2397,12 @@ def main():
     coverage = build_coverage(results_dir, dastool_summary, contig2bin, depths_df)
     write_json_gz(os.path.join(output_dir, 'coverage.json'), coverage)
     print(f"  Wrote coverage.json")
+
+    # 7a. samples.json — one row per mapped sample, keyed FLOWCELL:barcodeNN like
+    # nanopore_live's, so uploaded sample metadata matches the same way.
+    samples = build_samples(coverage.get('sample_names', []))
+    write_json_gz(os.path.join(output_dir, 'samples.json'), samples)
+    print(f"  Wrote samples.json ({len(samples)} samples)")
 
     # 8. mge_summary.json
     mge_summary = build_mge_summary(virus_df, plasmid_df, defense_df, integron_df)
