@@ -60,12 +60,17 @@
     return counts;
   });
 
-  // Quality source toggle (CheckM2 vs GTDB-Tk SCG)
+  // Quality source toggle. CheckM2 is a model over the whole proteome; the two
+  // SCG sources count the markers their heatmap shows.
   let qualitySource = $state('checkm2');
-  const qualitySources = [
-    { key: 'checkm2', label: 'CheckM2' },
-    { key: 'gtdbtk', label: 'GTDB-Tk SCG' },
+  const allQualitySources = [
+    { key: 'checkm2', label: 'CheckM2', field: 'completeness' },
+    { key: 'dastool', label: 'DAS Tool SCG', field: 'dastool_completeness' },
+    { key: 'gtdbtk', label: 'GTDB-Tk SCG', field: 'gtdbtk_completeness' },
   ];
+  // Only offer a source some bin has values for (older bundles lack DAS Tool SCG)
+  let qualitySources = $derived(allQualitySources.filter(s =>
+    s.key === 'checkm2' || allBins?.some(b => b[s.field] != null)));
   function cycleQualitySource() {
     const keys = qualitySources.map(s => s.key);
     qualitySource = keys[(keys.indexOf(qualitySource) + 1) % keys.length];
@@ -74,10 +79,14 @@
     return qualitySources.find(s => s.key === qualitySource)?.label || qualitySource;
   }
   function getComp(b) {
-    return qualitySource === 'gtdbtk' ? b.gtdbtk_completeness : b.completeness;
+    if (qualitySource === 'gtdbtk') return b.gtdbtk_completeness;
+    if (qualitySource === 'dastool') return b.dastool_completeness;
+    return b.completeness;
   }
   function getCont(b) {
-    return qualitySource === 'gtdbtk' ? b.gtdbtk_contamination : b.contamination;
+    if (qualitySource === 'gtdbtk') return b.gtdbtk_contamination;
+    if (qualitySource === 'dastool') return b.dastool_contamination;
+    return b.contamination;
   }
 
   // Quality filter sliders

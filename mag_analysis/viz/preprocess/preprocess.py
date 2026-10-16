@@ -749,6 +749,19 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
     if gtdbtk_quality:
         print(f"  Loaded GTDB-Tk marker quality for {len(gtdbtk_quality)} bins")
 
+    # DAS Tool's own SCG quality (the 51 bac / 38 arc markers the SCG heatmap
+    # shows): bin_quality.tsv has raw binner bins, summary.tsv dastool- bins.
+    dastool_quality = {}  # bin_name -> (completeness, redundancy)
+    for df in (load_tsv(resolve_path(results_dir, 'binning', 'dastool', 'bin_quality.tsv')),
+               dastool_summary):
+        if df is None or 'SCG_completeness' not in df.columns:
+            continue
+        for _, qrow in df.iterrows():
+            if pd.isna(qrow['SCG_completeness']) or pd.isna(qrow['SCG_redundancy']):
+                continue
+            dastool_quality[qrow['bin']] = (round(float(qrow['SCG_completeness']), 2),
+                                            round(float(qrow['SCG_redundancy']), 2))
+
     records = []
     for _, row in checkm2_df.iterrows():
         name = row['Name']
@@ -794,12 +807,15 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
         n_integron = sum(1 for c in contigs if c in integron_contigs)
 
         gtq = gtdbtk_quality.get(name)
+        dsq = dastool_quality.get(name)
         records.append({
             'name': name,
             'completeness': round(float(row['Completeness']), 2),
             'contamination': round(float(row['Contamination']), 2),
             'gtdbtk_completeness': gtq['completeness'] if gtq else None,
             'gtdbtk_contamination': gtq['contamination'] if gtq else None,
+            'dastool_completeness': dsq[0] if dsq else None,
+            'dastool_contamination': dsq[1] if dsq else None,
             'genome_size': int(row['Genome_Size']),
             'gc': round(float(row['GC_Content']), 4),
             'n50': int(row['Contig_N50']),
@@ -1160,9 +1176,14 @@ def build_gtdbtk_scg_heatmap(results_dir):
             bin_name = mrow['name']
             counts = Counter()
 
-            unique_str = str(mrow.get('list_unique_genes', '') or '')
-            multi_str = str(mrow.get('list_multiple_genes', '') or '')
-            missing_str = str(mrow.get('list_missing_genes', '') or '')
+            # An empty list is a blank cell, which pandas reads as NaN; str()
+            # of that is 'nan', which would become a marker of its own.
+            def gene_list(col):
+                v = mrow.get(col, '')
+                return '' if pd.isna(v) else str(v)
+            unique_str = gene_list('list_unique_genes')
+            multi_str = gene_list('list_multiple_genes')
+            missing_str = gene_list('list_missing_genes')
 
             unique_genes = [g.strip() for g in unique_str.split(',') if g.strip()]
             multi_genes = [g.strip() for g in multi_str.split(',') if g.strip()]
