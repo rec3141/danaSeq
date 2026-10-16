@@ -95,7 +95,7 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 # cannot import (every run then reports 0 defense systems).
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-genomic   -f /tmp/envs/genomic.yml && \
-    /opt/conda/envs/dana-mag-genomic/bin/pip install --upgrade integron_finder 'macsyfinder==2.1.4' && \
+    /opt/conda/envs/dana-mag-genomic/bin/pip install 'integron_finder==2.0.6' 'macsyfinder==2.1.4' && \
     /opt/conda/envs/dana-mag-genomic/bin/python -c "import macsypy, defense_finder"
 
 # 7. Derep: galah, skani, sourmash, skder, drep

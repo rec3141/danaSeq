@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - semibin=2.1.0
+  - semibin=2.6.0
   - pytorch-gpu           # GPU-accelerated training (falls back to CPU if no GPU)
   - biopython             # LorBin dependency (hmmer, prodigal, bedtools already in SemiBin2)
   - pip:

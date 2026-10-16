@@ -3,4 +3,4 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - bakta>=1.9
+  - bakta>=1.12.2
