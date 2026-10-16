@@ -402,6 +402,95 @@
     return { n: emb.n, showlegend: true, traces: [...traces, ...missingTrace] };
   });
 
+  // Bin t-SNE (the transpose): one embedding of every binner's bins over samples,
+  // computed in preprocess (Bray-Curtis on fourth-root relabund); the binner and
+  // quality filters only choose which bins are drawn.
+  let tsneMode = $state('samples'); // 'samples' | 'bins'
+  let hasBinTsne = $derived(!!covData?.bin_tsne?.some(Boolean));
+  let showBins = $derived(tsneMode === 'bins' && hasBinTsne);
+
+  const binColorDefs = [
+    { key: 'phylum', label: 'Phylum' },
+    { key: 'quality', label: 'Quality' },
+    { key: 'binner', label: 'Binner' },
+    { key: 'relabund', label: 'Total relabund' },
+  ];
+  let binColorBy = $state('phylum');
+  const binnerLabel = (k) => binnerDefs.find(d => d.key === k)?.label ?? k;
+
+  let binTsne = $derived.by(() => {
+    if (!showBins) return null;
+    const idx = sortedIndices.filter(i => covData.bin_tsne[i]);
+    if (!idx.length) return { n: 0, traces: [] };
+    const lineage = (tax) => tax
+      ? ['domain', 'phylum', 'class', 'order', 'family', 'genus'].map(r => tax[r]).filter(Boolean).join('; ')
+      : '';
+    const total = (i) => covData.relabund[i].reduce((a, b) => a + b, 0);
+    const point = (sub) => ({
+      type: 'scattergl',
+      mode: 'markers',
+      x: sub.map(i => covData.bin_tsne[i][0]),
+      y: sub.map(i => covData.bin_tsne[i][1]),
+      customdata: sub.map(i => covData.bins[i].id),
+      hovertext: sub.map(i => {
+        const b = covData.bins[i], m = binMetaMap[b.id];
+        const q = m ? `<br>${qualityTier(m)} · ${m.completeness.toFixed(0)}% comp · ${m.contamination.toFixed(1)}% cont` : '';
+        const tax = lineage(m?.taxonomy?.[taxSource]);
+        return `<b>${b.id}</b> (${binnerLabel(b.binner)})${q}` +
+          `${tax ? `<br>${tax}` : ''}<br>Total relabund: ${(total(i) * 100).toFixed(2)}%`;
+      }),
+      hovertemplate: '%{hovertext}<extra></extra>',
+    });
+    const marker = { size: idx.length > 5000 ? 4 : 6, opacity: 0.85 };
+
+    if (binColorBy === 'relabund') {
+      return { n: idx.length, showlegend: false, traces: [{ ...point(idx), marker: {
+        ...marker,
+        color: idx.map(i => Math.log10(Math.max(total(i), 1e-6))),
+        colorscale: 'Viridis',
+        colorbar: { title: { text: 'log10 relabund', side: 'right' }, thickness: 10 },
+      } }] };
+    }
+    const groupOf = {
+      phylum: (i) => binMetaMap[covData.bins[i].id]?.taxonomy?.[taxSource]?.phylum || 'Unclassified',
+      quality: (i) => { const m = binMetaMap[covData.bins[i].id]; return m ? qualityTier(m) : 'No CheckM2'; },
+      binner: (i) => binnerLabel(covData.bins[i].binner),
+    }[binColorBy];
+    const groups = new Map();
+    for (const i of idx) {
+      const k = groupOf(i);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(i);
+    }
+    // Largest groups get the palette; the tail and the unassigned are grey
+    const tierOrder = ['HQ', 'MQ', 'LQ', 'No CheckM2'];
+    let keys = [...groups.keys()].sort((a, b) => binColorBy === 'quality'
+      ? tierOrder.indexOf(a) - tierOrder.indexOf(b)
+      : groups.get(b).length - groups.get(a).length);
+    const grey = new Set(['Unclassified', 'No CheckM2', 'Other']);
+    if (binColorBy === 'phylum' && keys.length > categoryPalette.length) {
+      const top = keys.filter(k => !grey.has(k)).slice(0, categoryPalette.length);
+      const other = keys.filter(k => !top.includes(k) && k !== 'Unclassified').flatMap(k => groups.get(k));
+      for (const k of keys) if (!top.includes(k) && k !== 'Unclassified') groups.delete(k);
+      if (other.length) groups.set('Other', other);
+      keys = [...top, ...['Other', 'Unclassified'].filter(k => groups.has(k))];
+    }
+    const fixed = { HQ: '#34d399', MQ: '#fbbf24', LQ: '#64748b' };
+    let g = 0;
+    const traces = keys.map((k, rank) => ({ ...point(groups.get(k)), name: `${k} (${groups.get(k).length})`,
+      legendrank: rank,
+      marker: { ...marker, color: fixed[k] && binColorBy === 'quality' ? fixed[k]
+        : grey.has(k) ? '#475569' : categoryPalette[g++ % categoryPalette.length] } }));
+    // Draw grey groups first so coloured points sit on top (legendrank keeps the legend order)
+    traces.sort((a, b) => (a.marker.color === '#475569' ? 0 : 1) - (b.marker.color === '#475569' ? 0 : 1));
+    return { n: idx.length, showlegend: true, traces };
+  });
+
+  function handleBinTsneClick(e) {
+    const id = e?.points?.[0]?.customdata;
+    if (id) handleRowClick(id);
+  }
+
   let showDetail = $state(false);
 
   function handleRowClick(magId) {
@@ -560,28 +649,69 @@
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    {#if sampleTsne}
+    {#if sampleTsne || hasBinTsne}
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      {#if sampleTsne.tooFew}
+      <div class="flex items-center gap-3 flex-wrap text-xs text-slate-400 mb-1">
+        {#if hasBinTsne}
+          <div class="flex rounded-md border border-slate-600 overflow-hidden">
+            {#each [['samples', 'Samples'], ['bins', 'Bins']] as [key, label]}
+              <button
+                class="px-3 py-1 transition-colors {tsneMode === key ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                onclick={() => tsneMode = key}
+              >{label}</button>
+            {/each}
+          </div>
+        {/if}
+        {#if showBins}
+          <label class="flex items-center gap-2">
+            Color by:
+            <select
+              class="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1"
+              bind:value={binColorBy}
+            >
+              {#each binColorDefs as { key, label }}
+                <option value={key}>{label}{key === 'phylum' ? ` (${taxSourceLabel()})` : ''}</option>
+              {/each}
+            </select>
+          </label>
+        {:else if sampleTsne && !sampleTsne.tooFew && tsneColorOptions.length}
+          <label class="flex items-center gap-2">
+            Color by:
+            <select
+              class="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1"
+              bind:value={tsneColorBy}
+            >
+              <option value="">% in shown bins</option>
+              {#each tsneColorOptions as c}
+                <option value={c}>{c}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+      </div>
+      {#if showBins}
+        {#if binTsne?.n}
+          <PlotlyChart
+            data={binTsne.traces}
+            onclick={handleBinTsneClick}
+            layout={{
+              title: { text: `Bin t-SNE (${binTsne.n} bins, Bray-Curtis on \u2074\u221A relabund)`, font: { size: 14 } },
+              xaxis: { showticklabels: false, zeroline: false, title: 't-SNE 1' },
+              yaxis: { showticklabels: false, zeroline: false, title: 't-SNE 2' },
+              showlegend: binTsne.showlegend,
+              legend: { font: { size: 10 }, itemsizing: 'constant' },
+              hovermode: 'closest',
+            }}
+          />
+        {:else}
+          <p class="text-slate-500 text-sm py-12 text-center">No shown bins have reads in any sample</p>
+        {/if}
+      {:else if !sampleTsne || sampleTsne.tooFew}
         <h3 class="text-sm font-medium text-slate-400 mb-2">Sample t-SNE</h3>
         <p class="text-slate-500 text-sm py-12 text-center">
-          Needs at least 4 samples with reads in the shown bins ({sampleTsne.n} now)
+          Needs at least 4 samples with reads in the shown bins ({sampleTsne?.n ?? 0} now)
         </p>
       {:else}
-      {#if tsneColorOptions.length}
-        <label class="flex items-center gap-2 text-xs text-slate-400 mb-1">
-          Color by:
-          <select
-            class="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1"
-            bind:value={tsneColorBy}
-          >
-            <option value="">% in shown bins</option>
-            {#each tsneColorOptions as c}
-              <option value={c}>{c}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
       <PlotlyChart
         data={sampleTsne.traces}
         layout={{
@@ -605,7 +735,7 @@
         }}
       />
     </div>
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 {sampleTsne ? 'lg:col-span-2' : ''}">
+    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 {sampleTsne || hasBinTsne ? 'lg:col-span-2' : ''}">
       <PlotlyChart
         data={barData}
         layout={{

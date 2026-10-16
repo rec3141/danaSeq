@@ -1413,13 +1413,38 @@ def build_coverage(results_dir, dastool_summary, contig2bin, depths_df):
     reordered_matrix = [[round(v, 4) for v in row] for row in reordered_matrix]
     relabund = np.array(all_relabund).reshape(len(all_bins), len(sample_names))[row_order][:, col_order]
     reordered_relabund = [[float(f'{v:.4g}') for v in row] for row in relabund]
+    bin_tsne = build_bin_tsne(relabund)
 
     return {
         'bins': reordered_bins,         # [{id, binner}, ...]
         'sample_names': reordered_samples,
         'matrix': reordered_matrix,     # mean depth
         'relabund': reordered_relabund, # fraction of sample's mapped bases
+        'bin_tsne': bin_tsne,           # [x, y] per bin, or null
     }
+
+
+def build_bin_tsne(relabund):
+    """t-SNE of bins over samples: Bray-Curtis on fourth-root relabund, one
+    embedding for the bins of every binner (the viz filters which are shown).
+    Bins with no reads in any sample get null."""
+    coords = [None] * relabund.shape[0]
+    keep = np.flatnonzero(relabund.sum(axis=1) > 0)
+    if len(keep) < 4:
+        return coords
+    try:
+        from sklearn.manifold import TSNE
+        print(f"  Running bin t-SNE on {len(keep)} bins x {relabund.shape[1]} samples ...")
+        X = np.power(relabund[keep], 0.25)
+        tsne = TSNE(n_components=2, perplexity=min(30.0, (len(keep) - 1) / 3),
+                    metric='braycurtis', init='pca', learning_rate='auto',
+                    max_iter=1000, random_state=42, n_jobs=-1)
+        Y = tsne.fit_transform(X)
+        for k, i in enumerate(keep):
+            coords[i] = [round(float(Y[k, 0]), 3), round(float(Y[k, 1]), 3)]
+    except Exception as e:
+        print(f"  [WARNING] bin t-SNE failed: {e}", file=sys.stderr)
+    return coords
 
 
 def build_mge_summary(virus_df, plasmid_df, defense_df, integron_df):
