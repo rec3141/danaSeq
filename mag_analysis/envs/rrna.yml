@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - barrnap=0.9
+  - barrnap=0.9    # 1.x drops --reject, the euk kingdom and the TYPE:: prefix parse_rrna_results.py reads
   - vsearch>=2.28
   - aragorn>=1.2.41
   - python>=3.8
