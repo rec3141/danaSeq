@@ -1,9 +1,9 @@
 {
   "image": "danaseq-nanopore-assembly",
-  "digest": "sha256:58caa34e8d366a85cd9e2af0f9f2e33e91c971d637953550cd437bcc77a36372",
-  "commit": "1b9052cfa1bc59ba04a537a1428ee41748a3e18a",
-  "base_digest": "sha256:e23024048a0464412d22819b0d403421063d81d8483830f4024c5163dab0a7ae",
-  "built": "2026-10-05T15:26:00Z",
-  "sif": "oras://ghcr.io/rec3141/danaseq-nanopore-assembly:sif-1b9052cfa1bc59ba04a537a1428ee41748a3e18a",
-  "sif_sha256": "658ce8044569bfd7c564ec864394f45c1fb094d0bb9a4dab63b9b5b19966d98a"
+  "digest": "sha256:95670c63bd629078b5130e7a55cd4b32e5254104a39fabe86c31310657c04015",
+  "commit": "c2f6a1fa1d72d2996f51a0a0dc4a4c95532ccdb5",
+  "base_digest": "sha256:c3edc3d89d915cb79845ea0b657b2a5bce3e40968cc5d7d14ac286e2229cc6a6",
+  "built": "2026-10-16T21:30:55Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-nanopore-assembly:sif-c2f6a1fa1d72d2996f51a0a0dc4a4c95532ccdb5",
+  "sif_sha256": "1c4e870e2d1a3623cfadc9acc8af846696fb54bbea07fdf2110ba28ca2a97546"
 }
