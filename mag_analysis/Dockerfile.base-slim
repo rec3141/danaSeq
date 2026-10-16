@@ -105,8 +105,10 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 # 8. Strain: strainy, instrain (pip), floria
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-strain    -f /tmp/envs/strain.yml
-RUN /opt/conda/envs/dana-mag-strain/bin/pip install --no-deps \
-    'instrain @ git+https://github.com/rec3141/inStrain.git@fix-biopython-compat'
+# inStrain 1.11.0 is the first release with modern Biopython support; its
+# runtime dependencies all come from strain.yml.
+RUN /opt/conda/envs/dana-mag-strain/bin/pip install --no-deps 'instrain==1.11.0' \
+    && /opt/conda/envs/dana-mag-strain/bin/python -c 'import inStrain'
 
 # 9. PathViz: pathway tools, viz, nodejs
 RUN --mount=type=cache,target=/opt/conda/pkgs \

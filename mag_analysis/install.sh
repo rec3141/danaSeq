@@ -305,7 +305,7 @@ post_install_merged() {
     if [[ "${env_name}" == "dana-mag-strain" ]]; then
         echo "  Installing inStrain via pip..."
         "${env_path}/bin/pip" install --no-deps \
-            'instrain @ git+https://github.com/rec3141/inStrain.git@fix-biopython-compat' \
+            'instrain==1.11.0' \
             > /dev/null 2>&1
         echo "  inStrain installed"
     fi
@@ -339,7 +339,7 @@ post_install_standalone() {
         # whokaryote package itself via pip --no-deps to avoid re-resolving that pin.
         echo "  Installing whokaryote via pip (no-deps)..."
         "${env_path}/bin/pip" install --no-deps -q \
-            'whokaryote @ git+https://github.com/LottePronk/whokaryote.git' \
+            'whokaryote @ git+https://github.com/rec3141/whokaryote.git@fix/gff-attribute-parsing' \
             > /dev/null 2>&1
         echo "  whokaryote installed"
     fi
