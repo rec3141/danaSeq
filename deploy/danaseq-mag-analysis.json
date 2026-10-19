@@ -1,8 +1,8 @@
 {
   "image": "danaseq-mag-analysis",
-  "digest": "sha256:6857104c1259f5a0cd3b02ba1d966beba0130a8257c3852bfc5148468320e2dd",
-  "commit": "c662d6299d5f246a25dc79cceafb6c08854a80ab",
-  "built": "2026-10-19T15:03:44Z",
-  "sif": "oras://ghcr.io/rec3141/danaseq-mag-analysis:sif-c662d6299d5f246a25dc79cceafb6c08854a80ab",
-  "sif_sha256": "09a2d76e59451a7d9a495908db137298eb1a34f547482ba9a7384fa24d71a767"
+  "digest": "sha256:ed49bb06dfa5d5b6db8fc40004e3dcc569f440820b5a567b71c394927b25f1a1",
+  "commit": "09bf8409cfbf4babd4d215c057d6ad87776ab2bc",
+  "built": "2026-10-19T18:03:26Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-mag-analysis:sif-09bf8409cfbf4babd4d215c057d6ad87776ab2bc",
+  "sif_sha256": "055f0bd4ed62ab841c7cd6d5cdfe70e8aa1c01b6a78cc51e1f0dd914e2fba525"
 }
