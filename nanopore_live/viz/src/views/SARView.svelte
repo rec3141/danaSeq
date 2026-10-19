@@ -114,7 +114,7 @@
   // (./data/sar_<id>.json).
   const SAR_SPECIES = [
     { id: 'namaovirus',    label: 'Namao virus',         latin: 'Namao virus' },
-    { id: 'megalonaias',   label: 'Megalonaias nervosa', latin: 'Megalonaias nervosa' },
+    { id: 'megalonaias',   label: 'Washboard mussel',    latin: 'Megalonaias nervosa' },
     { id: 'carmineshiner', label: 'Carmine shiner',      latin: 'Notropis percobromus' },
     { id: 'beluga',        label: 'Beluga whale',        latin: 'Delphinapterus leucas' },
     { id: 'narwhal',       label: 'Narwhal',             latin: 'Monodon monoceros' },
@@ -718,8 +718,11 @@
         onclick={cycleSpecies}
         title={`SAR species — click to cycle (${SAR_SPECIES.length} available)`}
       >
-        <span class="italic">{species.latin}</span> &#x25BE;
+        {species.label} &#x25BE;
       </button>
+      {#if species.latin !== species.label}
+        <span class="italic text-slate-400">{species.latin}</span>
+      {/if}
 
       <!-- HQ identity cutoff slider. Recomputes hq_hits / hq_fraction live
            from each sample's identity histogram. Range matches the histogram

@@ -694,8 +694,11 @@
         onclick={cycleSpecies}
         title={`AIS species — click to cycle (${AIS_SPECIES.length} available)`}
       >
-        <span class="italic">{species.latin}</span> &#x25BE;
+        {species.label} &#x25BE;
       </button>
+      {#if species.latin !== species.label}
+        <span class="italic text-slate-400">{species.latin}</span>
+      {/if}
 
       <!-- HQ identity cutoff slider. Recomputes hq_hits / hq_fraction live
            from each sample's identity histogram. Range matches the histogram
