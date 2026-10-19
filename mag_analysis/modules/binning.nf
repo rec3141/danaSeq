@@ -696,6 +696,16 @@ process MAGSCOT_CONSENSUS {
     """
     mkdir -p bins
 
+    # MAGScoT's HMMs and marker profiles both come from download-databases.sh
+    # --magscot; check them before the hours of Prodigal and hmmsearch.
+    MAGSCOT_HMM="${params.magscot_hmm_dir}"
+    for f in gtdbtk_rel207_tigrfam.hmm gtdbtk_rel207_Pfam-A.hmm profiles/gtdb_rel207_default_markers.tsv; do
+        if [ ! -s "\$MAGSCOT_HMM/\$f" ]; then
+            echo "[ERROR] MAGScoT: \$MAGSCOT_HMM/\$f is missing; fetch it with download-databases.sh --magscot" >&2
+            exit 1
+        fi
+    done
+
     # 1. Predict proteins with Prodigal (meta mode, parallelized)
     # MAGScoT requires prodigal-style gene IDs (contig_N) to map genes → contigs
     mkdir -p prodigal_chunks prodigal_out
@@ -712,7 +722,6 @@ process MAGSCOT_CONSENSUS {
     rm -f proteins.raw.faa
 
     # 2. HMM search against GTDBtk rel207 markers
-    MAGSCOT_HMM="${params.magscot_hmm_dir}"
     echo "[INFO] MAGScoT HMM dir: \$MAGSCOT_HMM" >&2
 
     # TIGRFAM and Pfam HMMs use different tblout column layouts
@@ -753,7 +762,7 @@ process MAGSCOT_CONSENSUS {
         set +e
         "\$PY" ${projectDir}/bin/magscot.py \
             -i contig2bin.tsv --hmm markers.tsv \
-            --profile_dir ${projectDir}/bin/profiles \
+            --profile_dir "\$MAGSCOT_HMM/profiles" \
             -o magscot_out
         magscot_exit=\$?
         set -e
