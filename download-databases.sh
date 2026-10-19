@@ -1356,23 +1356,29 @@ download_antismash() {
 
 download_magscot() {
     local db_path="${DB_DIR}/magscot_hmm"
-    if [ -d "${db_path}" ] && [ -f "${db_path}/gtdbtk_rel207_tigrfam.hmm" ] && [ -f "${db_path}/gtdbtk_rel207_Pfam-A.hmm" ]; then
-        echo "[INFO] MAGScoT HMMs already exist at ${db_path}"
-        echo "  Delete ${db_path} and re-run to force re-download."
-        return 0
-    fi
+    # The marker HMMs, and the marker profiles magscot.py scores bins with.
+    # Fetched per file, so an install that predates the profiles gains them.
+    local files=(hmm/gtdbtk_rel207_tigrfam.hmm hmm/gtdbtk_rel207_Pfam-A.hmm
+                 profiles/gtdb_rel207_default_markers.tsv
+                 profiles/gtdb_rel207_bac120_markers.tsv
+                 profiles/gtdb_rel207_ar53_markers.tsv)
+    local base_url="https://raw.githubusercontent.com/ikmb/MAGScoT/main"
 
     echo ""
-    echo "[INFO] Downloading MAGScoT GTDB rel207 marker HMMs..."
-    echo "  Destination: ${db_path}"
+    echo "[INFO] MAGScoT GTDB rel207 marker HMMs and profiles -> ${db_path}"
+    mkdir -p "${db_path}/profiles"
+    local f dest
+    for f in "${files[@]}"; do
+        # HMMs sit at the top of magscot_hmm/, profiles in magscot_hmm/profiles/
+        case "$f" in hmm/*) dest="${db_path}/${f#hmm/}" ;; *) dest="${db_path}/${f}" ;; esac
+        if [ -s "${dest}" ]; then
+            echo "  have ${f##*/}"
+            continue
+        fi
+        curl -fSL "${base_url}/${f}" -o "${dest}.tmp" && mv "${dest}.tmp" "${dest}" || { rm -f "${dest}.tmp"; return 1; }
+    done
 
-    mkdir -p "${db_path}"
-
-    local base_url="https://raw.githubusercontent.com/ikmb/MAGScoT/main/hmm"
-    curl -fSL "${base_url}/gtdbtk_rel207_tigrfam.hmm" -o "${db_path}/gtdbtk_rel207_tigrfam.hmm" || return 1
-    curl -fSL "${base_url}/gtdbtk_rel207_Pfam-A.hmm"  -o "${db_path}/gtdbtk_rel207_Pfam-A.hmm"  || return 1
-
-    echo "[SUCCESS] MAGScoT HMMs downloaded to ${db_path}"
+    echo "[SUCCESS] MAGScoT HMMs and profiles in ${db_path}"
     echo "  Use with: --magscot_hmm_dir ${db_path}"
 }
 
