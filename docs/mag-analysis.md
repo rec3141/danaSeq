@@ -163,6 +163,7 @@ the representative; `NA` if the pair falls below skani's 80% ANI screen),
 | `--derep_min_af` | `15` | Minimum aligned fraction (%) for two genomes to cluster |
 | `--derep_min_completeness` | `50` | CheckM2 completeness (%) below which a bin is not clustered |
 | `--derep_max_contamination` | `10` | CheckM2 contamination (%) above which a bin is not clustered |
+| `--derep_min_size_bp` | `500000` | Bins shorter than this (bp) are not clustered, so a fragment cannot become a representative |
 
 ### Annotation
 

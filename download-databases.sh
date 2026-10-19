@@ -15,7 +15,7 @@ set -euo pipefail
 #   ./download-databases.sh --human            # Download BBTools human reference (~4 GB, for illumina_assembly)
 #   ./download-databases.sh --genomad          # Download geNomad database only
 #   ./download-databases.sh --checkv           # Download CheckV database only
-#   ./download-databases.sh --checkm            # Download CheckM v1 data (needed by dRep/COMEBin)
+#   ./download-databases.sh --checkm            # Download CheckM v1 data (needed by COMEBin)
 #   ./download-databases.sh --checkm2          # Download CheckM2 database only
 #   ./download-databases.sh --kaiju            # Download Kaiju RefSeq database only
 #   ./download-databases.sh --macsyfinder      # Download MacSyFinder models (TXSScan + CONJScan)
@@ -258,7 +258,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "human"   "~4 GB"  "BBTools masked human reference (illumina_assembly decontamination)"
     printf "  %-12s %-8s  %s\n" "genomad"  "~3.5 GB" "geNomad marker profiles + MMseqs2 (virus + plasmid detection)"
     printf "  %-12s %-8s  %s\n" "checkv"   "~1.4 GB" "CheckV reference genomes (viral quality assessment)"
-    printf "  %-12s %-8s  %s\n" "checkm"   "~280 MB" "CheckM v1 reference data (needed by dRep + COMEBin)"
+    printf "  %-12s %-8s  %s\n" "checkm"   "~280 MB" "CheckM v1 reference data (needed by COMEBin)"
     printf "  %-12s %-8s  %s\n" "checkm2"  "~3.5 GB" "CheckM2 DIAMOND db (MAG quality assessment)"
     printf "  %-12s %-8s  %s\n" "kaiju"    "~47 GB"  "Kaiju RefSeq protein db (contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "macsyfinder" "~50 MB" "MacSyFinder models: TXSScan + CONJScan (secretion + conjugation)"
@@ -321,7 +321,7 @@ if $INTERACTIVE; then
     echo "  1) human     - BBTools masked human reference (illumina_assembly, ~4 GB)"
     echo "  2) genomad   - geNomad (virus + plasmid detection)"
     echo "  3) checkv    - CheckV (viral quality assessment)"
-    echo "  4) checkm    - CheckM v1 reference data (needed by dRep + COMEBin, ~280 MB)"
+    echo "  4) checkm    - CheckM v1 reference data (needed by COMEBin, ~280 MB)"
     echo "  5) checkm2   - CheckM2 (MAG quality assessment)"
     echo "  6) kaiju     - Kaiju RefSeq proteins (contig taxonomy, ~47 GB)"
     echo "  7) macsyfinder - MacSyFinder models: TXSScan + CONJScan (~50 MB)"
@@ -603,7 +603,7 @@ download_checkm() {
 
     echo ""
     echo "[INFO] Downloading CheckM v1 reference data (~280 MB)..."
-    echo "  Needed by dRep and COMEBin (transitive dependency on checkm-genome)"
+    echo "  Needed by COMEBin (transitive dependency on checkm-genome)"
     echo "  Destination: ${db_path}"
 
     mkdir -p "${db_path}"

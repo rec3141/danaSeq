@@ -7,4 +7,3 @@ dependencies:
   # sketch format skani 0.3.x cannot read; skani stays on GTDB-Tk's 0.3.1 (#83).
   - galah=0.6.0
   - skani=0.3.1
-  - sourmash-minimal

@@ -18,7 +18,7 @@ set -euo pipefail
 #   dana-mag-genomic   - IntegronFinder, IslandPath, MacSyFinder, DefenseFinder, dbCAN
 #   dana-mag-pathviz   - MinPath, KEGG-Decoder, viz dashboard (Node.js + Python)
 #   dana-mag-strain    - Strainy, Floria, InStrain
-#   dana-mag-derep     - galah, skani, sourmash, skDER, dRep
+#   dana-mag-derep     - galah, skani
 #
 # Standalone environments (too large or conflicting to merge):
 #   dana-mag-prokka    - Prokka gene annotation
@@ -158,7 +158,7 @@ declare -A ENV_EXTRAS=(
     [dana-mag-genomic]="hmmscan macsyfinder defense-finder run_dbcan"
     [dana-mag-pathviz]="node npm python3"
     [dana-mag-strain]="strainy floria"
-    [dana-mag-derep]="skani sourmash"
+    [dana-mag-derep]="galah skani"
 )
 
 # ============================================================================

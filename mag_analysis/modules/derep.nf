@@ -52,11 +52,31 @@ process DEREP_GALAH {
         echo "[WARNING] derep: \$(wc -l < no_quality.txt) bins have no CheckM2 estimate and are left out" >&2
     fi
 
+    # A fragment can still score as half-complete, and then be picked over a
+    # whole genome as its cluster's representative, so bins shorter than
+    # derep_min_size_bp are left out of clustering.
+    : > too_small.txt
+    if [ ${params.derep_min_size_bp} -gt 0 ] && [ -s genome_list.txt ]; then
+        : > kept.txt
+        while read -r g; do
+            bp=\$(grep -v '>' "\$g" | tr -d '\\n\\r' | wc -c)
+            if [ "\$bp" -lt ${params.derep_min_size_bp} ]; then
+                n=\$(basename "\$g" .fa); echo "\$n" >> too_small.txt
+            else
+                echo "\$g" >> kept.txt
+            fi
+        done < genome_list.txt
+        mv kept.txt genome_list.txt
+        [ -s too_small.txt ] && echo "[INFO] derep: \$(wc -l < too_small.txt) bins under ${params.derep_min_size_bp} bp left out" >&2
+    fi
+
     HEADER='genome\\trepresentative\\tani\\taf_genome\\taf_representative\\tcompleteness\\tcontamination\\tstatus'
     if [ ! -s genome_list.txt ]; then
         echo "[WARNING] derep: no consensus bins with CheckM2 estimates -- nothing to dereplicate" >&2
         printf "\$HEADER\\n" > derep_clusters.tsv
         awk -v OFS='\\t' '{ print \$1, "NA", "NA", "NA", "NA", "NA", "NA", "no_checkm2" }' no_quality.txt >> derep_clusters.tsv
+        awk -F'\\t' -v OFS='\\t' 'NR == FNR { comp[\$1] = \$2; cont[\$1] = \$3; next }
+            { print \$1, "NA", "NA", "NA", "NA", comp[\$1], cont[\$1], "too_small" }' quality.tsv too_small.txt >> derep_clusters.tsv
         exit 0
     fi
     echo "[INFO] derep: clustering \$(wc -l < genome_list.txt) bins at ${params.derep_ani}% ANI" >&2
@@ -107,7 +127,8 @@ process DEREP_GALAH {
                 else          print g, r, "NA", "NA", "NA", comp[g], cont[g], "member"
             }
             FILENAME == "no_quality.txt"   { print \$1, "NA", "NA", "NA", "NA", "NA", "NA", "no_checkm2" }
-        ' quality.tsv member_ani.tsv galah_clusters.tsv genome_list.txt no_quality.txt
+            FILENAME == "too_small.txt"    { print \$1, "NA", "NA", "NA", "NA", comp[\$1], cont[\$1], "too_small" }
+        ' quality.tsv member_ani.tsv galah_clusters.tsv genome_list.txt no_quality.txt too_small.txt
     } > derep_clusters.tsv.tmp
 
     if [ -d galah_reps ]; then
@@ -116,7 +137,7 @@ process DEREP_GALAH {
     mv derep_clusters.tsv.tmp derep_clusters.tsv
 
     awk -F'\\t' 'NR > 1 { s[\$8]++ } END {
-        printf "[INFO] derep: %d representatives, %d members, %d below quality, %d without CheckM2\\n",
-            s["representative"], s["member"], s["failed_quality"], s["no_checkm2"] }' derep_clusters.tsv >&2
+        printf "[INFO] derep: %d representatives, %d members, %d below quality, %d too small, %d without CheckM2\\n",
+            s["representative"], s["member"], s["failed_quality"], s["too_small"], s["no_checkm2"] }' derep_clusters.tsv >&2
     """
 }
