@@ -108,6 +108,11 @@
   //                    level). Direct species reference; beluga and
   //                    narwhal are sister species and cross-map, so only
   //                    high-identity hits separate them.
+  //   bigmouthbuffalo — Ictiobus cyprinellus, SARA Special Concern
+  //                    (Saskatchewan-Nelson). Provisional transcript-level
+  //                    reference (Flye on Iso-Seq subreads, SRR14126266);
+  //                    no nuclear genome exists yet. Coding genes are
+  //                    conserved across suckers, so hits are catostomid-like.
   //
   // `id` must match the mapping reference name (the .idx basename used
   // by run-nanopore-mapping.sh) AND the JSON filename suffix
@@ -118,6 +123,7 @@
     { id: 'carmineshiner', label: 'Carmine shiner',      latin: 'Notropis percobromus' },
     { id: 'beluga',        label: 'Beluga whale',        latin: 'Delphinapterus leucas' },
     { id: 'narwhal',       label: 'Narwhal',             latin: 'Monodon monoceros' },
+    { id: 'bigmouthbuffalo', label: 'Bigmouth buffalo',  latin: 'Ictiobus cyprinellus' },
   ];
   let speciesIdx = $state(0);
   let species = $derived(SAR_SPECIES[speciesIdx]);
