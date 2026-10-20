@@ -130,13 +130,18 @@ EXPECTED_EOF
 
     # CoverM handles supplementary alignments correctly and avoids the integer
     # overflow bug in jgi_summarize_bam_contig_depths (MetaBAT2 <=2.17)
+    # Write through stdout, not --output-file: the file writer is unbuffered
+    # (about one write syscall per byte), which on Lustre turned writing a
+    # 1.5M-contig x 399-sample matrix into hours. stdout is line-buffered and
+    # cat writes in large blocks.
+    set -o pipefail
     coverm contig \\
         -b *.sorted.bam \\
         --methods metabat \\
         --min-read-percent-identity 80 \\
         --min-read-aligned-percent 0 \\
         --threads ${task.cpus} \\
-        --output-file depths.txt
+        | cat > depths.txt
 
     if [ ! -s depths.txt ]; then
         echo "[ERROR] Depth calculation produced empty output" >&2
