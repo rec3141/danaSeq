@@ -407,14 +407,27 @@ process KEGG_DECODER {
             done
             [ -z "\${KEGG_DEC}" ] && KEGG_DEC="KEGG-decoder"  # fallback to PATH
 
+            # The static heatmap clusters every genome, and scipy's dendrogram
+            # recurses once per tree level: on a co-assembly's tens of thousands
+            # of bins it overflows the recursion limit. Above the cap only the
+            # table is written (any -v other than static/interactive/tanglegram).
+            viz=static
+            if [ "\$n_genomes" -gt ${params.keggdecoder_heatmap_max_genomes} ]; then
+                echo "[INFO] \$n_genomes genomes, over ${params.keggdecoder_heatmap_max_genomes}: no heatmap" >&2
+                viz=none
+            fi
+
             set +e
-            \${KEGG_DEC} -i keggdecoder_input.tsv -o kegg_decoder_output.tsv -v static
+            \${KEGG_DEC} -i keggdecoder_input.tsv -o kegg_decoder_output.tsv -v \$viz
             decoder_exit=\$?
             set -e
 
-            if [ \$decoder_exit -ne 0 ] || [ ! -f kegg_decoder_output.tsv ]; then
-                echo "[WARNING] KEGG-Decoder exited with code \$decoder_exit" >&2
+            # The table is written before the heatmap, so keep it if only the plot failed
+            if [ ! -f kegg_decoder_output.tsv ] || [ \$(wc -l < kegg_decoder_output.tsv) -lt 2 ]; then
+                echo "[WARNING] KEGG-Decoder exited with code \$decoder_exit and wrote no scores" >&2
                 printf 'Function\\n' > kegg_decoder_output.tsv
+            elif [ \$decoder_exit -ne 0 ]; then
+                echo "[WARNING] KEGG-Decoder exited with code \$decoder_exit after writing its scores; no heatmap" >&2
             fi
 
             # KEGG-Decoder names the SVG after the -o file (e.g. kegg_decoder_output.svg)

@@ -52,8 +52,10 @@ STAGE="$BUILD/.stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 shopt -s nullglob
-for f in "$PRE"/*.json.gz; do ln -s "$f" "$STAGE/"; done
-for f in "$PRE"/*.json; do [[ -e "$f.gz" ]] || ln -s "$f" "$STAGE/"; done
+# Name each link: on grex's Lustre, coreutils 9.4 fails `ln -s FILE DIR/` with
+# "No such file or directory" even though DIR exists.
+for f in "$PRE"/*.json.gz; do ln -s "$f" "$STAGE/${f##*/}"; done
+for f in "$PRE"/*.json; do [[ -e "$f.gz" ]] || ln -s "$f" "$STAGE/${f##*/}"; done
 shopt -u nullglob
 
 exec bash "$DEPLOYER" \
