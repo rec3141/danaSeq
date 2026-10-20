@@ -54,6 +54,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Bakta from our fork: 1.12.2 plus a fix that lets pseudogene detection finish
+# on whole co-assemblies (it ran for days on one core). The base image strips pip
+# from its envs, so the base conda's pip installs into the env's interpreter.
+ARG BAKTA_COMMIT=fc13deb142f85b6291ddce388b799733e5cdd8c6
+RUN SP=/opt/conda/envs/dana-mag-annotate/lib/python3.11/site-packages \
+    && rm -rf "$SP"/bakta "$SP"/bakta-*.dist-info \
+    && /opt/conda/bin/pip --python /opt/conda/envs/dana-mag-annotate/bin/python install \
+        --no-deps --no-cache-dir --root-user-action=ignore \
+        "bakta @ git+https://github.com/rec3141/bakta.git@${BAKTA_COMMIT}" \
+    && grep -q uniref90_counts "$SP"/bakta/features/cds.py
+
 COPY . /pipeline/
 
 # Pre-install the viz app's node_modules, so a later `vite build` needs nothing

@@ -293,6 +293,15 @@ post_install_merged() {
         echo "  LorBin installed"
     fi
 
+    if [[ "${env_name}" == "dana-mag-annotate" ]]; then
+        # Bakta 1.12.2 plus our fix for pseudogene detection on whole co-assemblies
+        echo "  Installing Bakta from rec3141/bakta via pip..."
+        "${env_path}/bin/pip" install --no-deps --force-reinstall \
+            'bakta @ git+https://github.com/rec3141/bakta.git@fc13deb142f85b6291ddce388b799733e5cdd8c6' \
+            > /dev/null 2>&1
+        echo "  Bakta installed"
+    fi
+
     if [[ "${env_name}" == "dana-mag-quality" ]]; then
         # Tiara only. Whokaryote lives in its own env (dana-mag-whokaryote / whokaryote.yml)
         # because its bundled RF models require scikit-learn 1.0.2, while this env ships a
