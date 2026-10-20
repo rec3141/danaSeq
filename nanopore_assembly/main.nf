@@ -89,7 +89,7 @@ def validateParams() {
     // Flye's read mode must be chosen, not inferred. Refusing here costs nothing:
     // no node has been allocated to any task yet.
     def readTypes = ['nano-raw', 'nano-hq', 'nano-corr', 'auto']
-    if (params.assembler == 'flye' && !params.read_type) {
+    if (params.assembler == 'flye' && !params.read_type && !params.assembly_fasta) {
         log.error "ERROR: --read_type is required: nano-raw, nano-hq or nano-corr. " +
                   "It sets Flye's index, overlap settings and error model, so it is not inferred " +
                   "by default. Flye's criterion is error rate: nano-hq for Guppy5+/Dorado SUP reads " +
@@ -109,7 +109,11 @@ def validateParams() {
         log.error "ERROR: Invalid --assembler '${params.assembler}'. Choose from: flye, metamdbg, myloasm"
         System.exit(1)
     }
-    log.info "Assembler: ${params.assembler}"
+    if (params.assembly_fasta) {
+        log.info "Map-only mode: mapping reads to ${params.assembly_fasta} (no read pooling, human-read removal or assembly)"
+    } else {
+        log.info "Assembler: ${params.assembler}"
+    }
 }
 
 // Import modules
@@ -246,6 +250,13 @@ workflow {
         error "ERROR: No reads found in ${params.input}. Expected *.fastq.gz / *.fasta[.gz] or a fastq_pass/barcode*/ structure.\nRun with --help for usage."
     }
 
+    // Map-only mode: the assembly already exists, so skip everything that only
+    // feeds the assembler (pooling all reads, human-read removal, assembly, polish).
+    def do_polish = false
+    if (params.assembly_fasta) {
+        ch_assembly = Channel.value(file(params.assembly_fasta, checkIfExists: true))
+    } else {
+
     // 2. Concatenate + dedupe + optional filtlong -> single all_reads.fastq.gz
     //
     // Order matters here and must not be left to chance. A plain collect()
@@ -293,7 +304,7 @@ workflow {
     }
 
     // Optional polishing (default: true for flye, false for others)
-    def do_polish = (params.polish != null) ? params.polish : (params.assembler == 'flye')
+    do_polish = (params.polish != null) ? params.polish : (params.assembler == 'flye')
     if (do_polish) {
         FLYE_POLISH(ch_raw_assembly, ch_asm_info, ch_asm_graph, ch_asm_input)
         ch_assembly  = FLYE_POLISH.out.assembly
@@ -307,6 +318,8 @@ workflow {
         ch_asm_info  = PUBLISH_UNPOLISHED.out.info
         ch_asm_graph = PUBLISH_UNPOLISHED.out.graph
     }
+
+    } // end of assembly (skipped in map-only mode)
 
     // Tetranucleotide frequencies from assembly
     CALCULATE_TNF(ch_assembly)

@@ -73,6 +73,8 @@ usage() {
     echo ""
     echo "Pipeline flags (passed to Nextflow):"
     echo "  --assembler STR      flye, metamdbg, or myloasm [default: flye]"
+    echo "  --assembly_fasta F   Map-only: map reads to this existing assembly; skips read"
+    echo "                       pooling, human-read removal, assembly and polishing"
     echo "  --dedupe             BBDuk deduplication before assembly"
     echo "  --filtlong_size N    Filtlong target bases; skip if not set"
     echo "  --min_overlap N      Flye --min-overlap [default: 1000]"
@@ -160,6 +162,10 @@ while (( $# )); do
         --run_flye_polish)
             NF_ARGS+=("--polish" "$2")
             shift 2 ;;
+        --assembly_fasta)
+            [[ -z "${2:-}" ]] && die "--assembly_fasta requires a FASTA path"
+            ASSEMBLY_FASTA_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
+            shift 2 ;;
         *)
             NF_ARGS+=("$1")
             shift ;;
@@ -194,6 +200,20 @@ if [[ "$STORE_MODE" == true && -z "$STORE_DIR_HOST" ]]; then
 fi
 
 [[ -d "$INPUT_HOST" ]] || die "Input directory does not exist: $INPUT_HOST"
+
+# Map-only mode: put the given assembly where an assembly run would leave it
+# ($STORE/assembly/assembly.fasta, else $OUTDIR/assembly/), so mag_analysis finds
+# the usual layout, and hand that copy to the pipeline.
+if [[ -n "${ASSEMBLY_FASTA_HOST:-}" ]]; then
+    [[ -s "$ASSEMBLY_FASTA_HOST" ]] || die "--assembly_fasta is missing or empty: $ASSEMBLY_FASTA_HOST"
+    _asm_dir="${STORE_DIR_HOST:-$OUTDIR_HOST}/assembly"
+    mkdir -p "$_asm_dir" || die "Cannot create $_asm_dir"
+    if [[ "$(realpath "$ASSEMBLY_FASTA_HOST")" != "$(realpath -m "$_asm_dir/assembly.fasta")" ]]; then
+        cp "$ASSEMBLY_FASTA_HOST" "$_asm_dir/assembly.fasta" || die "Cannot copy the assembly to $_asm_dir"
+    fi
+    NF_ARGS+=("--assembly_fasta" "$_asm_dir/assembly.fasta")
+    echo "[INFO] Map-only mode: reads will be mapped to $_asm_dir/assembly.fasta"
+fi
 
 if [[ ! -d "$OUTDIR_HOST" ]]; then
     echo "[INFO] Creating output directory: $OUTDIR_HOST"
@@ -272,6 +292,11 @@ if [[ "$USE_CONTAINER" == true ]]; then
         BINDS+=("${STORE_DIR_HOST}:/data/store")
         for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
             NF_ARGS[$i]="${NF_ARGS[$i]//${STORE_DIR_HOST}/\/data\/store}"
+        done
+    elif [[ -n "${ASSEMBLY_FASTA_HOST:-}" ]]; then
+        # --publish mode: the map-only assembly sits under the outdir instead
+        for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+            NF_ARGS[$i]="${NF_ARGS[$i]//${OUTDIR_HOST}/\/data\/output}"
         done
     fi
 
