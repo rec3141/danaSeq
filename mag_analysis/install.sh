@@ -294,7 +294,12 @@ post_install_merged() {
     fi
 
     if [[ "${env_name}" == "dana-mag-annotate" ]]; then
-        "${SCRIPT_DIR}/patches/apply-bakta-patch.sh" "${env_path}"
+        # Bakta 1.12.2 plus our fix for pseudogene detection on whole co-assemblies
+        echo "  Installing Bakta from rec3141/bakta via pip..."
+        "${env_path}/bin/pip" install --no-deps --force-reinstall \
+            'bakta @ git+https://github.com/rec3141/bakta.git@fc13deb142f85b6291ddce388b799733e5cdd8c6' \
+            > /dev/null 2>&1
+        echo "  Bakta installed"
     fi
 
     if [[ "${env_name}" == "dana-mag-quality" ]]; then
