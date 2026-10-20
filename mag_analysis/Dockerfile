@@ -56,6 +56,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 
 COPY . /pipeline/
 
+# Bakta's pseudogene detection does not finish on whole co-assemblies without
+# this (patches/apply-bakta-patch.sh says why).
+RUN /pipeline/patches/apply-bakta-patch.sh /opt/conda/envs/dana-mag-annotate
+
 # Pre-install the viz app's node_modules, so a later `vite build` needs nothing
 # fetched.
 RUN cd /pipeline/viz && npm ci --no-audit --no-fund

@@ -293,6 +293,10 @@ post_install_merged() {
         echo "  LorBin installed"
     fi
 
+    if [[ "${env_name}" == "dana-mag-annotate" ]]; then
+        "${SCRIPT_DIR}/patches/apply-bakta-patch.sh" "${env_path}"
+    fi
+
     if [[ "${env_name}" == "dana-mag-quality" ]]; then
         # Tiara only. Whokaryote lives in its own env (dana-mag-whokaryote / whokaryote.yml)
         # because its bundled RF models require scikit-learn 1.0.2, while this env ships a
