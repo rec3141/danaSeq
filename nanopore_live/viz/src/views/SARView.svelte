@@ -113,6 +113,11 @@
   //                    reference (Flye on Iso-Seq subreads, SRR14126266);
   //                    no nuclear genome exists yet. Coding genes are
   //                    conserved across suckers, so hits are catostomid-like.
+  //   *_wgs (buffalo)  — pooled MEGAHIT genome drafts of all three Ictiobus
+  //                    (PRJNA832677). Black and smallmouth buffalo are not
+  //                    SAR-listed; they are there to compare against bigmouth.
+  //   lakesturgeon_*  — Acipenser fulvescens: MEGAHIT draft from WGA reads
+  //                    (PRJNA1139757) and rnaSPAdes transcriptome (RNA-seq).
   //
   // `id` must match the mapping reference name (the .idx basename used
   // by run-nanopore-mapping.sh) AND the JSON filename suffix
@@ -123,7 +128,12 @@
     { id: 'carmineshiner', label: 'Carmine shiner',      latin: 'Notropis percobromus' },
     { id: 'beluga',        label: 'Beluga whale',        latin: 'Delphinapterus leucas' },
     { id: 'narwhal',       label: 'Narwhal',             latin: 'Monodon monoceros' },
-    { id: 'bigmouthbuffalo', label: 'Bigmouth buffalo',  latin: 'Ictiobus cyprinellus' },
+    { id: 'bigmouthbuffalo', label: 'Bigmouth buffalo (transcripts)', latin: 'Ictiobus cyprinellus' },
+    { id: 'bigmouthbuffalo_wgs', label: 'Bigmouth buffalo (genome)', latin: 'Ictiobus cyprinellus' },
+    { id: 'blackbuffalo_wgs', label: 'Black buffalo (genome)', latin: 'Ictiobus niger' },
+    { id: 'smallmouthbuffalo_wgs', label: 'Smallmouth buffalo (genome)', latin: 'Ictiobus bubalus' },
+    { id: 'lakesturgeon_wgs', label: 'Lake sturgeon (genome)', latin: 'Acipenser fulvescens' },
+    { id: 'lakesturgeon_tx', label: 'Lake sturgeon (transcripts)', latin: 'Acipenser fulvescens' },
   ];
   let speciesIdx = $state(0);
   let species = $derived(SAR_SPECIES[speciesIdx]);
