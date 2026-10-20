@@ -626,7 +626,7 @@ process BINETTE_CONSENSUS {
             [ -e "\$f" ] || continue
             size=\$(stat -Lc %s "\$f")
             if [ "\$size" -ge ${params.binette_min_bin_bp} ] && [ "\$size" -le ${params.binette_max_bin_bp} ]; then
-                ln -s "\$(readlink -f "\$f")" "\${d}_in/"
+                ln -s "\$(readlink -f "\$f")" "\${d}_in/\${f##*/}"
             fi
         done
         echo "[INFO] Binette input \$d: \$(ls "\${d}_in" | wc -l) of \$(ls "\$d" | wc -l) bins within ${params.binette_min_bin_bp}-${params.binette_max_bin_bp} bp" >&2
