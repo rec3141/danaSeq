@@ -134,6 +134,7 @@
     { id: 'smallmouthbuffalo_wgs', label: 'Smallmouth buffalo (genome)', latin: 'Ictiobus bubalus' },
     { id: 'lakesturgeon_wgs', label: 'Lake sturgeon (genome)', latin: 'Acipenser fulvescens' },
     { id: 'lakesturgeon_tx', label: 'Lake sturgeon (transcripts)', latin: 'Acipenser fulvescens' },
+    { id: 'wildrice',      label: 'Northern wild rice (manoomin)', latin: 'Zizania palustris' },
   ];
   let speciesIdx = $state(0);
   let species = $derived(SAR_SPECIES[speciesIdx]);
