@@ -198,6 +198,10 @@ CONVERT_TO_FASTA        Header cleanup
 | `--kraken_db` | (required if kraken) | Path to Kraken2 database |
 | `--annotator` | `bakta` | Annotator: `bakta`, `prokka`, or `none` |
 | `--hmm_databases` | (skip) | Path to HMM file(s) for functional profiling |
+| `--hmm_cut` | `tc` | hmmsearch cutoff for HMM DBs (`tc`/`ga`/`nc`/E-value); per-DB `<name>.opts` / catalogue thresholds override |
+| `--protein_dbs` | (skip) | DIAMOND `.dmnd` file(s) searched with blastp against annotation proteins |
+| `--protein_db_opts` | `id=50,qcov=50,scov=50,evalue=1e-5` | DIAMOND cutoffs (HADEG-recommended); per-DB `<name>.opts` overrides |
+| `--pollutant_dbs` | (skip) | Directory of pollutant DBs (`<name>/<name>.hmm` or `.dmnd` + sidecars), e.g. `/data/scratch/refdbs/pollutants` |
 | `--run_sketch` | `false` | Enable per-read GTDB sendsketch classification |
 | `--sendsketch_address` | `http://10.151.50.41:3068/sketch` | Local GTDB sendsketch server URL |
 | `--run_tetra` | `false` | Enable tetranucleotide frequency |
@@ -275,6 +279,23 @@ Python scripts in `bin/` load results into per-sample DuckDB databases:
 | `db_schema.py` | Shared schema definitions (imported by all scripts) |
 
 Scripts are idempotent and track imports via `import_log`. Contig names are prefixed with the batch file ID to prevent collisions across batches.
+
+`import_protein_hits.py` (called by `import_all.py`, or standalone with a barcode dir) loads the
+protein-DB searches (`hmm/<chunk>.<db>.tsv`, `protdb/<chunk>.<db>.tsv`, written by
+`bin/protein_db_search.sh`) into `protein_hits` (one row per protein x target, with a `db`
+column), `protein_db_annot` (target -> gene/category/pathway) and `protein_db_searches`
+(proteins searched per db/chunk, the normalisation denominator).
+
+## Pollutants tab
+
+`--pollutant_dbs /data/scratch/refdbs/pollutants` searches every annotation protein against
+the pollutant marker DBs there (CANT-HYD, HADEG, Hg-MATE, KEGG-xeno, BacMet, PAZy, RDase,
+CARD — layout, cutoffs and sources in that directory's `README.md`). `viz/preprocess/preprocess.py`
+turns the tables into `pollutants.json` (gene occurrences per read: best target per protein
+per DB, one count per read+gene; hgcAB same-read pairs; hgcA/hgcB carrier taxa; mapping
+references with a `Pollutant-*` meta.json category such as crAssphage), which the SPA's
+**Pollutants** tab groups as database > category > pathway > gene with per-M-protein,
+per-M-read or raw abundance on the map and tables.
 
 ## Deploy to microscape.app
 
