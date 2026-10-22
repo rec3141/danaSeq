@@ -131,7 +131,9 @@ cd mag_analysis
 | `--run_semibin` | `false` | Include SemiBin2 (needs `--bam_dir`) |
 | `--run_maxbin` | `false` | Include MaxBin2 |
 | `--run_lorbin` | `false` | Include LorBin (needs `--bam_dir`) |
-| `--run_comebin` | `false` | Include COMEBin (needs `--bam_dir`) |
+| `--run_comebin` | `false` | Include COMEBin (needs `--bam_dir`). Without a visible GPU it is skipped, unless `--comebin_on_cpu` is set or a COMEBin result is already in `--store_dir` |
+| `--comebin_on_cpu` | `false` | Run COMEBin even without a GPU; on a co-assembly that takes days |
+| `--binners_only` | `false` | Run the selected binners and stop, with no DAS Tool, Binette, MAGScoT or CheckM2. Lets a GPU node run the binners ahead of a full run sharing `--store_dir` |
 | `--gpu` | `auto` | Train SemiBin2, LorBin, COMEBin and VAMB on a GPU: `auto` uses one when the tool's PyTorch sees it, `true` also warns when none is usable, `false` forces CPU. Needs the GPU image (`--gpu` in `run-mag-analysis.sh`) or a CUDA conda install |
 | `--run_vamb` | `false` | Include VAMB |
 | `--run_vamb_tax` | `false` | Include taxonomy-guided VAMB |
@@ -307,7 +309,7 @@ results/
 |-----------|------|-----|-------|
 | MetaBAT2 / MaxBin2 | 16 | 60 GB | Default `process_high` label |
 | SemiBin2 | 8 | 16 GB | GPU optional |
-| COMEBin | 8 | 16 GB | GPU optional |
+| COMEBin | 8 | 16 GB | GPU; skipped on CPU unless `--comebin_on_cpu` |
 | Prokka / Bakta | 16 | 60 GB | Per-bin annotation |
 | Bakta (extra) | 16 | 24 GB | Full annotation mode |
 | eggNOG-mapper | 16 | 48 GB | Batched protein annotation |

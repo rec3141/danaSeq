@@ -30,8 +30,8 @@ process BIN_SEMIBIN2 {
     """
     mkdir -p bins
 
-    # SemiBin2 can crash on very small datasets (0 bins → empty ORFs → hmmsearch fail)
-    # Catch failures and produce an empty output so the pipeline can continue
+    # SemiBin2 can crash on very small datasets (0 bins → empty ORFs → hmmsearch
+    # fail); the task is then recorded as failed and the pipeline carries on.
     engine=\$(torch_device.sh binning ${params.gpu} | sed 's/cuda/gpu/')
     set +e
     SemiBin2 single_easy_bin \\
@@ -44,9 +44,11 @@ process BIN_SEMIBIN2 {
     semibin_exit=\$?
     set -e
 
+    # A failed or killed run must not leave outputs: storeDir would keep an
+    # empty result and skip SemiBin2 on every resume (errorStrategy carries on).
     if [ \$semibin_exit -ne 0 ]; then
-        echo "[WARNING] SemiBin2 exited with code \$semibin_exit: \$(exit_reason.sh \$semibin_exit)" >&2
-        touch semibin_bins.tsv
+        echo "[WARNING] SemiBin2 exited with code \$semibin_exit: \$(exit_reason.sh \$semibin_exit); no results stored, it reruns on resume" >&2
+        exit \$semibin_exit
     elif [ -d semibin_out/output_bins ] && ls semibin_out/output_bins/*.fa.gz 1>/dev/null 2>&1; then
         # Build TSV from FASTA headers (single source of truth)
         # Extract bin number from SemiBin2 filename (e.g. SemiBin2_42.fa.gz -> 43)
@@ -214,9 +216,11 @@ process BIN_LORBIN {
     lorbin_exit=\$?
     set -e
 
+    # A failed or killed run must not leave outputs: storeDir would keep an
+    # empty result and skip LorBin on every resume (errorStrategy carries on).
     if [ \$lorbin_exit -ne 0 ]; then
-        echo "[WARNING] LorBin exited with code \$lorbin_exit: \$(exit_reason.sh \$lorbin_exit)" >&2
-        touch lorbin_bins.tsv
+        echo "[WARNING] LorBin exited with code \$lorbin_exit: \$(exit_reason.sh \$lorbin_exit); no results stored, it reruns on resume" >&2
+        exit \$lorbin_exit
     elif [ -d lorbin_out/output_bins ]; then
         # Convert LorBin FASTA bins to DAS_Tool format TSV (contig\\tbin)
         # Extract bin number from filename (e.g. bin.42.fa -> 42) for consistent naming
@@ -278,9 +282,11 @@ process BIN_COMEBIN {
     comebin_exit=\$?
     set -e
 
+    # A failed or killed run must not leave outputs: storeDir would keep an
+    # empty result and skip COMEBin on every resume (errorStrategy carries on).
     if [ \$comebin_exit -ne 0 ]; then
-        echo "[WARNING] COMEBin exited with code \$comebin_exit: \$(exit_reason.sh \$comebin_exit)" >&2
-        touch comebin_bins.tsv
+        echo "[WARNING] COMEBin exited with code \$comebin_exit: \$(exit_reason.sh \$comebin_exit); no results stored, it reruns on resume" >&2
+        exit \$comebin_exit
     elif [ -d comebin_out/comebin_res/comebin_res_bins ]; then
         # Convert COMEBin FASTA bins to DAS_Tool format TSV (contig\\tbin)
         # COMEBin uses sparse bin numbers (0, 11, 768, 4926, ...) — renumber sequentially
@@ -391,9 +397,11 @@ with open('vamb_abundance.tsv', 'w') as out:
     vamb_exit=\$?
     set -e
 
+    # A failed or killed run must not leave outputs: storeDir would keep an
+    # empty result and skip VAMB on every resume (errorStrategy carries on).
     if [ \$vamb_exit -ne 0 ]; then
-        echo "[WARNING] VAMB exited with code \$vamb_exit" >&2
-        touch vamb_bins.tsv
+        echo "[WARNING] VAMB exited with code \$vamb_exit: \$(exit_reason.sh \$vamb_exit); no results stored, it reruns on resume" >&2
+        exit \$vamb_exit
     elif [ -d vamb_out/bins ] && ls vamb_out/bins/*.fna 1>/dev/null 2>&1; then
         > vamb_bins.tsv
         bin_num=0
@@ -552,9 +560,11 @@ with open('vamb_abundance.tsv', 'w') as out:
     vamb_exit=\$?
     set -e
 
+    # A failed or killed run must not leave outputs: storeDir would keep an
+    # empty result and skip taxVAMB on every resume (errorStrategy carries on).
     if [ \$vamb_exit -ne 0 ]; then
-        echo "[WARNING] VAMB taxvamb exited with code \$vamb_exit" >&2
-        touch vamb_tax_bins.tsv
+        echo "[WARNING] VAMB taxvamb exited with code \$vamb_exit: \$(exit_reason.sh \$vamb_exit); no results stored, it reruns on resume" >&2
+        exit \$vamb_exit
     elif [ -d vamb_out/bins ] && ls vamb_out/bins/*.fna 1>/dev/null 2>&1; then
         > vamb_tax_bins.tsv
         bin_num=0
@@ -884,8 +894,11 @@ process DASTOOL_CONSENSUS {
         if grep -q 'No bins with bin-score' dastool_out/dastool_DASTool.log 2>/dev/null; then
             echo "[WARNING] DAS_Tool exited with code \$dastool_exit: no bins above the score threshold" >&2
         else
-            echo "[WARNING] DAS_Tool exited with code \$dastool_exit; end of its log:" >&2
+            # Any other failure must not leave outputs: storeDir would keep an
+            # empty consensus and skip DAS Tool on every resume.
+            echo "[WARNING] DAS_Tool exited with code \$dastool_exit; no results stored, it reruns on resume. End of its log:" >&2
             tail -n 20 dastool_out/dastool_DASTool.log >&2 2>/dev/null || true
+            exit \$dastool_exit
         fi
     fi
 
