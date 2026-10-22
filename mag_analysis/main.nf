@@ -107,6 +107,8 @@ def runComebin() {
     if (!params.run_comebin || !params.bam_dir) return false
     if (params.comebin_on_cpu) return true
     if (gpuVisible()) return true
+    // -profile slurm_hybrid sends it to a GPU partition, not this node
+    if (params.slurm_gpu_queue && workflow.profile.tokenize(',').contains('slurm_hybrid')) return true
     if (params.store_dir && file("${params.store_dir}/binning/comebin/comebin_bins.tsv").exists()) return true
     log.warn "COMEBin skipped: no GPU visible (--gpu ${params.gpu}). Run it where one is, or pass --comebin_on_cpu true."
     return false

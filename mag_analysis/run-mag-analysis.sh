@@ -170,12 +170,15 @@ usage() {
     echo ""
     echo "Hybrid Slurm execution:"
     echo "  --slurm                   Run Nextflow on this host and send the heavy steps"
-    echo "                            (Bakta, the big binners, GTDB-Tk, Kaiju, eggNOG,"
-    echo "                            MetaEuk, geNomad) out as their own Slurm jobs; the"
-    echo "                            rest run here. Every task runs in the pipeline image."
+    echo "                            (Bakta, the binners, Binette, antiSMASH, GTDB-Tk, Kaiju,"
+    echo "                            eggNOG, MetaEuk, geNomad) out as their own Slurm jobs;"
+    echo "                            the rest run here. Every task runs in the pipeline image."
     echo "  --slurm_account ACCT      sbatch --account for those jobs (required)"
+    echo "  --slurm_gpu_queue P       partition(s) for SemiBin2, LorBin, COMEBin and VAMB, one"
+    echo "                            GPU each, in the -gpu image [default: --slurm_queue, CPU]"
     echo "  --slurm_queue P, --slurm_time T, --slurm_extra 'OPTS'  passed through"
-    echo "  Needs nextflow on PATH and a --workdir on shared storage [default: <outdir>/work]."
+    echo "  Needs nextflow on PATH (its version is set to the image's) and a --workdir"
+    echo "  on shared storage [default: <outdir>/work]."
     echo ""
     echo "microscape.app deploy (needs --run_viz or --all):"
     echo "  --deploy_slug SLUG        URL slug for the run on microscape.app"
@@ -213,6 +216,7 @@ STORE_DIR_HOST=""
 STORE_MODE=true
 SLURM_MODE=false
 SLURM_ACCOUNT=""
+SLURM_GPU_QUEUE=""
 DEPLOY_SLUG=""
 DEPLOY_NAME=""
 DEPLOY_VISIBILITY="private"
@@ -331,6 +335,9 @@ while (( $# )); do
         --slurm_account)
             [[ -z "${2:-}" ]] && die "--slurm_account requires an account"
             SLURM_ACCOUNT="$2"; NF_ARGS+=("--slurm_account" "$2"); shift 2 ;;
+        --slurm_gpu_queue)
+            [[ -z "${2:-}" ]] && die "--slurm_gpu_queue requires a partition"
+            SLURM_GPU_QUEUE="$2"; shift 2 ;;
         --deploy_slug)
             [[ -z "${2:-}" ]] && die "--deploy_slug requires a slug"
             DEPLOY_SLUG="$2"; shift 2 ;;
@@ -502,6 +509,28 @@ if [[ "$SLURM_MODE" == true ]]; then
         || die "--slurm runs Nextflow on the host; put nextflow on PATH (e.g. module load nextflow)"
     [[ -n "$SLURM_ACCOUNT" ]] || die "--slurm needs --slurm_account"
 
+    # The head node usually has no GPU, so SIF_PATH is the CPU image; the
+    # binners on --slurm_gpu_queue get the -gpu one. Without it they would
+    # train on CPU on a GPU node, so they go to --slurm_queue instead.
+    GPU_SIF=""
+    if [[ -n "$SLURM_GPU_QUEUE" ]]; then
+        GPU_SIF="$(dirname "$SIF_PATH")/.danaseq-mag-analysis-gpu.sif"
+        if [[ -f "$GPU_SIF" ]]; then
+            GPU_SIF=$(readlink -f "$GPU_SIF")
+            NF_ARGS+=("--slurm_gpu_queue" "$SLURM_GPU_QUEUE" "--slurm_gpu_container" "$GPU_SIF")
+        else
+            warn "--slurm_gpu_queue given but $GPU_SIF is missing; the binners run on --slurm_queue on CPU"
+            GPU_SIF=""
+        fi
+    fi
+    SIF_PATH=$(readlink -f "$SIF_PATH")
+
+    # Run the Nextflow the image was built and tested with.
+    if [[ -z "${NXF_VER:-}" ]]; then
+        NXF_VER=$("$CONTAINER_RUNTIME" exec "$SIF_PATH" nextflow -version 2>/dev/null | grep -oP 'version \K[0-9][0-9.]+' | head -1)
+        [[ -n "$NXF_VER" ]] && export NXF_VER || warn "Could not read the image's Nextflow version; using $(nextflow -version 2>/dev/null | grep -oP 'version \K[0-9.]+')"
+    fi
+
     # Slurm-run steps land on other nodes, so node-local work is invisible to them.
     case "$WORKDIR_HOST" in
         "${SLURM_TMPDIR:-/nonexistent}"*|/tmp/*) WORKDIR_HOST="${OUTDIR_HOST}/work" ;;
@@ -517,13 +546,16 @@ if [[ "$SLURM_MODE" == true ]]; then
     fi
 
     # Tasks see everything at its host path, plus the squashed DB images at
-    # /data/dbimg/<sub> with their --*_db arguments rewritten, as in container mode.
+    # /data/dbimg/<sub> with their --*_db arguments rewritten, as in container
+    # mode. The database dir is also at /data/db, where the image's CheckM v1
+    # config (COMEBin) expects checkm_data.
     RUNOPTS=()
     for d in "$(dirname "$ASSEMBLY_HOST")" "$(dirname "$DEPTHS_HOST")" "$OUTDIR_HOST" \
              "$WORKDIR_HOST" "$PIPE_DIR" ${BAM_DIR_HOST:+"$BAM_DIR_HOST"} \
              ${DB_DIR_HOST:+"$DB_DIR_HOST"} ${STORE_DIR_HOST:+"$STORE_DIR_HOST"}; do
         RUNOPTS+=(-B "$d")
     done
+    [[ -n "${DB_DIR_HOST:-}" ]] && RUNOPTS+=(-B "${DB_DIR_HOST}:/data/db:ro")
     for e in "${SQSH_IMAGES[@]}"; do
         img="${e%%|*}"; sub="${e#*|}"
         RUNOPTS+=(-B "${img}:/data/dbimg/${sub}:image-src=/")
@@ -533,30 +565,37 @@ if [[ "$SLURM_MODE" == true ]]; then
                     NF_ARGS[$i]="/data/dbimg/${sub}${NF_ARGS[$i]#${DB_DIR_HOST}/${sub}}" ;;
             esac
         done
+        echo "[INFO] Using squashed database image $(basename "$img") for ${sub}/"
     done
     if [[ -n "$DEPLOY_SLUG" && -f "${HOME}/.config/microscape/api-key" ]]; then
         RUNOPTS+=(-B "${HOME}/.config/microscape:/data/microscape:ro")
     fi
-    # Slurm jobs inherit the submitting environment, and the container passes it on.
+
+    # Slurm jobs inherit this environment and the container passes it on.
     if [[ -n "${DB_DIR_HOST:-}" && -f "${DB_DIR_HOST}/checkm_data/taxon_marker_sets.tsv" ]]; then
-        export CHECKM_DATA_PATH="${DB_DIR_HOST}/checkm_data"
+        export CHECKM_DATA_PATH="/data/db/checkm_data"
     fi
+    container_ca="/etc/ssl/certs/ca-certificates.crt"
+    for v in REQUESTS_CA_BUNDLE SSL_CERT_FILE CURL_CA_BUNDLE; do
+        export "SINGULARITYENV_${v}=${container_ca}" "APPTAINERENV_${v}=${container_ca}"
+    done
 
     mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info"
     RUNTIME_CFG="${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/slurm_hybrid.runtime.config"
     {
         echo "// Written by run-mag-analysis.sh --slurm"
-        printf "process.container = '%s'\n" "$SIF_PATH"
         printf "singularity.runOptions = '%s'\n" "${RUNOPTS[*]}"
     } > "$RUNTIME_CFG"
 
     NF_CMD=(nextflow -log "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log"
             run "$PIPE_DIR/main.nf" -profile slurm_hybrid
             -c "$PIPE_DIR/docker.config" -c "$RUNTIME_CFG"
-            -w "$WORKDIR_HOST" --outdir "$OUTDIR_HOST" "${NF_ARGS[@]}")
+            -w "$WORKDIR_HOST" --outdir "$OUTDIR_HOST"
+            --slurm_container "$SIF_PATH" --gpu "$GPU_MODE" "${NF_ARGS[@]}")
     [[ "$DO_RESUME" == true ]] && NF_CMD+=(-resume ${RESUME_SESSION})
 
-    echo "[INFO] Mode:     Hybrid Slurm (image ${img_sha:-unknown}, account ${SLURM_ACCOUNT})"
+    echo "[INFO] Mode:     Hybrid Slurm (image ${img_sha:-unknown}, Nextflow ${NXF_VER:-host}, account ${SLURM_ACCOUNT})"
+    echo "[INFO] Binners:  ${GPU_SIF:+GPU on $SLURM_GPU_QUEUE}${GPU_SIF:-CPU}"
     echo "[INFO] Work:     $WORKDIR_HOST"
     echo "[INFO] Running: ${NF_CMD[*]}"
     "${NF_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
