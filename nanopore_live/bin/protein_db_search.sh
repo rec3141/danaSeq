@@ -16,7 +16,9 @@
 #                `threshold` + `score_type` (full|domain), applied exactly like
 #                kofam_scan (full-sequence score, or best 1-domain score)
 #   dmnd_opts  : "id=50,qcov=50,scov=50,evalue=1e-5[,len=N]" (any subset; these are
-#                defaults; len = minimum alignment length in aa, default 0)
+#                defaults; len = minimum alignment length in aa, default 0;
+#                bits = minimum bit score, or 'catalogue' for per-target bit scores
+#                from the annot.tsv `threshold` column)
 #   annot.tsv  : optional gene catalogue, header
 #                  target gene category pathway subpathway description [threshold score_type motif]
 #                (target = HMM NAME / first '|' field of the DIAMOND subject id)
@@ -85,13 +87,14 @@ hmm)
     params="method=hmmsearch	cutoff=$opts"
     ;;
 diamond)
-    id=50; qcov=50; scov=50; evalue=1e-5; minlen=0
+    id=50; qcov=50; scov=50; evalue=1e-5; minlen=0; bits=
     IFS=',' read -ra kv <<< "$opts"
     for p in "${kv[@]}"; do
         case "$p" in
             id=*) id=${p#id=} ;; qcov=*) qcov=${p#qcov=} ;;
             scov=*) scov=${p#scov=} ;; evalue=*) evalue=${p#evalue=} ;;
             len=*) minlen=${p#len=} ;;
+            bits=*) bits=${p#bits=} ;;
             "") ;; *) echo "protein_db_search.sh: unknown diamond option '$p'" >&2; exit 2 ;;
         esac
     done
@@ -107,9 +110,30 @@ diamond)
         : > "$out.tbl"
     fi
     # subject ids are 'ACCESSION|gene ...' -> target = ACCESSION
-    awk -F'\t' -v OFS='\t' -v minlen="$minlen" '$8 + 0 >= minlen + 0 {split($2, s, "|"); print $1, s[1], $4, $5, $3, $6, $7}' "$out.tbl" > hits.raw
+    if [ "$bits" = catalogue ] && { [ "$annot" = NONE ] || ! head -1 "$annot" | tr '\t' '\n' | grep -qx threshold; }; then
+        echo "protein_db_search.sh: bits=catalogue needs an annot.tsv with a threshold column" >&2; exit 2
+    fi
+    # bits=catalogue: per-target minimum bit score from the catalogue
+    # `threshold` column (e.g. CARD's curated BLASTP bit-score = RGI 'Strict').
+    awk -F'\t' -v OFS='\t' -v minlen="$minlen" -v bits="$bits" -v annot="$annot" '
+        BEGIN {
+            if (bits == "catalogue") {
+                while ((getline line < annot) > 0) {
+                    n = split(line, a, "\t")
+                    if (a[1] == "target") { for (i = 1; i <= n; i++) col[a[i]] = i; continue }
+                    thr[a[1]] = a[col["threshold"]]
+                }
+            }
+        }
+        $8 + 0 >= minlen + 0 {
+            split($2, s, "|")
+            if (bits == "catalogue" && (!(s[1] in thr) || thr[s[1]] == "" || $5 + 0 < thr[s[1]] + 0)) next
+            if (bits != "" && bits != "catalogue" && $5 + 0 < bits + 0) next
+            print $1, s[1], $4, $5, $3, $6, $7
+        }' "$out.tbl" > hits.raw
     params="method=diamond_blastp	id=$id	qcov=$qcov	scov=$scov	evalue=$evalue"
     [ "$minlen" = 0 ] || params="$params	len=$minlen"
+    [ -z "$bits" ] || params="$params	bits=$bits"
     ;;
 *)
     echo "protein_db_search.sh: unknown mode '$mode'" >&2; exit 2 ;;

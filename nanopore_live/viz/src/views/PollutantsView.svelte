@@ -95,6 +95,13 @@
       cutoff: 'hmmsearch: TIGR02486 trusted cutoff (rdhA); PF13486 gathering cutoff (rdhA-like)',
       color: '#2dd4bf',
     },
+    'CARD': {
+      label: 'CARD (ARGs)',
+      blurb: 'Antibiotic resistance genes — emerging-contaminant indicator',
+      cite: 'Alcock et al. 2023, Nucleic Acids Res. 51:D690 (CARD 4.0.1)',
+      cutoff: 'DIAMOND blastp, per-model curated bit-score cutoffs (RGI "Strict")',
+      color: '#fb923c',
+    },
     'HADEG': {
       label: 'HADEG',
       blurb: 'Aerobic hydrocarbon & plastic degradation and biosurfactant genes',
