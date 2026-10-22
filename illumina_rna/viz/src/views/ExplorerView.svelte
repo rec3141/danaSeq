@@ -363,7 +363,7 @@
 
 <div class="flex gap-4 mb-6">
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[820px] flex flex-col flex-1 min-w-0">
-    <ReglScatter data={filteredData} {colorBy} sizeBy={scatterSize} {sizeScale} {sizeExponent} mode="tsne"
+    <ReglScatter data={filteredData} {colorBy} sizeBy={scatterSize} {sizeScale} {sizeExponent} maxPointSize={20} mode="tsne"
       colorMap={stableColorMap} {coordExtents} onselect={ids => selectedIds = ids} onclick={openDetail}
       {searchMatchIds} {sampleDepthData} selectedSample={colorMode === 'sample' ? selectedSampleName : ''} tipFormat={tip} />
     <div class="text-xs text-slate-500 mt-2 flex-shrink-0">

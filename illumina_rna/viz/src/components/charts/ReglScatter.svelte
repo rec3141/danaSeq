@@ -3,7 +3,7 @@
   import createScatterplot from 'regl-scatterplot';
   import * as d3 from 'd3';
 
-  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, sampleDepthData = null, selectedSample = '', tipFormat = null, sizeExponent = 1 } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, sampleDepthData = null, selectedSample = '', tipFormat = null, sizeExponent = 1, maxPointSize = 10 } = $props();
 
   let canvasEl;
   let scatterplot;
@@ -265,7 +265,7 @@
         valueB[i] = Math.pow(Math.max(0, Math.min(1, (sfn(sorted[i]) - sMin) / sRange)), sizeExponent);
       }
       // pointSize must be a lookup array, not a [min, max] range
-      const pMin = 2 * sizeScale, pMax = 10 * sizeScale;
+      const pMin = 2 * sizeScale, pMax = maxPointSize * sizeScale;
       const sizeMap = Array.from({length: 64}, (_, i) => pMin + (i / 63) * (pMax - pMin));
       sizeCfg = { sizeBy: 'valueB', pointSize: sizeMap };
     }
@@ -296,7 +296,7 @@
   });
 
   $effect(() => {
-    const _deps = [data, colorBy, sizeBy, sizeScale, sizeExponent, mode, colorMap, coordExtents, sampleDepthData, selectedSample];
+    const _deps = [data, colorBy, sizeBy, sizeScale, sizeExponent, maxPointSize, mode, colorMap, coordExtents, sampleDepthData, selectedSample];
     if (!canvasEl || !data) return;
     if (!scatterplot) init();
     draw();
