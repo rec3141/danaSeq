@@ -690,22 +690,24 @@ def build_mapping_payloads(samples, mapping_refs_dir, output_dir):
     if not refs:
         print("[INFO] No mapping data found across samples; skipping AIS payloads",
               file=sys.stderr)
-        return
+        return {}
 
     # Resolve reference metadata (category + contigs).
     ref_meta = {}
     for ref in refs:
-        meta = {'category': 'AIS', 'contigs': None, 'total_length': 0}
+        meta = {'category': 'AIS', 'contigs': None, 'total_length': 0, 'meta': {}}
         if mapping_refs_dir:
             mdir = Path(mapping_refs_dir) / ref
             mj = mdir / 'meta.json'
             if mj.exists():
                 try:
                     md = json.load(open(mj))
-                    # 'SAR-proxy' / 'SAR' / 'AIS' / 'HAB' → uppercase, strip
-                    # the proxy qualifier.
+                    meta['meta'] = md
+                    # 'SAR-proxy' / 'SAR' / 'AIS' / 'HAB' / 'Pollutant-fecal'
+                    # → uppercase, strip the qualifier. POLLUTANT refs (e.g.
+                    # crAssphage) surface in the Pollutants view.
                     cat = (md.get('category') or 'AIS').split('-')[0].upper()
-                    if cat in ('AIS', 'HAB', 'SAR'):
+                    if cat in ('AIS', 'HAB', 'SAR', 'POLLUTANT'):
                         meta['category'] = cat
                 except Exception as e:
                     print(f"  [WARNING] meta.json {ref}: {e}", file=sys.stderr)
@@ -814,6 +816,7 @@ def build_mapping_payloads(samples, mapping_refs_dir, output_dir):
         print(f"  {filename}: {size / 1024:.1f} KB "
               f"({len(counts)} samples, {total_hits} hits, "
               f"category={meta['category']})", file=sys.stderr)
+    return ref_meta
 
 
 # Derived "pair on the same read" features: (db, gene A, gene B) -> a feature
@@ -925,7 +928,14 @@ POLLUTANT_COUNT_SQL = """
 """
 
 
-def build_pollutant_payload(samples, output_dir, sample_ids):
+# Mapping-based pollutant markers (mapping_refs category 'Pollutant-*', e.g.
+# crAssphage for human fecal/sewage input): reads aligned at >= this identity
+# are counted, as distinct reads, under db 'Mapping markers'.
+MARKER_MIN_IDENTITY = 90.0
+MARKER_DB = 'Mapping markers'
+
+
+def build_pollutant_payload(samples, output_dir, sample_ids, marker_refs=None):
     """Build pollutants.json from the protein-DB search tables.
 
     Sources: protein_hits / protein_db_annot / protein_db_searches (filled by
@@ -941,8 +951,8 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
         "dbs": {db: {"params": "method=... cutoff=...", "n_samples": int,
                      "n_targets_hit": int}},
         "samples": {sid: {"n_proteins": {db: int}, "counts": {feature_idx: n}}},
-        "read_features": [feature_idx, ...],   # counted in reads (same-read pairs),
-                                               # normalised per read
+        "read_features": [feature_idx, ...],   # counted in reads (same-read pairs,
+                                               # mapping markers), normalised per read
         "carriers": {"db|gene": {sid: {taxon: n_reads}}}
       }
     Normalisation is left to the view: hits per million proteins searched
@@ -954,7 +964,17 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
     dbs = {}
     out_samples = {}
     carriers = {}      # "db|gene" -> {sid: {taxon: n_reads}}
-    pair_idx = set()   # feature indices that count reads (same-read pairs), not proteins
+    pair_idx = set()   # feature indices that count reads (same-read pairs, mapping markers), not proteins
+    marker_refs = marker_refs or {}
+    markers_info = {}
+    for ref, m in sorted(marker_refs.items()):
+        md = m.get('meta') or {}
+        sub = (md.get('category') or 'Pollutant').split('-', 1)
+        markers_info[ref] = {
+            'label': md.get('common_name') or ref, 'species': md.get('species') or '',
+            'category': (sub[1].capitalize() + ' markers') if len(sub) > 1 else 'Markers',
+            'accession': md.get('accession') or '', 'notes': md.get('notes') or '',
+        }
     keep = set(sample_ids)
     for s in samples:
         sid = s['id']
@@ -964,6 +984,18 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
             con = duckdb.connect(s['db_path'], read_only=True)
         except Exception:
             continue
+        # Mapping markers (reads, identity >= MARKER_MIN_IDENTITY)
+        marker_counts = {}
+        if marker_refs:
+            try:
+                for ref, n in con.execute(
+                    "SELECT reference, COUNT(DISTINCT qname) FROM mapping "
+                    "WHERE identity_pct >= ? AND reference IN (SELECT UNNEST(?)) GROUP BY reference",
+                    [MARKER_MIN_IDENTITY, list(marker_refs)]).fetchall():
+                    marker_counts[ref] = int(n)
+                mapped = con.execute("SELECT COUNT(*) FROM import_log WHERE filename LIKE 'map/%'").fetchone()[0]
+            except Exception:
+                mapped = 0
         try:
             searched = con.execute("""
                 SELECT db, SUM(n_proteins), MODE(params), COUNT(*)
@@ -971,9 +1003,8 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
             """).fetchall()
             rows = con.execute(POLLUTANT_COUNT_SQL).fetchall()
         except Exception:
-            con.close()
-            continue  # no protein-DB tables in this DB
-        if not searched:
+            searched, rows = [], []  # no protein-DB tables in this DB
+        if not searched and not (marker_refs and mapped):
             con.close()
             continue
         n_prot = {}
@@ -1002,6 +1033,19 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
                         features.append(list(key))
                         pair_idx.add(feat_idx[key])
                     counts[feat_idx[key]] = int(n)
+        for ref, n in marker_counts.items():
+            mi = markers_info[ref]
+            key = (MARKER_DB, mi['category'], mi['species'] or ref, mi['label'])
+            if key not in feat_idx:
+                feat_idx[key] = len(features)
+                features.append(list(key))
+                pair_idx.add(feat_idx[key])
+            counts[feat_idx[key]] = n
+            dbs.setdefault(MARKER_DB, {'params': f'minimap2 map-ont, identity >= {MARKER_MIN_IDENTITY:g}%',
+                                       'n_samples': 0, 'targets': set()})['targets'].add(mi['label'])
+        if marker_refs and mapped:
+            dbs.setdefault(MARKER_DB, {'params': f'minimap2 map-ont, identity >= {MARKER_MIN_IDENTITY:g}%',
+                                       'n_samples': 0, 'targets': set()})['n_samples'] += 1
         for db, gene in POLLUTANT_CARRIER_GENES:
             if (db, gene) in genes_present:
                 taxa = _carrier_taxa(con, db, gene)
@@ -1021,6 +1065,7 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
         'samples': out_samples,
         'read_features': sorted(pair_idx),
         'carriers': carriers,
+        'markers': markers_info,
     }
     path = os.path.join(output_dir, 'pollutants.json')
     with open(path, 'w') as f:
@@ -1246,11 +1291,12 @@ def main():
     # JSON per reference into the same output dir; the SPA's AIS/HAB/SAR
     # views fetch them on demand by name.
     print("[INFO] Building reference-mapping payloads (ais_/hab_/sar_)...", file=sys.stderr)
-    build_mapping_payloads(samples, args.mapping_refs, args.output)
+    ref_meta = build_mapping_payloads(samples, args.mapping_refs, args.output) or {}
 
     # Pollutant marker genes (CANT-HYD, HADEG, ... protein-DB searches).
     print("[INFO] Building pollutant payload (pollutants.json)...", file=sys.stderr)
-    build_pollutant_payload(samples, args.output, sample_ids)
+    marker_refs = {r: m for r, m in ref_meta.items() if m['category'] == 'POLLUTANT'}
+    build_pollutant_payload(samples, args.output, sample_ids, marker_refs)
 
     print("[SUCCESS] Main preprocessing complete", file=sys.stderr)
 

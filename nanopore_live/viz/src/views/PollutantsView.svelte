@@ -60,6 +60,13 @@
       cutoff: 'hmmsearch, trusted cutoffs (--cut_tc)',
       color: '#fbbf24',
     },
+    'Mapping markers': {
+      label: 'Fecal markers (read mapping)',
+      blurb: 'Human fecal / sewage indicator genomes (crAssphage) mapped with minimap2',
+      cite: 'Dutilh et al. 2014; Stachler et al. 2017 (crAssphage as sewage marker)',
+      cutoff: 'reads aligned at ≥90% identity; always per million reads',
+      color: '#a78bfa',
+    },
     'KEGG-xeno': {
       label: 'KEGG xenobiotics',
       blurb: 'KOfam profiles for KEGG xenobiotics-degradation pathways (BTEX, PAH, organohalides, atrazine, nitroaromatics, steroids …)',
@@ -97,6 +104,8 @@
       match: f => f[0] === 'Hg-MATE' && f[3] === 'hgcA' },
     { id: 'hgcAB',  label: 'hgcAB same read', title: 'Reads carrying both hgcA and hgcB (counted in reads)',
       match: f => f[0] === 'Hg-MATE' && f[3] === 'hgcAB pair (same read)' },
+    { id: 'crass',  label: 'crAssphage (sewage)', title: 'Reads mapping to crAssphage — human fecal / sewage marker (per million reads)',
+      match: f => f[0] === 'Mapping markers' && /crass/i.test(f[2] + f[3]) },
     { id: 'alkB',   label: 'alkB / CYP153',     title: 'Medium-chain alkane hydroxylases (CANT-HYD AlkB + CYP153)',
       match: f => f[0] === 'CANT-HYD' && (f[3] === 'alkB' || f[3] === 'CYP153') },
     { id: 'almA',   label: 'almA / ladA',       title: 'Long-chain alkane monooxygenases (CANT-HYD)',
@@ -758,7 +767,7 @@
           </div>
         {:else}
           <p class="text-slate-500 text-xs">Click a map marker or table row to see the selection broken down for that sample.</p>
-          <p class="text-slate-600 text-[11px]">Counts are reads carrying a gene in the selection (each annotated protein's best hit per database; a gene split into several ORFs on one read counts once). Per-M-protein rates divide by the proteins searched; same-read pairs (hgcAB) are always per million reads.</p>
+          <p class="text-slate-600 text-[11px]">Counts are reads carrying a gene in the selection (each annotated protein's best hit per database; a gene split into several ORFs on one read counts once). Per-M-protein rates divide by the proteins searched; same-read pairs (hgcAB) and mapping markers (crAssphage) are always per million reads.</p>
         {/if}
       </div>
     </div>
