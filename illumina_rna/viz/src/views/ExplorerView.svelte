@@ -42,7 +42,7 @@
   let colorMode = $state('expression');   // 'expression' | 'bins' | 'taxa' | 'length'
   let taxRank = $state('phylum');
   let sizeBy = $state('length');
-  let sizeScale = $state(1.0);
+  let sizeScale = $state(2);   // minimum point size, px
   let sizeExponent = $state(0.5);   // size ∝ value^p; 0.5 = sqrt
   // Expression selection shared by colour and size: -1 = Total (pooled), else a sample
   let sampleIdx = $state(-1);
@@ -332,11 +332,13 @@
     onclick={cycleSize}
     title={`Click to cycle: ${sizeDefs.map(d => d.label).join(' → ')}`}
   >{sizeDefs.find(d => d.key === sizeBy)?.label} &#x25BE;</button>
-  <input type="range" min="0.2" max="20" step="0.1" bind:value={sizeScale} class="w-20 h-1 accent-cyan-400 cursor-pointer" />
-  <span class="text-slate-500 w-8">{sizeScale.toFixed(1)}x</span>
-  <span class="text-slate-500" title="px = 1 + scale × value^p (length in kb, expression in RPKM); higher p grows larger values more">value^</span>
+  <span class="text-slate-500" title="Size of the smallest points (value 0), in pixels">min</span>
+  <input type="range" min="0.5" max="20" step="0.5" bind:value={sizeScale} class="w-20 h-1 accent-cyan-400 cursor-pointer"
+    title="Size of the smallest points (value 0), in pixels" />
+  <span class="text-slate-500 w-10">{sizeScale.toFixed(1)} px</span>
+  <span class="text-slate-500" title="px = min + (1 + value)^p − 1 (length in kb, expression in RPKM); points only grow with value and p">(1+value)^</span>
   <input type="range" min="0.1" max="1.5" step="0.05" bind:value={sizeExponent} class="w-16 h-1 accent-cyan-400 cursor-pointer"
-    title="px = 1 + scale × value^p (length in kb, expression in RPKM); higher p grows larger values more" />
+    title="px = min + (1 + value)^p − 1 (length in kb, expression in RPKM); points only grow with value and p" />
   <span class="text-slate-500 w-8">{sizeExponent.toFixed(2)}</span>
 </div>
 

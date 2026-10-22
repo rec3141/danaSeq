@@ -251,9 +251,10 @@
     prep = { n, x, y, valueA, colorCfg, isCont };
   }
 
-  // ---- Size encoding: px = 1 + sizeScale × value^sizeExponent (capped) ----
-  // Raw value, no normalization: a point keeps its size under filtering, and
-  // a larger exponent grows points (for values above 1). Units: length in kb,
+  // ---- Size encoding: px = sizeScale + ((1 + value)^sizeExponent − 1) ----
+  // sizeScale is the size of a zero-value point (the minimum). 1 + value ≥ 1,
+  // so points only grow as the value or the exponent rises. Raw value, no
+  // normalization: filtering never resizes a point. Units: length in kb,
   // depth/expression as given (RPKM); sizeOf overrides the value.
   const MAX_PX = 80;
   function computeSizes() {
@@ -263,13 +264,13 @@
     const sorted = indexMap;
     const get = sizeOf ?? (sizeBy === 'depth' ? (c => c.depth) : (c => c.length / 1e3));
     for (let i = 0; i < n; i++) {
-      const px = 1 + sizeScale * Math.pow(Math.max(0, get(sorted[i])), sizeExponent);
+      const px = sizeScale + Math.pow(1 + Math.max(0, get(sorted[i])), sizeExponent) - 1;
       valueB[i] = Math.min(1, px / MAX_PX);
     }
   }
 
   function sizeConfig() {
-    if (sizeBy === 'fixed') return { sizeBy: null, pointSize: 3 * sizeScale };
+    if (sizeBy === 'fixed') return { sizeBy: null, pointSize: sizeScale };
     // valueB = px / MAX_PX; a fine lookup so sizes are near-continuous
     return { sizeBy: 'valueB', pointSize: Array.from({length: 256}, (_, i) => Math.max(1, (i / 255) * MAX_PX)) };
   }
