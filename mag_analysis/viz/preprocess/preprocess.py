@@ -17,7 +17,8 @@ chunked layout.
 
 Usage:
   python3 preprocess.py --results <path> --output <path> [--store-dir <path>]
-      [--skip-tsne] [--skip-umap] [--min-contig-length N]
+      [--skip-tsne] [--skip-umap] [--tsne-engine auto|gpu|cpu|sklearn] [--no-fastsne-viewer]
+      [--min-contig-length N]
       [--contig-chunk-size N] [--gene-shard-size N]
 """
 
@@ -203,6 +204,10 @@ def parse_args():
                    help='Persistent storeDir overlay (checked first for each file)')
     p.add_argument('--skip-tsne', action='store_true', help='Skip t-SNE (saves ~5 min)')
     p.add_argument('--skip-umap', action='store_true', help='Skip UMAP (saves ~5-15 min)')
+    p.add_argument('--tsne-engine', choices=['auto', 'gpu', 'cpu', 'sklearn'], default='auto',
+                   help='contig t-SNE: fastsne on a GPU, else fastsne_cpu, else sklearn (auto)')
+    p.add_argument('--no-fastsne-viewer', action='store_true',
+                   help='do not write the fastsne WebGL viewer of the contig maps (fastsne/viewer.html)')
     p.add_argument('--min-contig-length', type=int, default=0,
                    help='Leave contigs shorter than this out of the per-contig viz files '
                         '(contig explorer, per-sample depths, genes). Default 0 keeps every contig.')
@@ -1794,8 +1799,98 @@ def build_eukaryotic(results_dir, assembly_info):
     }
 
 
+def find_fastsne(engine):
+    """(binary, 'gpu'|'cpu') for the requested t-SNE engine, or None (use sklearn). FASTSNE_BIN overrides."""
+    import shutil
+    import subprocess
+    if engine == 'sklearn':
+        return None
+    if os.environ.get('FASTSNE_BIN'):
+        b = os.environ['FASTSNE_BIN']
+        return b, 'gpu' if os.path.basename(b) == 'fastsne' else 'cpu'
+    gpu = shutil.which('fastsne')
+    if gpu and engine in ('auto', 'gpu'):
+        try:
+            if 'GPU' in subprocess.run(['nvidia-smi', '-L'], capture_output=True, text=True, timeout=20).stdout:
+                return gpu, 'gpu'
+        except (OSError, subprocess.SubprocessError):
+            pass
+    cpu = shutil.which('fastsne_cpu')
+    if cpu and engine in ('auto', 'cpu'):
+        return cpu, 'cpu'
+    if engine in ('gpu', 'cpu'):
+        print(f"  [WARNING] --tsne-engine {engine}: no usable fastsne binary; using sklearn", file=sys.stderr)
+    return None
+
+
+def fastsne_tsne(tnf_path, fs, output_dir):
+    """t-SNE of assembly/tnf.tsv with fastsne (CLR + PCA + kNN t-SNE; --dedup 2 keeps over-represented
+    genomes from stretching into worms). Returns {contig: [x, y]} or None on failure."""
+    import subprocess
+    import tempfile
+    binary, kind = fs
+    with tempfile.TemporaryDirectory(dir=output_dir) as tmp:
+        out = os.path.join(tmp, 'tsne.tsv')
+        cmd = [binary, '-i', tnf_path, '-o', out, '--dedup', '2']
+        print(f"  Running fastsne ({kind}) t-SNE on TNF: {' '.join(cmd)}")
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"  [WARNING] fastsne failed (exit {r.returncode}): {r.stderr[-800:]}", file=sys.stderr)
+            return None
+        last = [l for l in r.stderr.splitlines() if 'optimisation done' in l]
+        if last:
+            print(f"  {last[-1].strip()}")
+        emb = pd.read_csv(out, sep='\t', dtype={'id': str})
+    return {cid: [round(float(x), 4), round(float(y), 4)] for cid, x, y in zip(emb['id'], emb['x'], emb['y'])}
+
+
+def write_fastsne_viewer(output_dir, contig_explorer, embeddings, fs):
+    """fastsne WebGL viewer of the contig maps: <output_dir>/fastsne/viewer.html?data=contigs.fsv
+    (t-SNE, UMAP, PCA; coloured by bin, taxonomy, GC, depth, length)."""
+    import shutil
+    import subprocess
+    share = Path(os.path.realpath(fs[0])).parent.parent / 'share' / 'fastsne'
+    pack, viewer = share / 'tools' / 'pack_viewer.py', share / 'viewer.html'
+    if not pack.exists() or not viewer.exists():
+        print(f"  [WARNING] {share} has no pack_viewer.py / viewer.html; skipping the fastsne viewer")
+        return
+    recs = contig_explorer.get('contigs') or []
+    if not recs:
+        return
+    tab = pd.DataFrame(recs)
+    for method in ('tsne', 'umap'):
+        e = embeddings.get(method) or {}
+        xy = np.array([e.get(c, [np.nan, np.nan]) for c in tab['id']], dtype=float).reshape(-1, 2)
+        tab[f'{method}_x'], tab[f'{method}_y'] = xy[:, 0], xy[:, 1]
+    vdir = os.path.join(output_dir, 'fastsne')
+    os.makedirs(vdir, exist_ok=True)
+    tsv = os.path.join(vdir, 'contigs_table.tsv')
+    tab.to_csv(tsv, sep='\t', index=False)
+    cmd = [sys.executable, str(pack), os.path.join(vdir, 'contigs.fsv'), '--title', f'{len(tab):,} contigs']
+    for name, m in (('t-SNE', 'tsne'), ('UMAP', 'umap'), ('PCA', 'pca')):
+        if f'{m}_x' in tab and tab[f'{m}_x'].notna().any():
+            cmd += ['--emb', f'{name}={tsv}:{m}_x,{m}_y']
+    layers = [('bin', 'bin', '')] + [(f'{src} {rank}', f'{src}_{rank}', '') for src in ('kaiju', 'kraken2', 'sendsketch')
+                                     for rank in ('genus', 'family', 'phylum')]
+    layers += [('replicon', 'replicon', ''), ('GC', 'gc', '~num'), ('depth', 'depth', '~log'), ('length', 'length', '~log')]
+    for name, col, mode in layers:
+        if col in tab and (tab[col].astype(str).str.len() > 0).any():
+            cmd += ['--layer', f'{name}={tsv}:{col}{mode}']
+    if not any(a.startswith('t-SNE=') or a.startswith('UMAP=') or a.startswith('PCA=') for a in cmd):
+        os.remove(tsv)
+        return
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    os.remove(tsv)
+    if r.returncode != 0:
+        print(f"  [WARNING] pack_viewer failed: {r.stderr[-500:]}", file=sys.stderr)
+        return
+    shutil.copy(viewer, os.path.join(vdir, 'viewer.html'))
+    print(f"  Wrote fastsne viewer: {vdir}/viewer.html?data=contigs.fsv")
+
+
 def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
-                          skip_tsne=False, skip_umap=False, output_dir=None, sendsketch_df=None):
+                          skip_tsne=False, skip_umap=False, output_dir=None, sendsketch_df=None,
+                          tsne_engine='auto'):
     """Build contig_explorer.json with PCA + t-SNE + UMAP on fourth-root transformed TNF."""
     print("Building contig_explorer.json ...")
 
@@ -2005,7 +2100,10 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     tsne_emb = None
     umap_emb = None
 
-    if not skip_tsne:
+    fs = find_fastsne(tsne_engine) if not skip_tsne else None
+    if fs:
+        tsne_emb = fastsne_tsne(tnf_path, fs, output_dir or '.')
+    if not skip_tsne and tsne_emb is None:
         try:
             from sklearn.manifold import TSNE
             print("  Running t-SNE on fourth-root transformed TNF ...")
@@ -2290,6 +2388,7 @@ def write_contig_viz(output_dir, contig_explorer, tsne_emb, umap_emb, sample_dep
     print(f"  Wrote contig explorer: {man['n_contigs']} contigs in {len(man['chunks'])} chunks "
           f"(t-SNE: {man['has_tsne']}, UMAP: {man['has_umap']}"
           f"{', per-sample depths' if sample_depths is not None else ''})")
+    return embeddings
 
 
 def main():
@@ -2480,8 +2579,12 @@ def main():
     contig_explorer, tsne_emb, umap_emb, sample_depths = build_contig_explorer(
         results_dir, assembly_info, depths_df, contig2bin, kaiju_df,
         skip_tsne=args.skip_tsne, skip_umap=args.skip_umap, output_dir=output_dir,
-        sendsketch_df=sendsketch_df)
-    write_contig_viz(output_dir, contig_explorer, tsne_emb, umap_emb, sample_depths, args)
+        sendsketch_df=sendsketch_df, tsne_engine=args.tsne_engine)
+    embeddings = write_contig_viz(output_dir, contig_explorer, tsne_emb, umap_emb, sample_depths, args)
+    # every stage rewrites the viewer: bins and taxonomy change after the embeddings are made
+    fs = find_fastsne('auto') if not args.no_fastsne_viewer else None
+    if fs:
+        write_fastsne_viewer(output_dir, contig_explorer, embeddings, fs)
 
     print("\nDone! All JSON files written to", output_dir)
 

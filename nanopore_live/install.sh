@@ -31,6 +31,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_DIR="${SCRIPT_DIR}/conda-envs"
 ENVS_YAML_DIR="${SCRIPT_DIR}/envs"
 TETRAMER_URL="https://raw.githubusercontent.com/tetramerFreqs/Binning/master/tetramer_freqs_esom.pl"
+# fastsne (read-level t-SNE of every read): pinned release, built against the tools env's FFTW
+FASTSNE_VERSION="v0.2.0"
+FASTSNE_URL="https://github.com/rec3141/fastsne"
 
 # Detect conda/mamba
 if command -v mamba &>/dev/null; then
@@ -174,6 +177,25 @@ do_install() {
         echo "  Installed to: ${tetra_bin}"
     fi
 
+    # Build fastsne_cpu into the tools environment (optional: without it the
+    # read t-SNE uses a sklearn sample, as before)
+    echo ""
+    echo "Building fastsne ${FASTSNE_VERSION}..."
+    local tools_env="${ENV_DIR}/dana-tools" fs_src
+    if [[ -d "${tools_env}" ]] && command -v git &>/dev/null && command -v make &>/dev/null && command -v g++ &>/dev/null; then
+        fs_src=$(mktemp -d)
+        if git clone -q --depth 1 --branch "${FASTSNE_VERSION}" "${FASTSNE_URL}" "${fs_src}" \
+            && make -s -C "${fs_src}" cpu install PREFIX="${tools_env}" \
+                FFTW_INC="-I${tools_env}/include" FFTW_LIB="-L${tools_env}/lib -Wl,-rpath,${tools_env}/lib"; then
+            echo "  Installed to: ${tools_env}/bin/fastsne_cpu"
+        else
+            echo "  [WARNING] fastsne build failed; read t-SNE will use sklearn"
+        fi
+        rm -rf "${fs_src}"
+    else
+        echo "  [WARNING] needs git, make and g++; skipped (read t-SNE will use sklearn)"
+    fi
+
     echo ""
     if (( failed > 0 )); then
         echo "[WARNING] ${failed} environment(s) failed to install"
@@ -235,6 +257,13 @@ do_check() {
             missing=$((missing + 1))
         fi
     done
+
+    printf "    %-20s" "fastsne_cpu"
+    if [[ -x "${ENV_DIR}/dana-tools/bin/fastsne_cpu" ]]; then
+        echo "OK"
+    else
+        echo "MISSING (optional; read t-SNE falls back to sklearn)"
+    fi
 
     # Check tetramer script
     printf "    %-20s" "tetramer_freqs"

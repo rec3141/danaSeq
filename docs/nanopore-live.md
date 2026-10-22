@@ -77,6 +77,29 @@ results/
 └── pipeline_info/        Nextflow reports (timeline, trace, DAG)
 ```
 
+### Read map (t-SNE of every read)
+
+In watch mode, DB_SYNC runs `viz/preprocess/compute_read_tsne.py` whenever
+`tetra_data` grows. With [fastsne](https://github.com/rec3141/fastsne) installed
+(the container ships the CPU build; `install.sh` builds it into `dana-tools`),
+every read is mapped, not a sample:
+
+- each sample's `tetra_data` is exported once to `viz/read_map/fsb/`
+  (re-exported only when its `dana.duckdb` changes)
+- a reference t-SNE is built from a uniform random sample of up to `--ref-max`
+  reads (10M on CPU, 20M on a GPU) and rebuilt when the read count has doubled
+  (`--rebuild-factor`)
+- the other reads are projected onto it, only for samples whose data changed
+- `viz/read_explorer.json` keeps a `--max-reads` sample for the dashboard, with
+  coordinates from the full map
+- `viz/read_map/viewer.html?data=reads.json` shows every read (WebGL, paged),
+  coloured by kraken genus, sample or distance to the reference; projected reads
+  can be hidden
+
+fastsne_cpu uses half the available cores by default (`--threads`), leaving room
+for basecalling and classification. Without fastsne, or with `--engine sklearn`,
+the sampled sklearn t-SNE runs as before.
+
 ## Profiles
 
 | Profile | Use case |
