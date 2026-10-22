@@ -250,9 +250,10 @@
     prep = { n, x, y, valueA, colorCfg, isCont };
   }
 
-  // ---- Size encoding: sqrt of the raw value over a fixed maximum ----
-  // sizeRange = { length: max, depth: max } from the full (unfiltered) data, so
-  // a point keeps its size when filters change; without it, the max of `data`.
+  // ---- Size encoding: size ∝ (value / max)^sizeExponent ----
+  // One raw exponent (0.5 = sqrt; lower compresses, 1 is linear). sizeRange =
+  // { length: max, depth: max } from the full (unfiltered) data, so a point
+  // keeps its size when filters change; without it, the max of `data`.
   function computeSizes() {
     const { n } = prep;
     valueB = new Float32Array(n);
@@ -261,10 +262,8 @@
     const field = sizeBy === 'depth' ? 'depth' : 'length';
     let vmax = sizeRange?.[field];
     if (!(vmax > 0)) { vmax = 0; for (const c of data.contigs) if (c[field] > vmax) vmax = c[field]; }
-    const smax = Math.sqrt(vmax) || 1;
-    // sizeExponent > 1 shrinks the many small points relative to the few large ones
     for (let i = 0; i < n; i++) {
-      valueB[i] = Math.pow(Math.min(1, Math.sqrt(Math.max(0, sorted[i][field])) / smax), sizeExponent);
+      valueB[i] = Math.pow(Math.min(1, Math.max(0, sorted[i][field]) / (vmax || 1)), sizeExponent);
     }
   }
 

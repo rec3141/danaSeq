@@ -43,7 +43,7 @@
   let taxRank = $state('phylum');
   let sizeBy = $state('length');
   let sizeScale = $state(1.0);
-  let sizeExponent = $state(1);
+  let sizeExponent = $state(0.5);   // size ∝ value^p; 0.5 = sqrt
   let sampleIdx = $state(0);
   let layer = $state(null);
   let layerFor = $state(-1);
@@ -323,10 +323,10 @@
   >{sizeDefs.find(d => d.key === sizeBy)?.label} &#x25BE;</button>
   <input type="range" min="0.2" max="20" step="0.1" bind:value={sizeScale} class="w-20 h-1 accent-cyan-400 cursor-pointer" />
   <span class="text-slate-500 w-8">{sizeScale.toFixed(1)}x</span>
-  <span class="text-slate-500" title="Size exponent: higher makes the largest contigs stand out">exp</span>
-  <input type="range" min="1" max="4" step="0.25" bind:value={sizeExponent} class="w-16 h-1 accent-cyan-400 cursor-pointer"
-    title="Size exponent: higher makes the largest contigs stand out" />
-  <span class="text-slate-500 w-8">{sizeExponent.toFixed(2).replace(/0$/, '')}</span>
+  <span class="text-slate-500" title="Size ∝ value^p: 0.5 = square root, 1 = linear, lower compresses the range">value^</span>
+  <input type="range" min="0.1" max="1" step="0.05" bind:value={sizeExponent} class="w-16 h-1 accent-cyan-400 cursor-pointer"
+    title="Size ∝ value^p: 0.5 = square root, 1 = linear, lower compresses the range" />
+  <span class="text-slate-500 w-8">{sizeExponent.toFixed(2)}</span>
 </div>
 
 <div class="flex items-center gap-3 flex-wrap text-xs">

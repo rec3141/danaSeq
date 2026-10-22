@@ -81,6 +81,7 @@ def helpMessage() {
       --strandedness STR     unstranded | forward | reverse [default: unstranded]
       --feature_types STR    GFF features counted [default: CDS,rRNA,tRNA,tmRNA,ncRNA]
       --min_mapq N           featureCounts -Q [default: 0]
+      --min_aligned_frac F   count only alignments covering >= F of the read [default: 0.8]
 
     Resources:
       --rna_cpus N           CPUs per high-resource task [default: 16]
@@ -428,7 +429,8 @@ workflow {
         ch_by_ref = FEATURECOUNTS.out.counts
             .map { meta, ref, genes, contigs, summary -> [ref.name, genes, contigs, summary] }
             .groupTuple()
-        ch_flagstat_by_ref = ch_flagstat
+        // mapping statistics of the alignments actually counted (aligned-fraction filter)
+        ch_flagstat_by_ref = FEATURECOUNTS.out.flagstat
             .map { meta, ref, f -> [ref.name, f] }
             .groupTuple()
         ch_all_counts = ch_readcounts.map { meta, f -> f }.collect()

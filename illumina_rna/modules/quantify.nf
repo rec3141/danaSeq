@@ -50,6 +50,7 @@ process FEATURECOUNTS {
     tuple val(meta), val(ref), path("${meta.id}_vs_${ref.name}.genes.tsv.gz"),
                                path("${meta.id}_vs_${ref.name}.contigs.tsv.gz"),
                                path("${meta.id}_vs_${ref.name}.genes.summary"), emit: counts
+    tuple val(meta), val(ref), path("${meta.id}_vs_${ref.name}.counted.flagstat.txt"), emit: flagstat
 
     script:
     def tag = "${meta.id}_vs_${ref.name}"
@@ -57,15 +58,23 @@ process FEATURECOUNTS {
     // Pairs count once; a pair overlapping two genes goes to the larger
     // overlap (prokaryotic genes often overlap by a few bp). Primary only.
     def common = "-F SAF -p --countReadPairs --primary -Q ${params.min_mapq} -s ${strand_flag} -T ${task.cpus}"
+    def clip = String.format('%.4f', 1 - (params.min_aligned_frac as double))
     """
     set -o pipefail
+    # Count only alignments covering >= ${params.min_aligned_frac} of the read. The
+    # aligner keeps short local hits (e.g. 21 matched bases, the rest soft-
+    # clipped): on a marine sample they were a third of all mapped reads and
+    # piled abundant foreign RNAs onto whichever contig shared a k-mer.
+    samtools view -@ ${task.cpus} -b -e 'flag.unmap || sclen <= ${clip} * qlen' -o counted.bam "${bam}"
+    samtools flagstat -@ ${task.cpus} counted.bam > "${tag}.counted.flagstat.txt"
+
     slim() {  # Geneid + count column, renamed to the sample id
         awk -v sid="${meta.id}" 'BEGIN { OFS = "\\t" } /^#/ { next } !h { print "Geneid", sid; h = 1; next } { print \$1, \$NF }' "\$1" \\
         | gzip -1 > "\$2"
     }
 
     if [ \$(wc -l < "${genes_saf}") -gt 1 ]; then
-        featureCounts ${common} -O --largestOverlap -a "${genes_saf}" -o genes.raw "${bam}"
+        featureCounts ${common} -O --largestOverlap -a "${genes_saf}" -o genes.raw counted.bam
         slim genes.raw "${tag}.genes.tsv.gz"
         mv genes.raw.summary "${tag}.genes.summary"
     else
@@ -73,7 +82,8 @@ process FEATURECOUNTS {
         printf 'Status\\t%s\\n' "${meta.id}" > "${tag}.genes.summary"
     fi
 
-    featureCounts ${common} -a "${contigs_saf}" -o contigs.raw "${bam}"
+    featureCounts ${common} -a "${contigs_saf}" -o contigs.raw counted.bam
     slim contigs.raw "${tag}.contigs.tsv.gz"
+    rm -f counted.bam
     """
 }
