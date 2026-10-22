@@ -133,15 +133,22 @@ EXPECTED_EOF
     # Write through stdout, not --output-file: the file writer is unbuffered
     # (about one write syscall per byte), which on Lustre turned writing a
     # 1.5M-contig x 399-sample matrix into hours. stdout is line-buffered and
-    # cat writes in large blocks.
+    # awk writes in large blocks.
+    # Not --methods metabat: it replaces any --min-read-percent-identity with
+    # 97%, which raw nanopore reads mostly fall below, so the matrix kept a few
+    # percent of the mapped coverage. The same mean and variance (75 bp contig
+    # ends excluded, nothing dropped for low covered fraction) with the 80%
+    # cutoff, reshaped into the MetaBAT table CoverM's metabat method prints.
     set -o pipefail
     coverm contig \\
         -b *.sorted.bam \\
-        --methods metabat \\
+        --methods length mean variance \\
         --min-read-percent-identity 80 \\
         --min-read-aligned-percent 0 \\
+        --min-covered-fraction 0 \\
+        --contig-end-exclusion 75 \\
         --threads ${task.cpus} \\
-        | cat > depths.txt
+        | jgi_depth_table.awk > depths.txt
 
     if [ ! -s depths.txt ]; then
         echo "[ERROR] Depth calculation produced empty output" >&2
