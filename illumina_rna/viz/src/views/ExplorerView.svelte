@@ -304,7 +304,7 @@
     onclick={cycleSize}
     title={`Click to cycle: ${sizeDefs.map(d => d.label).join(' → ')}`}
   >{sizeDefs.find(d => d.key === sizeBy)?.label} &#x25BE;</button>
-  <input type="range" min="0.2" max="3" step="0.1" bind:value={sizeScale} class="w-20 h-1 accent-cyan-400 cursor-pointer" />
+  <input type="range" min="0.2" max="20" step="0.1" bind:value={sizeScale} class="w-20 h-1 accent-cyan-400 cursor-pointer" />
   <span class="text-slate-500 w-8">{sizeScale.toFixed(1)}x</span>
   <span class="text-slate-500" title="Size exponent: higher makes the largest contigs stand out">exp</span>
   <input type="range" min="1" max="4" step="0.25" bind:value={sizeExponent} class="w-16 h-1 accent-cyan-400 cursor-pointer"
