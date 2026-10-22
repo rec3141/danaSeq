@@ -12,6 +12,7 @@
     { id: 'ais', label: 'AIS' },
     { id: 'sar', label: 'SAR' },
     { id: 'habs', label: 'HABs' },
+    { id: 'pollutants', label: 'Pollutants' },
     { id: 'environmental', label: 'Environmental' },
     { id: 'taxonomy', label: 'Taxonomy' },
     { id: 'heatmap', label: 'Heatmap' },

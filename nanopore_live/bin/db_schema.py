@@ -120,3 +120,46 @@ def ensure_schema(con):
             aligned_len  INTEGER
         )
     """)
+
+    # Protein-DB search results (HMM_SEARCH / DIAMOND_DB_SEARCH): pollutant
+    # marker DBs such as CANT-HYD and HADEG, and any later HMM/protein DB.
+    # Loaded by import_protein_hits.py from hmm/*.tsv and protdb/*.tsv.
+    #   protein_hits        one row per (protein, target) hit; `db` = source DB,
+    #                       `chunk` = annotation batch (meta.id) the protein came from
+    #   protein_db_annot    target -> gene / category / pathway catalogue per DB
+    #   protein_db_searches proteins searched per (db, chunk), so hit counts can
+    #                       be normalised (hits per million proteins searched)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS protein_hits (
+            db       TEXT,
+            chunk    TEXT,
+            gene_id  TEXT,
+            target   TEXT,
+            evalue   DOUBLE,
+            score    DOUBLE,
+            pident   REAL,
+            qcov     REAL,
+            scov     REAL
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS protein_db_annot (
+            db         TEXT,
+            target     TEXT,
+            gene       TEXT,
+            category   TEXT,
+            pathway    TEXT,
+            subpathway TEXT,
+            PRIMARY KEY (db, target)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS protein_db_searches (
+            db         TEXT,
+            chunk      TEXT,
+            n_proteins BIGINT,
+            n_hits     INTEGER,
+            params     TEXT,
+            PRIMARY KEY (db, chunk)
+        )
+    """)

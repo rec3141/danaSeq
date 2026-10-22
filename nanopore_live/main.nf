@@ -47,6 +47,18 @@ def helpMessage() {
       --sendsketch_address URL  Sendsketch server URL [default: local GTDB]
       --run_tetra        Tetranucleotide frequency analysis
       --hmm_databases    Comma-separated HMM file paths (requires annotation)
+      --hmm_cut STR      hmmsearch cutoff for HMM DBs: tc|ga|nc or an E-value [default: tc]
+      --protein_dbs      Comma-separated DIAMOND .dmnd paths searched with blastp (requires annotation)
+      --protein_db_opts  DIAMOND cutoffs [default: id=50,qcov=50,scov=50,evalue=1e-5 (HADEG)]
+      --pollutant_dbs DIR  Directory of pollutant reference DBs, one subdir per DB holding
+                         <name>.hmm and/or <name>.dmnd (e.g. CANT-HYD, HADEG); every one
+                         is added to the HMM / DIAMOND searches. See the README in
+                         /data/scratch/refdbs/pollutants/.
+                         Per-DB files beside the DB file (all optional):
+                           <name>.genes.tsv  target->gene/category/pathway catalogue
+                                             (+ threshold/score_type columns = per-target
+                                             cutoffs, applied kofam_scan style)
+                           <name>.opts       one line overriding --hmm_cut / --protein_db_opts
       --mapping_refs DIR Directory of reference subdirs for minimap2 mapping (AIS / others).
                          Each subdir holds <refname>.idx (required), <refname>.fna,
                          <refname>.contigs.json, and an optional meta.json describing
@@ -90,6 +102,7 @@ def helpMessage() {
           --run_kraken --kraken_db /path/to/krakendb \\
           --annotator bakta \\
           --hmm_databases /path/to/CANT-HYD.hmm,/path/to/FOAM.hmm \\
+          --protein_dbs /path/to/HADEG.dmnd \\
           --run_sketch \\
           --run_tetra \\
           --run_db_integration \\
@@ -190,6 +203,7 @@ include { BAKTA_CDS }          from './modules/bakta'
 include { BAKTA_FULL }         from './modules/bakta'
 include { SENDSKETCH }        from './modules/sketch'
 include { HMM_SEARCH }        from './modules/hmm'
+include { DIAMOND_DB_SEARCH } from './modules/diamond_db'
 include { TETRAMER_FREQ }     from './modules/tetramer'
 include { MAP_REFERENCE }     from './modules/mapping'
 include { DB_INTEGRATION }    from './modules/db_integration'
@@ -335,6 +349,43 @@ def create_fastq_channel() {
 }
 
 // ============================================================================
+// Protein reference DBs (HMM + DIAMOND) for pollutant / functional searches
+// ============================================================================
+// Returns [ [dbname, dbfile, annot_path_or_NONE, cutoff_opts], ... ] for one
+// search method. Sources: the explicit comma list (--hmm_databases /
+// --protein_dbs) plus every <sub>/<sub>.<ext> under --pollutant_dbs.
+// Per-DB cutoff: <name>.opts beside the DB file, else the catalogue's own
+// per-target thresholds (hmm only, when <name>.genes.tsv has a `threshold`
+// column), else the global default.
+def protein_db_entries(String list_param, String ext, String default_opts) {
+    def files = []
+    if (list_param) {
+        files += list_param.toString().split(',').collect { it.trim() }.findAll { it }.collect { file(it) }
+    }
+    if (params.pollutant_dbs) {
+        def root = file(params.pollutant_dbs)
+        if (!root.isDirectory()) error "ERROR: --pollutant_dbs is not a directory: ${params.pollutant_dbs}"
+        root.listFiles().findAll { it.isDirectory() }.sort { it.name }.each { sub ->
+            def f = file("${sub}/${sub.name}.${ext}")
+            if (f.exists()) files << f
+        }
+    }
+    files.unique { it.toAbsolutePath().toString() }.collect { f ->
+        if (!f.exists()) error "ERROR: protein DB not found: ${f}"
+        def base  = f.toAbsolutePath().toString().replaceAll(/\.[^.\/]+$/, '')
+        def annot = file("${base}.genes.tsv")
+        def optsf = file("${base}.opts")
+        def opts  = default_opts
+        if (optsf.exists()) {
+            opts = optsf.text.readLines().find { it.trim() && !it.trim().startsWith('#') }?.trim() ?: default_opts
+        } else if (ext == 'hmm' && annot.exists() && annot.readLines()[0].split('\t').contains('threshold')) {
+            opts = 'catalogue'
+        }
+        [ f.baseName, f, annot.exists() ? annot.toString() : 'NONE', opts ]
+    }
+}
+
+// ============================================================================
 // Main workflow
 // ============================================================================
 
@@ -437,6 +488,7 @@ workflow {
 
     // Gene annotation (prokka, bakta, or none)
     ch_annotation_proteins = Channel.empty()
+    ch_protdb_done         = Channel.empty()   // HMM / DIAMOND protein-DB hit TSVs
     ch_annotation_tsv      = Channel.empty()
 
     if (annotator == 'prokka') {
@@ -469,26 +521,27 @@ workflow {
     }
 
     if (annotator != 'none') {
-        // HMM search on annotation proteins (requires annotation output)
-        if (params.hmm_databases) {
-            // Build channel of HMM database files
-            ch_hmm_dbs = Channel
-                .of(params.hmm_databases.split(','))
-                .map { it.trim() }
-                .map { dbpath ->
-                    def dbfile = file(dbpath)
-                    def dbname = dbfile.baseName
-                    [ dbname, dbfile ]
-                }
-
-            // Cartesian product: each protein file x each HMM database
+        // HMM search on annotation proteins (requires annotation output).
+        // Each protein file x each HMM DB (CANT-HYD etc.); cutoff per DB.
+        def hmm_entries = protein_db_entries(params.hmm_databases, 'hmm', params.hmm_cut)
+        if (hmm_entries) {
+            log.info "HMM databases: ${hmm_entries.collect { "${it[0]} (${it[3]})" }.join(', ')}"
             ch_hmm_input = ch_annotation_proteins
-                .combine(ch_hmm_dbs)
-                .map { meta, faa, dbname, hmm_db ->
-                    [ meta, faa, dbname, hmm_db ]
-                }
-
+                .combine(Channel.fromList(hmm_entries))
+                .map { meta, faa, dbname, hmm_db, annot, cut -> [ meta, faa, dbname, hmm_db, annot, cut ] }
             HMM_SEARCH(ch_hmm_input)
+            ch_protdb_done = ch_protdb_done.mix(HMM_SEARCH.out.tsv)
+        }
+
+        // DIAMOND blastp vs curated protein DBs (HADEG etc.)
+        def dmnd_entries = protein_db_entries(params.protein_dbs, 'dmnd', params.protein_db_opts)
+        if (dmnd_entries) {
+            log.info "DIAMOND protein databases: ${dmnd_entries.collect { "${it[0]} (${it[3]})" }.join(', ')}"
+            ch_dmnd_input = ch_annotation_proteins
+                .combine(Channel.fromList(dmnd_entries))
+                .map { meta, faa, dbname, dmnd, annot, opts -> [ meta, faa, dbname, dmnd, annot, opts ] }
+            DIAMOND_DB_SEARCH(ch_dmnd_input)
+            ch_protdb_done = ch_protdb_done.mix(DIAMOND_DB_SEARCH.out.tsv)
         }
     }
 
@@ -522,9 +575,7 @@ workflow {
             if (params.run_tetra)   { ch_done = ch_done.mix(TETRAMER_FREQ.out.lrn.map        { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
             if (params.mapping_refs) { ch_done = ch_done.mix(ch_map_hits.map                  { meta, refname, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
             if (annotator != 'none') { ch_done = ch_done.mix(ch_annotation_tsv.map      { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" }) }
-            if (annotator != 'none' && params.hmm_databases) {
-                ch_done = ch_done.mix(HMM_SEARCH.out.tsv.map { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" })
-            }
+            ch_done = ch_done.mix(ch_protdb_done.map { meta, f -> "${abs_outdir}/${meta.flowcell}/${meta.barcode}" })
 
             // Wait for everything, then deduplicate to unique barcode dirs
             ch_barcode_dirs = ch_done

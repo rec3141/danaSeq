@@ -816,6 +816,98 @@ def build_mapping_payloads(samples, mapping_refs_dir, output_dir):
               f"category={meta['category']})", file=sys.stderr)
 
 
+def build_pollutant_payload(samples, output_dir, sample_ids):
+    """Build pollutants.json from the protein-DB search tables.
+
+    Sources: protein_hits / protein_db_annot / protein_db_searches (filled by
+    bin/import_protein_hits.py from the HMM_SEARCH + DIAMOND_DB_SEARCH outputs,
+    e.g. CANT-HYD and HADEG). Each protein is counted once per DB, under its
+    best-scoring target, so overlapping profiles (e.g. NdoB vs MAH_alpha) don't
+    double count.
+
+    Shape (compact: features are indexed, per-sample counts are sparse):
+      {
+        "features": [[db, category, pathway, gene], ...],
+        "dbs": {db: {"params": "method=... cutoff=...", "n_samples": int,
+                     "n_targets_hit": int}},
+        "samples": {sid: {"n_proteins": {db: int}, "counts": {feature_idx: n}}}
+      }
+    Normalisation is left to the view: hits per million proteins searched
+    (n_proteins is per DB because DBs can be searched on different chunk sets)
+    or per read (samples.json read_count).
+    """
+    feat_idx = {}
+    features = []
+    dbs = {}
+    out_samples = {}
+    keep = set(sample_ids)
+    for s in samples:
+        sid = s['id']
+        if sid not in keep:
+            continue
+        try:
+            con = duckdb.connect(s['db_path'], read_only=True)
+        except Exception:
+            continue
+        try:
+            searched = con.execute("""
+                SELECT db, SUM(n_proteins), MODE(params), COUNT(*)
+                FROM protein_db_searches GROUP BY db
+            """).fetchall()
+            rows = con.execute("""
+                WITH best AS (
+                    SELECT db, chunk, gene_id, arg_max(target, score) AS target
+                    FROM protein_hits GROUP BY db, chunk, gene_id
+                )
+                SELECT b.db,
+                       COALESCE(NULLIF(a.category, ''), 'Unassigned') AS category,
+                       COALESCE(NULLIF(a.pathway, ''), 'Unassigned')  AS pathway,
+                       COALESCE(NULLIF(a.gene, ''), b.target)         AS gene,
+                       COUNT(*) AS n
+                FROM best b LEFT JOIN protein_db_annot a
+                  ON a.db = b.db AND a.target = b.target
+                GROUP BY ALL
+            """).fetchall()
+        except Exception:
+            con.close()
+            continue  # no protein-DB tables in this DB
+        con.close()
+        if not searched:
+            continue
+        n_prot = {}
+        for db, n, params, n_chunks in searched:
+            n_prot[db] = int(n or 0)
+            d = dbs.setdefault(db, {'params': params or '', 'n_samples': 0, 'targets': set()})
+            d['n_samples'] += 1
+        counts = {}
+        for db, cat, pw, gene, n in rows:
+            key = (db, cat, pw, gene)
+            if key not in feat_idx:
+                feat_idx[key] = len(features)
+                features.append(list(key))
+            counts[feat_idx[key]] = int(n)
+            dbs.setdefault(db, {'params': '', 'n_samples': 0, 'targets': set()})['targets'].add(gene)
+        out_samples[sid] = {'n_proteins': n_prot, 'counts': counts}
+
+    if not out_samples:
+        print("[INFO] No protein-DB (pollutant) search results found; skipping pollutants.json",
+              file=sys.stderr)
+        return
+    payload = {
+        'features': features,
+        'dbs': {db: {'params': d['params'], 'n_samples': d['n_samples'],
+                     'n_genes_hit': len(d['targets'])} for db, d in sorted(dbs.items())},
+        'samples': out_samples,
+    }
+    path = os.path.join(output_dir, 'pollutants.json')
+    with open(path, 'w') as f:
+        json.dump(payload, f, separators=(',', ':'))
+    n_hits = sum(sum(v['counts'].values()) for v in out_samples.values())
+    print(f"  pollutants.json: {os.path.getsize(path) / 1024:.1f} KB "
+          f"({len(out_samples)} samples, {len(features)} genes, {n_hits} hits, "
+          f"dbs={','.join(payload['dbs'])})", file=sys.stderr)
+
+
 def shannon_diversity(taxonomy):
     """Compute Shannon diversity index from taxonomy counts."""
     total = sum(taxonomy.values())
@@ -1032,6 +1124,10 @@ def main():
     # views fetch them on demand by name.
     print("[INFO] Building reference-mapping payloads (ais_/hab_/sar_)...", file=sys.stderr)
     build_mapping_payloads(samples, args.mapping_refs, args.output)
+
+    # Pollutant marker genes (CANT-HYD, HADEG, ... protein-DB searches).
+    print("[INFO] Building pollutant payload (pollutants.json)...", file=sys.stderr)
+    build_pollutant_payload(samples, args.output, sample_ids)
 
     print("[SUCCESS] Main preprocessing complete", file=sys.stderr)
 

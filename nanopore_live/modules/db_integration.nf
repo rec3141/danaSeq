@@ -166,7 +166,7 @@ process DB_SYNC {
         echo "[INFO] DB_SYNC tick=\${tick}: scanning ${outdir} for barcode directories"
 
         # Count pending data files to detect new data
-        cur_files=\$(find ${outdir} -mindepth 4 -maxdepth 4 \\( -path '*/kraken/*.tsv' -o -path '*/sketch/*.txt' -o -path '*/tetra/*.lrn' -o -path '*/prokka/*' -o -path '*/bakta/*' \\) 2>/dev/null | wc -l)
+        cur_files=\$(find ${outdir} -mindepth 4 -maxdepth 4 \\( -path '*/kraken/*.tsv' -o -path '*/sketch/*.txt' -o -path '*/tetra/*.lrn' -o -path '*/prokka/*' -o -path '*/bakta/*' -o -path '*/hmm/*.tsv' -o -path '*/protdb/*.tsv' \\) 2>/dev/null | wc -l)
         has_new_data=false
         if [ \$cur_files -ne \$last_sync_files ]; then
             has_new_data=true

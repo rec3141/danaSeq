@@ -19,6 +19,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db_schema import ensure_schema
 from import_mapping import import_mapping
+from import_protein_hits import import_protein_hits
 
 TAXID_RE = re.compile(r'\(taxid (\d+)\)$')
 EC_RE = re.compile(r'EC:(\S+)')
@@ -470,6 +471,7 @@ def main():
     import_sketch(con, imported)
     import_tetra(con, imported)
     import_mapping(con, imported)
+    import_protein_hits(con, imported)
 
     con.close()
 

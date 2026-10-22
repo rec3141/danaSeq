@@ -11,6 +11,7 @@
   import AISView from './views/AISView.svelte';
   import SARView from './views/SARView.svelte';
   import HABsView from './views/HABsView.svelte';
+  import PollutantsView from './views/PollutantsView.svelte';
   import EnvironmentalView from './views/EnvironmentalView.svelte';
   import TaxonomyView from './views/TaxonomyView.svelte';
   import HeatmapView from './views/HeatmapView.svelte';
@@ -58,6 +59,8 @@
         <SARView />
       {:else if activeTab === 'habs'}
         <HABsView />
+      {:else if activeTab === 'pollutants'}
+        <PollutantsView />
       {:else if activeTab === 'environmental'}
         <EnvironmentalView />
       {:else if activeTab === 'taxonomy'}

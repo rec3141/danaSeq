@@ -89,6 +89,8 @@ usage() {
     echo "  --kraken_db DIR      Kraken2 database directory"
     echo "  --bakta_db PATH      Bakta database [default: db-light from config]"
     echo "  --hmm_databases LIST Comma-separated HMM file paths"
+    echo "  --pollutant_dbs DIR  Pollutant protein DBs (<name>/<name>.hmm|.dmnd, e.g. CANT-HYD, HADEG)"
+    echo "  --protein_dbs LIST   Comma-separated DIAMOND .dmnd paths (local mode only)"
     echo "  --metadata FILE      Sample metadata TSV (flowcell, barcode, lat, lon, etc.)"
     echo ""
     echo "Pipeline flags (passed to Nextflow):"
@@ -172,6 +174,7 @@ ARCHIVE=false
 ARCHIVE_RAW_DEST="${ARCHIVE_RAW_DEST:-}"
 ARCHIVE_OUT_DEST="${ARCHIVE_OUT_DEST:-}"
 ARCHIVE_POLL=30
+POLLUTANT_DBS_HOST=""
 
 while (( $# )); do
     case "$1" in
@@ -208,6 +211,11 @@ while (( $# )); do
         --hmm_databases)
             [[ -z "${2:-}" ]] && die "--hmm_databases requires file path(s)"
             HMM_HOST="$2"
+            shift 2 ;;
+        --pollutant_dbs)
+            [[ -z "${2:-}" ]] && die "--pollutant_dbs requires a directory path"
+            POLLUTANT_DBS_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
+            [[ -d "$POLLUTANT_DBS_HOST" ]] || die "--pollutant_dbs directory does not exist: $2"
             shift 2 ;;
         --session)
             [[ -z "${2:-}" ]] && die "--session requires a session ID"
@@ -401,6 +409,13 @@ if [[ "$USE_DOCKER" == true ]]; then
         fi
     done
 
+    # Pollutant DB directory (CANT-HYD, HADEG, ...): mount read-only as a whole
+    # so each DB's .genes.tsv / .opts sidecars come along.
+    if [[ -n "$POLLUTANT_DBS_HOST" ]]; then
+        MOUNTS+=("-v" "${POLLUTANT_DBS_HOST}:/pollutant_dbs:ro")
+        NF_ARGS+=("--pollutant_dbs" "/pollutant_dbs")
+    fi
+
     # HMM databases
     if [[ -n "$HMM_HOST" ]]; then
         container_hmm_paths=()
@@ -484,6 +499,8 @@ if [[ -n "$HMM_HOST" ]]; then
     done
     NF_ARGS+=("--hmm_databases" "$HMM_HOST")
 fi
+
+[[ -n "$POLLUTANT_DBS_HOST" ]] && NF_ARGS+=("--pollutant_dbs" "$POLLUTANT_DBS_HOST")
 
 LOCAL_CMD=(
     mamba run -p "${SCRIPT_DIR}/conda-envs/dana-tools"
