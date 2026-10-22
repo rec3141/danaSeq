@@ -89,3 +89,29 @@ CheckM2 / GTDB-Tk), Functions (KO / COG / CAZy), Genes (most expressed genes),
 Contig t-SNE (the mag_analysis contig embedding, coloured by each sample),
 Samples (QC and mapping table). `--viz_mag_url` links the header to the
 mag_analysis viz of the same reference.
+
+### Sample metadata
+
+A table with one row per sample (TSV, CSV, or XLSX in the browser) turns its
+columns into sample annotations. The sample name comes from the first column,
+or from a `sample` / `sample_id` / `samp_name` / `id` column. File names
+(`<sample>_1.fq.gz`) and case differences still match. A `lat_lon` column
+splits into `lat` and `lon`. Columns are typed as numbers, dates or categories.
+
+- Ship it with the run: `--metadata samples.tsv` (TSV/CSV) writes
+  `viz/metadata.json.gz` (`{"<sample>": {column: value}}`). Every bundle also
+  has `samples.json`, the sample list microscape.app matches against.
+- On microscape.app, a lab admin can upload it in the run's settings page.
+  The server then answers `data/metadata.json` with that table for every
+  viewer, replacing the shipped one.
+- Or upload it with the **Metadata** button in the header. That upload stays
+  in that browser only and wins over the others until removed (✕).
+  **Template** downloads one row per sample, prefilled with the flowcell,
+  lane and barcode from the sample name and any metadata already loaded.
+
+The annotation you pick (sequencing run, read QC, or a metadata column) is
+shared across tabs. It colours the sample t-SNEs, the strip above every
+heatmap, and the composition bars. It can order the heatmap and bar samples.
+It also colours a row's per-sample profile, which can be switched to
+expression against the annotation: a scatter with Spearman ρ for numbers and
+dates, or box plots per category.

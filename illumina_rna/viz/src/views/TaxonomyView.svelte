@@ -4,7 +4,10 @@
   import ExpressionMatrix from '../components/ExpressionMatrix.svelte';
   import { index, refName, fmtPct } from '../stores/data.js';
   import { fetchJSON } from '../stores/fetchJson.js';
+  import SampleAnnotSelect from '../components/SampleAnnotSelect.svelte';
+  import AnnotLegend from '../components/AnnotLegend.svelte';
   import { wardOrder } from '../lib/cluster.js';
+  import { sampleAnnot } from '../stores/metadata.js';
 
   // Loaded on first visit (not every reference has it)
   let tax = $state(null);
@@ -46,7 +49,8 @@
   const PALETTE = ['#22d3ee', '#34d399', '#fbbf24', '#f87171', '#a78bfa', '#fb923c',
                    '#2dd4bf', '#818cf8', '#f472b6', '#4ade80', '#e879f9', '#38bdf8'];
   let barSort = $state('clustered');
-  const barSorts = [{ key: 'clustered', label: 'Clustered' }, { key: 'name', label: 'Sample' }, { key: 'top', label: 'Top taxon' }];
+  let barSorts = $derived([{ key: 'clustered', label: 'Clustered' }, { key: 'name', label: 'Sample' },
+    { key: 'top', label: 'Top taxon' }, { key: 'annot', label: $sampleAnnot?.label ?? 'Annotation' }]);
   const cycleBarSort = () => { const k = barSorts.map(d => d.key); barSort = k[(k.indexOf(barSort) + 1) % k.length]; };
 
   let bars = $derived.by(() => {
@@ -60,6 +64,7 @@
     let order = samples.map((_, j) => j);
     if (barSort === 'name') order.sort((a, b) => samples[a].localeCompare(samples[b]));
     else if (barSort === 'top' && top.length) order.sort((a, b) => top[0].tpm[b] - top[0].tpm[a]);
+    else if (barSort === 'annot' && $sampleAnnot) order = $sampleAnnot.order(samples);
     else if (barSort === 'clustered') order = wardOrder(samples.map((_, j) => [...top.map(r => Math.sqrt(r.tpm[j])), Math.sqrt(other[j]), Math.sqrt(uncl[j])]));
     const x = order.map(j => samples[j]);
     const tr = (name, y, color) => ({
@@ -67,7 +72,15 @@
       marker: { color, line: { color: '#1e293b', width: samples.length > 80 ? 0.5 : 1 } },
       hovertemplate: `<b>%{x}</b><br>${name}: %{y:.1f}%<extra></extra>`,
     });
-    return { traces: [...top.map((r, i) => tr(r.name, r.tpm, PALETTE[i])), tr('Other', other, '#94a3b8'), tr('Unclassified', uncl, '#475569')] };
+    // Sample annotation strip above the bars (its own y axis)
+    const an = $sampleAnnot;
+    const strip = an ? [{
+      type: 'bar', x, y: x.map(() => 1), yaxis: 'y2', showlegend: false,
+      marker: { color: x.map(an.colorOf), line: { width: 0 } },
+      hovertext: x.map(n => `<b>${n}</b><br>${an.label}: ${an.display(n)}`),
+      hovertemplate: '%{hovertext}<extra></extra>',
+    }] : [];
+    return { traces: [...top.map((r, i) => tr(r.name, r.tpm, PALETTE[i])), tr('Other', other, '#94a3b8'), tr('Unclassified', uncl, '#475569'), ...strip] };
   });
 </script>
 
@@ -102,13 +115,18 @@
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 mb-6">
     <div class="flex items-center justify-between mb-2">
       <h3 class="text-sm font-medium text-slate-400">Composition by {rank} ({samples.length} samples)</h3>
-      <button class="text-xs px-2 py-0.5 rounded border border-cyan-400 bg-cyan-400/10 text-cyan-400" onclick={cycleBarSort}
-        title={`Sort samples: ${barSorts.map(d => d.label).join(' → ')}`}>Sort: {barSorts.find(d => d.key === barSort)?.label} &#x25BE;</button>
+      <div class="flex items-center gap-3">
+        <SampleAnnotSelect label="Strip:" />
+        <button class="text-xs px-2 py-0.5 rounded border border-cyan-400 bg-cyan-400/10 text-cyan-400" onclick={cycleBarSort}
+          title={`Sort samples: ${barSorts.map(d => d.label).join(' → ')}`}>Sort: {barSorts.find(d => d.key === barSort)?.label} &#x25BE;</button>
+      </div>
     </div>
+    <AnnotLegend />
     <PlotlyChart data={bars.traces} layout={{
       barmode: 'stack', bargap: samples.length > 80 ? 0.05 : 0.15, height: 460,
       xaxis: { tickangle: -60, tickfont: { size: samples.length > 80 ? 7 : 9 }, automargin: true },
-      yaxis: { title: `% of ${src?.unit}`, range: [0, 100] },
+      yaxis: { title: `% of ${src?.unit}`, range: [0, 100], domain: [0, 0.94] },
+      yaxis2: { domain: [0.955, 1], range: [0, 1], showticklabels: false, showgrid: false, zeroline: false, fixedrange: true },
       legend: { font: { size: 10 }, traceorder: 'normal' },
       margin: { t: 20, r: 20, b: 100, l: 60 },
     }} />

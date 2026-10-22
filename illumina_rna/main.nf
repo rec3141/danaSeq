@@ -59,6 +59,8 @@ def helpMessage() {
       --chunk I/N        Process only the I-th of N deterministic sample chunks
                          (1-based); pair with --summarize false and a shared --store_dir
       --summarize BOOL   Build the merged matrices + viz JSONs [default: true]
+      --metadata FILE    Sample metadata TSV/CSV for the viz (first column or a
+                         sample/sample_id column names the sample)
       --prepare_only     Build the reference index and features, then stop
 
     QC:
@@ -445,7 +447,8 @@ workflow {
         SUMMARIZE_EXPRESSION(ch_summary_input)
 
         VIZ_PREPROCESS(
-            SUMMARIZE_EXPRESSION.out.viz_tables.map { name, files -> files }.flatten().collect()
+            SUMMARIZE_EXPRESSION.out.viz_tables.map { name, files -> files }.flatten().collect(),
+            params.metadata ? file(params.metadata, checkIfExists: true) : file("${projectDir}/assets/NO_FILE")
         )
     }
 
