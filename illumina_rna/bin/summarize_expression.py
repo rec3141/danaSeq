@@ -179,6 +179,41 @@ def functions_from_dbxref(dbxref):
     return out
 
 
+def load_contig_embedding(viz_dir, contig_index):
+    """t-SNE coordinates per contig from mag_analysis's viz data
+    (contig_explorer.part-NNN.json[.gz]: delta-encoded contig numbers plus
+    columns). Returns (x, y) float arrays aligned to contig_index, NaN where absent."""
+    if not viz_dir or not os.path.isdir(viz_dir):
+        return None
+    parts = sorted(glob.glob(os.path.join(viz_dir, "contig_explorer.part-*.json.gz"))) \
+        or sorted(glob.glob(os.path.join(viz_dir, "contig_explorer.part-*.json")))
+    man = next((m for m in (os.path.join(viz_dir, "contig_explorer_manifest.json.gz"),
+                            os.path.join(viz_dir, "contig_explorer_manifest.json")) if os.path.exists(m)), None)
+    if not parts or not man:
+        return None
+    op = lambda f: gzip.open(f, "rt") if f.endswith(".gz") else open(f)
+    with op(man) as fh:
+        manifest = json.load(fh)
+    if not manifest.get("has_tsne"):
+        return None
+    enc = manifest.get("id_encoding", {"prefix": "contig_", "width": 7})
+    x = np.full(len(contig_index), np.nan, dtype=np.float32)
+    y = np.full(len(contig_index), np.nan, dtype=np.float32)
+    hit = 0
+    for f in parts:
+        with op(f) as fh:
+            c = json.load(fh)
+        nums = np.cumsum(np.asarray(c["ids"], dtype=np.int64))
+        tx, ty = c["columns"]["tsne_x"], c["columns"]["tsne_y"]
+        for n, a, b in zip(nums, tx, ty):
+            i = contig_index.get(f"{enc['prefix']}{int(n):0{enc['width']}d}")
+            if i is not None and a is not None and b is not None:
+                x[i], y[i] = a, b
+                hit += 1
+    log(f"contig t-SNE: {hit} of {len(contig_index)} contigs placed from {len(parts)} parts")
+    return (x, y) if hit else None
+
+
 def jdump(path, obj):
     with gzip.open(path, "wt", compresslevel=6) as f:
         json.dump(obj, f, separators=(",", ":"), allow_nan=False)
@@ -202,6 +237,8 @@ def main():
     ap.add_argument("--checkm2")
     ap.add_argument("--gtdbtk")
     ap.add_argument("--annotations")
+    ap.add_argument("--contig-explorer", help="mag_analysis viz/data dir with contig_explorer parts")
+    ap.add_argument("--max-map-contigs", type=int, default=400000)
     ap.add_argument("--top-genes", type=int, default=2000)
     ap.add_argument("--top-functions", type=int, default=500)
     ap.add_argument("--out", default=".")
@@ -350,6 +387,39 @@ def main():
     jdump(os.path.join(vz, f"{ref}.bins.json.gz"), {"ref": ref, "samples": samples, "bins": bin_rows})
     jdump(os.path.join(vz, f"{ref}.functions.json.gz"), {"ref": ref, "samples": samples, "kinds": func_json})
     jdump(os.path.join(vz, f"{ref}.top_genes.json.gz"), {"ref": ref, "samples": samples, "genes": top_rows})
+    # ---- contig t-SNE with per-sample expression ----
+    emb = load_contig_embedding(a.contig_explorer, contig_index)
+    if emb is not None:
+        ex, ey = emb
+        tot = cmat.sum(axis=1)
+        cand = np.flatnonzero((tot > 0) & ~np.isnan(ex))
+        if len(cand) > a.max_map_contigs:
+            cand = cand[np.argsort(-tot[cand], kind="stable")[: a.max_map_contigs]]
+        cand.sort()
+        clen_arr = clen["length"].to_numpy()
+        bnames = bins or []
+        jdump(os.path.join(vz, f"{ref}.contig_map.json.gz"), {
+            "ref": ref, "samples": samples,
+            "n_contigs_total": int(len(clen)), "n": int(len(cand)),
+            "x": [round(float(v), 2) for v in ex[cand]],
+            "y": [round(float(v), 2) for v in ey[cand]],
+            "length": [int(v) for v in clen_arr[cand]],
+            "bins": bnames,
+            "bin": [int(contig_bin[i]) if bins else -1 for i in cand],
+            # reads on these contigs per sample, for per-million scaling
+            "sample_totals": [int(v) for v in cmat[cand].sum(axis=0)],
+            "files": [f"{ref}.contig_expr.{j:04d}.json.gz" for j in range(n_s)],
+        })
+        sub = cmat[cand]
+        for j in range(n_s):
+            nz = np.flatnonzero(sub[:, j])
+            jdump(os.path.join(vz, f"{ref}.contig_expr.{j:04d}.json.gz"), {
+                "sample": samples[j],
+                "idx": np.diff(nz, prepend=0).astype(int).tolist(),   # delta-encoded
+                "reads": sub[nz, j].astype(int).tolist(),
+            })
+        log(f"contig map: {len(cand)} contigs with RNA reads, {n_s} sample layers")
+
     log("done")
 
 

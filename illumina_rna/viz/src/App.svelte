@@ -8,6 +8,7 @@
   import FunctionsView from './views/FunctionsView.svelte';
   import GenesView     from './views/GenesView.svelte';
   import SamplesView   from './views/SamplesView.svelte';
+  import TsneView      from './views/TsneView.svelte';
 
   let activeTab = $state('overview');
 
@@ -44,6 +45,8 @@
       <FunctionsView />
     {:else if activeTab === 'genes'}
       <GenesView />
+    {:else if activeTab === 'tsne'}
+      <TsneView />
     {:else if activeTab === 'samples'}
       <SamplesView />
     {/if}

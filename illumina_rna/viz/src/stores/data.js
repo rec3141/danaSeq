@@ -42,6 +42,37 @@ export async function loadIndex() {
   }
 }
 
+// Contig t-SNE: the map (coordinates of RNA-active contigs) loads when its
+// tab opens; per-sample layers load on demand and are cached.
+export const contigMap = writable(null);
+const layerCache = new Map();
+let mapFor = null;
+
+export async function loadContigMap() {
+  let idx, name;
+  index.subscribe(v => (idx = v))();
+  refName.subscribe(v => (name = v))();
+  const ref = idx?.references?.find(r => r.name === name);
+  if (!ref?.files?.contig_map) { contigMap.set(null); return null; }
+  if (mapFor === name) { let m; contigMap.subscribe(v => (m = v))(); return m; }
+  const m = await fetchJSON(`./data/${ref.files.contig_map}`);
+  mapFor = name;
+  layerCache.clear();
+  contigMap.set(m);
+  return m;
+}
+
+export async function loadContigLayer(map, j) {
+  const key = `${map.ref}:${j}`;
+  if (!layerCache.has(key)) {
+    const raw = await fetchJSON(`./data/${map.files[j]}`);
+    let pos = 0;
+    const idx = raw.idx.map(d => (pos += d));   // undo delta encoding
+    layerCache.set(key, { idx, reads: raw.reads, sample: raw.sample });
+  }
+  return layerCache.get(key);
+}
+
 let current = null;
 export async function loadReference(name) {
   let idx;

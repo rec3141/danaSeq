@@ -6,6 +6,7 @@
     { id: 'mags',      label: 'MAGs' },
     { id: 'functions', label: 'Functions' },
     { id: 'genes',     label: 'Genes' },
+    { id: 'tsne',      label: 'Contig t-SNE' },
     { id: 'samples',   label: 'Samples' },
   ];
 </script>

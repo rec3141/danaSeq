@@ -20,6 +20,7 @@ process SUMMARIZE_EXPRESSION {
           path(checkm2,       stageAs: 'ref/checkm2.tsv'),
           path(gtdbtk,        stageAs: 'ref/gtdbtk.tsv'),
           path(annotations,   stageAs: 'ref/annotations.tsv'),
+          path(contig_explorer, stageAs: 'ref/contig_explorer'),
           path(read_counts,   stageAs: 'readcounts/*')
 
     output:
@@ -36,6 +37,7 @@ process SUMMARIZE_EXPRESSION {
         --gene-annot ref/genes.tsv.gz --contig-lengths ref/contig_lengths.tsv \\
         --bins ref/bins.tsv --checkm2 ref/checkm2.tsv --gtdbtk ref/gtdbtk.tsv \\
         --annotations ref/annotations.tsv \\
+        --contig-explorer ref/contig_explorer \\
         --top-genes ${params.viz_top_genes} --top-functions ${params.viz_top_functions} \\
         --out .
     """

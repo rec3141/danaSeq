@@ -86,5 +86,6 @@ VIZ_DATA_DIR=/path/to/output/viz npm run dev     # http://localhost:5173
 
 Pages: Overview (where each sample's reads went), MAGs (per-MAG TPM with
 CheckM2 / GTDB-Tk), Functions (KO / COG / CAZy), Genes (most expressed genes),
+Contig t-SNE (the mag_analysis contig embedding, coloured by each sample),
 Samples (QC and mapping table). `--viz_mag_url` links the header to the
 mag_analysis viz of the same reference.

@@ -7,6 +7,8 @@ summarize_expression.py:
   <ref>.bins.json.gz       per-MAG reads + TPM, CheckM2, GTDB-Tk
   <ref>.functions.json.gz  top KO / COG / CAZy TPM
   <ref>.top_genes.json.gz  most expressed genes with annotation
+  <ref>.contig_map.json.gz contig t-SNE (from mag_analysis) + per-sample
+                           <ref>.contig_expr.NNNN.json.gz layers
 
 Copies them into --out and writes index.json, which the SPA loads first.
 Stdlib only.
@@ -28,13 +30,13 @@ def main():
         with gzip.open(f, "rt") as fh:
             s = json.load(fh)
         files = {}
-        for kind in ("samples", "bins", "functions", "top_genes"):
-            src = os.path.join(a.tables, f"{name}.{kind}.json.gz")
-            if os.path.exists(src):
-                dst = os.path.join(a.out, os.path.basename(src))
-                if os.path.abspath(src) != os.path.abspath(dst):
-                    shutil.copyfile(src, dst)
-                files[kind] = os.path.basename(src)
+        for src in sorted(glob.glob(os.path.join(a.tables, f"{name}.*.json.gz"))):
+            dst = os.path.join(a.out, os.path.basename(src))
+            if os.path.abspath(src) != os.path.abspath(dst):
+                shutil.copyfile(src, dst)
+        for kind in ("samples", "bins", "functions", "top_genes", "contig_map"):
+            if os.path.exists(os.path.join(a.tables, f"{name}.{kind}.json.gz")):
+                files[kind] = f"{name}.{kind}.json.gz"
         refs.append({
             "name": name,
             "n_samples": len(s["samples"]),
