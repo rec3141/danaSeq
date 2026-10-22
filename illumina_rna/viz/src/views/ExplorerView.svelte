@@ -43,7 +43,7 @@
   let taxRank = $state('phylum');
   let sizeBy = $state('length');
   let sizeScale = $state(1.0);
-  let sizeExponent = $state(2.5);
+  let sizeExponent = $state(1);
   let sampleIdx = $state(0);
   let layer = $state(null);
   let layerFor = $state(-1);
@@ -139,6 +139,8 @@
     commitTimer = setTimeout(() => { committed = next; }, 150);
     return () => clearTimeout(commitTimer);
   });
+  // Fixed size scale from the whole map: filtering never resizes points
+  let sizeMax = $derived(ext ? { length: ext.lMax, depth: ext.eMax } : null);
   let isFiltered = $derived(committed.lenMinPct > 0 || committed.lenMaxPct < 100 || committed.expMinPct > 0 || committed.expMaxPct < 100);
   let passes = $derived.by(() => {
     const c0 = committed;
@@ -378,7 +380,7 @@
 
 <div class="flex gap-4 mb-6">
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[820px] flex flex-col flex-1 min-w-0">
-    <ReglScatter data={filteredData} {colorBy} sizeBy={scatterSize} {sizeScale} {sizeExponent} mode="tsne"
+    <ReglScatter data={filteredData} {colorBy} sizeBy={scatterSize} {sizeScale} {sizeExponent} sizeRange={sizeMax} mode="tsne"
       colorMap={stableColorMap} {coordExtents} onselect={ids => selectedIds = ids} onclick={openDetail}
       {searchMatchIds} {sampleDepthData} selectedSample={colorMode === 'sample' ? selectedSampleName : ''} tipFormat={tip} />
     <div class="text-xs text-slate-500 mt-2 flex-shrink-0">

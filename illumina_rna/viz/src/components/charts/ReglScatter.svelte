@@ -250,25 +250,22 @@
     prep = { n, x, y, valueA, colorCfg, isCont };
   }
 
-  // ---- Size encoding (log-scale: raw values are extremely skewed) ----
+  // ---- Size encoding: sqrt of the raw value over a fixed maximum ----
+  // sizeRange = { length: max, depth: max } from the full (unfiltered) data, so
+  // a point keeps its size when filters change; without it, the max of `data`.
   function computeSizes() {
     const { n } = prep;
     valueB = new Float32Array(n);
     if (sizeBy === 'fixed') return;
     const sorted = indexMap;
-    const sfn = sizeBy === 'depth'
-      ? c => Math.log10(c.depth + 1)
-      : c => Math.log10(c.length + 1);
-    let sMin = Infinity, sMax = -Infinity;
-    for (let i = 0; i < n; i++) {
-      const v = sfn(sorted[i]);
-      valueB[i] = v;
-      if (v < sMin) sMin = v;
-      if (v > sMax) sMax = v;
-    }
-    const sRange = sMax - sMin || 1;
+    const field = sizeBy === 'depth' ? 'depth' : 'length';
+    let vmax = sizeRange?.[field];
+    if (!(vmax > 0)) { vmax = 0; for (const c of data.contigs) if (c[field] > vmax) vmax = c[field]; }
+    const smax = Math.sqrt(vmax) || 1;
     // sizeExponent > 1 shrinks the many small points relative to the few large ones
-    for (let i = 0; i < n; i++) valueB[i] = Math.pow(Math.max(0, Math.min(1, (valueB[i] - sMin) / sRange)), sizeExponent);
+    for (let i = 0; i < n; i++) {
+      valueB[i] = Math.pow(Math.min(1, Math.sqrt(Math.max(0, sorted[i][field])) / smax), sizeExponent);
+    }
   }
 
   function sizeConfig() {
@@ -310,7 +307,7 @@
 
   $effect(() => {
     const colorKey = [data, colorBy, mode, colorMap, coordExtents, sampleDepthData, selectedSample];
-    const sizeKey = [sizeBy, sizeExponent];
+    const sizeKey = [sizeBy, sizeExponent, sizeRange];
     const scaleKey = [sizeScale];
     if (!canvasEl || !data?.contigs?.length) return;
     if (!scatterplot) init();
