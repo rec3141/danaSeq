@@ -43,6 +43,7 @@
   let taxRank = $state('phylum');
   let sizeBy = $state('length');
   let sizeScale = $state(1.0);
+  let sizeExponent = $state(2.5);
   let sampleIdx = $state(0);
   let layer = $state(null);
   let layerFor = $state(-1);
@@ -305,6 +306,10 @@
   >{sizeDefs.find(d => d.key === sizeBy)?.label} &#x25BE;</button>
   <input type="range" min="0.2" max="3" step="0.1" bind:value={sizeScale} class="w-20 h-1 accent-cyan-400 cursor-pointer" />
   <span class="text-slate-500 w-8">{sizeScale.toFixed(1)}x</span>
+  <span class="text-slate-500" title="Size exponent: higher makes the largest contigs stand out">exp</span>
+  <input type="range" min="1" max="4" step="0.25" bind:value={sizeExponent} class="w-16 h-1 accent-cyan-400 cursor-pointer"
+    title="Size exponent: higher makes the largest contigs stand out" />
+  <span class="text-slate-500 w-8">{sizeExponent.toFixed(2).replace(/0$/, '')}</span>
 </div>
 
 <div class="flex items-center gap-3 flex-wrap text-xs">
@@ -358,7 +363,7 @@
 
 <div class="flex gap-4 mb-6">
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[820px] flex flex-col flex-1 min-w-0">
-    <ReglScatter data={filteredData} {colorBy} sizeBy={scatterSize} {sizeScale} mode="tsne"
+    <ReglScatter data={filteredData} {colorBy} sizeBy={scatterSize} {sizeScale} {sizeExponent} mode="tsne"
       colorMap={stableColorMap} {coordExtents} onselect={ids => selectedIds = ids} onclick={openDetail}
       {searchMatchIds} {sampleDepthData} selectedSample={colorMode === 'sample' ? selectedSampleName : ''} tipFormat={tip} />
     <div class="text-xs text-slate-500 mt-2 flex-shrink-0">
