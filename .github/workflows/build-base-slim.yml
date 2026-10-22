@@ -10,7 +10,7 @@ jobs:
   # cpu and cuda builds of the same Dockerfile (TORCH_VARIANT); the cuda one
   # is the base of danaseq-mag-analysis-gpu.
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     permissions:
       contents: read

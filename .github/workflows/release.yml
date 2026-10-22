@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,7 +50,7 @@ jobs:
             dockerfile: mag_analysis/Dockerfile.base-slim
             timeout: 60
             large: true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.timeout }}
     steps:
       - name: Maximize build space
@@ -111,7 +111,7 @@ jobs:
             dockerfile: mag_analysis/Dockerfile
             timeout: 60
             large: true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.timeout }}
     steps:
       - name: Maximize build space
@@ -153,7 +153,7 @@ jobs:
   # ── nanopore_live (independent, no base) ──────────────────────────────
   nanopore-live:
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - name: Maximize build space
