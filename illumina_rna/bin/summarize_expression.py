@@ -218,7 +218,8 @@ def load_contig_embedding(viz_dir, contig_index):
     vocab = manifest.get("vocab") or {}
     if isinstance(vocab, str):
         vocab = {}
-    tax_cols = tuple(f"kaiju_{r}" for r in ("domain", "phylum", "class", "order", "family", "genus"))
+    tax_cols = tuple(f"kaiju_{r}" for r in ("domain", "phylum", "class", "order", "family", "genus")) + \
+               ("rrna_domain", "rrna_phylum", "rrna_genus")   # SILVA class of the contig's rRNA genes
     tax = {k: np.full(len(contig_index), "", dtype=object) for k in tax_cols}
     hit = 0
     for f in parts:
@@ -243,6 +244,8 @@ def load_contig_embedding(viz_dir, contig_index):
 
 
 RANKS = ["domain", "phylum", "class", "order", "family", "genus"]
+# taxon columns carried into the contig map (colour, search, contig panel)
+MAP_TAX = ("kaiju_phylum", "kaiju_genus", "rrna_domain", "rrna_phylum", "rrna_genus")
 GTDB_PREFIX = {"d": "domain", "p": "phylum", "c": "class", "o": "order", "f": "family", "g": "genus"}
 
 
@@ -515,9 +518,9 @@ def main():
             # often spurious ORFs inside rRNA
             "rrna": [int(v) for v in rrna_contig[cand]],
             # taxon codes into tax_vocab (empty string = unclassified)
-            **{f"{col}_vocab": sorted(set(etax[col][cand])) for col in ("kaiju_phylum", "kaiju_genus")},
+            **{f"{col}_vocab": sorted(set(etax[col][cand])) for col in MAP_TAX},
             **{col: (lambda voc: [voc[t] for t in etax[col][cand]])({t: j for j, t in enumerate(sorted(set(etax[col][cand])))})
-               for col in ("kaiju_phylum", "kaiju_genus")},
+               for col in MAP_TAX},
             # reads on these contigs per sample, for per-million scaling
             # per-million basis: all CDS pairs in the sample
             "sample_totals": [int(v) for v in cds_pairs],
