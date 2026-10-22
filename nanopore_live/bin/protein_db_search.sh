@@ -36,14 +36,30 @@ mode=$1; db=$2; dbname=$3; out=$4; cpus=$5; opts=$6; annot=$7
 shift 7
 [ $# -ge 1 ] || { echo "protein_db_search.sh: no protein files given" >&2; exit 2; }
 
-# Merge the chunk's protein files (Bakta .faa / Prokka PROKKA_*.faa; .gz ok)
-: > combined_proteins.faa
+# Merge the chunk's protein files (Bakta .faa / Prokka PROKKA_*.faa; .gz ok),
+# keeping only well-formed records: a '>' header with an ID, then a non-empty
+# sequence of letters/'*' only, ID not seen before. Damaged archive .faa files
+# (a stretch overwritten with the file's own data, leaving header fragments on
+# sequence lines) otherwise make hmmsearch fail and DIAMOND hang.
 for f in "$@"; do
     case "$f" in
-        *.gz) gzip -dc "$f" >> combined_proteins.faa ;;
-        *)    cat "$f"      >> combined_proteins.faa ;;
+        *.gz) gzip -dc "$f" ;;
+        *)    cat "$f" ;;
     esac
-done
+done | awk '
+    function flush() {
+        if (id != "" && ok && seq != "" && !(id in seen)) { seen[id] = 1; printf "%s%s", hdr, seq; kept++ }
+        else if (hdr != "" || seq != "") bad++
+        hdr = seq = ""; id = ""; ok = 1
+    }
+    BEGIN { ok = 1 }
+    /^>/ { flush(); hdr = $0 "\n"; id = substr($0, 2); sub(/[ \t].*/, "", id); next }
+    $0 == "" { next }
+    { if (hdr == "" || $0 !~ /^[A-Za-z*]+$/) ok = 0; seq = seq $0 "\n" }
+    END {
+        flush()
+        if (bad) printf "protein_db_search.sh: skipped %d malformed/duplicate protein record(s)\n", bad > "/dev/stderr"
+    }' > combined_proteins.faa
 n_prot=$(grep -c '^>' combined_proteins.faa || true)
 
 case "$mode" in
