@@ -105,6 +105,12 @@
         <span class="text-slate-500">Kaiju:</span>
         <span class="text-slate-200">{[contig.kaiju_phylum, contig.kaiju_genus].filter(Boolean).join('; ') || 'unclassified'}</span>
       </div>
+      {#if contig.rrna_domain || contig.rrna_phylum || contig.rrna_genus}
+        <div title="SILVA classification of this contig's rRNA genes (MAG analysis)">
+          <span class="text-slate-500">rRNA:</span>
+          <span class="text-slate-200">{[contig.rrna_domain, contig.rrna_phylum, contig.rrna_genus].filter(Boolean).join('; ')}</span>
+        </div>
+      {/if}
       <div class="flex gap-x-4 flex-wrap">
         <span><span class="text-slate-500">MAG:</span> <span class="text-slate-300">{contig.bin || 'unbinned'}</span></span>
         {#if contig.rrna}<span class="text-amber-400" title="Reads here are mostly rRNA the filter missed; their CDS calls may be spurious">carries rRNA loci</span>{/if}

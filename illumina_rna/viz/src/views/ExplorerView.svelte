@@ -22,6 +22,8 @@
     if (!map) return null;
     const grand = map.sample_totals.reduce((a, b) => a + b, 0) || 1;
     const ph = map.kaiju_phylum, ge = map.kaiju_genus;
+    // decoded taxon label of contig i in a coded map column (empty when absent)
+    const dec = (col, i) => map[col] ? map[`${col}_vocab`][map[col][i]] : '';
     const contigs = map.id.map((id, i) => ({
       id, idx: i,
       length: map.length[i],
@@ -29,6 +31,8 @@
       bin: map.bin[i] >= 0 ? map.bins[map.bin[i]] : '',
       kaiju_phylum: ph ? map.kaiju_phylum_vocab[ph[i]] : '',
       kaiju_genus: ge ? map.kaiju_genus_vocab[ge[i]] : '',
+      // SILVA class of the contig's rRNA genes (MAG analysis); most contigs have none
+      rrna_domain: dec('rrna_domain', i), rrna_phylum: dec('rrna_phylum', i), rrna_genus: dec('rrna_genus', i),
       reads: map.total_reads[i],
       n_detected: map.n_detected[i],
       rrna: map.rrna?.[i] === 1,
@@ -40,7 +44,8 @@
 
   // ── Colour / size controls ──
   let colorMode = $state('expression');   // 'expression' | 'bins' | 'taxa' | 'length'
-  let taxRank = $state('phylum');
+  // Taxon colouring cycles source × rank: Kaiju (proteins) and rRNA (SILVA)
+  let taxKey = $state('kaiju_phylum');
   let sizeBy = $state('length');
   let sizeScale = $state(2);   // minimum point size, px
   let sizeExponent = $state(0.5);   // size ∝ value^p; 0.5 = sqrt
@@ -72,7 +77,7 @@
   let colorBy = $derived(
     colorMode === 'expression' ? (sampleDepthData ? 'sample_depth' : 'depth') :
     colorMode === 'bins' ? 'bin' :
-    colorMode === 'taxa' ? `kaiju_${taxRank}` : 'length'
+    colorMode === 'taxa' ? taxKey : 'length'
   );
   let scatterSize = $derived(sizeBy === 'expression' ? 'depth' : sizeBy);
   // Size by expression follows the same selection: pooled RPKM for Total,
@@ -89,7 +94,7 @@
                    '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8',
                    '#94a3b8','#d4d4d8','#78716c'];
   let stableColorMap = $derived.by(() => {
-    if (!explorerData || !['bin', 'kaiju_phylum', 'kaiju_genus'].includes(colorBy)) return {};
+    if (!explorerData || !(colorBy === 'bin' || TAX_DEFS.some(d => d.key === colorBy))) return {};
     const bg = colorBy === 'bin' ? 'unbinned' : 'Unknown';
     const names = colorBy === 'bin' ? map.bins
       : (map[`${colorBy}_vocab`] ?? []).filter(Boolean);
@@ -112,12 +117,18 @@
     { key: 'expression', label: 'Expression' },
     { key: 'bins', label: 'MAGs' }, { key: 'taxa', label: 'Taxon' }, { key: 'length', label: 'Length' },
   ];
-  const rankDefs = ['phylum', 'genus'];
+  const TAX_DEFS = [
+    { key: 'kaiju_phylum', label: 'Kaiju phylum' }, { key: 'kaiju_genus', label: 'Kaiju genus' },
+    { key: 'rrna_phylum', label: 'rRNA phylum' }, { key: 'rrna_genus', label: 'rRNA genus' },
+  ];
+  let taxDefs = $derived(TAX_DEFS.filter(d => map?.[`${d.key}_vocab`]?.some(Boolean)));
+  const cycleTax = () => { const k = taxDefs.map(d => d.key); taxKey = k[(k.indexOf(taxKey) + 1) % k.length] ?? taxKey; };
   const sizeDefs = [{ key: 'length', label: 'Length' }, { key: 'expression', label: 'Expression' }, { key: 'fixed', label: 'Fixed' }];
   const cycleSize = () => { const k = sizeDefs.map(d => d.key); sizeBy = k[(k.indexOf(sizeBy) + 1) % k.length]; };
   // steps through Total, then each sample
   const step = d => { const n = (map?.samples?.length ?? 0) + 1; if (n > 1) sampleIdx = ((sampleIdx + 1 + d + n) % n) - 1; };
-  let hasTaxa = $derived(!!map?.kaiju_phylum_vocab?.some(Boolean));
+  let hasTaxa = $derived(taxDefs.length > 0);
+  let hasRrnaTax = $derived(!!map?.rrna_phylum_vocab?.some(Boolean));
 
   // ── Filters: log-scale dual-range sliders on length and pooled expression ──
   let lenMinPct = $state(0), lenMaxPct = $state(100);
@@ -190,7 +201,8 @@
     if (genePos) for (const c of filteredData.contigs) if (genePos.has(c.idx)) out.add(c.id);
     for (const c of filteredData.contigs) {
       if (c.id.toLowerCase().includes(q) || c.bin.toLowerCase().includes(q)
-          || c.kaiju_phylum.toLowerCase().includes(q) || c.kaiju_genus.toLowerCase().includes(q)) out.add(c.id);
+          || c.kaiju_phylum.toLowerCase().includes(q) || c.kaiju_genus.toLowerCase().includes(q)
+          || c.rrna_phylum.toLowerCase().includes(q) || c.rrna_genus.toLowerCase().includes(q)) out.add(c.id);
     }
     return out;
   });
@@ -270,6 +282,7 @@
     { key: 'length', label: 'Length', render: v => v.toLocaleString() },
     { key: 'bin', label: 'MAG', render: v => v || '-' },
     ...(hasTaxa ? [{ key: 'kaiju_phylum', label: 'Phylum', render: v => v || '-' }, { key: 'kaiju_genus', label: 'Genus', render: v => v || '-' }] : []),
+    ...(hasRrnaTax ? [{ key: 'rrna_genus', label: 'rRNA', render: (v, r) => [r.rrna_phylum, v].filter(Boolean).join('; ') || '-' }] : []),
     { key: 'reads', label: 'Read pairs', render: v => fmtInt(v) },
     { key: 'depth', label: 'Pooled RPKM', render: v => fmtExp(v) },
     { key: 'n_detected', label: 'Samples' },
@@ -277,13 +290,13 @@
   ]);
   function exportTSV() {
     downloadTsv(`contigs_${selectedContigs ? 'selection' : 'all'}_${tableSrc.length}.tsv`,
-      ['contig_id', 'length', 'mag', 'phylum', 'genus', 'read_pairs', 'pooled_rpkm', 'n_samples'],
-      tableSrc.map(c => [c.id, c.length, c.bin, c.kaiju_phylum, c.kaiju_genus, c.reads, c.depth.toFixed(4), c.n_detected]));
+      ['contig_id', 'length', 'mag', 'kaiju_phylum', 'kaiju_genus', 'rrna_domain', 'rrna_phylum', 'rrna_genus', 'read_pairs', 'pooled_rpkm', 'n_samples'],
+      tableSrc.map(c => [c.id, c.length, c.bin, c.kaiju_phylum, c.kaiju_genus, c.rrna_domain, c.rrna_phylum, c.rrna_genus, c.reads, c.depth.toFixed(4), c.n_detected]));
   }
 
   const tip = c => {
     const s = sampleDepthData ? ` | ${selectedSampleName}: ${fmtExp(sampleDepthData.depthOf(c))} RPKM` : '';
-    const tax = c.kaiju_genus || c.kaiju_phylum;
+    const tax = [c.kaiju_genus || c.kaiju_phylum, c.rrna_genus || c.rrna_phylum ? `rRNA: ${c.rrna_genus || c.rrna_phylum}` : ''].filter(Boolean).join(' | ');
     return `${c.id} | ${c.length.toLocaleString()} bp | ${fmtInt(c.reads)} read pairs | pooled ${fmtExp(c.depth)} RPKM${s}${c.bin ? ` | ${c.bin}` : ''}${tax ? ` | ${tax}` : ''}`;
   };
 </script>
@@ -307,9 +320,9 @@
       <button
         class="px-3 py-1 rounded-md border transition-colors text-center
           {colorMode === d.key ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
-        onclick={() => { if (d.key === 'taxa' && colorMode === 'taxa') taxRank = rankDefs[(rankDefs.indexOf(taxRank) + 1) % rankDefs.length]; else colorMode = d.key; }}
-        title={d.key === 'taxa' ? 'Kaiju taxonomy from the MAG analysis; click again to cycle Phylum → Genus' : ''}
-      >{d.key === 'taxa' && colorMode === 'taxa' ? `Kaiju ${taxRank}` : d.label}{d.key === 'taxa' ? ' ▾' : ''}</button>
+        onclick={() => { if (d.key === 'taxa' && colorMode === 'taxa') cycleTax(); else colorMode = d.key; }}
+        title={d.key === 'taxa' ? `Taxonomy from the MAG analysis (Kaiju on proteins; rRNA genes vs SILVA); click again to cycle: ${taxDefs.map(t => t.label).join(' → ')}` : ''}
+      >{d.key === 'taxa' && colorMode === 'taxa' ? (taxDefs.find(t => t.key === taxKey)?.label ?? d.label) : d.label}{d.key === 'taxa' ? ' ▾' : ''}</button>
     {/if}
   {/each}
   {#if colorMode === 'expression' || sizeBy === 'expression'}
