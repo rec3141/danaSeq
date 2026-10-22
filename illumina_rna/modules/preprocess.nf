@@ -83,63 +83,61 @@ process QC_READS {
 }
 
 process HUMAN_INDEX {
-    // removehuman.sh needs a BBTools index; build it once from a FASTA.
-    label 'process_high'
+    // strobealign index of the (masked) human reference, built once.
+    // (BBMap 40.05's index builder livelocks in IndexMaker4 in this image,
+    // which took removehuman.sh down with it.)
+    label 'process_map'
+    label 'env_align'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
     storeDir { params.store_dir ? "${params.store_dir}/references/human" : null }
 
     input:
-    path(fasta)
+    path(fasta, stageAs: 'src/*')
 
     output:
-    path("human_index"), emit: index
+    tuple path("human.fa"), path("human.fa.r${params.read_len}.sti"), emit: index
 
     script:
-    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    # k=14 + usemodulo match the index removehuman.sh maps with; any other
-    # index makes every sample rebuild it (into this shared directory).
-    bbmap.sh ${xmx} ref="${fasta}" path=human_index k=14 usemodulo t=${task.cpus} 2> human_index.log
-    if [ ! -d human_index/ref ]; then
-        cat human_index.log >&2
-        echo "[ERROR] human index build failed" >&2
-        exit 1
-    fi
+    case "${fasta}" in *.gz) gzip -dc "${fasta}" ;; *) cat "${fasta}" ;; esac \
+        | awk '/^>/ { print \$1; next } { print }' > human.fa
+    strobealign --create-index -t ${task.cpus} -r ${params.read_len} human.fa
+    [ -s "human.fa.r${params.read_len}.sti" ] || { echo "[ERROR] human index build failed" >&2; exit 1; }
     """
 }
 
 process REMOVE_HUMAN {
     tag "${meta.id}"
-    label 'process_high'
+    label 'process_map'
+    label 'env_align'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'symlink', pattern: '*.fq.gz', enabled: !params.store_dir
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:
     tuple val(meta), path(reads)
-    path(human_index)
+    tuple path(human_fa), path(human_index)
 
     output:
     tuple val(meta), path("${meta.id}.nohuman.fq.gz"),       emit: reads
     tuple val(meta), path("${meta.id}.nohuman.counts.tsv"),  emit: counts
 
     script:
-    def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    export JAVA_TOOL_OPTIONS="\${JAVA_TOOL_OPTIONS:-} -XX:-UseLoopPredicate"
-    removehuman.sh ${xmx} \\
-        in="${reads}" interleaved=t \\
-        outu="${meta.id}.nohuman.fq.gz" \\
-        path="${human_index}" \\
-        t=${task.cpus} 2> removehuman.log
+    set -o pipefail
+    # A mate is human at >=95% identity over >=80% of its length (the
+    # stringency of removehuman.sh); a pair goes if either mate is.
+    strobealign --use-index -t ${task.cpus} --interleaved "${human_fa}" "${reads}" 2> strobealign.log \
+    | python3 "${projectDir}/bin/filter_human_sam.py" --counts human.counts \
+    | gzip -1 > "${meta.id}.nohuman.fq.gz"
 
-    # bbmap reports per-read mapping; unmapped reads (outu) are the non-human ones
-    n=\$(reformat.sh in="${meta.id}.nohuman.fq.gz" interleaved=t 2>&1 | awk '/^Input:/ {print \$2; exit}')
-    printf '%s\\tnohuman\\t%s\\n' "${meta.id}" "\${n:-0}" > "${meta.id}.nohuman.counts.tsv"
+    read kept removed < human.counts
+    printf '%s\tnohuman\t%s\n' "${meta.id}" "\$kept" > "${meta.id}.nohuman.counts.tsv"
+    echo "[INFO] ${meta.id}: removed \$removed human reads, kept \$kept" >&2
 
-    if [ ! -s "${meta.id}.nohuman.fq.gz" ]; then
-        cat removehuman.log >&2
-        echo "[ERROR] Human removal produced empty output for ${meta.id}" >&2
+    if [ "\$kept" -eq 0 ]; then
+        cat strobealign.log >&2
+        echo "[ERROR] Human removal kept no reads for ${meta.id}" >&2
         exit 1
     fi
     """

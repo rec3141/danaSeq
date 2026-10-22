@@ -11,7 +11,7 @@ nextflow.enable.dsl = 2
 // Stages:
 //   1. QC         — one streaming pass per sample: bbduk adapter trim | bbduk
 //                   artifact/phiX/entropy filter | bbduk rRNA split (SILVA)
-//   2. Human      — removehuman.sh on the non-rRNA reads (optional)
+//   2. Human      — strobealign vs a masked human FASTA, removehuman.sh stringency
 //   3. Mapping    — strobealign (default) or BBmap to each reference
 //   4. Quantify   — featureCounts on genes (from the reference GFF) and contigs
 //   5. Summarize  — genes/contigs/bins/functions × samples matrices + viz JSONs
@@ -63,7 +63,7 @@ def helpMessage() {
       --min_readlen N        Minimum read length after trimming [default: 50]
       --run_filterbytile     filterbytile.sh (Illumina tiles only) [default: false]
       --run_remove_human     Remove human reads via removehuman.sh [default: true]
-      --human_ref PATH       BBTools human reference (index dir or FASTA)
+      --human_ref PATH       Human reference FASTA (masked hg19 etc.; indexed once)
       --run_fastqc           FastQC on the final reads [default: false]
 
     rRNA removal:
@@ -341,9 +341,7 @@ workflow {
 
     if (params.run_remove_human) {
         def human = file(params.human_ref, checkIfExists: true)
-        ch_human_index = human.isDirectory()
-            ? Channel.value(human)
-            : HUMAN_INDEX(Channel.value(human)).index
+        ch_human_index = HUMAN_INDEX(Channel.value(human)).index
     }
 
     if (!params.prepare_only) {

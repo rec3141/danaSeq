@@ -71,7 +71,7 @@ Mode:
   --workdir DIR        Nextflow work dir [default: <outdir>/work]
 
 Pipeline flags (passed to Nextflow; see --help-pipeline for all):
-  --human_ref PATH         BBTools human index dir, or a FASTA to index once
+  --human_ref PATH         Human reference FASTA (indexed once)
   --rrna_refs PATH         rRNA FASTA or dir (e.g. SILVA SSU+LSU NR99)
   --rrna_method STR        bbduk | sortmerna | none [default: bbduk]
   --run_remove_human BOOL  Remove human reads [default: true]
