@@ -92,7 +92,7 @@
       <div class="mr-auto">
         <div class="text-sm font-semibold text-slate-200">Contig t-SNE · expression by sample</div>
         <div class="text-xs text-slate-400">
-          Same layout as the MAG viz (tetranucleotide + coverage t-SNE). Grey: the {fmtInt($contigMap?.n)} contigs with RNA reads in any sample; colour: reads per kb per million for the selected sample.
+          Contig layout from the MAG analysis. Grey: the {fmtInt($contigMap?.n)} contigs with RNA reads in any sample; colour: reads per kb per million for the selected sample.
         </div>
       </div>
       <button class="px-2 py-1 rounded border border-slate-700 text-slate-300 text-xs" onclick={() => step(-1)} aria-label="Previous sample">◀</button>
