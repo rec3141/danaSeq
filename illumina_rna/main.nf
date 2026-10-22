@@ -46,6 +46,8 @@ def helpMessage() {
       --ref_name STR       Name for a --from_mag/--from_assembly reference
                            [default: the directory name]
       --bin_set STR        mag_analysis bin set for per-MAG tables [default: dastool]
+      --contig_explorer DIR  Contig t-SNE in mag_analysis viz format (contig_explorer_*)
+                           [default: <from_mag>/viz/data when present]
 
     Output:
       --outdir DIR       Output directory [default: results]
@@ -278,6 +280,10 @@ def discoverReferences() {
     def refs = params.from_mag      ? referencesFromMag(params.from_mag) :
                params.from_assembly ? referencesFromAssembly(params.from_assembly) :
                                       referencesFromDir(params.references)
+    if (params.contig_explorer) {
+        def ce = file(params.contig_explorer, checkIfExists: true)
+        refs.each { r -> r.contig_explorer = ce }
+    }
     refs.each { r ->
         if (!(r.name ==~ /[A-Za-z0-9._-]+/)) error "ERROR: reference name '${r.name}' must be alnum/._- only (set --ref_name)"
     }

@@ -101,7 +101,7 @@ AUTO_SESSION=true
 
 # Flags whose value is a host path: resolved to absolute, and bound in
 # container mode.
-PATH_FLAGS=" --input --samplesheet --references --from_mag --from_assembly --human_ref --rrna_refs --store_dir "
+PATH_FLAGS=" --input --samplesheet --references --from_mag --from_assembly --human_ref --rrna_refs --store_dir --contig_explorer "
 
 while (( $# )); do
     case "$1" in
