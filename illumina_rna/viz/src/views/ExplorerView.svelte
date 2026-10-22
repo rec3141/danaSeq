@@ -325,18 +325,6 @@
       >{d.key === 'taxa' && colorMode === 'taxa' ? (taxDefs.find(t => t.key === taxKey)?.label ?? d.label) : d.label}{d.key === 'taxa' ? ' ▾' : ''}</button>
     {/if}
   {/each}
-  {#if colorMode === 'expression' || sizeBy === 'expression'}
-    <button class="px-2 py-1 rounded-md border border-slate-600 text-slate-400 hover:border-slate-500" onclick={() => step(-1)} title="Previous sample">&#x25C0;</button>
-    <select
-      class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer font-mono"
-      bind:value={sampleIdx}
-    >
-      <option value={-1}>Total (pooled)</option>
-      {#each map.samples as s, j}<option value={j}>{s}</option>{/each}
-    </select>
-    <button class="px-2 py-1 rounded-md border border-slate-600 text-slate-400 hover:border-slate-500" onclick={() => step(1)} title="Next sample">&#x25B6;</button>
-    {#if sampleIdx >= 0 && layerFor !== sampleIdx}<span class="text-slate-500 italic">loading sample...</span>{/if}
-  {/if}
   <span class="text-slate-600">|</span>
   <span class="text-slate-400">Size:</span>
   <button
@@ -353,6 +341,20 @@
   <input type="range" min="0.1" max="1.5" step="0.05" bind:value={sizeExponent} class="w-16 h-1 accent-cyan-400 cursor-pointer"
     title="px = min + (1 + value)^p − 1 (length in kb, expression in RPKM); points only grow with value and p" />
   <span class="text-slate-500 w-8">{sizeExponent.toFixed(2)}</span>
+  {#if colorMode === 'expression' || sizeBy === 'expression'}
+    <div class="ml-auto flex items-center gap-2">
+    <button class="px-2 py-1 rounded-md border border-slate-600 text-slate-400 hover:border-slate-500" onclick={() => step(-1)} title="Previous sample">&#x25C0;</button>
+    <select
+      class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer font-mono"
+      bind:value={sampleIdx}
+    >
+      <option value={-1}>Total (pooled)</option>
+      {#each map.samples as s, j}<option value={j}>{s}</option>{/each}
+    </select>
+    <button class="px-2 py-1 rounded-md border border-slate-600 text-slate-400 hover:border-slate-500" onclick={() => step(1)} title="Next sample">&#x25B6;</button>
+    {#if sampleIdx >= 0 && layerFor !== sampleIdx}<span class="text-slate-500 italic">loading sample...</span>{/if}
+    </div>
+  {/if}
 </div>
 
 <div class="flex items-center gap-3 flex-wrap text-xs">
