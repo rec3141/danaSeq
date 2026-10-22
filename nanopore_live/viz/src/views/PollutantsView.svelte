@@ -60,6 +60,13 @@
       cutoff: 'hmmsearch, trusted cutoffs (--cut_tc)',
       color: '#fbbf24',
     },
+    'KEGG-xeno': {
+      label: 'KEGG xenobiotics',
+      blurb: 'KOfam profiles for KEGG xenobiotics-degradation pathways (BTEX, PAH, organohalides, atrazine, nitroaromatics, steroids …)',
+      cite: 'Aramaki et al. 2020 (KOfam); KEGG br08901 class 1.11',
+      cutoff: 'hmmsearch, kofam_scan per-KO thresholds (full / domain score); core-metabolism KOs excluded',
+      color: '#38bdf8',
+    },
     'HADEG': {
       label: 'HADEG',
       blurb: 'Aerobic hydrocarbon & plastic degradation and biosurfactant genes',
