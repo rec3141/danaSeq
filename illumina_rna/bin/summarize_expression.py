@@ -160,6 +160,13 @@ def functions_from_annotations(path, gene_ids):
             continue
         s = df[col].reindex(gene_ids)
         # one label per gene: the first of a comma list; COG keeps the first letter
+        if kind == "cazy":
+            # dbCAN strings mix families, domain ranges, subfamilies and
+            # GenBank hits ("AAZ20843.1,CE11,CE11(6-276),CE11_e24(7-277)");
+            # keep the first real family. Family 0 means unclassified.
+            s = s.fillna("").str.extract(r"\b((?:GH|GT|PL|CE|AA|CBM)(?!0(?!\d))\d+)(?!\d)", expand=False).fillna("")
+            out[kind] = s.to_numpy()
+            continue
         s = s.fillna("").str.split(r"[,;]", n=1).str[0].str.strip()
         s = s.replace({"-": "", "nan": ""}).str.replace(r"^ko:", "", regex=True)
         if kind == "cog":
