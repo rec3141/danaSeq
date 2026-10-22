@@ -67,6 +67,13 @@
       cutoff: 'hmmsearch, kofam_scan per-KO thresholds (full / domain score); core-metabolism KOs excluded',
       color: '#38bdf8',
     },
+    'BacMet': {
+      label: 'BacMet',
+      blurb: 'Experimentally confirmed metal & biocide resistance genes (Hg, As, Cu, Zn/Cd/Co, Cr, Ni, Ag, QACs …)',
+      cite: 'Pal et al. 2014, Nucleic Acids Res. 42:D737 (BacMet2 EXP)',
+      cutoff: 'DIAMOND blastp, ≥90% identity, ≥30 aa alignment (BacMet-Scan defaults)',
+      color: '#94a3b8',
+    },
     'HADEG': {
       label: 'HADEG',
       blurb: 'Aerobic hydrocarbon & plastic degradation and biosurfactant genes',
@@ -100,6 +107,8 @@
       match: f => f[0] === 'CANT-HYD' && f[2].startsWith('Anaerobic') },
     { id: 'plastic', label: 'Plastics (HADEG)', title: 'HADEG plastic-degradation enzymes',
       match: f => f[0] === 'HADEG' && f[1] === 'Plastics' },
+    { id: 'mer',    label: 'mer (Hg resistance)', title: 'Mercury resistance genes (BacMet: merA/merB/merR/merT …)',
+      match: f => f[0] === 'BacMet' && f[2].startsWith('Mercury') },
   ];
 
   // ---- Selection: a node in the db -> category -> pathway -> gene tree -----

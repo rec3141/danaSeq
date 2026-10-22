@@ -15,7 +15,8 @@
 #                'catalogue': per-target thresholds from the annot.tsv columns
 #                `threshold` + `score_type` (full|domain), applied exactly like
 #                kofam_scan (full-sequence score, or best 1-domain score)
-#   dmnd_opts  : "id=50,qcov=50,scov=50,evalue=1e-5" (any subset; these are defaults)
+#   dmnd_opts  : "id=50,qcov=50,scov=50,evalue=1e-5[,len=N]" (any subset; these are
+#                defaults; len = minimum alignment length in aa, default 0)
 #   annot.tsv  : optional gene catalogue, header
 #                  target gene category pathway subpathway description [threshold score_type motif]
 #                (target = HMM NAME / first '|' field of the DIAMOND subject id)
@@ -84,12 +85,13 @@ hmm)
     params="method=hmmsearch	cutoff=$opts"
     ;;
 diamond)
-    id=50; qcov=50; scov=50; evalue=1e-5
+    id=50; qcov=50; scov=50; evalue=1e-5; minlen=0
     IFS=',' read -ra kv <<< "$opts"
     for p in "${kv[@]}"; do
         case "$p" in
             id=*) id=${p#id=} ;; qcov=*) qcov=${p#qcov=} ;;
             scov=*) scov=${p#scov=} ;; evalue=*) evalue=${p#evalue=} ;;
+            len=*) minlen=${p#len=} ;;
             "") ;; *) echo "protein_db_search.sh: unknown diamond option '$p'" >&2; exit 2 ;;
         esac
     done
@@ -99,14 +101,15 @@ diamond)
             -q combined_proteins.faa -d "$db" -o "$out.tbl" \
             --id "$id" --query-cover "$qcov" --subject-cover "$scov" -e "$evalue" \
             --max-target-seqs 1 --max-hsps 1 \
-            -f 6 qseqid sseqid pident evalue bitscore qcovhsp scovhsp
+            -f 6 qseqid sseqid pident evalue bitscore qcovhsp scovhsp length
         rm -rf dmnd_tmp
     else
         : > "$out.tbl"
     fi
     # subject ids are 'ACCESSION|gene ...' -> target = ACCESSION
-    awk -F'\t' -v OFS='\t' '{split($2, s, "|"); print $1, s[1], $4, $5, $3, $6, $7}' "$out.tbl" > hits.raw
+    awk -F'\t' -v OFS='\t' -v minlen="$minlen" '$8 + 0 >= minlen + 0 {split($2, s, "|"); print $1, s[1], $4, $5, $3, $6, $7}' "$out.tbl" > hits.raw
     params="method=diamond_blastp	id=$id	qcov=$qcov	scov=$scov	evalue=$evalue"
+    [ "$minlen" = 0 ] || params="$params	len=$minlen"
     ;;
 *)
     echo "protein_db_search.sh: unknown mode '$mode'" >&2; exit 2 ;;
