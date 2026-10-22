@@ -17,7 +17,7 @@
 #                kofam_scan (full-sequence score, or best 1-domain score)
 #   dmnd_opts  : "id=50,qcov=50,scov=50,evalue=1e-5" (any subset; these are defaults)
 #   annot.tsv  : optional gene catalogue, header
-#                  target gene category pathway subpathway description [threshold score_type]
+#                  target gene category pathway subpathway description [threshold score_type motif]
 #                (target = HMM NAME / first '|' field of the DIAMOND subject id)
 #
 # Outputs:
@@ -113,6 +113,39 @@ diamond)
 esac
 
 [ "$annot" = "NONE" ] || [ -s "$annot" ] || annot=NONE
+
+# Optional sequence-motif check (catalogue column `motif`, an ERE such as the
+# HgcA cap-helix N[VI][WY]C[AS][AGST]G): a hit on a target with a motif must
+# contain it; otherwise it is relabelled <target>_nomotif when the catalogue
+# lists that pseudo-target (so near-misses stay visible), else dropped.
+if [ "$annot" != NONE ] && head -1 "$annot" | tr '\t' '\n' | grep -qx motif; then
+    awk -F'\t' -v OFS='\t' -v annot="$annot" '
+        BEGIN {
+            while ((getline line < annot) > 0) {
+                n = split(line, a, "\t")
+                if (a[1] == "target") { for (i = 1; i <= n; i++) col[a[i]] = i; continue }
+                known[a[1]] = 1
+                if (col["motif"] && a[col["motif"]] != "") motif[a[1]] = a[col["motif"]]
+            }
+        }
+        FNR == NR { if ($2 in motif) need[$1] = 1; next }           # pass 1: hits.raw
+        FILENAME != "hits.raw" && /^>/ {                               # pass 2: proteins
+            id = substr($0, 2); sub(/[ \t].*/, "", id); keep = (id in need); next
+        }
+        FILENAME != "hits.raw" { if (keep) seq[id] = seq[id] $0; next }
+        END {
+            while ((getline line < "hits.raw") > 0) {
+                nf = split(line, h, "\t")
+                if (h[2] in motif && seq[h[1]] !~ motif[h[2]]) {
+                    if (!((h[2] "_nomotif") in known)) continue
+                    h[2] = h[2] "_nomotif"
+                    line = h[1]; for (i = 2; i <= nf; i++) line = line "\t" h[i]
+                }
+                print line
+            }
+        }' hits.raw combined_proteins.faa > hits.motif
+    mv hits.motif hits.raw
+fi
 {
     printf '#db=%s\t%s\tn_proteins=%s\n' "$dbname" "$params" "$n_prot"
     printf 'gene_id\tdb\ttarget\tgene\tcategory\tpathway\tsubpathway\tevalue\tscore\tpident\tqcov\tscov\n'

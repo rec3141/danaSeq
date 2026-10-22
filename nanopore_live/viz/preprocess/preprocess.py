@@ -816,21 +816,134 @@ def build_mapping_payloads(samples, mapping_refs_dir, output_dir):
               f"category={meta['category']})", file=sys.stderr)
 
 
+# Derived "pair on the same read" features: (db, gene A, gene B) -> a feature
+# counting reads that carry both (e.g. hgcA + hgcB, the Hg-methylation pair;
+# both genes are required for methylation, Parks et al. 2013).
+POLLUTANT_PAIRS = [
+    ('Hg-MATE', 'hgcA', 'hgcB', 'Mercury', 'Hg methylation', 'hgcAB pair (same read)'),
+]
+# Genes whose carrier reads get a per-sample taxonomy breakdown in the payload
+# (GTDB genus from sendsketch, else the Kraken2 name).
+POLLUTANT_CARRIER_GENES = [('Hg-MATE', 'hgcA'), ('Hg-MATE', 'hgcB')]
+
+
+def _carrier_taxa(con, db, gene):
+    """{taxon: n_reads} for reads carrying a best-hit protein of db/gene."""
+    try:
+        rows = con.execute("""
+            WITH best AS (
+                SELECT db, chunk, gene_id, arg_max(target, score) AS target
+                FROM protein_hits WHERE db = ? GROUP BY db, chunk, gene_id
+            ), r AS (
+                SELECT DISTINCT COALESCE(m.read_id, l.seqid) AS read_id
+                FROM best b
+                JOIN protein_db_annot a ON a.db = b.db AND a.target = b.target AND a.gene = ?
+                JOIN locus_index l ON l.locus_tag = b.gene_id
+                LEFT JOIN read_contig_map m ON m.contig_id = l.seqid
+            )
+            SELECT r.read_id, ANY_VALUE(s.lineage), ANY_VALUE(k.taxa_name)
+            FROM r
+            LEFT JOIN sendsketch s ON s.read_id = r.read_id AND s.status = 'C'
+            LEFT JOIN kraken k ON k.seqid = r.read_id
+            GROUP BY r.read_id
+        """, [db, gene]).fetchall()
+    except Exception:
+        return {}
+    out = {}
+    for _rid, lineage, kname in rows:
+        label = None
+        if lineage:
+            parsed = parse_gtdb_lineage(lineage)
+            for rank in ('G', 'F', 'O', 'C', 'P'):
+                hit = [n for r_, n in parsed if r_ == rank]
+                if hit:
+                    label = hit[0] if rank == 'G' else f"{hit[0]} ({rank.lower()})"
+                    break
+        if not label and kname:
+            kname = re.sub(r'_?\(taxid_?\s*\d+\)', '', kname).replace('_', ' ').strip()
+            if kname and kname not in ('unclassified', 'root'):
+                label = f"{kname} (kraken)"
+        label = label or 'Unclassified'
+        out[label] = out.get(label, 0) + 1
+    return out
+
+
+def _pair_reads(con, db, gene_a, gene_b):
+    try:
+        return con.execute("""
+            WITH best AS (
+                SELECT db, chunk, gene_id, arg_max(target, score) AS target
+                FROM protein_hits WHERE db = ? GROUP BY db, chunk, gene_id
+            ), g AS (
+                SELECT COALESCE(m.read_id, l.seqid) AS read_id, a.gene
+                FROM best b
+                JOIN protein_db_annot a ON a.db = b.db AND a.target = b.target
+                JOIN locus_index l ON l.locus_tag = b.gene_id
+                LEFT JOIN read_contig_map m ON m.contig_id = l.seqid
+                WHERE a.gene IN (?, ?)
+            )
+            SELECT COUNT(*) FROM (
+                SELECT read_id FROM g GROUP BY read_id
+                HAVING bool_or(gene = ?) AND bool_or(gene = ?)
+            )
+        """, [db, gene_a, gene_b, gene_a, gene_b]).fetchone()[0]
+    except Exception:
+        return 0
+
+
+# Gene occurrences per sample. Each protein keeps its best-scoring target per
+# DB; proteins are then collapsed to (read, gene) so a gene split into several
+# ORFs by nanopore frameshifts on one read counts once. Motif-failing
+# pseudo-targets (<target>_nomotif, e.g. HgcA without the cap-helix) are
+# dropped on reads that also carry the motif-confirmed target. Reads come from
+# locus_index (prokka: read id; bakta: contig -> read_contig_map); proteins
+# that cannot be placed on a read count individually.
+POLLUTANT_COUNT_SQL = """
+    WITH best AS (
+        SELECT db, chunk, gene_id, arg_max(target, score) AS target
+        FROM protein_hits GROUP BY db, chunk, gene_id
+    ), placed AS (
+        SELECT b.db, b.target,
+               COALESCE(ANY_VALUE(m.read_id), ANY_VALUE(l.seqid), b.chunk || ':' || b.gene_id) AS read_id
+        FROM best b
+        LEFT JOIN locus_index l ON l.locus_tag = b.gene_id
+        LEFT JOIN read_contig_map m ON m.contig_id = l.seqid
+        GROUP BY b.db, b.chunk, b.gene_id, b.target
+    ), occ AS (
+        SELECT DISTINCT p.db, p.target, p.read_id,
+               COALESCE(NULLIF(a.category, ''), 'Unassigned') AS category,
+               COALESCE(NULLIF(a.pathway, ''), 'Unassigned')  AS pathway,
+               COALESCE(NULLIF(a.gene, ''), p.target)         AS gene
+        FROM placed p LEFT JOIN protein_db_annot a ON a.db = p.db AND a.target = p.target
+    )
+    SELECT o.db, o.category, o.pathway, o.gene, COUNT(DISTINCT o.read_id) AS n
+    FROM occ o
+    WHERE NOT (ends_with(o.target, '_nomotif') AND EXISTS (
+        SELECT 1 FROM occ q WHERE q.db = o.db AND q.read_id = o.read_id
+          AND q.target = regexp_replace(o.target, '_nomotif$', '')))
+    GROUP BY ALL
+"""
+
+
 def build_pollutant_payload(samples, output_dir, sample_ids):
     """Build pollutants.json from the protein-DB search tables.
 
     Sources: protein_hits / protein_db_annot / protein_db_searches (filled by
     bin/import_protein_hits.py from the HMM_SEARCH + DIAMOND_DB_SEARCH outputs,
-    e.g. CANT-HYD and HADEG). Each protein is counted once per DB, under its
-    best-scoring target, so overlapping profiles (e.g. NdoB vs MAH_alpha) don't
-    double count.
+    e.g. CANT-HYD and HADEG). Counts are gene occurrences on reads (see
+    POLLUTANT_COUNT_SQL): best target per protein per DB, so overlapping
+    profiles (e.g. NdoB vs MAH_alpha) don't double count, then one count per
+    (read, gene) so frameshift-fragmented genes don't either.
 
     Shape (compact: features are indexed, per-sample counts are sparse):
       {
         "features": [[db, category, pathway, gene], ...],
         "dbs": {db: {"params": "method=... cutoff=...", "n_samples": int,
                      "n_targets_hit": int}},
-        "samples": {sid: {"n_proteins": {db: int}, "counts": {feature_idx: n}}}
+        "samples": {sid: {"n_proteins": {db: int}, "counts": {feature_idx: n}}},
+        "read_features": [feature_idx, ...],   # counted in reads (same-read pairs),
+                                               # normalised per read
+        "carriers": {"db|gene": {sid: {taxon: n_reads}}}
       }
     Normalisation is left to the view: hits per million proteins searched
     (n_proteins is per DB because DBs can be searched on different chunk sets)
@@ -840,6 +953,8 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
     features = []
     dbs = {}
     out_samples = {}
+    carriers = {}      # "db|gene" -> {sid: {taxon: n_reads}}
+    pair_idx = set()   # feature indices that count reads (same-read pairs), not proteins
     keep = set(sample_ids)
     for s in samples:
         sid = s['id']
@@ -854,25 +969,12 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
                 SELECT db, SUM(n_proteins), MODE(params), COUNT(*)
                 FROM protein_db_searches GROUP BY db
             """).fetchall()
-            rows = con.execute("""
-                WITH best AS (
-                    SELECT db, chunk, gene_id, arg_max(target, score) AS target
-                    FROM protein_hits GROUP BY db, chunk, gene_id
-                )
-                SELECT b.db,
-                       COALESCE(NULLIF(a.category, ''), 'Unassigned') AS category,
-                       COALESCE(NULLIF(a.pathway, ''), 'Unassigned')  AS pathway,
-                       COALESCE(NULLIF(a.gene, ''), b.target)         AS gene,
-                       COUNT(*) AS n
-                FROM best b LEFT JOIN protein_db_annot a
-                  ON a.db = b.db AND a.target = b.target
-                GROUP BY ALL
-            """).fetchall()
+            rows = con.execute(POLLUTANT_COUNT_SQL).fetchall()
         except Exception:
             con.close()
             continue  # no protein-DB tables in this DB
-        con.close()
         if not searched:
+            con.close()
             continue
         n_prot = {}
         for db, n, params, n_chunks in searched:
@@ -880,13 +982,32 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
             d = dbs.setdefault(db, {'params': params or '', 'n_samples': 0, 'targets': set()})
             d['n_samples'] += 1
         counts = {}
+        genes_present = set()
         for db, cat, pw, gene, n in rows:
             key = (db, cat, pw, gene)
             if key not in feat_idx:
                 feat_idx[key] = len(features)
                 features.append(list(key))
             counts[feat_idx[key]] = int(n)
+            genes_present.add((db, gene))
             dbs.setdefault(db, {'params': '', 'n_samples': 0, 'targets': set()})['targets'].add(gene)
+        # Same-read gene pairs (e.g. hgcAB); counted in reads, not proteins.
+        for db, ga, gb, cat, pw, label in POLLUTANT_PAIRS:
+            if (db, ga) in genes_present and (db, gb) in genes_present:
+                n = _pair_reads(con, db, ga, gb)
+                if n:
+                    key = (db, cat, pw, label)
+                    if key not in feat_idx:
+                        feat_idx[key] = len(features)
+                        features.append(list(key))
+                        pair_idx.add(feat_idx[key])
+                    counts[feat_idx[key]] = int(n)
+        for db, gene in POLLUTANT_CARRIER_GENES:
+            if (db, gene) in genes_present:
+                taxa = _carrier_taxa(con, db, gene)
+                if taxa:
+                    carriers.setdefault(f"{db}|{gene}", {})[sid] = taxa
+        con.close()
         out_samples[sid] = {'n_proteins': n_prot, 'counts': counts}
 
     if not out_samples:
@@ -898,6 +1019,8 @@ def build_pollutant_payload(samples, output_dir, sample_ids):
         'dbs': {db: {'params': d['params'], 'n_samples': d['n_samples'],
                      'n_genes_hit': len(d['targets'])} for db, d in sorted(dbs.items())},
         'samples': out_samples,
+        'read_features': sorted(pair_idx),
+        'carriers': carriers,
     }
     path = os.path.join(output_dir, 'pollutants.json')
     with open(path, 'w') as f:

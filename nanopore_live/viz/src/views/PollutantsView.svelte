@@ -35,13 +35,24 @@
   $effect(() => {
     const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
     fetchMaybeGz(`${base}/data/pollutants.json`)
-      .then(p => { payload = p; loadState = 'ok'; })
+      .then(p => {
+        payload = p; loadState = 'ok';
+        // Methylmercury is the headline concern: open on hgcA when present.
+        if ((p.features || []).some(f => f[0] === 'Hg-MATE' && f[3] === 'hgcA')) selectFeatured('hgcA');
+      })
       .catch(e => { console.warn('pollutants.json not available:', e.message); loadState = 'missing'; });
   });
 
   // Display metadata for known databases. Unknown DBs still render, with
   // their raw name and the search parameters recorded in the payload.
   const DB_INFO = {
+    'Hg-MATE': {
+      label: 'Hg-MATE',
+      blurb: 'Mercury methylation genes hgcA / hgcB (methylmercury production)',
+      cite: 'Gionfriddo et al. 2021, Hg-MATE-Db.v1, doi:10.25573/serc.13105370',
+      cutoff: 'hmmsearch: hgcA ≥95 bits + cap-helix motif; hgcB ≥80 bits',
+      color: '#fb7185',
+    },
     'CANT-HYD': {
       label: 'CANT-HYD',
       blurb: 'Hydrocarbon-degradation marker HMMs (aerobic + anaerobic alkane/aromatic)',
@@ -68,6 +79,10 @@
   // Featured quick-picks: genes worth one click. Each `match` tests a feature
   // [db, category, pathway, gene]; only picks with data are shown.
   const FEATURED = [
+    { id: 'hgcA',   label: 'hgcA (Hg methylation)', title: 'HgcA with the conserved cap-helix motif (Hg-MATE) — methylmercury production potential',
+      match: f => f[0] === 'Hg-MATE' && f[3] === 'hgcA' },
+    { id: 'hgcAB',  label: 'hgcAB same read', title: 'Reads carrying both hgcA and hgcB (counted in reads)',
+      match: f => f[0] === 'Hg-MATE' && f[3] === 'hgcAB pair (same read)' },
     { id: 'alkB',   label: 'alkB / CYP153',     title: 'Medium-chain alkane hydroxylases (CANT-HYD AlkB + CYP153)',
       match: f => f[0] === 'CANT-HYD' && (f[3] === 'alkB' || f[3] === 'CYP153') },
     { id: 'almA',   label: 'almA / ladA',       title: 'Long-chain alkane monooxygenases (CANT-HYD)',
@@ -101,7 +116,20 @@
 
   let features = $derived(payload?.features || []);
 
-  function featureMatches(f, s) {
+  // Read-unit features (same-read gene pairs such as hgcAB, and mapping
+  // markers such as crAssphage) count reads, not proteins. A same-read pair
+  // only enters a selection when picked explicitly (gene level / featured), so
+  // it never double counts the underlying hgcA/hgcB proteins; read-only DBs
+  // (mapping markers) behave like any other DB.
+  let pairSet = $derived(new Set(payload?.read_features || payload?.pair_features || []));
+  let readOnlyDbs = $derived.by(() => {
+    const byDb = {};
+    features.forEach((f, i) => { (byDb[f[0]] ??= []).push(pairSet.has(i)); });
+    return new Set(Object.entries(byDb).filter(([, v]) => v.every(Boolean)).map(([k]) => k));
+  });
+  function featureMatches(f, s, i) {
+    if (i != null && pairSet.has(i) && !readOnlyDbs.has(f[0])
+        && !(s.featured ? FEATURED.find(x => x.id === s.featured)?.match(f) : s.gene === f[3])) return false;
     if (s.featured) {
       const fp = FEATURED.find(x => x.id === s.featured);
       return fp ? fp.match(f) : false;
@@ -113,7 +141,7 @@
   // Indices of features in the current selection
   let selFeatureIdx = $derived.by(() => {
     const out = new Set();
-    features.forEach((f, i) => { if (featureMatches(f, sel)) out.add(i); });
+    features.forEach((f, i) => { if (featureMatches(f, sel, i)) out.add(i); });
     return out;
   });
 
@@ -129,7 +157,7 @@
   const NORMS = [
     { id: 'per_mprot', label: 'per M proteins', title: 'Hits per million annotated proteins searched (per database)' },
     { id: 'per_mread', label: 'per M reads',    title: 'Hits per million reads in the sample' },
-    { id: 'hits',      label: 'raw hits',       title: 'Number of proteins hitting the selection' },
+    { id: 'hits',      label: 'raw hits',       title: 'Number of reads carrying a gene in the selection' },
   ];
   let normIdx = $state(0);
   let norm = $derived(NORMS[normIdx]);
@@ -149,6 +177,10 @@
       const i = +k;
       if (!idxSet.has(i)) continue;
       hits += n;
+      if (pairSet.has(i)) {   // read-unit feature: always per million reads
+        if (readCount[sid] > 0) rate += n / readCount[sid] * 1e6;
+        continue;
+      }
       const np = ps.n_proteins[features[i][0]] || 0;
       if (np > 0) rate += n / np * 1e6;
     }
@@ -208,7 +240,7 @@
       const b = node(a.children, cat, { db, category: cat, level: 'category', name: cat });
       const c = node(b.children, pw, { db, category: cat, pathway: pw, level: 'pathway', name: pw });
       const d = node(c.children, gene, { db, category: cat, pathway: pw, gene, level: 'gene', name: gene });
-      for (const n of [a, b, c, d]) { n.total += fTot[i]; n.idx.push(i); }
+      for (const n of (pairSet.has(i) && !readOnlyDbs.has(db) ? [d] : [a, b, c, d])) { n.total += fTot[i]; n.idx.push(i); }
       d.nSamples = Math.max(d.nSamples || 0, fSamp[i]);
     });
     // Include searched DBs that have no hits at all
@@ -347,7 +379,7 @@
       if (!selFeatureIdx.has(i)) continue;
       const f = features[i];
       const key = breakdownLevel === 0 ? f[0] : f[breakdownLevel];
-      const np = ps.n_proteins[f[0]] || 0;
+      const np = pairSet.has(i) ? (selectedDetail.read_count || 0) : (ps.n_proteins[f[0]] || 0);
       const g = groups.get(key) || { name: key, db: f[0], hits: 0, rate: 0 };
       g.hits += n;
       if (np > 0) g.rate += n / np * 1e6;
@@ -400,7 +432,7 @@
         if (!selFeatureIdx.has(i) || n <= 0) continue;
         const f = features[i];
         const key = f.join('|');
-        const np = ps.n_proteins[f[0]] || 0;
+        const np = pairSet.has(i) ? (readCount[sid] || 0) : (ps.n_proteins[f[0]] || 0);
         const g = agg.get(key) || { key, db: f[0], category: f[1], pathway: f[2], gene: f[3], hits: 0, n_samples: 0, rate_sum: 0 };
         g.hits += n; g.n_samples += 1;
         if (np > 0) g.rate_sum += n / np * 1e6;
@@ -420,13 +452,53 @@
     { key: 'hits', label: 'Total hits', render: v => v.toLocaleString() },
     { key: 'n_samples', label: 'Samples' },
     { key: 'prevalence', label: 'Prevalence', render: v => `${(v * 100).toFixed(0)}%` },
-    { key: 'mean_rate', label: 'Mean per M prot', render: v => v >= 1 ? v.toFixed(1) : v.toFixed(2) },
+    { key: 'mean_rate', label: 'Mean per M prot (reads*)', render: v => v >= 1 ? v.toFixed(1) : v.toFixed(2) },
   ];
 
   let totals = $derived.by(() => {
     let hits = 0, withHits = 0;
     for (const r of sampleRows) { hits += r.hits || 0; if (r.hits > 0) withHits++; }
     return { hits, withHits, n: sampleRows.length };
+  });
+
+  // ---- Mercury (hgcAB) summary panel ----------------------------------------
+  function geneIdx(db, gene) {
+    const out = new Set();
+    features.forEach((f, i) => { if (f[0] === db && f[3] === gene) out.add(i); });
+    return out;
+  }
+  let mercury = $derived.by(() => {
+    if (!payload || !features.some(f => f[0] === 'Hg-MATE')) return null;
+    const ia = geneIdx('Hg-MATE', 'hgcA'), ib = geneIdx('Hg-MATE', 'hgcB'), ip = geneIdx('Hg-MATE', 'hgcAB pair (same read)');
+    let nSearched = 0, nA = 0, nB = 0, nPair = 0, hitsA = 0;
+    const top = [];
+    for (const sid of cohortIds) {
+      const ps = payload.samples[sid];
+      if (ps.n_proteins['Hg-MATE'] == null) continue;
+      nSearched++;
+      const a = sampleHits(sid, ia), b = sampleHits(sid, ib), p = sampleHits(sid, ip);
+      if (a > 0) { nA++; hitsA += a; top.push({ sid, a, rate: sampleValue(sid, ia, 'per_mprot') }); }
+      if (b > 0) nB++;
+      if (p > 0) nPair++;
+    }
+    top.sort((x, y) => y.rate - x.rate);
+    const taxa = {};
+    for (const [sid, t] of Object.entries(payload.carriers?.['Hg-MATE|hgcA'] || {})) {
+      if (!cohortIds.includes(sid)) continue;
+      for (const [k, n] of Object.entries(t)) taxa[k] = (taxa[k] || 0) + n;
+    }
+    const topTaxa = Object.entries(taxa).sort((x, y) => y[1] - x[1]).slice(0, 8);
+    return { nSearched, nA, nB, nPair, hitsA, top: top.slice(0, 5), topTaxa };
+  });
+
+  let selectedCarriers = $derived.by(() => {
+    if (!selectedDetail || !payload?.carriers) return [];
+    const out = [];
+    for (const key of ['Hg-MATE|hgcA', 'Hg-MATE|hgcB']) {
+      const t = payload.carriers[key]?.[selectedDetail.id];
+      if (t) out.push({ gene: key.split('|')[1], taxa: Object.entries(t).sort((a, b) => b[1] - a[1]) });
+    }
+    return out;
   });
 
   const BTN_ON = 'border-cyan-400 bg-cyan-400/10 text-cyan-400';
@@ -444,6 +516,53 @@
       <code class="bg-slate-900 px-1 rounded text-slate-300">pollutants.json</code>.
     </div>
   {:else}
+    {#if mercury}
+      <!-- Methylmercury potential: hgcAB is the key Canadian-lake concern, so it
+           gets its own summary above the generic database cards. -->
+      <div class="rounded-lg border border-rose-400/40 bg-rose-400/5 p-3 text-xs">
+        <div class="flex items-baseline justify-between gap-3 flex-wrap">
+          <div>
+            <span class="text-rose-300 font-semibold text-sm">Mercury methylation potential (hgcAB)</span>
+            <span class="text-slate-400 ml-2">microbes with hgcA + hgcB convert Hg(II) to neurotoxic methylmercury</span>
+          </div>
+          <div class="flex gap-2">
+            <button class="px-2 py-1 rounded-md border transition-colors {sel.featured === 'hgcA' ? BTN_ON : BTN_OFF}" onclick={() => selectFeatured('hgcA')}>Map hgcA</button>
+            {#if mercury.nPair > 0}
+              <button class="px-2 py-1 rounded-md border transition-colors {sel.featured === 'hgcAB' ? BTN_ON : BTN_OFF}" onclick={() => selectFeatured('hgcAB')}>Map hgcAB reads</button>
+            {/if}
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-x-6 gap-y-1 mt-2">
+          <span class="text-slate-300">hgcA in <span class="font-mono text-rose-200">{mercury.nA}</span>/{mercury.nSearched} samples</span>
+          <span class="text-slate-300">hgcB in <span class="font-mono text-rose-200">{mercury.nB}</span></span>
+          <span class="text-slate-300">hgcA+hgcB on one read in <span class="font-mono text-rose-200">{mercury.nPair}</span></span>
+          <span class="text-slate-300">hgcA-carrying reads <span class="font-mono text-rose-200">{mercury.hitsA.toLocaleString()}</span></span>
+        </div>
+        {#if mercury.top.length}
+          <div class="mt-2 grid gap-2 md:grid-cols-2">
+            <div>
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Highest hgcA (per M proteins)</div>
+              {#each mercury.top as t (t.sid)}
+                <button class="block font-mono text-slate-300 hover:text-cyan-300" onclick={() => selectedSample.set(t.sid)}>
+                  {t.sid} <span class="text-slate-500">{fmtNorm(t.rate)} · {t.a} hits</span>
+                </button>
+              {/each}
+            </div>
+            {#if mercury.topTaxa.length}
+              <div>
+                <div class="text-[10px] uppercase tracking-wide text-slate-500">hgcA carrier taxa (reads, all samples)</div>
+                {#each mercury.topTaxa as [k, n] (k)}
+                  <div class="text-slate-300">{k} <span class="text-slate-500 font-mono">{n}</span></div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <div class="mt-1 text-slate-500 italic">No hgcA with the cap-helix motif detected in the samples in view.</div>
+        {/if}
+      </div>
+    {/if}
+
     <!-- Database summary cards -->
     <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));">
       {#each Object.entries(payload.dbs) as [db, d] (db)}
@@ -602,6 +721,14 @@
               {/if}
             {/if}
           </div>
+          {#each selectedCarriers as c (c.gene)}
+            <div class="border border-rose-400/30 bg-rose-400/5 rounded-md p-2">
+              <div class="text-xs text-rose-300 font-medium mb-1"><span class="font-mono">{c.gene}</span> carrier reads by taxon</div>
+              {#each c.taxa.slice(0, 10) as [k, n] (k)}
+                <div class="flex justify-between text-[11px]"><span class="truncate text-slate-200" title={k}>{k}</span><span class="font-mono text-slate-400">{n}</span></div>
+              {/each}
+            </div>
+          {/each}
           <div class="grid grid-cols-2 gap-2 text-xs">
             <div class="text-slate-400">Reads</div><div class="text-slate-200 font-mono">{selectedDetail.read_count?.toLocaleString() ?? '-'}</div>
             {#if selectedBreakdown?.searched}
@@ -615,7 +742,7 @@
           </div>
         {:else}
           <p class="text-slate-500 text-xs">Click a map marker or table row to see the selection broken down for that sample.</p>
-          <p class="text-slate-600 text-[11px]">Counts are annotated proteins (from reads) whose best hit in a database falls in the selection; each protein counts once per database.</p>
+          <p class="text-slate-600 text-[11px]">Counts are reads carrying a gene in the selection (each annotated protein's best hit per database; a gene split into several ORFs on one read counts once). Per-M-protein rates divide by the proteins searched; same-read pairs (hgcAB) are always per million reads.</p>
         {/if}
       </div>
     </div>
