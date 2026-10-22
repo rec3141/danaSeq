@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
 
-  let { data = [], layout = {}, config = {}, onclick = null } = $props();
+  let { data = [], layout = {}, config = {}, onclick = null, minHeight = '350px' } = $props();
   let container;
 
   const darkLayout = {
@@ -63,4 +63,4 @@
   });
 </script>
 
-<div bind:this={container} class="w-full" style="min-height: 350px;"></div>
+<div bind:this={container} class="w-full" style="min-height: {minHeight};"></div>

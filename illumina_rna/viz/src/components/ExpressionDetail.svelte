@@ -9,13 +9,13 @@
   import PlotlyChart from './charts/PlotlyChart.svelte';
   import { fmtTpm, mean } from '../stores/data.js';
 
-  let { title = '', subtitle = '', facts = [], tpm = [], samples = [], onclose = null, links = [], horizontal = false } = $props();
+  let { title = '', subtitle = '', facts = [], tpm = [], samples = [], onclose = null, links = [], horizontal = false, unit = 'TPM' } = $props();
 
   let detected = $derived(tpm.filter(v => v > 0).length);
   let profile = $derived([{
     type: 'bar', x: samples, y: tpm,
     marker: { color: '#22d3ee', opacity: 0.8 },
-    hovertemplate: '%{x}<br>TPM %{y:.1f}<extra></extra>',
+    hovertemplate: `%{x}<br>${unit} %{y:.2f}<extra></extra>`,
   }]);
 </script>
 
@@ -37,7 +37,7 @@
       </div>
     {/each}
     <div class="flex justify-between">
-      <dt class="text-slate-400">Mean TPM</dt>
+      <dt class="text-slate-400">Mean {unit}</dt>
       <dd class="font-mono text-cyan-400">{fmtTpm(mean(tpm))}</dd>
     </div>
     <div class="flex justify-between">
@@ -54,12 +54,12 @@
   {/if}
   </div>
   <div class={horizontal ? 'lg:col-span-2' : 'border-t border-slate-700 pt-2 mt-3'}>
-    <PlotlyChart data={profile} layout={{
-      title: { text: 'TPM per sample', font: { size: 12 } },
+    <PlotlyChart minHeight="260px" data={profile} layout={{
+      title: { text: `${unit} per sample`, font: { size: 12 } },
       height: 260,
       margin: { t: 30, r: 10, b: 60, l: 50 },
       xaxis: { tickangle: -60, tickfont: { size: 7 }, showticklabels: samples.length <= 60 },
-      yaxis: { title: 'TPM' },
+      yaxis: { title: unit },
       bargap: 0.15,
     }} />
   </div>

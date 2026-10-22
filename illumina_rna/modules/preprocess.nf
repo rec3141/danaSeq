@@ -20,6 +20,8 @@ process QC_READS {
     tuple val(meta), path("${meta.id}.qc.fq.gz"),         emit: reads
     tuple val(meta), path("${meta.id}.qc.counts.tsv"),    emit: counts
     path("${meta.id}.qc.log"),                            emit: log
+    // Required whenever bbduk splits rRNA, so stored runs from before it existed redo QC
+    tuple val(meta), path("${meta.id}.rrna_sub.fq.gz"),   emit: rrna, optional: params.rrna_method != 'bbduk'
 
     script:
     def mem_gb   = task.memory ? task.memory.toGiga() : 16
@@ -52,8 +54,14 @@ process QC_READS {
         ordered t=${t_small} 2> filter.log \\
     ${do_rrna ? """| bbduk.sh -Xmx${rrna_gb}g in=stdin.fq interleaved=t \\
         ref="${rrna_ref}" k=31 \\
-        outu="${id}.qc.fq.gz" \\
+        outu="${id}.qc.fq.gz" outm=rrna_all.fq.gz \\
         ordered t=${t_rrna} 2> rrna.log""" : ''}
+
+    # Keep the first rRNA pairs for rRNA-read taxonomy (RRNA_TAXONOMY)
+    if [ -s rrna_all.fq.gz ]; then
+        reformat.sh in=rrna_all.fq.gz interleaved=t out="${id}.rrna_sub.fq.gz" reads=${params.rrna_tax_pairs} ow=t 2> /dev/null
+        rm -f rrna_all.fq.gz
+    fi
 
     for f in trim.log filter.log ${do_rrna ? 'rrna.log' : ''}; do
         echo "==> \$f" >> "${id}.qc.log"; cat "\$f" >> "${id}.qc.log"

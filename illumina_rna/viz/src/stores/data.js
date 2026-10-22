@@ -133,3 +133,66 @@ export function downloadTsv(filename, header, rows) {
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
+
+// ── Genes of map contigs (contig panel) and the gene search index ──────────
+const shardCache = new Map();
+
+/** Genes on map contig `pos` as GeneArrowMap features, each with per-sample
+ *  TPM (tpm[]), pooled mean TPM and the number of samples it is seen in. */
+export async function loadContigGenes(map, pos) {
+  if (!map?.gene_shards?.length) return [];
+  const S = map.gene_shard_size;
+  const k = Math.floor(pos / S);
+  if (!shardCache.has(k)) shardCache.set(k, fetchJSON(base(map.gene_shards[k])));
+  const sh = await shardCache.get(k);
+  const i = pos - sh.first;
+  const nS = map.samples.length;
+  const out = [];
+  for (let g = sh.offsets[i]; g < sh.offsets[i + 1]; g++) {
+    const len = sh.e[g] - sh.s[g] + 1;
+    const tpm = new Array(nS).fill(0);
+    for (let q = sh.co[g]; q < sh.co[g + 1]; q++) {
+      const j = sh.ci[q];
+      tpm[j] = sh.cv[q] / (len / 1e3) / (map.rpk_sum[j] || 1) * 1e6;
+    }
+    const reads = sh.cv.slice(sh.co[g], sh.co[g + 1]).reduce((a, b) => a + b, 0);
+    out.push({
+      id: sh.id[g], t: sh.t[g], s: sh.s[g], e: sh.e[g], d: sh.d[g],
+      g: sh.g[g] || '', p: sh.pv[sh.p[g]] || '', ko: sh.ko?.[g] || '',
+      tpm, reads, mean: tpm.reduce((a, b) => a + b, 0) / nS,
+      detected: sh.co[g + 1] - sh.co[g],
+    });
+  }
+  return out;
+}
+
+let searchIndex = null;
+export const geneSearchState = writable({ loading: false, ready: false, error: null });
+
+export async function ensureGeneSearch(map) {
+  if (searchIndex || !map?.gene_search) return searchIndex;
+  geneSearchState.set({ loading: true, ready: false, error: null });
+  try {
+    const raw = await fetchJSON(base(map.gene_search));
+    searchIndex = { vocab: raw.vocab.map(v => v.toLowerCase()), offsets: raw.offsets, codes: raw.codes };
+    geneSearchState.set({ loading: false, ready: true, error: null });
+  } catch (e) {
+    geneSearchState.set({ loading: false, ready: false, error: e.message });
+  }
+  return searchIndex;
+}
+
+/** Map positions of contigs with a gene product / name / KO matching q. */
+export function searchGenes(q) {
+  if (!searchIndex || !q) return null;
+  const hit = new Uint8Array(searchIndex.vocab.length);
+  let any = false;
+  searchIndex.vocab.forEach((v, c) => { if (v.includes(q)) { hit[c] = 1; any = true; } });
+  const pos = new Set();
+  if (!any) return pos;
+  const { offsets, codes } = searchIndex;
+  for (let p = 0; p + 1 < offsets.length; p++) {
+    for (let q2 = offsets[p]; q2 < offsets[p + 1]; q2++) if (hit[codes[q2]]) { pos.add(p); break; }
+  }
+  return pos;
+}

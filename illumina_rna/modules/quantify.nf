@@ -10,7 +10,7 @@ process REF_FEATURES {
     storeDir { params.store_dir ? "${params.store_dir}/references/${ref.name}" : null }
 
     input:
-    tuple val(ref), path(fasta, stageAs: 'ref/*'), path(gff, stageAs: 'gff/*')
+    tuple val(ref), path(fasta, stageAs: 'ref/*'), path(gff, stageAs: 'gff/*'), path(rrna_genes, stageAs: 'rrna/rrna_genes.tsv')
 
     output:
     tuple val(ref), path("${ref.name}.genes.saf"), path("${ref.name}.contigs.saf"),            emit: saf
@@ -24,6 +24,8 @@ process REF_FEATURES {
 
     gff_arg=""
     [ -s "${gff}" ] && gff_arg="--gff ${gff}"
+    # rRNA loci called by barrnap in the MAG analysis (eukaryotic and divergent rRNA)
+    [ -s rrna/rrna_genes.tsv ] && gff_arg="\$gff_arg --rrna-tsv rrna/rrna_genes.tsv"
     python3 "${projectDir}/bin/gff_to_saf.py" \\
         --fai ref.fai \$gff_arg \\
         --types "${params.feature_types}" \\

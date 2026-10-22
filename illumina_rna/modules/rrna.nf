@@ -94,3 +94,68 @@ process REMOVE_RRNA_SORTMERNA {
     fi
     """
 }
+
+process PREPARE_RRNA_TAXDB {
+    // SILVA SSU+LSU as a DNA FASTA keyed by accession, its lineages, and a
+    // strobealign index, for classifying the rRNA reads QC_READS sets aside.
+    label 'process_map'
+    label 'env_align'
+    conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
+    storeDir { params.store_dir ? "${params.store_dir}/references/rrna_tax" : null }
+
+    input:
+    path(refs)
+
+    output:
+    tuple path("rrna_tax.fa"), path("rrna_tax.fa.r${params.read_len}.sti"), path("rrna_tax.lineages.tsv"), emit: db
+
+    script:
+    """
+    if [ -d "${refs}" ]; then
+        find -L "${refs}/" -maxdepth 1 -type f \\( -name '*.fa' -o -name '*.fasta' -o -name '*.fna' -o -name '*.fa.gz' -o -name '*.fasta.gz' \\) | sort > ref_list.txt
+    else
+        echo "${refs}" > ref_list.txt
+    fi
+    while read -r fa; do
+        case "\$fa" in *.gz) gzip -dc "\$fa" ;; *) cat "\$fa" ;; esac
+    done < ref_list.txt \\
+    | awk -v tax=rrna_tax.lineages.tsv '
+        /^>/ { acc = substr(\$1, 2); lin = substr(\$0, length(\$1) + 2)
+               if (seen[acc]++) { skip = 1; next } skip = 0
+               print acc "\\t" lin > tax; print ">" acc; next }
+        !skip { gsub(/[Uu]/, "T"); print toupper(\$0) }' > rrna_tax.fa
+
+    n=\$(grep -c '^>' rrna_tax.fa || true)
+    if ! awk -F'\\t' 'NF == 2 && \$2 ~ /;/ { ok++ } END { exit !(ok > 0) }' rrna_tax.lineages.tsv; then
+        echo "[ERROR] no lineages in the rRNA FASTA headers; rRNA taxonomy needs SILVA-style headers (>ACC Domain;Phylum;...)" >&2
+        exit 1
+    fi
+    echo "[INFO] rRNA taxonomy DB: \$n sequences" >&2
+    strobealign --create-index -t ${task.cpus} -r ${params.read_len} rrna_tax.fa
+    """
+}
+
+process RRNA_TAXONOMY {
+    tag "${meta.id}"
+    label 'process_map'
+    label 'env_align'
+    conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
+    publishDir { "${params.outdir}/rrna_taxonomy/${meta.id}" }, mode: 'copy', enabled: !params.store_dir
+    storeDir { params.store_dir ? "${params.store_dir}/rrna_taxonomy/${meta.id}" : null }
+
+    input:
+    tuple val(meta), path(reads), path(db_fa), path(db_index), path(lineages)
+
+    output:
+    tuple val(meta), path("${meta.id}.rrna_taxonomy.tsv"), emit: taxonomy
+
+    script:
+    """
+    set -o pipefail
+    # Best SILVA hit per read (both mates counted as reads); the classifier
+    # applies the per-rank identity cutoffs.
+    strobealign --use-index -t ${task.cpus} "${db_fa}" "${reads}" 2> strobealign.log \\
+    | python3 "${projectDir}/bin/classify_rrna.py" --taxonomy "${lineages}" \\
+        --sample "${meta.id}" --out "${meta.id}.rrna_taxonomy.tsv"
+    """
+}

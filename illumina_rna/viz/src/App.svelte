@@ -7,6 +7,7 @@
   import OverviewView from './views/OverviewView.svelte';
   import ExplorerView from './views/ExplorerView.svelte';
   import MagsView from './views/MagsView.svelte';
+  import TaxonomyView from './views/TaxonomyView.svelte';
   import FunctionView from './views/FunctionView.svelte';
   import GenesView from './views/GenesView.svelte';
   import SamplesView from './views/SamplesView.svelte';
@@ -48,6 +49,8 @@
         <ExplorerView />
       {:else if activeTab === 'mags'}
         <MagsView />
+      {:else if activeTab === 'taxonomy'}
+        <TaxonomyView />
       {:else if activeTab === 'function'}
         <FunctionView />
       {:else if activeTab === 'genes'}

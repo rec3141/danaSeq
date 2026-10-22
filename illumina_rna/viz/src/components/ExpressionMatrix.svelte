@@ -15,12 +15,15 @@
   import D3Heatmap from './charts/D3Heatmap.svelte';
   import DataTable from './ui/DataTable.svelte';
   import ExpressionDetail from './ExpressionDetail.svelte';
+  import SampleTsne from './SampleTsne.svelte';
+  import PlotlyChart from './charts/PlotlyChart.svelte';
+  import { clusterMatrix } from '../lib/cluster.js';
   import { mean, fmtTpm, downloadTsv } from '../stores/data.js';
 
   let { rows = [], samples = [], noun = 'rows', title = '', note = '',
         groups = null, searchFields = ['id'], searchPlaceholder = 'search...',
         annotations = null, columns = [], facts = () => [], links = () => [],
-        labelOf = r => r.id, subtitleOf = () => '', idLabel = 'ID', idWidth = 120 } = $props();
+        labelOf = r => r.id, subtitleOf = () => '', idLabel = 'ID', idWidth = 120, unit = 'TPM', rowLabel = r => r.id } = $props();
 
   let all = $derived(rows.map(r => ({
     ...r,
@@ -61,13 +64,14 @@
   const cycleTop = () => { topN = topDefs[(topDefs.indexOf(topN) + 1) % topDefs.length]; };
 
   const sortDefs = [
-    { key: 'mean', label: 'Mean TPM' },
-    { key: 'max', label: 'Max TPM' },
+    { key: 'clustered', label: 'Clustered' },
+    { key: 'mean', label: `Mean ${unit}` },
+    { key: 'max', label: `Max ${unit}` },
     { key: 'detected', label: 'Prevalence' },
     { key: 'cv', label: 'Variability' },
     { key: 'name', label: 'A-Z' },
   ];
-  let sortBy = $state('mean');
+  let sortBy = $state('clustered');
   const cycleSort = () => { const k = sortDefs.map(d => d.key); sortBy = k[(k.indexOf(sortBy) + 1) % k.length]; };
 
   let filtered = $derived(all.filter(r => {
@@ -79,6 +83,7 @@
   const cv = r => { const m = r.meanTpm; if (!m) return 0; return Math.sqrt(mean(r.tpm.map(x => (x - m) ** 2))) / m; };
   let sorted = $derived.by(() => {
     const by = {
+      clustered: (a, b) => b.meanTpm - a.meanTpm,   // top N by mean, then Ward order
       mean: (a, b) => b.meanTpm - a.meanTpm,
       max: (a, b) => b.maxTpm - a.maxTpm,
       detected: (a, b) => b.detected - a.detected || b.meanTpm - a.meanTpm,
@@ -87,7 +92,9 @@
     }[sortBy];
     return [...filtered].sort(by);
   });
-  let shown = $derived(sorted.slice(0, topN));
+  // Clustered: Ward on log1p TPM orders both the shown rows and the samples
+  let clust = $derived(sortBy === 'clustered' && sorted.length > 2 ? clusterMatrix(sorted.slice(0, topN).map(r => r.tpm)) : null);
+  let shown = $derived(clust ? clust.rowOrder.map(i => sorted[i]) : sorted.slice(0, topN));
 
   let maxTpm = $derived(Math.max(1, ...shown.flatMap(r => r.tpm)));
   let colorScale = $derived.by(() => {
@@ -99,16 +106,16 @@
     module_ids: samples, module_names: samples,
     matrix: shown.map(r => r.tpm),
     row_order: shown.map((_, i) => i),
-    col_order: samples.map((_, i) => i),
+    col_order: clust ? clust.colOrder : samples.map((_, i) => i),
   } : null);
   // Column 0 is the row label (clickable, bold when selected)
   let rowAnnotations = $derived(heatmapData ? [
-    { label: idLabel, values: shown.map(r => r.id), width: idWidth },
+    { label: idLabel, values: shown.map(r => rowLabel(r)), width: idWidth },
     ...(annotations ? annotations(shown) ?? [] : []),
   ] : null);
   const tooltip = (val, id, sample) => {
     const r = shown.find(x => x.id === id);
-    return `<strong>${sample}</strong><br>${r ? labelOf(r) : id}<br>TPM: ${fmtTpm(val)}`;
+    return `<strong>${sample}</strong><br>${r ? labelOf(r) : id}<br>${unit}: ${fmtTpm(val)}`;
   };
 
   // Many samples: full-width heatmap, detail panel below it
@@ -121,8 +128,8 @@
 
   let tableColumns = $derived([
     ...columns,
-    { key: 'meanTpm', label: 'Mean TPM', render: v => fmtTpm(v) },
-    { key: 'maxTpm', label: 'Max TPM', render: v => fmtTpm(v) },
+    { key: 'meanTpm', label: `Mean ${unit}`, render: v => fmtTpm(v) },
+    { key: 'maxTpm', label: `Max ${unit}`, render: v => fmtTpm(v) },
     { key: 'detected', label: 'Samples' },
   ]);
   let tableRows = $derived(sorted.slice(0, 500));
@@ -185,16 +192,31 @@
     </div>
     <div class="overflow-auto" style="max-height: 700px;">
       <D3Heatmap data={heatmapData} onRowClick={id => selected = id} tooltipFormat={tooltip}
-        {colorScale} legendLabel={['0', `${fmtTpm(maxTpm)} TPM`]} selectedRow={selected} {rowAnnotations} />
+        {colorScale} legendLabel={['0', `${fmtTpm(maxTpm)} ${unit}`]} selectedRow={selected} {rowAnnotations} />
     </div>
-    {#if note}<div class="mt-2 text-xs text-slate-500">{note}</div>{/if}
+    <div class="mt-2 text-xs text-slate-500">{note}{sortBy === 'clustered' ? ' Ward clustering of rows and samples on log(value+1).' : ''}</div>
   </div>
 
   {#if selectedRow}
     <ExpressionDetail title={selectedRow.id} subtitle={subtitleOf(selectedRow)}
-      facts={facts(selectedRow)} tpm={selectedRow.tpm} {samples} links={links(selectedRow)}
+      facts={facts(selectedRow)} tpm={selectedRow.tpm} {samples} links={links(selectedRow)} {unit}
       horizontal={wide} onclose={() => selected = null} />
   {/if}
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+  <SampleTsne {samples} matrix={shown.map(r => r.tpm)} what="shown {noun}" />
+  <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+    <PlotlyChart data={[{
+      type: 'bar', x: shown.map(r => labelOf(r)), y: shown.map(r => r.meanTpm),
+      marker: { color: '#22d3ee', opacity: 0.8 },
+      hovertemplate: `%{x}: %{y:,.2f} ${unit}<extra></extra>`,
+    }]} layout={{
+      title: { text: `Mean ${unit} (shown ${noun})`, font: { size: 14 } },
+      xaxis: { tickangle: -45, tickfont: { size: 8 }, showticklabels: shown.length <= 60, automargin: true },
+      yaxis: { title: `Mean ${unit}` },
+    }} />
+  </div>
 </div>
 {:else}
   <div class="flex flex-col items-center justify-center py-24 text-center">
@@ -206,13 +228,13 @@
 <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
   <div class="flex items-center justify-between mb-2">
   <h3 class="text-sm font-medium text-slate-400">
-    {searchDebounced ? `${filtered.length.toLocaleString()} matching ${noun}` : `Top ${Math.min(500, sorted.length)} ${noun} by ${sortDefs.find(d => d.key === sortBy)?.label}`}
+    {searchDebounced ? `${filtered.length.toLocaleString()} matching ${noun}` : `Top ${Math.min(500, sorted.length)} ${noun} by ${sortBy === 'clustered' ? `Mean ${unit}` : sortDefs.find(d => d.key === sortBy)?.label}`}
     {#if sorted.length > 500}<span class="text-slate-500 text-xs">({sorted.length.toLocaleString()} total)</span>{/if}
   </h3>
   <button
     class="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
     onclick={exportMatrix}
-    title="Export all {sorted.length.toLocaleString()} rows with TPM per sample"
+    title="Export all {sorted.length.toLocaleString()} rows with {unit} per sample"
   >TSV + samples</button>
   </div>
   <DataTable columns={tableColumns} rows={tableRows} idKey="id" maxHeight="400px" selectedId={selected} onRowClick={row => selected = row.id} />

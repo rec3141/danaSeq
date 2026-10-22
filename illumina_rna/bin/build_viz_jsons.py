@@ -34,7 +34,7 @@ def main():
             dst = os.path.join(a.out, os.path.basename(src))
             if os.path.abspath(src) != os.path.abspath(dst):
                 shutil.copyfile(src, dst)
-        for kind in ("samples", "bins", "functions", "top_genes", "contig_map"):
+        for kind in ("samples", "bins", "functions", "top_genes", "contig_map", "taxonomy"):
             if os.path.exists(os.path.join(a.tables, f"{name}.{kind}.json.gz")):
                 files[kind] = f"{name}.{kind}.json.gz"
         refs.append({

@@ -22,7 +22,8 @@ process SUMMARIZE_EXPRESSION {
           path(annotations,   stageAs: 'ref/annotations.tsv'),
           path(contig_explorer, stageAs: 'ref/contig_explorer'),
           path(kofam,         stageAs: 'ref/kofam.tsv'),
-          path(read_counts,   stageAs: 'readcounts/*')
+          path(read_counts,   stageAs: 'readcounts/*'),
+          path(rrna_tax,      stageAs: 'rrnatax/*')
 
     output:
     tuple val(ref_name), path("${ref_name}.*"),       emit: tables
@@ -42,7 +43,7 @@ process SUMMARIZE_EXPRESSION {
         --ref "${ref_name}" \\
         --genes-dir genes --contigs-dir contigs \\
         --summary-dir fcsummary --flagstat-dir flagstat \\
-        --readcounts-dir readcounts \\
+        --readcounts-dir readcounts --rrna-tax-dir rrnatax \\
         --gene-annot ref/genes.tsv.gz --contig-lengths ref/contig_lengths.tsv \\
         --bins ref/bins.tsv --checkm2 ref/checkm2.tsv --gtdbtk ref/gtdbtk.tsv \\
         --annotations ref/annotations.tsv \\

@@ -3,15 +3,14 @@
   import StatCard from '../components/layout/StatCard.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
   import { samples, bins, median, fmtInt, fmtPct, qualityTier } from '../stores/data.js';
-  import { tsne, brayCurtis } from '../lib/tsne.js';
 
   // Where each sample's raw reads went; every read lands in exactly one fate.
   // House hues (MAG dashboard palette) in an order validated for adjacent
   // stacks: CVD dE 10.5, normal-vision dE 21.2, all >= 3:1 on slate-800. They
   // sit above the dark-mode lightness band on purpose, to match the siblings.
   const FATES = [
-    { key: 'assigned',  label: 'Assigned to a gene', color: '#22d3ee' },
-    { key: 'nofeature', label: 'Mapped, no gene',    color: '#fb923c' },
+    { key: 'assigned',  label: 'Protein-coding genes', color: '#22d3ee' },
+    { key: 'nofeature', label: 'Mapped, other',      color: '#fb923c' },
     { key: 'unmapped',  label: 'Not in assembly',    color: '#34d399' },
     { key: 'human',     label: 'Human',              color: '#a78bfa' },
     { key: 'rrna',      label: 'rRNA',               color: '#fbbf24' },
@@ -24,10 +23,13 @@
     const norrna = r.reads_norrna ?? filtered;
     const final = r.reads_nohuman ?? norrna;
     const mapped = r.reads_mapped ?? 0;
-    const assigned = 2 * (r.pairs_assigned ?? 0);
+    // CDS pairs when the run reports them; older runs only have all features
+    const assigned = 2 * (r.pairs_cds ?? r.pairs_assigned ?? 0);
+    // rRNA = what the filter removed + mapped reads on rRNA loci it missed
+    const residual = 2 * (r.pairs_rrna_features ?? 0);
     const f = {
-      qc: raw - filtered, rrna: filtered - norrna, human: norrna - final,
-      unmapped: Math.max(0, final - mapped), nofeature: Math.max(0, mapped - assigned), assigned,
+      qc: raw - filtered, rrna: filtered - norrna + residual, human: norrna - final,
+      unmapped: Math.max(0, final - mapped), nofeature: Math.max(0, mapped - assigned - residual), assigned,
     };
     return { ...r, raw, f, genes_detected: $samples.genes_detected?.[i] };
   }));
@@ -35,7 +37,7 @@
   // ── Read fate chart ──
   const sortDefs = [
     { key: 'name', label: 'Sample' },
-    { key: 'assigned', label: 'Assigned' },
+    { key: 'assigned', label: 'Protein-coding' },
     { key: 'rrna', label: 'rRNA' },
     { key: 'mapped', label: 'Mapped' },
   ];
@@ -47,7 +49,7 @@
     const by = {
       name: (a, b) => a.sample.localeCompare(b.sample),
       assigned: (a, b) => (b.f.assigned / b.raw) - (a.f.assigned / a.raw),
-      rrna: (a, b) => (b.pct_rrna ?? 0) - (a.pct_rrna ?? 0),
+      rrna: (a, b) => (b.f.rrna / b.raw) - (a.f.rrna / a.raw),
       mapped: (a, b) => (b.pct_mapped ?? 0) - (a.pct_mapped ?? 0),
     }[sortBy];
     return [...rows].sort(by);
@@ -75,63 +77,12 @@
     return u ? 100 - median(u.tpm) / 1e4 : null;
   });
 
-  // ── Sample t-SNE: Bray-Curtis on fourth-root MAG expression shares ──
-  const colorDefs = [
-    { key: 'pct_assigned', label: '% assigned' },
-    { key: 'pct_rrna', label: '% rRNA' },
-    { key: 'pct_mapped', label: '% mapped' },
-    { key: 'run', label: 'Sequencing run' },
-  ];
-  let tsneColor = $state('pct_assigned');
-
-  let embedding = $derived.by(() => {
-    const B = ($bins?.bins ?? []).filter(b => b.bin !== 'unbinned');
-    const names = $bins?.samples ?? [];
-    if (names.length < 4 || !B.length) return null;
-    const vecs = names.map((_, j) => {
-      const col = B.map(b => b.tpm[j]);
-      const tot = col.reduce((a, b) => a + b, 0) || 1;
-      return col.map(v => Math.pow(v / tot, 0.25));
-    });
-    return { names, coords: tsne(brayCurtis(vecs)) };
-  });
-
-  let tsneTraces = $derived.by(() => {
-    if (!embedding) return [];
-    const byName = Object.fromEntries(rows.map(r => [r.sample, r]));
-    const marker = { size: 10, line: { color: '#0f172a', width: 1 } };
-    const pt = idx => ({
-      type: 'scatter', mode: 'markers',
-      x: idx.map(i => embedding.coords[i][0]), y: idx.map(i => embedding.coords[i][1]),
-      hovertext: idx.map(i => {
-        const r = byName[embedding.names[i]] ?? {};
-        return `<b>${embedding.names[i]}</b><br>rRNA ${fmtPct(r.pct_rrna)} · mapped ${fmtPct(r.pct_mapped)} · assigned ${fmtPct(r.pct_assigned)}`;
-      }),
-      hovertemplate: '%{hovertext}<extra></extra>',
-    });
-    const all = embedding.names.map((_, i) => i);
-    if (tsneColor === 'run') {
-      // Run = flowcell (+ lane) prefix of the sample name
-      const runOf = n => n.split('_').slice(0, -1).join('_') || n;
-      const groups = new Map();
-      for (const i of all) { const k = runOf(embedding.names[i]); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(i); }
-      const pal = ['#22d3ee', '#f472b6', '#fbbf24', '#34d399', '#a78bfa', '#fb923c', '#60a5fa', '#f87171', '#a3e635', '#e879f9', '#2dd4bf', '#facc15'];
-      return [...groups.keys()].sort().map((k, g) => ({ ...pt(groups.get(k)), name: k,
-        marker: { ...marker, color: g < pal.length ? pal[g] : '#475569' } }));
-    }
-    return [{ ...pt(all), marker: { ...marker,
-      color: all.map(i => byName[embedding.names[i]]?.[tsneColor] ?? null),
-      colorscale: 'Viridis',
-      colorbar: { title: { text: colorDefs.find(d => d.key === tsneColor)?.label, side: 'right' }, thickness: 10 },
-    } }];
-  });
-
   const sampleColumns = [
     { key: 'sample', label: 'Sample' },
     { key: 'reads_raw', label: 'Raw reads', render: v => fmtInt(v) },
-    { key: 'pct_rrna', label: 'rRNA', render: v => fmtPct(v) },
+    { key: 'pct_rrna_total', label: 'rRNA', render: (v, r) => fmtPct(v ?? r.pct_rrna) },
     { key: 'pct_mapped', label: 'Mapped', render: v => fmtPct(v) },
-    { key: 'pct_assigned', label: 'Assigned', render: v => fmtPct(v) },
+    { key: 'pct_cds', label: 'On CDS', render: (v, r) => fmtPct(v ?? r.pct_assigned) },
     { key: 'genes_detected', label: 'Genes detected', render: v => fmtInt(v) },
   ];
 </script>
@@ -142,7 +93,7 @@
     <StatCard label="Genes" value={fmtInt($samples.n_genes)} sub="{fmtInt($samples.n_contigs)} contigs" color="slate" />
     <StatCard label="MAGs" value={magCounts.n.toLocaleString()}
       sub={magCounts.none === magCounts.n ? 'no CheckM2 yet' : `${magCounts.HQ} HQ / ${magCounts.MQ} MQ / ${magCounts.LQ} LQ`} color="emerald" />
-    <StatCard label="Median rRNA" value={fmtPct(median(rows.map(r => r.pct_rrna)))} sub="of reads after QC" color="amber" />
+    <StatCard label="Median rRNA" value={fmtPct(median(rows.map(r => r.pct_rrna_total ?? r.pct_rrna)))} sub="filtered + residual on rRNA loci" color="amber" />
     <StatCard label="Median Mapped" value={fmtPct(median(rows.map(r => r.pct_mapped)))} sub="of non-rRNA, non-human" color="cyan" />
     <StatCard label="Expression in MAGs" value={fmtPct(binnedShare)} sub="median share of TPM" color="purple" />
   </div>
@@ -173,28 +124,7 @@
     }} />
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      <div class="flex items-center gap-3 text-xs text-slate-400 mb-1">
-        <label class="flex items-center gap-2">
-          Color by:
-          <select class="bg-slate-800 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1" bind:value={tsneColor}>
-            {#each colorDefs as d}<option value={d.key}>{d.label}</option>{/each}
-          </select>
-        </label>
-      </div>
-      {#if embedding}
-        <PlotlyChart data={tsneTraces} layout={{
-          title: { text: `Sample t-SNE (${embedding.names.length} samples, Bray-Curtis on ⁴√ MAG expression)`, font: { size: 14 } },
-          xaxis: { showticklabels: false, zeroline: false, title: 't-SNE 1' },
-          yaxis: { showticklabels: false, zeroline: false, title: 't-SNE 2' },
-          showlegend: tsneColor === 'run',
-          legend: { font: { size: 10 } },
-        }} />
-      {:else}
-        <p class="text-slate-500 text-sm py-12 text-center">Needs at least 4 samples and MAG bins</p>
-      {/if}
-    </div>
+  <div class="grid grid-cols-1 gap-6">
     <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
       <h3 class="text-sm font-medium text-slate-400 mb-2">Samples</h3>
       <DataTable columns={sampleColumns} rows={rows} idKey="sample" maxHeight="420px" />

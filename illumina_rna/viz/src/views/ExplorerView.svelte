@@ -3,7 +3,9 @@
   import PlotlyChart from '../components/charts/PlotlyChart.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
   import { onMount } from 'svelte';
+  import ContigGenes from '../components/ContigGenes.svelte';
   import { contigMap, contigMapState, loadContigMap, loadContigLayer, refName,
+           loadContigGenes, ensureGeneSearch, searchGenes, geneSearchState,
            fmtBp, fmtInt, downloadTsv } from '../stores/data.js';
 
   // Contig map from the MAG analysis' t-SNE, with RNA expression laid over it.
@@ -29,6 +31,7 @@
       kaiju_genus: ge ? map.kaiju_genus_vocab[ge[i]] : '',
       reads: map.total_reads[i],
       n_detected: map.n_detected[i],
+      rrna: map.rrna?.[i] === 1,
       // pooled RPKM across all samples
       depth: map.total_reads[i] / (map.length[i] / 1e3) / (grand / 1e6),
     }));
@@ -149,10 +152,15 @@
     timer = setTimeout(() => { searchDebounced = q.trim().toLowerCase(); }, 300);
     return () => clearTimeout(timer);
   });
+  // Gene names, products and KOs: the index loads on the first keystroke
+  $effect(() => { if (searchQuery.length > 0 && map) ensureGeneSearch(map); });
+  let geneState = $derived($geneSearchState);
   let searchMatchIds = $derived.by(() => {
     const q = searchDebounced;
     if (!q || !filteredData) return null;
     const out = new Set();
+    const genePos = geneState.ready ? searchGenes(q) : null;
+    if (genePos) for (const c of filteredData.contigs) if (genePos.has(c.idx)) out.add(c.id);
     for (const c of filteredData.contigs) {
       if (c.id.toLowerCase().includes(q) || c.bin.toLowerCase().includes(q)
           || c.kaiju_phylum.toLowerCase().includes(q) || c.kaiju_genus.toLowerCase().includes(q)) out.add(c.id);
@@ -185,11 +193,17 @@
   let detail = $derived(explorerData?.contigs?.find(c => c.id === detailId) ?? null);
   let detailProfile = $state(null);
   let profileProgress = $state(0);
+  let detailGenes = $state(null);
+  let genesLoading = $state(false);
   async function openDetail(id) {
     detailId = id;
     detailProfile = null;
     const c = explorerData.contigs.find(x => x.id === id);
     if (!c) return;
+    genesLoading = true;
+    detailGenes = null;
+    loadContigGenes(map, c.idx).then(g => { if (detailId === id) { detailGenes = g; genesLoading = false; } })
+                               .catch(() => { if (detailId === id) { detailGenes = []; genesLoading = false; } });
     const n = map.samples.length;
     const out = new Array(n).fill(null);
     profileProgress = 0;
@@ -325,7 +339,7 @@
   <span class="text-slate-600">|</span>
 
   <div class="relative flex items-center">
-    <input type="text" bind:value={searchQuery} placeholder={hasTaxa ? 'contig, MAG, taxon...' : 'contig, MAG...'}
+    <input type="text" bind:value={searchQuery} placeholder={hasTaxa ? 'contig, MAG, taxon, gene, product, KO...' : 'contig, MAG, gene, product, KO...'}
       class="w-48 px-2 py-1 rounded bg-slate-800 border border-slate-600 text-slate-200 text-xs placeholder-slate-500 focus:border-cyan-400 focus:outline-none" />
     {#if searchQuery}
       <button class="absolute right-1 text-slate-500 hover:text-slate-300" onclick={() => { searchQuery = ''; }} title="Clear search">
@@ -333,7 +347,8 @@
       </button>
     {/if}
   </div>
-  {#if searchMatchIds}<span class="text-amber-400 font-medium">{searchMatchIds.size.toLocaleString()} matches</span>{/if}
+  {#if geneState.loading}<span class="text-slate-500 italic">loading gene index...</span>{/if}
+  {#if searchMatchIds}<span class="text-amber-400 font-medium">{searchMatchIds.size.toLocaleString()} matching contigs</span>{/if}
   {#if isFiltered || searchMatchIds}
     {#if isFiltered}<span class="text-cyan-400 font-medium">{filteredData.contigs.length.toLocaleString()} / {explorerData.n_total.toLocaleString()}</span>{/if}
     <button class="text-slate-500 hover:text-slate-300 underline" onclick={resetFilters}>reset</button>
@@ -354,45 +369,10 @@
     </div>
   </div>
 
-  <div class="w-1/2 min-w-[380px] max-w-[560px]">
-    {#if detail}
-      <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-        <div class="flex items-start justify-between mb-1">
-          <h3 class="text-cyan-400 font-semibold font-mono">{detail.id}</h3>
-          <button class="text-slate-500 hover:text-slate-300 text-lg leading-none" onclick={() => detailId = null} title="Close">&times;</button>
-        </div>
-        <p class="text-xs text-slate-500 mb-3">{detail.bin || 'unbinned'}{detail.kaiju_genus || detail.kaiju_phylum ? ` · ${detail.kaiju_genus || detail.kaiju_phylum}` : ''}</p>
-        <dl class="space-y-2 text-sm">
-          <div class="flex justify-between"><dt class="text-slate-400">Length</dt><dd class="font-mono">{detail.length.toLocaleString()} bp</dd></div>
-          <div class="flex justify-between"><dt class="text-slate-400">MAG</dt><dd class="font-mono text-emerald-400">{detail.bin || '-'}</dd></div>
-          {#if hasTaxa}
-            <div class="flex justify-between"><dt class="text-slate-400">Phylum (Kaiju)</dt><dd class="font-mono">{detail.kaiju_phylum || '-'}</dd></div>
-            <div class="flex justify-between"><dt class="text-slate-400">Genus (Kaiju)</dt><dd class="font-mono">{detail.kaiju_genus || '-'}</dd></div>
-          {/if}
-          <div class="flex justify-between"><dt class="text-slate-400">Read pairs</dt><dd class="font-mono">{fmtInt(detail.reads)}</dd></div>
-          <div class="flex justify-between"><dt class="text-slate-400">Pooled RPKM</dt><dd class="font-mono text-cyan-400">{fmtExp(detail.depth)}</dd></div>
-          <div class="flex justify-between"><dt class="text-slate-400">Detected in</dt><dd class="font-mono">{detail.n_detected} / {map.samples.length} samples</dd></div>
-        </dl>
-        <div class="border-t border-slate-700 pt-2 mt-3">
-          {#if detailProfile}
-            <PlotlyChart data={[{
-              type: 'bar', x: map.samples, y: detailProfile,
-              marker: { color: map.samples.map((_, j) => j === sampleIdx && colorMode === 'sample' ? '#fbbf24' : '#22d3ee'), opacity: 0.85 },
-              hovertemplate: '%{x}<br>RPKM %{y:.2f}<extra></extra>',
-            }]} layout={{
-              title: { text: 'RPKM per sample', font: { size: 12 } },
-              height: 300, margin: { t: 30, r: 10, b: 60, l: 50 },
-              xaxis: { tickangle: -60, tickfont: { size: 7 }, showticklabels: map.samples.length <= 60 },
-              yaxis: { title: 'RPKM' }, bargap: 0.15,
-            }} />
-          {:else}
-            <p class="text-slate-500 text-xs py-10 text-center">Loading sample layers ({profileProgress}/{map.samples.length})...</p>
-          {/if}
-        </div>
-      </div>
-    {:else}
-      <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 text-slate-500 text-sm py-12 text-center">Click a contig for its expression across samples</div>
-    {/if}
+  <div class="w-1/2 min-w-[420px] max-w-[640px]">
+    <ContigGenes contig={detail} genes={detailGenes} loading={genesLoading} samples={map.samples}
+      sampleIdx={colorMode === 'sample' ? sampleIdx : null} contigProfile={detailProfile}
+      query={searchDebounced} onclose={() => detailId = null} />
   </div>
 </div>
 

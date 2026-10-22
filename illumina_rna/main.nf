@@ -235,6 +235,7 @@ def referencesFromMag(dir_path) {
         gtdbtk:      firstExisting(["${dir}/taxonomy/gtdbtk/gtdbtk_taxonomy.tsv"]),
         annotations: firstExisting(["${dir}/metabolism/merged/merged_annotations.tsv"]),
         kofam:       firstExisting(["${dir}/metabolism/kofamscan/kofamscan_results.tsv"]),
+        rrna_genes:  firstExisting(["${dir}/taxonomy/rrna/rrna_genes.tsv"]),
         // contig t-SNE computed by the mag_analysis viz, reused for the RNA map
         contig_explorer: firstExisting([
             "${dir}/viz/data/contig_explorer_manifest.json.gz",
@@ -301,6 +302,8 @@ include { REMOVE_HUMAN }          from './modules/preprocess'
 include { FASTQC }                from './modules/preprocess'
 include { PREPARE_RRNA_REF }      from './modules/rrna'
 include { REMOVE_RRNA_SORTMERNA } from './modules/rrna'
+include { PREPARE_RRNA_TAXDB }    from './modules/rrna'
+include { RRNA_TAXONOMY }         from './modules/rrna'
 include { REF_FEATURES }          from './modules/quantify'
 include { STROBEALIGN_INDEX }     from './modules/alignment'
 include { MAP_READS_STROBEALIGN } from './modules/alignment'
@@ -331,7 +334,7 @@ workflow {
     // Only the name travels as the ref meta; files go through path() inputs so
     // they are staged (and bound into containers) properly.
     ch_ref_fasta = Channel.fromList(refs.collect { r -> [[name: r.name], r.fasta] })
-    ch_ref_gff   = Channel.fromList(refs.collect { r -> [[name: r.name], r.fasta, r.gff ?: empty] })
+    ch_ref_gff   = Channel.fromList(refs.collect { r -> [[name: r.name], r.fasta, r.gff ?: empty, r.rrna_genes ?: empty] })
     ch_ref_extra = Channel.fromList(refs.collect { r ->
         [r.name, r.bins ?: empty, r.checkm2 ?: empty, r.gtdbtk ?: empty, r.annotations ?: empty,
          r.contig_explorer ?: empty, r.kofam ?: empty]
@@ -352,6 +355,11 @@ workflow {
         ? PREPARE_RRNA_REF(Channel.value(file(params.rrna_refs, checkIfExists: true))).ref
         : Channel.value(empty)
 
+    def do_rrna_tax = params.rrna_method == 'bbduk' && params.run_rrna_taxonomy
+    ch_rrna_taxdb = do_rrna_tax
+        ? PREPARE_RRNA_TAXDB(Channel.value(file(params.rrna_refs, checkIfExists: true))).db
+        : Channel.empty()
+
     if (params.run_remove_human) {
         def human = file(params.human_ref, checkIfExists: true)
         ch_human_index = HUMAN_INDEX(Channel.value(human)).index
@@ -370,6 +378,14 @@ workflow {
     QC_READS(ch_raw_reads, ch_rrna_ref)
     ch_readcounts = QC_READS.out.counts
     ch_reads = QC_READS.out.reads
+
+    // Taxonomy of the rRNA reads the QC split off
+    if (do_rrna_tax) {
+        RRNA_TAXONOMY(QC_READS.out.rrna.combine(ch_rrna_taxdb))
+        ch_rrna_tax = RRNA_TAXONOMY.out.taxonomy.map { meta, f -> f }.collect()
+    } else {
+        ch_rrna_tax = Channel.value([])
+    }
 
     if (params.rrna_method == 'sortmerna') {
         REMOVE_RRNA_SORTMERNA(ch_reads)
@@ -422,6 +438,7 @@ workflow {
             .join(REF_FEATURES.out.annotation.map { ref, annot, lengths -> [ref.name, annot, lengths] })
             .join(ch_ref_extra)
             .combine(ch_all_counts.map { files -> [files] })
+            .combine(ch_rrna_tax.ifEmpty([]).map { files -> [files] })
 
         SUMMARIZE_EXPRESSION(ch_summary_input)
 

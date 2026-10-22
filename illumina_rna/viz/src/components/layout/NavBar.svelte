@@ -5,6 +5,7 @@
     { id: 'overview', label: 'Overview' },
     { id: 'explorer', label: 'Explorer' },
     { id: 'mags', label: 'MAGs' },
+    { id: 'taxonomy', label: 'Taxonomy' },
     { id: 'function', label: 'Function' },
     { id: 'genes', label: 'Genes' },
     { id: 'samples', label: 'Samples' },

@@ -4,6 +4,8 @@
   import D3Heatmap from '../components/charts/D3Heatmap.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
   import ExpressionDetail from '../components/ExpressionDetail.svelte';
+  import SampleTsne from '../components/SampleTsne.svelte';
+  import { clusterMatrix } from '../lib/cluster.js';
   import { bins, index, mean, fmtTpm, fmtInt, fmtBp, qualityTier, gtdbRanks, lastRank, downloadTsv } from '../stores/data.js';
 
   let names = $derived($bins?.samples ?? []);
@@ -53,6 +55,7 @@
   const cycleTop = () => { topN = topDefs[(topDefs.indexOf(topN) + 1) % topDefs.length]; };
 
   const sortDefs = [
+    { key: 'clustered', label: 'Clustered' },
     { key: 'mean', label: 'Mean TPM' },
     { key: 'max', label: 'Max TPM' },
     { key: 'detected', label: 'Prevalence' },
@@ -62,7 +65,7 @@
     { key: 'taxonomy', label: 'Taxonomy' },
     { key: 'size', label: 'Size' },
   ];
-  let sortBy = $state('mean');
+  let sortBy = $state('clustered');
   const cycleSort = () => { const k = sortDefs.map(d => d.key); sortBy = k[(k.indexOf(sortBy) + 1) % k.length]; };
 
   let filtered = $derived(all.filter(b => {
@@ -78,6 +81,7 @@
   const cv = b => { const m = b.meanTpm; if (!m) return 0; const v = mean(b.tpm.map(x => (x - m) ** 2)); return Math.sqrt(v) / m; };
   let sorted = $derived.by(() => {
     const by = {
+      clustered: (a, b) => b.meanTpm - a.meanTpm,   // top N by mean, then Ward order
       mean: (a, b) => b.meanTpm - a.meanTpm,
       max: (a, b) => b.maxTpm - a.maxTpm,
       detected: (a, b) => b.detected - a.detected || b.meanTpm - a.meanTpm,
@@ -89,7 +93,10 @@
     }[sortBy];
     return [...filtered].sort(by);
   });
-  let shown = $derived(topN ? sorted.slice(0, topN) : sorted);
+  let topRows = $derived(topN ? sorted.slice(0, topN) : sorted);
+  // Clustered: Ward on log1p TPM orders both the shown MAGs and the samples
+  let clust = $derived(sortBy === 'clustered' && topRows.length > 2 ? clusterMatrix(topRows.map(b => b.tpm)) : null);
+  let shown = $derived(clust ? clust.rowOrder.map(i => topRows[i]) : topRows);
 
   // ── Heatmap ──
   let maxTpm = $derived(Math.max(1, ...shown.flatMap(b => b.tpm)));
@@ -102,7 +109,7 @@
     module_ids: names, module_names: names,
     matrix: shown.map(b => b.tpm),
     row_order: shown.map((_, i) => i),
-    col_order: names.map((_, i) => i),
+    col_order: clust ? clust.colOrder : names.map((_, i) => i),
   } : null);
 
   const tierColor = v => v === 'HQ' ? '#34d399' : v === 'MQ' ? '#fbbf24' : '#64748b';
@@ -153,13 +160,6 @@
     y: shown.filter(b => b.id !== 'unbinned').map(b => b.tpm[j]).filter(v => v > 0),
     marker: { color: '#22d3ee' }, line: { width: 1 }, boxpoints: false,
   })) : []);
-  let barData = $derived([{
-    type: 'bar',
-    x: shown.map(b => b.taxon ? `${b.id} · ${b.taxon}` : b.id),
-    y: shown.map(b => b.meanTpm),
-    marker: { color: '#22d3ee', opacity: 0.8 },
-    hovertemplate: '%{x}: %{y:,.1f} TPM<extra></extra>',
-  }]);
 
   const columns = [
     { key: 'id', label: 'MAG' },
@@ -238,7 +238,7 @@
         <D3Heatmap data={heatmapData} onRowClick={id => selected = id} tooltipFormat={tooltip}
           {colorScale} legendLabel={['0', `${fmtTpm(maxTpm)} TPM`]} selectedRow={selected} {rowAnnotations} />
       </div>
-      <div class="mt-2 text-xs text-slate-500">Sum of gene TPM per MAG, log-scaled colour. Click a row for its detail.</div>
+      <div class="mt-2 text-xs text-slate-500">Sum of protein-coding gene TPM per MAG, log-scaled colour.{sortBy === 'clustered' ? ' Ward clustering of MAGs and samples on log(TPM+1).' : ''} Click a row for its detail.</div>
     </div>
 
     {#if selectedBin}
@@ -260,13 +260,7 @@
         showlegend: false,
       }} />
     </div>
-    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
-      <PlotlyChart data={barData} layout={{
-        title: { text: 'Mean TPM per MAG (shown bins)', font: { size: 14 } },
-        xaxis: { tickangle: -45, tickfont: { size: 8 }, showticklabels: shown.length <= 100 },
-        yaxis: { title: 'Mean TPM' },
-      }} />
-    </div>
+    <SampleTsne samples={names} matrix={shown.filter(b => b.id !== 'unbinned').map(b => b.tpm)} what="shown MAGs" />
   </div>
   {:else}
     <div class="flex flex-col items-center justify-center py-24 text-center">
