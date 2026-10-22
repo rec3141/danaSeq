@@ -1,25 +1,19 @@
 <script>
-  /**
-   * Shared Plotly wrapper matching the patterns used in mag_analysis and
-   * nanopore_live: dark theme, scroll-zoom, drag-pan, mode-bar cleaned up.
-   * Pass `data`, `layout`, `config` to override.
-   */
   import { onMount } from 'svelte';
   import Plotly from 'plotly.js-dist-min';
 
-  let { data = [], layout = {}, config = {}, onclick = null, height = '500px' } = $props();
+  let { data = [], layout = {}, config = {}, onclick = null, minHeight = '350px' } = $props();
   let container;
 
   const darkLayout = {
-    paper_bgcolor: '#0f172a',
-    plot_bgcolor: '#0f172a',
-    font: { color: '#cbd5e1', family: 'Inter, sans-serif', size: 11 },
+    paper_bgcolor: '#1e293b',
+    plot_bgcolor: '#1e293b',
+    font: { color: '#94a3b8', family: 'Inter, sans-serif', size: 12 },
     xaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155' },
     yaxis: { gridcolor: '#1e293b', zerolinecolor: '#334155' },
-    margin: { t: 30, r: 30, b: 50, l: 60 },
-    legend: { bgcolor: 'transparent', font: { color: '#cbd5e1' } },
+    margin: { t: 40, r: 20, b: 50, l: 60 },
+    legend: { bgcolor: 'transparent', font: { color: '#94a3b8' } },
     dragmode: 'pan',
-    hovermode: 'closest',
   };
 
   const defaultConfig = {
@@ -31,16 +25,16 @@
       'select2d', 'lasso2d', 'autoScale2d',
       'toggleSpikelines', 'hoverCompareCartesian', 'hoverClosestCartesian',
     ],
+    modeBarButtonsToAdd: [],
   };
 
   function mergeDeep(target, source) {
     const result = { ...target };
     for (const key of Object.keys(source)) {
-      const sv = source[key];
-      if (sv && typeof sv === 'object' && !Array.isArray(sv)) {
-        result[key] = mergeDeep(result[key] || {}, sv);
+      if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+        result[key] = mergeDeep(result[key] || {}, source[key]);
       } else {
-        result[key] = sv;
+        result[key] = source[key];
       }
     }
     return result;
@@ -50,8 +44,14 @@
     const merged = mergeDeep(darkLayout, layout);
     const cfg = { ...defaultConfig, ...config };
     Plotly.newPlot(container, data, merged, cfg);
-    if (onclick) container.on('plotly_click', onclick);
-    return () => Plotly.purge(container);
+
+    if (onclick) {
+      container.on('plotly_click', onclick);
+    }
+
+    return () => {
+      Plotly.purge(container);
+    };
   });
 
   $effect(() => {
@@ -63,4 +63,4 @@
   });
 </script>
 
-<div bind:this={container} class="w-full" style="height: {height};"></div>
+<div bind:this={container} class="w-full" style="min-height: {minHeight};"></div>

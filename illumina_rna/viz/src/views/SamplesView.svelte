@@ -1,72 +1,40 @@
 <script>
-  import { samples, overview } from '../stores/data.js';
+  import DataTable from '../components/ui/DataTable.svelte';
+  import StatCard from '../components/layout/StatCard.svelte';
+  import { samples, fmtInt, fmtPct, median } from '../stores/data.js';
 
-  let selectedId = $state(null);
-  let selected = $derived($samples.find(s => s.id === selectedId) || null);
+  let rows = $derived(($samples?.rows ?? []).map((r, i) => ({ ...r, genes_detected: $samples.genes_detected?.[i] })));
 
-  function pct(x) { return x == null ? '—' : (x * 100).toFixed(1) + '%'; }
-  function fmt(n) { return n == null ? '—' : n.toLocaleString(); }
+  const columns = [
+    { key: 'sample', label: 'Sample' },
+    { key: 'reads_raw', label: 'Raw reads', render: v => fmtInt(v) },
+    { key: 'reads_filtered', label: 'After QC', render: v => fmtInt(v) },
+    { key: 'pct_rrna', label: 'rRNA filtered', render: v => fmtPct(v) },
+    { key: 'pct_rrna_total', label: 'rRNA total', render: v => fmtPct(v) },
+    { key: 'reads_norrna', label: 'Non-rRNA', render: v => fmtInt(v) },
+    { key: 'reads_nohuman', label: 'Non-human', render: v => fmtInt(v) },
+    { key: 'reads_mapped', label: 'Mapped', render: v => fmtInt(v) },
+    { key: 'pct_mapped', label: 'Mapped %', render: v => fmtPct(v) },
+    { key: 'pairs_assigned', label: 'Pairs on features', render: v => fmtInt(v) },
+    { key: 'pairs_cds', label: 'Pairs on CDS', render: v => fmtInt(v) },
+    { key: 'pairs_rrna_features', label: 'Pairs on rRNA loci', render: v => fmtInt(v) },
+    { key: 'pairs_no_feature', label: 'No gene', render: v => fmtInt(v) },
+    { key: 'pct_cds', label: 'On CDS %', render: v => fmtPct(v) },
+    { key: 'genes_detected', label: 'Genes detected', render: v => fmtInt(v) },
+  ];
+  const sum = k => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
 </script>
 
-<div class="grid grid-cols-3 gap-4">
-  <div class="col-span-1 bg-slate-900 border border-slate-800 rounded-lg p-3 max-h-[80vh] overflow-y-auto">
-    <div class="text-xs uppercase text-slate-500 mb-2 px-1">Samples ({$samples.length})</div>
-    {#each $samples as s}
-      <button
-        class="block w-full text-left px-3 py-2 rounded text-sm
-               {selectedId === s.id ? 'bg-cyan-900/40 text-cyan-200' : 'hover:bg-slate-800 text-slate-300'}"
-        onclick={() => selectedId = s.id}>
-        {s.id}
-      </button>
-    {/each}
+{#if rows.length}
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <StatCard label="Raw Reads" value={fmtInt(sum('reads_raw'))} sub="all samples" color="cyan" />
+    <StatCard label="Mapped Reads" value={fmtInt(sum('reads_mapped'))} color="cyan" />
+    <StatCard label="Pairs on Genes" value={fmtInt(sum('pairs_assigned'))} color="emerald" />
+    <StatCard label="Median Genes Detected" value={fmtInt(median(rows.map(r => r.genes_detected)))} color="slate" />
   </div>
-
-  <div class="col-span-2 space-y-4">
-    {#if !selected}
-      <div class="bg-slate-900 border border-slate-800 rounded-lg p-6 text-slate-500 text-sm">
-        Select a sample on the left.
-      </div>
-    {:else}
-      <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-        <div class="text-sm font-semibold text-slate-200 mb-2">{selected.id} · read flow</div>
-        <table class="text-xs w-full">
-          <thead class="text-slate-500">
-            <tr><th class="text-left py-1">Stage</th><th class="text-right">Reads</th></tr>
-          </thead>
-          <tbody>
-            {#each Object.entries(selected.read_flow || {}) as [stage, n]}
-              <tr class="border-t border-slate-800">
-                <td class="py-1 text-slate-300">{stage}</td>
-                <td class="py-1 text-right font-mono text-slate-200">{fmt(n)}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-        <div class="text-sm font-semibold text-slate-200 mb-2">{selected.id} · per-reference mapping</div>
-        <table class="text-xs w-full">
-          <thead class="text-slate-500">
-            <tr>
-              <th class="text-left py-1">Reference</th>
-              <th class="text-right">Total reads</th>
-              <th class="text-right">Mapped</th>
-              <th class="text-right">Rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each Object.entries(selected.per_reference || {}) as [ref, st]}
-              <tr class="border-t border-slate-800">
-                <td class="py-1 text-slate-300 font-mono">{ref}</td>
-                <td class="py-1 text-right text-slate-200">{fmt(st.total_reads)}</td>
-                <td class="py-1 text-right text-slate-200">{fmt(st.mapped_reads)}</td>
-                <td class="py-1 text-right text-cyan-300">{pct(st.mapping_rate)}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
+  <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+    <h3 class="text-sm font-medium text-slate-400 mb-2">Read Accounting ({rows.length} samples)</h3>
+    <DataTable {columns} {rows} idKey="sample" maxHeight="700px" />
+    <p class="mt-2 text-xs text-slate-500">Reads count both mates; "Pairs on genes" counts fragments assigned by featureCounts. Mapped % is of non-rRNA, non-human reads.</p>
   </div>
-</div>
+{/if}

@@ -1,67 +1,74 @@
-// Cross-sample summaries: merged gene-count matrix, mapping-rate matrix,
-// and the viz JSONs.
+// Cross-sample summaries: merged matrices, MAG/function aggregates and the
+// viz JSONs.
 
-process MERGE_GENE_COUNTS {
-    tag "${ref.name}"
-    label 'process_medium'
+process SUMMARIZE_EXPRESSION {
+    tag "${ref_name}"
+    label 'process_high'
+    label 'env_rnaseq'
     conda "${projectDir}/conda-envs/dana-illumina-rna-rnaseq"
-    publishDir "${params.outdir}/expression/${ref.name}", mode: 'copy'
+    publishDir "${params.outdir}/expression/${ref_name}", mode: 'copy', pattern: "${ref_name}.*"
 
     input:
-    tuple val(ref), path(per_sample_counts, stageAs: 'counts_*.tsv')
+    tuple val(ref_name),
+          path(gene_counts,   stageAs: 'genes/*'),
+          path(contig_counts, stageAs: 'contigs/*'),
+          path(fc_summaries,  stageAs: 'fcsummary/*'),
+          path(flagstats,     stageAs: 'flagstat/*'),
+          path(gene_annot,    stageAs: 'ref/genes.tsv.gz'),
+          path(contig_lengths, stageAs: 'ref/contig_lengths.tsv'),
+          path(bins,          stageAs: 'ref/bins.tsv'),
+          path(checkm2,       stageAs: 'ref/checkm2.tsv'),
+          path(gtdbtk,        stageAs: 'ref/gtdbtk.tsv'),
+          path(annotations,   stageAs: 'ref/annotations.tsv'),
+          path(contig_explorer, stageAs: 'ref/contig_explorer'),
+          path(kofam,         stageAs: 'ref/kofam.tsv'),
+          path(read_counts,   stageAs: 'readcounts/*'),
+          path(rrna_tax,      stageAs: 'rrnatax/*')
 
     output:
-    tuple val(ref), path("${ref.name}.gene_counts.tsv"), emit: counts
+    tuple val(ref_name), path("${ref_name}.*"),       emit: tables
+    tuple val(ref_name), path("viz/${ref_name}.*"),   emit: viz_tables
 
     script:
     """
-    python3 - <<PY
-import glob, os, pandas as pd
-files = sorted(glob.glob("counts_*.tsv"))
-dfs = []
-for f in files:
-    df = pd.read_csv(f, sep="\\t", comment="#")
-    if df.empty or len(df.columns) < 7:
-        continue
-    sample_col = df.columns[-1]
-    sub = df[["Geneid", sample_col]].set_index("Geneid")
-    dfs.append(sub)
-if not dfs:
-    pd.DataFrame(columns=["Geneid"]).to_csv("${ref.name}.gene_counts.tsv", sep="\\t", index=False)
-else:
-    merged = pd.concat(dfs, axis=1).fillna(0).astype(int)
-    merged.to_csv("${ref.name}.gene_counts.tsv", sep="\\t")
-PY
+    # KO definitions from KofamScan's detail table (one line per hit; the
+    # marine run's is 20 GB), first definition per KO
+    ko_arg=""
+    if [ -s ref/kofam.tsv ]; then
+        awk -F'\\t' '\$3 ~ /^K[0-9]+\$/ && !seen[\$3]++ { d = \$7; gsub(/^"|"\$/, "", d); print \$3 "\\t" d }' ref/kofam.tsv > ko_names.tsv
+        ko_arg="--ko-names ko_names.tsv"
+    fi
+
+    python3 "${projectDir}/bin/summarize_expression.py" \\
+        --ref "${ref_name}" \\
+        --genes-dir genes --contigs-dir contigs \\
+        --summary-dir fcsummary --flagstat-dir flagstat \\
+        --readcounts-dir readcounts --rrna-tax-dir rrnatax \\
+        --gene-annot ref/genes.tsv.gz --contig-lengths ref/contig_lengths.tsv \\
+        --bins ref/bins.tsv --checkm2 ref/checkm2.tsv --gtdbtk ref/gtdbtk.tsv \\
+        --annotations ref/annotations.tsv \\
+        --contig-explorer ref/contig_explorer \$ko_arg \\
+        --top-genes ${params.viz_top_genes} --top-functions ${params.viz_top_functions} \\
+        --out .
     """
 }
 
 process VIZ_PREPROCESS {
-    label 'process_medium'
-    conda "${projectDir}/conda-envs/dana-illumina-rna-rnaseq"
+    label 'process_low'
     publishDir "${params.outdir}/viz", mode: 'copy'
 
     input:
-    path(idxstats_files,  stageAs: 'idxstats/*')
-    path(flagstat_files,  stageAs: 'flagstat/*')
-    path(covstats_files,  stageAs: 'covstats/*')
-    path(read_counts,     stageAs: 'readcounts/*')
-    path(gene_counts,     stageAs: 'genecounts/*')
+    path(viz_tables, stageAs: 'tables/*')
 
     output:
-    path("overview.json"),       emit: overview
-    path("samples.json"),        emit: samples
-    path("references.json"),     emit: references
-    path("expression.json.gz"),  emit: expression
-    path("read_flow.json"),      emit: read_flow
+    path("*.json*"), emit: json
 
     script:
     """
     python3 "${projectDir}/bin/build_viz_jsons.py" \\
-        --idxstats-dir idxstats \\
-        --flagstat-dir flagstat \\
-        --covstats-dir covstats \\
-        --readcounts-dir readcounts \\
-        --genecounts-dir genecounts \\
+        --tables tables \\
+        --title "${params.viz_title ?: ''}" \\
+        --mag-url "${params.viz_mag_url ?: ''}" \\
         --out .
     """
 }

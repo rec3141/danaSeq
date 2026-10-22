@@ -1,15 +1,87 @@
-// Reference-based mapping with BBmap. Each (sample, reference) pair is one task.
-// References come from a user-supplied directory containing <name>.fasta files,
-// typically the output of an upstream assembly or MAG run.
+// Reference-based mapping. Each (sample, reference) pair is one task.
+//
+// strobealign (default) indexes even a multi-Gbp co-assembly in minutes and
+// maps short reads far faster than BBmap; the index is built once per
+// reference (storeDir) and reused by every sample. BBmap stays available via
+// --mapper bbmap.
+
+process STROBEALIGN_INDEX {
+    tag "${ref.name}"
+    label 'process_map'
+    label 'env_align'
+    conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
+    storeDir { params.store_dir ? "${params.store_dir}/references/${ref.name}" : null }
+
+    input:
+    tuple val(ref), path(fasta, stageAs: 'ref/*')
+
+    output:
+    tuple val(ref), path("${ref.name}.fasta"), path("${ref.name}.fasta.r${params.read_len}.sti"), emit: index
+
+    script:
+    """
+    # Canonical name so the .sti sits next to the FASTA it was built from.
+    # Keep only the first header word: BAM @SQ names must match the GFF seqids.
+    awk '/^>/ { print \$1; next } { print }' ${fasta} > "${ref.name}.fasta"
+
+    strobealign --create-index -t ${task.cpus} -r ${params.read_len} "${ref.name}.fasta"
+
+    if [ ! -s "${ref.name}.fasta.r${params.read_len}.sti" ]; then
+        echo "[ERROR] strobealign index build failed for ${ref.name}" >&2
+        exit 1
+    fi
+    """
+}
+
+process MAP_READS_STROBEALIGN {
+    tag "${meta.id}_vs_${ref.name}"
+    label 'process_map'
+    label 'env_align'
+    conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
+    publishDir { "${params.outdir}/mapping/${meta.id}/${ref.name}" }, mode: 'symlink',
+        pattern: '*.{bam,flagstat.txt,log}', enabled: !params.store_dir
+    storeDir { params.store_dir ? "${params.store_dir}/mapping/${meta.id}/${ref.name}" : null }
+
+    input:
+    tuple val(meta), path(reads), val(ref), path(ref_fasta), path(ref_index)
+
+    output:
+    tuple val(meta), val(ref), path("${meta.id}_vs_${ref.name}.bam"),          emit: bam
+    tuple val(meta), val(ref), path("${meta.id}_vs_${ref.name}.flagstat.txt"), emit: flagstat
+    path("${meta.id}_vs_${ref.name}.strobealign.log"),                         emit: log
+
+    script:
+    def tag = "${meta.id}_vs_${ref.name}"
+    def sort_threads = Math.max(1, (task.cpus / 8) as int)
+    """
+    set -o pipefail
+
+    # Name-grouped (unsorted) BAM: featureCounts -p reads mates adjacently,
+    # and skipping the coordinate sort saves a full rewrite of every BAM.
+    # -U drops unmapped reads; the QC counts already record the input.
+    strobealign --use-index -t ${task.cpus} -U \\
+        --rg-id="${meta.id}" --rg="SM:${meta.id}" \\
+        --interleaved "${ref_fasta}" "${reads}" 2> "${tag}.strobealign.log" \\
+    | samtools view -@ ${sort_threads} -b -o "${tag}.bam" -
+
+    samtools flagstat -@ ${sort_threads} "${tag}.bam" > "${tag}.flagstat.txt"
+
+    if [ ! -s "${tag}.bam" ]; then
+        cat "${tag}.strobealign.log" >&2
+        echo "[ERROR] Mapping produced empty BAM for ${tag}" >&2
+        exit 1
+    fi
+    """
+}
 
 process BBMAP_INDEX {
     tag "${ref.name}"
-    label 'process_medium'
+    label 'process_map'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    storeDir params.store_dir ? "${params.store_dir}/references/${ref.name}" : null
+    storeDir { params.store_dir ? "${params.store_dir}/references/${ref.name}" : null }
 
     input:
-    tuple val(ref), path(fasta)
+    tuple val(ref), path(fasta, stageAs: 'ref/*')
 
     output:
     tuple val(ref), path("${ref.name}.fasta"), path("ref_${ref.name}"), emit: index
@@ -17,12 +89,7 @@ process BBMAP_INDEX {
     script:
     def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
-    # Stage the FASTA with a canonical name. cp would fail with "same file"
-    # when the upstream channel already provided <ref>.fasta, so skip if the
-    # path is identical.
-    if [ "${fasta}" != "${ref.name}.fasta" ]; then
-        cp "${fasta}" "${ref.name}.fasta"
-    fi
+    awk '/^>/ { print \$1; next } { print }' ${fasta} > "${ref.name}.fasta"
 
     bbmap.sh ${xmx} \\
         ref="${ref.name}.fasta" \\
@@ -38,16 +105,11 @@ process BBMAP_INDEX {
 
 process MAP_READS_BBMAP {
     tag "${meta.id}_vs_${ref.name}"
-    label 'process_high'
+    label 'process_map'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    // Hardlink mode keeps disk usage flat across work/ and outdir/ on the same
-    // filesystem. (Cross-fs hardlink fails; symlink is the safe fallback.)
-    // Symlink works across filesystems (the hardlink mode is fine on a single
-    // FS but /data and /data/scratch are separate nvme devices here).
-    // Pattern catches both bare-extension files and the .tsv/.txt-suffixed
-    // ones that samtools+bbmap actually emit.
+    // Symlink works across filesystems (hardlinks fail between devices).
     publishDir { "${params.outdir}/mapping/${meta.id}/${ref.name}" }, mode: 'symlink',
-        pattern: '*.{bam,bai,covhist.txt,covstats.txt,flagstat.txt,idxstats.tsv}'
+        pattern: '*.{bam,bai,covhist.txt,covstats.txt,flagstat.txt,idxstats.tsv}', enabled: !params.store_dir
     storeDir { params.store_dir ? "${params.store_dir}/mapping/${meta.id}/${ref.name}" : null }
 
     input:
@@ -56,43 +118,31 @@ process MAP_READS_BBMAP {
     output:
     tuple val(meta), val(ref), path("${meta.id}_vs_${ref.name}.sorted.bam"),
                                 path("${meta.id}_vs_${ref.name}.sorted.bam.bai"), emit: bam
-    tuple val(meta), val(ref), path("${meta.id}_vs_${ref.name}.idxstats.tsv"),    emit: idxstats
     tuple val(meta), val(ref), path("${meta.id}_vs_${ref.name}.flagstat.txt"),    emit: flagstat
     tuple val(meta), val(ref), path("${meta.id}_vs_${ref.name}.covstats.txt"),    emit: covstats
-    path("${meta.id}_vs_${ref.name}.covhist.txt"),                                emit: covhist
 
     script:
     def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     def tag = "${meta.id}_vs_${ref.name}"
     """
-    # Skip mapping if reference is empty
-    if [ ! -s "${ref_fasta}" ] || ! grep -q '>' "${ref_fasta}"; then
-        echo "[WARNING] Empty reference ${ref.name} — creating empty BAM" >&2
-        echo -e '@HD\tVN:1.6\tSO:coordinate' | samtools view -b -o "${tag}.sorted.bam" -
-        samtools index "${tag}.sorted.bam"
-        touch "${tag}.idxstats.tsv" "${tag}.flagstat.txt" "${tag}.covstats.txt" "${tag}.covhist.txt"
-        exit 0
-    fi
-
+    set -o pipefail
     # OpenJDK 23 C2 JIT bug workaround (same as illumina_assembly mapping)
     export JAVA_TOOL_OPTIONS="\${JAVA_TOOL_OPTIONS:-} -XX:-UseLoopPredicate"
 
     bbmap.sh ${xmx} \\
-        in="${reads}" \\
+        in="${reads}" interleaved=t \\
         path="${ref_index}" \\
         out=stdout.sam \\
         maxindel=200 minid=${params.min_identity} \\
         qtrim=10 untrim \\
-        ambig=all \\
-        covhist="${tag}.covhist.txt" \\
+        ambig=random \\
         covstats="${tag}.covstats.txt" \\
         ow=t \\
         t=${task.cpus} \\
-        | samtools sort -@ ${task.cpus} -o "${tag}.sorted.bam" -
+    | samtools sort -@ ${task.cpus} -o "${tag}.sorted.bam" -
 
     samtools index -@ ${task.cpus} "${tag}.sorted.bam"
     samtools flagstat "${tag}.sorted.bam" > "${tag}.flagstat.txt"
-    samtools idxstats "${tag}.sorted.bam" > "${tag}.idxstats.tsv"
 
     if [ ! -s "${tag}.sorted.bam" ]; then
         echo "[ERROR] Mapping produced empty BAM for ${tag}" >&2
