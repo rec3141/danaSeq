@@ -11,9 +11,23 @@ summarize_expression.py:
                            <ref>.contig_expr.NNNN.json.gz layers
 
 Copies them into --out and writes index.json, which the SPA loads first.
+With --metadata, a sample metadata TSV/CSV is shipped as metadata.json
+(header + rows of strings; the SPA matches samples and types the columns,
+the same code path as a metadata file uploaded in the browser).
 Stdlib only.
 """
-import argparse, glob, gzip, json, os, shutil
+import argparse, csv, glob, gzip, json, os, shutil
+
+
+def read_metadata(path):
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        text = fh.read()
+    first = text.split("\n", 1)[0]
+    delim = "\t" if "\t" in first else ","
+    rows = [r for r in csv.reader(text.splitlines(), delimiter=delim) if any(v.strip() for v in r)]
+    if len(rows) < 2:
+        raise SystemExit(f"[viz] metadata {path}: needs a header and at least one row")
+    return {"source": os.path.basename(path), "header": rows[0], "rows": rows[1:]}
 
 
 def main():
@@ -21,6 +35,7 @@ def main():
     ap.add_argument("--tables", required=True)
     ap.add_argument("--title", default="")
     ap.add_argument("--mag-url", default="")
+    ap.add_argument("--metadata", default="")
     ap.add_argument("--out", default=".")
     a = ap.parse_args()
 
@@ -48,6 +63,12 @@ def main():
     index = {"title": a.title or (refs[0]["name"] if len(refs) == 1 else "RNA-seq"),
              "mag_url": a.mag_url or None,
              "references": refs}
+    if a.metadata:
+        meta = read_metadata(a.metadata)
+        with gzip.open(os.path.join(a.out, "metadata.json.gz"), "wt") as fh:
+            json.dump(meta, fh)
+        index["metadata"] = "metadata.json.gz"
+        print(f"[viz] metadata: {len(meta['rows'])} rows, {len(meta['header'])} columns")
     with open(os.path.join(a.out, "index.json"), "w") as fh:
         json.dump(index, fh, indent=1)
     # microscape.app serves the .gz copy of each data file

@@ -59,14 +59,16 @@ process VIZ_PREPROCESS {
 
     input:
     path(viz_tables, stageAs: 'tables/*')
+    path(metadata, stageAs: 'meta/*')
 
     output:
     path("*.json*"), emit: json
 
     script:
+    def meta_arg = metadata.name != 'NO_FILE' ? "--metadata ${metadata}" : ''
     """
     python3 "${projectDir}/bin/build_viz_jsons.py" \\
-        --tables tables \\
+        --tables tables ${meta_arg} \\
         --title "${params.viz_title ?: ''}" \\
         --mag-url "${params.viz_mag_url ?: ''}" \\
         --out .

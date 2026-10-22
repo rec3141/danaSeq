@@ -19,6 +19,9 @@
   import PlotlyChart from './charts/PlotlyChart.svelte';
   import { clusterMatrix } from '../lib/cluster.js';
   import { mean, fmtTpm, downloadTsv } from '../stores/data.js';
+  import { sampleAnnot, annotStrip, sampleColumnOrder } from '../stores/metadata.js';
+  import SampleAnnotSelect from './SampleAnnotSelect.svelte';
+  import AnnotLegend from './AnnotLegend.svelte';
 
   let { rows = [], samples = [], noun = 'rows', title = '', note = '',
         groups = null, searchFields = ['id'], searchPlaceholder = 'search...',
@@ -100,6 +103,10 @@
   let clust = $derived(sortBy === 'clustered' && sorted.length > 2 ? clusterMatrix(sorted.slice(0, topN).map(r => r.tpm)) : null);
   let shown = $derived(clust ? clust.rowOrder.map(i => sorted[i]) : sorted.slice(0, topN));
 
+  // Sample (column) order: Ward clustering or the shared sample annotation
+  let sampleSort = $state('clustered');
+  let colOrder = $derived(sampleColumnOrder(sampleSort, $sampleAnnot, samples, shown.map(r => r.tpm), clust?.colOrder));
+
   let maxTpm = $derived(Math.max(1, ...shown.flatMap(r => r.tpm)));
   let colorScale = $derived.by(() => {
     const viridis = d3.scaleSequential(d3.interpolateViridis).domain([0, Math.log10(maxTpm + 1)]);
@@ -110,8 +117,9 @@
     module_ids: samples, module_names: samples,
     matrix: shown.map(r => r.tpm),
     row_order: shown.map((_, i) => i),
-    col_order: clust ? clust.colOrder : samples.map((_, i) => i),
+    col_order: colOrder,
   } : null);
+  let colAnnotation = $derived(annotStrip($sampleAnnot, samples));
   // Column 0 is the row label (clickable, bold when selected)
   let rowAnnotations = $derived(heatmapData ? [
     { label: idLabel, values: shown.map(r => rowLabel(r)), width: idWidth },
@@ -192,13 +200,17 @@
           title="Rows shown: Top 50 → Top 100 → Top 200">Top {topN} &#x25BE;</button>
         <button class="px-2 py-0.5 rounded border border-cyan-400 bg-cyan-400/10 text-cyan-400" onclick={cycleSort}
           title={`Sort rows: ${sortDefs.map(d => d.label).join(' → ')}`}>Sort: {sortDefs.find(d => d.key === sortBy)?.label} &#x25BE;</button>
+        <button class="px-2 py-0.5 rounded border border-cyan-400 bg-cyan-400/10 text-cyan-400"
+          onclick={() => sampleSort = sampleSort === 'clustered' ? 'annot' : 'clustered'}
+          title="Order samples: Ward clustering → by the sample annotation">Samples: {sampleSort === 'annot' ? $sampleAnnot?.label : 'Clustered'} &#x25BE;</button>
       </div>
     </div>
+    <div class="flex items-center gap-3 flex-wrap mb-1"><SampleAnnotSelect label="Strip:" /><AnnotLegend /></div>
     <div class="overflow-auto" style="max-height: 700px;">
       <D3Heatmap data={heatmapData} onRowClick={id => selected = id} tooltipFormat={tooltip}
-        {colorScale} legendLabel={['0', `${fmtTpm(maxTpm)} ${unit}`]} selectedRow={selected} {rowAnnotations} />
+        {colorScale} legendLabel={['0', `${fmtTpm(maxTpm)} ${unit}`]} selectedRow={selected} {rowAnnotations} {colAnnotation} />
     </div>
-    <div class="mt-2 text-xs text-slate-500">{note}{sortBy === 'clustered' ? ' Ward clustering of rows and samples on log(value+1).' : ''}</div>
+    <div class="mt-2 text-xs text-slate-500">{note}{sortBy === 'clustered' ? ' Ward clustering of rows on log(value+1).' : ''}{sampleSort === 'clustered' ? ' Samples in Ward order.' : ''}</div>
   </div>
 
   {#if selectedRow}

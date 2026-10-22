@@ -3,6 +3,7 @@
   import NavBar from './components/layout/NavBar.svelte';
   import LoadingSpinner from './components/ui/LoadingSpinner.svelte';
   import { index, loading, error, loadIndex } from './stores/data.js';
+  import { initMetadata } from './stores/metadata.js';
 
   import OverviewView from './views/OverviewView.svelte';
   import ExplorerView from './views/ExplorerView.svelte';
@@ -23,7 +24,7 @@
   onMount(() => {
     updateHash();
     window.addEventListener('hashchange', updateHash);
-    loadIndex();
+    loadIndex().then(initMetadata);
     return () => window.removeEventListener('hashchange', updateHash);
   });
 

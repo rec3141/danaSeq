@@ -4,7 +4,10 @@
 
   let { data = null, onCellClick = null, onRowClick = null,
         tooltipFormat = null, legendLabel = null, selectedRow = null,
-        rowAnnotations = null, colorScale: colorScaleProp = null } = $props();
+        rowAnnotations = null, colorScale: colorScaleProp = null,
+        colAnnotation = null } = $props();
+  // colAnnotation: { label, colors[], values[] } per column (original order),
+  // drawn as a strip above the cells
   let container;
 
   onMount(() => {
@@ -39,7 +42,8 @@
     const cellW = dense ? 4 : orderedMods.length > 60 ? 7 : 14;
     const cellH = 16;
     const marginLeft = 10;
-    const marginTop = dense ? 24 : 260;
+    const strip = colAnnotation?.colors?.length === module_ids.length ? 10 : 0;
+    const marginTop = (dense ? 24 : 260) + strip;
     const marginBottom = 20;
 
     // Calculate right margin for annotations
@@ -134,13 +138,37 @@
       svg.append('text')
         .attr('x', 0)
         .attr('y', 0)
-        .attr('transform', `translate(${marginLeft + j * cellW + cellW / 2}, ${marginTop - 6}) rotate(-70)`)
+        .attr('transform', `translate(${marginLeft + j * cellW + cellW / 2}, ${marginTop - 6 - strip}) rotate(-70)`)
         .attr('text-anchor', 'start')
         .attr('dominant-baseline', 'hanging')
         .attr('fill', '#64748b')
         .attr('font-size', '8px')
         .attr('font-family', 'Inter, sans-serif')
         .text(orderedNames[j]);
+    }
+
+    // Sample annotation strip
+    if (strip) {
+      for (let j = 0; j < orderedMods.length; j++) {
+        const c = cOrder[j];
+        svg.append('rect')
+          .attr('x', marginLeft + j * cellW).attr('y', marginTop - strip)
+          .attr('width', cellW - 1).attr('height', strip - 3).attr('rx', 1)
+          .attr('fill', colAnnotation.colors[c])
+          .on('mouseover', function () {
+            tooltip.style('opacity', 1).html(`<strong>${orderedNames[j]}</strong><br>${colAnnotation.label}: ${colAnnotation.values?.[c] ?? ''}`);
+          })
+          .on('mousemove', function (event) {
+            const rect = container.getBoundingClientRect();
+            tooltip.style('left', (event.clientX - rect.left + 12) + 'px').style('top', (event.clientY - rect.top - 10) + 'px');
+          })
+          .on('mouseout', () => tooltip.style('opacity', 0));
+      }
+      svg.append('text')
+        .attr('x', marginLeft + orderedMods.length * cellW + 8).attr('y', marginTop - strip / 2 - 1)
+        .attr('dominant-baseline', 'central').attr('fill', '#64748b')
+        .attr('font-size', '8px').attr('font-family', 'Inter, sans-serif')
+        .text(colAnnotation.label);
     }
 
     // Row annotations (right side of heatmap)
@@ -157,7 +185,7 @@
           : annoX + annoColOffsets[c] + colW / 2;
         svg.append('text')
           .attr('x', xPos)
-          .attr('y', marginTop - 6)
+          .attr('y', marginTop - 6 - strip)
           .attr('text-anchor', align)
           .attr('dominant-baseline', 'auto')
           .attr('fill', '#64748b')
