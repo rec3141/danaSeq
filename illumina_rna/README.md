@@ -68,6 +68,5 @@ VIZ_DATA_DIR=/path/to/output/viz npm run dev
 # open http://localhost:5173
 ```
 
-Pages: Overview (mapping-rate matrix, read-flow funnel), Samples (per-sample
-detail), Expression (gene × sample heatmap, top-N by variance, log₂ transform),
-References (per-contig read totals).
+Pages: Overview (read fate per sample), MAGs (per-MAG TPM with CheckM2/GTDB-Tk), Functions
+(KO / COG / CAZy TPM), Genes (most expressed genes), Samples (QC + mapping table).

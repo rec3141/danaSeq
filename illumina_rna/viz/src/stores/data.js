@@ -1,68 +1,39 @@
-import { writable, derived } from 'svelte/store';
+import { writable } from 'svelte/store';
 
-export const overview     = writable(null);
-export const samples      = writable([]);
-export const references   = writable([]);
-export const readFlow     = writable(null);
-export const expression   = writable(null);  // { <ref>: {genes, samples, matrix} }
-export const functions_   = writable(null);  // { <ref>: {genes, samples, matrix, annotations[]} }
-export const tsne         = writable(null);  // { <ref>: {gene_ids, products, totals, coords} }
-export const contigs      = writable(null);  // { samples, contigs: [{id, mag, length, gc, x, y, total_reads, reads_by_sample}] }
-export const taxonomy     = writable(null);  // { <mag>: {lineage, ani} }
+// index.json lists the references; each has four tables written by
+// bin/summarize_expression.py: samples, bins, functions, top_genes.
+export const index    = writable(null);
+export const refName  = writable(null);
+export const samples  = writable(null);  // { samples, rows[], n_genes, n_contigs, genes_detected[] }
+export const bins     = writable(null);  // { samples, bins: [{bin, length, n_genes, completeness, contamination, classification, reads[], tpm[]}] }
+export const funcs    = writable(null);  // { samples, kinds: { ko|cog|cazy: [{id, tpm[]}] } }
+export const topGenes = writable(null);  // { samples, genes: [{id, contig, product, gene, bin, ko, reads[], tpm[]}] }
 
 export const loading = writable(true);
 export const error   = writable(null);
 
 async function fetchJSON(url) {
-  // Resolve absolute /data/* against Vite's BASE_URL so the SPA works under a subdir
-  if (url.startsWith('/data/')) {
-    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
-    url = base + url;
-  }
-  try {
-    const gzRes = await fetch(url + '.gz');
-    if (gzRes.ok) {
-      const ct = gzRes.headers.get('Content-Type') || '';
-      if (ct.includes('json') || ct.includes('gzip') || ct.includes('octet-stream')) {
-        const ce = gzRes.headers.get('Content-Encoding');
-        if (ce && ce.includes('gzip')) return gzRes.json();
-        const ds = new DecompressionStream('gzip');
-        const text = await new Response(gzRes.body.pipeThrough(ds)).text();
-        return JSON.parse(text);
-      }
-    }
-  } catch (_) { /* fall through */ }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
-  const ct = res.headers.get('Content-Type') || '';
-  if (ct.includes('html')) return null;
-  return res.json();
+  // .json.gz is served either with Content-Encoding: gzip (already inflated
+  // by the browser) or as raw bytes; peek at the magic number to tell.
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf[0] === 0x1f && buf[1] === 0x8b) {
+    const ds = new DecompressionStream('gzip');
+    const text = await new Response(new Blob([buf]).stream().pipeThrough(ds)).text();
+    return JSON.parse(text);
+  }
+  return JSON.parse(new TextDecoder().decode(buf));
 }
 
-export async function loadAllData() {
+export async function loadIndex() {
   loading.set(true);
   error.set(null);
   try {
-    const [ov, sm, rf, rd, ex, fn, ts, ct, tx] = await Promise.all([
-      fetchJSON('./data/overview.json').catch(() => null),
-      fetchJSON('./data/samples.json').catch(() => []),
-      fetchJSON('./data/references.json').catch(() => []),
-      fetchJSON('./data/read_flow.json').catch(() => null),
-      fetchJSON('./data/expression.json').catch(() => null),
-      fetchJSON('./data/functions.json').catch(() => null),
-      fetchJSON('./data/tsne.json').catch(() => null),
-      fetchJSON('./data/contigs.json').catch(() => null),
-      fetchJSON('./data/taxonomy.json').catch(() => null),
-    ]);
-    overview.set(ov);
-    samples.set(sm || []);
-    references.set(rf || []);
-    readFlow.set(rd);
-    expression.set(ex);
-    functions_.set(fn);
-    tsne.set(ts);
-    contigs.set(ct);
-    taxonomy.set(tx);
+    const idx = await fetchJSON('./data/index.json');
+    index.set(idx);
+    const first = idx.references?.[0]?.name;
+    if (first) await loadReference(first);
   } catch (e) {
     error.set(e.message);
     console.error('Data load error:', e);
@@ -70,3 +41,40 @@ export async function loadAllData() {
     loading.set(false);
   }
 }
+
+let current = null;
+export async function loadReference(name) {
+  let idx;
+  index.subscribe(v => (idx = v))();
+  const ref = idx?.references?.find(r => r.name === name);
+  if (!ref || current === name) return;
+  current = name;
+  loading.set(true);
+  try {
+    const get = k => ref.files[k] ? fetchJSON(`./data/${ref.files[k]}`) : Promise.resolve(null);
+    const [s, b, f, g] = await Promise.all([get('samples'), get('bins'), get('functions'), get('top_genes')]);
+    samples.set(s); bins.set(b); funcs.set(f); topGenes.set(g);
+    refName.set(name);
+  } catch (e) {
+    error.set(e.message);
+  } finally {
+    loading.set(false);
+  }
+}
+
+// ── shared helpers ──────────────────────────────────────────────────────────
+export const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+export const median = a => {
+  const v = a.filter(x => x != null && !Number.isNaN(x)).sort((x, y) => x - y);
+  return v.length ? v[Math.floor(v.length / 2)] : null;
+};
+export const fmtInt = n => (n == null ? '—' : Math.round(n).toLocaleString());
+export const fmtPct = n => (n == null ? '—' : `${n.toFixed(1)}%`);
+export const fmtTpm = n => (n == null ? '—' : n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(1));
+
+// Sequential blue for magnitude on the dark surface: near-zero recedes into
+// the surface, high values step toward the light end.
+export const SEQ_BLUE = [
+  [0.0, '#0f172a'], [0.12, '#0d366b'], [0.3, '#1c5cab'],
+  [0.5, '#2a78d6'], [0.7, '#5598e7'], [0.85, '#86b6ef'], [1.0, '#cde2fb'],
+];

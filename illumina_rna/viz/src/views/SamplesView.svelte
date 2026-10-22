@@ -1,72 +1,38 @@
 <script>
-  import { samples, overview } from '../stores/data.js';
+  import { samples, fmtInt, fmtPct } from '../stores/data.js';
 
-  let selectedId = $state(null);
-  let selected = $derived($samples.find(s => s.id === selectedId) || null);
-
-  function pct(x) { return x == null ? '—' : (x * 100).toFixed(1) + '%'; }
-  function fmt(n) { return n == null ? '—' : n.toLocaleString(); }
+  const cols = [
+    ['reads_raw', 'Raw reads', fmtInt], ['reads_filtered', 'After QC', fmtInt],
+    ['pct_rrna', 'rRNA', fmtPct], ['reads_nohuman', 'Non-rRNA, non-human', fmtInt],
+    ['reads_mapped', 'Mapped', fmtInt], ['pct_mapped', 'Mapped %', fmtPct],
+    ['pairs_assigned', 'Pairs on genes', fmtInt], ['pct_assigned', 'Assigned %', fmtPct],
+    ['genes_detected', 'Genes detected', fmtInt],
+  ];
+  let sortKey = $state('sample');
+  let dir = $state(1);
+  let rows = $derived(($samples?.rows ?? []).map((r, i) => ({ ...r, genes_detected: $samples.genes_detected?.[i] })));
+  let sorted = $derived([...rows].sort((a, b) => {
+    const x = a[sortKey], y = b[sortKey];
+    return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * dir;
+  }));
+  const by = k => { if (sortKey === k) dir = -dir; else { sortKey = k; dir = k === 'sample' ? 1 : -1; } };
 </script>
 
-<div class="grid grid-cols-3 gap-4">
-  <div class="col-span-1 bg-slate-900 border border-slate-800 rounded-lg p-3 max-h-[80vh] overflow-y-auto">
-    <div class="text-xs uppercase text-slate-500 mb-2 px-1">Samples ({$samples.length})</div>
-    {#each $samples as s}
-      <button
-        class="block w-full text-left px-3 py-2 rounded text-sm
-               {selectedId === s.id ? 'bg-cyan-900/40 text-cyan-200' : 'hover:bg-slate-800 text-slate-300'}"
-        onclick={() => selectedId = s.id}>
-        {s.id}
-      </button>
-    {/each}
-  </div>
-
-  <div class="col-span-2 space-y-4">
-    {#if !selected}
-      <div class="bg-slate-900 border border-slate-800 rounded-lg p-6 text-slate-500 text-sm">
-        Select a sample on the left.
-      </div>
-    {:else}
-      <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-        <div class="text-sm font-semibold text-slate-200 mb-2">{selected.id} · read flow</div>
-        <table class="text-xs w-full">
-          <thead class="text-slate-500">
-            <tr><th class="text-left py-1">Stage</th><th class="text-right">Reads</th></tr>
-          </thead>
-          <tbody>
-            {#each Object.entries(selected.read_flow || {}) as [stage, n]}
-              <tr class="border-t border-slate-800">
-                <td class="py-1 text-slate-300">{stage}</td>
-                <td class="py-1 text-right font-mono text-slate-200">{fmt(n)}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
-        <div class="text-sm font-semibold text-slate-200 mb-2">{selected.id} · per-reference mapping</div>
-        <table class="text-xs w-full">
-          <thead class="text-slate-500">
-            <tr>
-              <th class="text-left py-1">Reference</th>
-              <th class="text-right">Total reads</th>
-              <th class="text-right">Mapped</th>
-              <th class="text-right">Rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each Object.entries(selected.per_reference || {}) as [ref, st]}
-              <tr class="border-t border-slate-800">
-                <td class="py-1 text-slate-300 font-mono">{ref}</td>
-                <td class="py-1 text-right text-slate-200">{fmt(st.total_reads)}</td>
-                <td class="py-1 text-right text-slate-200">{fmt(st.mapped_reads)}</td>
-                <td class="py-1 text-right text-cyan-300">{pct(st.mapping_rate)}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
-  </div>
+<div class="bg-slate-900 border border-slate-800 rounded-lg p-4 overflow-auto">
+  <table class="w-full text-xs tabular-nums">
+    <thead class="text-slate-400 sticky top-0 bg-slate-900">
+      <tr>
+        <th class="text-left p-1 cursor-pointer" onclick={() => by('sample')}>Sample</th>
+        {#each cols as [k, label]}<th class="text-right p-1 cursor-pointer" onclick={() => by(k)}>{label}</th>{/each}
+      </tr>
+    </thead>
+    <tbody class="text-slate-200">
+      {#each sorted as r}
+        <tr class="border-t border-slate-800">
+          <td class="p-1 font-mono">{r.sample}</td>
+          {#each cols as [k, , f]}<td class="text-right p-1">{f(r[k])}</td>{/each}
+        </tr>
+      {/each}
+    </tbody>
+  </table>
 </div>
