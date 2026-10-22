@@ -52,6 +52,11 @@ def helpMessage() {
       --run_maxbin       Include MaxBin2 [default: false]
       --run_lorbin       Include LorBin (needs --bam_dir) [default: false]
       --run_comebin      Include COMEBin (needs --bam_dir) [default: false]
+      --comebin_on_cpu   Run COMEBin when no GPU is visible; otherwise it is skipped,
+                         since on CPU it takes days on a co-assembly [default: false]
+      --binners_only     Run the selected binners and stop: no DAS Tool, Binette,
+                         MAGScoT or CheckM2. For running the binners on a GPU node
+                         ahead of a full run that shares --store_dir [default: false]
       --run_vamb         Include VAMB [default: false]
       --run_vamb_tax     Include taxonomy-guided VAMB [default: false]
       --run_binette      Run Binette consensus (needs --checkm2_db) [default: false]
@@ -93,6 +98,29 @@ def helpMessage() {
 def resolveAnnotator() {
     return params.annotator ?:
         (params.run_bakta ? 'bakta' : (params.run_prokka ? 'prokka' : 'none'))
+}
+
+// COMEBin on CPU runs for days on a co-assembly (and has failed there), so it
+// runs only where a GPU is visible unless --comebin_on_cpu. A result already
+// in --store_dir (e.g. from a --binners_only run on a GPU node) is always used.
+def runComebin() {
+    if (!params.run_comebin || !params.bam_dir) return false
+    if (params.comebin_on_cpu) return true
+    if (gpuVisible()) return true
+    if (params.store_dir && file("${params.store_dir}/binning/comebin/comebin_bins.tsv").exists()) return true
+    log.warn "COMEBin skipped: no GPU visible (--gpu ${params.gpu}). Run it where one is, or pass --comebin_on_cpu true."
+    return false
+}
+
+def gpuVisible() {
+    if (params.gpu.toString() in ['false', 'off', 'cpu']) return false
+    try {
+        def p = ['nvidia-smi', '-L'].execute()
+        p.waitFor()
+        return p.exitValue() == 0
+    } catch (Exception e) {
+        return false
+    }
 }
 
 def validateParams() {
@@ -231,6 +259,7 @@ workflow {
 
     validateParams()
     def effective_annotator = resolveAnnotator()
+    def comebin_enabled = runComebin()
 
     // 1. Create channels from file-based inputs
     ch_assembly = Channel.fromPath(params.assembly, checkIfExists: true)
@@ -415,7 +444,7 @@ workflow {
         )
     }
 
-    if (params.run_comebin && params.bam_dir) {
+    if (comebin_enabled) {
         BIN_COMEBIN(ch_assembly, ch_bam_files)
         ch_binner_results = ch_binner_results.mix(
             BIN_COMEBIN.out.bins.map { ['comebin', it] }
@@ -440,9 +469,12 @@ workflow {
         )
     }
 
-    // 4. DAS Tool consensus
-    ch_bin_labels = ch_binner_results.collect { it[0] }
-    ch_bin_files  = ch_binner_results.collect { it[1] }
+    // 4. DAS Tool consensus. With --binners_only the consensus steps and
+    // CheckM2 get no input and do not run, so nothing is stored from a
+    // partial set of binners.
+    ch_consensus_in = params.binners_only ? Channel.empty() : ch_binner_results
+    ch_bin_labels = ch_consensus_in.collect { it[0] }
+    ch_bin_files  = ch_consensus_in.collect { it[1] }
 
     DASTOOL_CONSENSUS(
         ch_assembly,
@@ -462,7 +494,7 @@ workflow {
         if (params.run_lorbin && params.bam_dir) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_LORBIN.out.fastas)
         }
-        if (params.run_comebin && params.bam_dir) {
+        if (comebin_enabled) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_COMEBIN.out.fastas)
         }
         if (params.run_vamb) {
@@ -471,7 +503,7 @@ workflow {
         if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB_TAX.out.fastas)
         }
-        BINETTE_CONSENSUS(ch_assembly, ch_binner_fastas.collect())
+        BINETTE_CONSENSUS(ch_assembly, params.binners_only ? Channel.empty() : ch_binner_fastas.collect())
     }
 
     // 4b. MAGScoT consensus refinement
@@ -550,7 +582,7 @@ workflow {
         if (params.run_lorbin && params.bam_dir) {
             ch_all_bins = ch_all_bins.mix(BIN_LORBIN.out.fastas)
         }
-        if (params.run_comebin && params.bam_dir) {
+        if (comebin_enabled) {
             ch_all_bins = ch_all_bins.mix(BIN_COMEBIN.out.fastas)
         }
         if (params.run_vamb) {
@@ -566,7 +598,7 @@ workflow {
         if (params.run_magscot) {
             ch_all_bins = ch_all_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
         }
-        ch_all_bins = ch_all_bins.collect()
+        ch_all_bins = params.binners_only ? Channel.empty() : ch_all_bins.collect()
 
         CHECKM2(ch_all_bins)
 
@@ -596,7 +628,7 @@ workflow {
         if (params.run_lorbin && params.bam_dir) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_LORBIN.out.fastas)
         }
-        if (params.run_comebin && params.bam_dir) {
+        if (comebin_enabled) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_COMEBIN.out.fastas)
         }
         if (params.run_vamb) {
