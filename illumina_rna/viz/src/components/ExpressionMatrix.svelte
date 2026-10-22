@@ -48,6 +48,10 @@
   }
 
   let minDetected = $state(1);
+  // applied once the slider pauses (the heatmap, clustering and t-SNE follow it)
+  let minDetectedApplied = $state(1);
+  let detTimer;
+  $effect(() => { const v = minDetected; clearTimeout(detTimer); detTimer = setTimeout(() => { minDetectedApplied = v; }, 150); return () => clearTimeout(detTimer); });
 
   let searchQuery = $state('');
   let searchDebounced = $state('');
@@ -76,7 +80,7 @@
 
   let filtered = $derived(all.filter(r => {
     if (groups && !active.has(r[groups.field] ?? '')) return false;
-    if (r.detected < minDetected) return false;
+    if (r.detected < minDetectedApplied) return false;
     if (searchDebounced && !searchFields.some(f => r[f] != null && String(r[f]).toLowerCase().includes(searchDebounced))) return false;
     return true;
   }));

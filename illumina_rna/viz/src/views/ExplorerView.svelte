@@ -130,16 +130,30 @@
     expMinPct <= 0 ? ext.eMin : pctToLog(expMinPct, Math.log10(ext.eMin), Math.log10(ext.eMax)),
     expMaxPct >= 100 ? ext.eMax : pctToLog(expMaxPct, Math.log10(ext.eMin), Math.log10(ext.eMax)),
   ] : [0, Infinity]);
-  let isFiltered = $derived(lenMinPct > 0 || lenMaxPct < 100 || expMinPct > 0 || expMaxPct < 100);
+  // Slider labels follow the drag; the filter itself applies once it pauses
+  let committed = $state({ lenMinPct: 0, lenMaxPct: 100, expMinPct: 0, expMaxPct: 100, lenRange: [0, Infinity], expRange: [0, Infinity] });
+  let commitTimer;
+  $effect(() => {
+    const next = { lenMinPct, lenMaxPct, expMinPct, expMaxPct, lenRange, expRange };
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(() => { committed = next; }, 150);
+    return () => clearTimeout(commitTimer);
+  });
+  let isFiltered = $derived(committed.lenMinPct > 0 || committed.lenMaxPct < 100 || committed.expMinPct > 0 || committed.expMaxPct < 100);
+  let passes = $derived.by(() => {
+    const c0 = committed;
+    const lMin = c0.lenMinPct > 0 ? c0.lenRange[0] : -Infinity, lMax = c0.lenMaxPct < 100 ? c0.lenRange[1] : Infinity;
+    const eMin = c0.expMinPct > 0 ? c0.expRange[0] : -Infinity, eMax = c0.expMaxPct < 100 ? c0.expRange[1] : Infinity;
+    return c => c.length >= lMin && c.length <= lMax && c.depth >= eMin && c.depth <= eMax;
+  });
 
   let filteredData = $derived.by(() => {
     if (!explorerData) return null;
     if (!isFiltered) return explorerData;
-    const lMin = lenMinPct > 0 ? lenRange[0] : -Infinity, lMax = lenMaxPct < 100 ? lenRange[1] : Infinity;
-    const eMin = expMinPct > 0 ? expRange[0] : -Infinity, eMax = expMaxPct < 100 ? expRange[1] : Infinity;
-    return { ...explorerData, contigs: explorerData.contigs.filter(c =>
-      c.length >= lMin && c.length <= lMax && c.depth >= eMin && c.depth <= eMax) };
+    return { ...explorerData, contigs: explorerData.contigs.filter(passes) };
   });
+  // Sorted by pooled expression once; filters keep this order for the table
+  let byExpression = $derived(explorerData ? [...explorerData.contigs].sort((a, b) => b.depth - a.depth) : []);
 
   const fmtExp = v => v >= 100 ? Math.round(v).toLocaleString() : v >= 1 ? v.toFixed(1) : v.toFixed(3);
 
@@ -231,8 +245,9 @@
   // ── Table ──
   let tableSrc = $derived.by(() => {
     if (!filteredData) return [];
-    const src = selectedContigs ?? (searchMatchIds ? filteredData.contigs.filter(c => searchMatchIds.has(c.id)) : filteredData.contigs);
-    return [...src].sort((a, b) => b.depth - a.depth);
+    if (selectedContigs) return [...selectedContigs].sort((a, b) => b.depth - a.depth);
+    const p = isFiltered ? passes : null;
+    return byExpression.filter(c => (!p || p(c)) && (!searchMatchIds || searchMatchIds.has(c.id)));
   });
   let tableRows = $derived(tableSrc.slice(0, 500).map(c => ({
     ...c,

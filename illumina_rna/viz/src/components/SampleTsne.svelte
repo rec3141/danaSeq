@@ -22,8 +22,23 @@
 
   let meta = $derived(Object.fromEntries(($sampleStore?.rows ?? []).map(r => [r.sample, r])));
 
-  // Only rerun the embedding when the data changes, not the colouring
-  let embedding = $derived.by(() => {
+  // The embedding (exact t-SNE, ~0.2 s for 130 samples) reruns only once the
+  // shown rows stop changing, and only if they changed; colouring never reruns it.
+  let embedding = $state(null);
+  let lastKey = '';
+  let tsneTimer;
+  $effect(() => {
+    const m = matrix, names = samples;
+    let sum = 0;
+    for (const r of m) for (const v of r) sum += v;
+    const key = `${names.length}:${m.length}:${sum.toPrecision(12)}`;
+    if (key === lastKey) return;
+    clearTimeout(tsneTimer);
+    tsneTimer = setTimeout(() => { lastKey = key; embedding = embed(names, m); }, embedding ? 350 : 0);
+    return () => clearTimeout(tsneTimer);
+  });
+
+  function embed(samples, matrix) {
     if (samples.length < 4 || !matrix.length) return null;
     const rows = [];
     samples.forEach((name, j) => {
@@ -33,7 +48,7 @@
     });
     if (rows.length < 4) return null;
     return { names: rows.map(r => r.name), coords: tsne(brayCurtis(rows.map(r => r.v))) };
-  });
+  }
 
   const runOf = n => n.split('_').slice(0, -1).join('_') || n;
   const PAL = ['#22d3ee', '#f472b6', '#fbbf24', '#34d399', '#a78bfa', '#fb923c',

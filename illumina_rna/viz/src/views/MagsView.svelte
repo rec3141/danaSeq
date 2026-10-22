@@ -38,6 +38,10 @@
   }
   let minCompleteness = $state(0);
   let maxContamination = $state(100);
+  // applied once the sliders pause (the heatmap, clustering and t-SNE follow them)
+  let qApplied = $state({ comp: 0, cont: 100 });
+  let qTimer;
+  $effect(() => { const v = { comp: minCompleteness, cont: maxContamination }; clearTimeout(qTimer); qTimer = setTimeout(() => { qApplied = v; }, 150); return () => clearTimeout(qTimer); });
   let showUnbinned = $state(false);
 
   let searchQuery = $state('');
@@ -71,9 +75,9 @@
   let filtered = $derived(all.filter(b => {
     if (b.id === 'unbinned') return showUnbinned;
     if (!activeTiers.has(b.tier ?? 'none')) return false;
-    if (b.completeness != null && b.completeness < minCompleteness) return false;
-    if (b.contamination != null && b.contamination > maxContamination) return false;
-    if ((minCompleteness > 0 || maxContamination < 100) && b.completeness == null) return false;
+    if (b.completeness != null && b.completeness < qApplied.comp) return false;
+    if (b.contamination != null && b.contamination > qApplied.cont) return false;
+    if ((qApplied.comp > 0 || qApplied.cont < 100) && b.completeness == null) return false;
     if (searchDebounced && ![b.id, b.classification].some(v => v && v.toLowerCase().includes(searchDebounced))) return false;
     return true;
   }));

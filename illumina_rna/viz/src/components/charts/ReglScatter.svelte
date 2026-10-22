@@ -122,9 +122,13 @@
     }
   }
 
-  function draw() {
-    if (!scatterplot || !data?.contigs?.length) return;
+  // Drawing is split by what a control changes, so dragging a slider does
+  // only its own work: colour/data/mode → sort + colours + upload; size field
+  // or exponent → sizes + upload; size scale/max → point-size lookup only.
+  let prep = null;      // { n, x, y, valueA, colorCfg, isCont }
+  let valueB = null;
 
+  function prepare() {
     const contigs = data.contigs;
     let xKey = 'pca_x', yKey = 'pca_y';
     if (mode === 'tsne' && data.has_tsne) { xKey = 'tsne_x'; yKey = 'tsne_y'; }
@@ -144,22 +148,27 @@
     const isCont = !!effectiveContinuous[colorBy];
     const isBin = colorBy === 'bin' || colorBy.endsWith('_bin');
     const bgLabel = isBin ? 'unbinned' : 'Unknown';
+    const n0 = contigs.length;
 
-    // Sort: low-value / background points first (drawn underneath),
-    // high-value / foreground points last (drawn on top)
-    let sorted;
+    // Draw order: low values / background first, high values / foreground on top.
+    // Keys are computed once into a typed array; the sort compares numbers only.
+    let sorted, raw = null;
     if (isCont) {
       const fn = effectiveContinuous[colorBy];
-      sorted = [...contigs].sort((a, b) => fn(a) - fn(b));
+      const keys = new Float64Array(n0);
+      for (let i = 0; i < n0; i++) keys[i] = fn(contigs[i]);
+      const order = new Uint32Array(n0);
+      for (let i = 0; i < n0; i++) order[i] = i;
+      order.sort((a, b) => keys[a] - keys[b]);
+      sorted = new Array(n0);
+      raw = new Float64Array(n0);
+      for (let i = 0; i < n0; i++) { sorted[i] = contigs[order[i]]; raw[i] = keys[order[i]]; }
     } else {
-      sorted = [...contigs];
-      sorted.sort((a, b) => {
-        const aIsBg = !(a[colorBy]) || a[colorBy] === bgLabel;
-        const bIsBg = !(b[colorBy]) || b[colorBy] === bgLabel;
-        if (aIsBg && !bIsBg) return -1;
-        if (!aIsBg && bIsBg) return 1;
-        return 0;
-      });
+      // stable partition: background first, then the rest in original order
+      sorted = [];
+      const fg = [];
+      for (const c of contigs) ((!c[colorBy] || c[colorBy] === bgLabel) ? sorted : fg).push(c);
+      for (const c of fg) sorted.push(c);
     }
     indexMap = sorted;
 
@@ -167,7 +176,6 @@
     const x = new Float32Array(n);
     const y = new Float32Array(n);
     const valueA = new Float32Array(n);
-    const valueB = new Float32Array(n);
 
     // Extract and normalize coordinates to [-1, 1] with uniform scale (1:1 aspect)
     // Use full-dataset extents (from coordExtents) so filtering doesn't re-zoom
@@ -195,21 +203,17 @@
     // ---- Color encoding ----
     let colorCfg;
     if (isCont) {
-      const fn = effectiveContinuous[colorBy];
-      const raw = new Float64Array(n);
-      for (let i = 0; i < n; i++) raw[i] = fn(sorted[i]);
       // Use global fixed range for sample_depth (consistent across samples),
       // rank-based normalization for other continuous modes (spreads colors
-      // evenly by percentile so narrow distributions show full color range)
+      // evenly by percentile so narrow distributions show full color range).
+      // Points are already sorted by value, so a point's rank is its position.
       if (colorBy === 'sample_depth' && sampleDepthData?.maxDepth != null) {
         const vMin = Math.log10(0.01);
         const vMax = Math.log10(sampleDepthData.maxDepth + 0.01);
         const vRange = vMax - vMin || 1;
         for (let i = 0; i < n; i++) valueA[i] = Math.max(0, Math.min(1, (raw[i] - vMin) / vRange));
       } else {
-        const indices = Array.from({length: n}, (_, i) => i);
-        indices.sort((a, b) => raw[a] - raw[b]);
-        for (let rank = 0; rank < n; rank++) valueA[indices[rank]] = rank / (n - 1 || 1);
+        for (let i = 0; i < n; i++) valueA[i] = i / (n - 1 || 1);
       }
       colorCfg = { colorBy: 'valueA', pointColor: VIRIDIS, opacityBy: null, opacity: 0.75 };
     } else {
@@ -243,42 +247,47 @@
       }
       colorCfg = { colorBy: 'valueA', pointColor: colors, opacityBy: 'valueA', opacity: opacities };
     }
+    prep = { n, x, y, valueA, colorCfg, isCont };
+  }
 
-    // ---- Size encoding (use full-dataset extents from sizeRange to stay stable across filters) ----
-    let sizeCfg;
-    if (sizeBy === 'fixed') {
-      sizeCfg = { sizeBy: null, pointSize: 3 * sizeScale };
-    } else {
-      // Log-scale for even visual spread (raw values are extremely skewed)
-      const sfn = sizeBy === 'depth'
-        ? c => Math.log10(c.depth + 1)
-        : c => Math.log10(c.length + 1);
-      let sMin = Infinity, sMax = -Infinity;
-      for (let i = 0; i < n; i++) {
-        const s = sfn(sorted[i]);
-        if (s < sMin) sMin = s;
-        if (s > sMax) sMax = s;
-      }
-      const sRange = sMax - sMin || 1;
-      for (let i = 0; i < n; i++) {
-        // sizeExponent > 1 shrinks the many small points relative to the few large ones
-        valueB[i] = Math.pow(Math.max(0, Math.min(1, (sfn(sorted[i]) - sMin) / sRange)), sizeExponent);
-      }
-      // pointSize must be a lookup array, not a [min, max] range
-      const pMin = 2 * sizeScale, pMax = maxPointSize * sizeScale;
-      const sizeMap = Array.from({length: 64}, (_, i) => pMin + (i / 63) * (pMax - pMin));
-      sizeCfg = { sizeBy: 'valueB', pointSize: sizeMap };
+  // ---- Size encoding (log-scale: raw values are extremely skewed) ----
+  function computeSizes() {
+    const { n } = prep;
+    valueB = new Float32Array(n);
+    if (sizeBy === 'fixed') return;
+    const sorted = indexMap;
+    const sfn = sizeBy === 'depth'
+      ? c => Math.log10(c.depth + 1)
+      : c => Math.log10(c.length + 1);
+    let sMin = Infinity, sMax = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const v = sfn(sorted[i]);
+      valueB[i] = v;
+      if (v < sMin) sMin = v;
+      if (v > sMax) sMax = v;
     }
+    const sRange = sMax - sMin || 1;
+    // sizeExponent > 1 shrinks the many small points relative to the few large ones
+    for (let i = 0; i < n; i++) valueB[i] = Math.pow(Math.max(0, Math.min(1, (valueB[i] - sMin) / sRange)), sizeExponent);
+  }
 
+  function sizeConfig() {
+    if (sizeBy === 'fixed') return { sizeBy: null, pointSize: 3 * sizeScale };
+    // pointSize must be a lookup array, not a [min, max] range
+    const pMin = 2 * sizeScale, pMax = maxPointSize * sizeScale;
+    return { sizeBy: 'valueB', pointSize: Array.from({length: 64}, (_, i) => pMin + (i / 63) * (pMax - pMin)) };
+  }
+
+  function upload() {
     // Save camera view before redraw (preserve zoom/pan across settings changes)
     const modeChanged = mode !== prevMode;
     const savedView = (!modeChanged && prevMode !== null) ? scatterplot.get('cameraView') : null;
     prevMode = mode;
 
-    scatterplot.set({ ...colorCfg, ...sizeCfg });
+    scatterplot.set({ ...prep.colorCfg, ...sizeConfig() });
 
-    scatterplot.draw({ x, y, valueA, valueB }, {
-      zDataType: isCont ? 'continuous' : 'categorical',
+    scatterplot.draw({ x: prep.x, y: prep.y, valueA: prep.valueA, valueB }, {
+      zDataType: prep.isCont ? 'continuous' : 'categorical',
       wDataType: 'continuous',
     }).then(() => {
       // Restore camera after redraw (only if coordinates didn't change)
@@ -289,6 +298,10 @@
     });
   }
 
+  let lastColorKey = [], lastSizeKey = [], lastScaleKey = [];
+  let scaleFrame = 0;
+  const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
   onMount(() => {
     return () => {
       if (scatterplot) { scatterplot.destroy(); scatterplot = null; }
@@ -296,10 +309,20 @@
   });
 
   $effect(() => {
-    const _deps = [data, colorBy, sizeBy, sizeScale, sizeExponent, maxPointSize, mode, colorMap, coordExtents, sampleDepthData, selectedSample];
-    if (!canvasEl || !data) return;
+    const colorKey = [data, colorBy, mode, colorMap, coordExtents, sampleDepthData, selectedSample];
+    const sizeKey = [sizeBy, sizeExponent];
+    const scaleKey = [sizeScale, maxPointSize];
+    if (!canvasEl || !data?.contigs?.length) return;
     if (!scatterplot) init();
-    draw();
+    if (!prep || !same(colorKey, lastColorKey)) {
+      prepare(); computeSizes(); upload();
+    } else if (!same(sizeKey, lastSizeKey)) {
+      computeSizes(); upload();
+    } else if (!same(scaleKey, lastScaleKey)) {
+      // lookup only, no re-upload; at most once per frame while dragging
+      if (!scaleFrame) scaleFrame = requestAnimationFrame(() => { scaleFrame = 0; scatterplot?.set(sizeConfig()); });
+    }
+    lastColorKey = colorKey; lastSizeKey = sizeKey; lastScaleKey = scaleKey;
   });
 
   // Re-apply search filter when only searchMatchIds changes (no full redraw needed)
