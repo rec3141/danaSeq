@@ -206,19 +206,33 @@ def load_contig_embedding(viz_dir, contig_index):
     enc = manifest.get("id_encoding", {"prefix": "contig_", "width": 7})
     x = np.full(len(contig_index), np.nan, dtype=np.float32)
     y = np.full(len(contig_index), np.nan, dtype=np.float32)
+    # Taxon labels ride along for search and colour: coded columns index the
+    # manifest vocabulary (or hold strings in older runs).
+    vocab = manifest.get("vocab") or {}
+    if isinstance(vocab, str):
+        vocab = {}
+    tax_cols = ("kaiju_phylum", "kaiju_genus")
+    tax = {k: np.full(len(contig_index), "", dtype=object) for k in tax_cols}
     hit = 0
     for f in parts:
         with op(f) as fh:
             c = json.load(fh)
         nums = np.cumsum(np.asarray(c["ids"], dtype=np.int64))
-        tx, ty = c["columns"]["tsne_x"], c["columns"]["tsne_y"]
-        for n, a, b in zip(nums, tx, ty):
+        cols = c["columns"]
+        tx, ty = cols["tsne_x"], cols["tsne_y"]
+        for k, n in enumerate(nums):
             i = contig_index.get(f"{enc['prefix']}{int(n):0{enc['width']}d}")
-            if i is not None and a is not None and b is not None:
-                x[i], y[i] = a, b
-                hit += 1
+            if i is None or tx[k] is None or ty[k] is None:
+                continue
+            x[i], y[i] = tx[k], ty[k]
+            hit += 1
+            for col in tax_cols:
+                v = cols.get(col, [None] * len(nums))[k]
+                if isinstance(v, int) and col in vocab:
+                    v = vocab[col][v] if 0 <= v < len(vocab[col]) else ""
+                tax[col][i] = v or ""
     log(f"contig t-SNE: {hit} of {len(contig_index)} contigs placed from {len(parts)} parts")
-    return (x, y) if hit else None
+    return (x, y, tax) if hit else None
 
 
 def jdump(path, obj):
@@ -246,8 +260,9 @@ def main():
     ap.add_argument("--annotations")
     ap.add_argument("--contig-explorer", help="mag_analysis viz/data dir with contig_explorer parts")
     ap.add_argument("--max-map-contigs", type=int, default=400000)
+    ap.add_argument("--ko-names", help="KO<TAB>definition")
     ap.add_argument("--top-genes", type=int, default=2000)
-    ap.add_argument("--top-functions", type=int, default=500)
+    ap.add_argument("--top-functions", type=int, default=2000)
     ap.add_argument("--out", default=".")
     a = ap.parse_args()
     ref = a.ref
@@ -353,7 +368,14 @@ def main():
     funcs = functions_from_annotations(a.annotations, genes["gene_id"]) if len(genes) else {}
     if not funcs and len(genes):
         funcs = functions_from_dbxref(genes["dbxref"].to_numpy())
-    func_json = {}
+    func_json, func_totals = {}, {}
+    ko_names = {}
+    if a.ko_names and os.path.exists(a.ko_names):
+        with open(a.ko_names) as fh:
+            for line in fh:
+                k, _, d = line.rstrip("\n").partition("\t")
+                ko_names[k] = d
+        log(f"{len(ko_names)} KO definitions")
     for kind, labels in funcs.items():
         cats, idx = np.unique(labels, return_inverse=True)
         idx = np.where(cats[idx] == "", -1, idx)
@@ -362,7 +384,10 @@ def main():
         cats, ftpm = cats[keep], ftpm[keep]
         write_table(os.path.join(a.out, f"{ref}.{kind}_tpm.tsv"), kind, list(cats), samples, ftpm)
         top = np.argsort(-ftpm.mean(axis=1))[: a.top_functions]
-        func_json[kind] = [{"id": str(cats[i]), "tpm": [r(x, 2) for x in ftpm[i]]} for i in top]
+        named = kind == "ko" and ko_names
+        func_json[kind] = [{"id": str(cats[i]), **({"name": ko_names.get(str(cats[i]))} if named else {}),
+                            "tpm": [r(x, 2) for x in ftpm[i]]} for i in top]
+        func_totals[kind] = int(len(cats))
         log(f"{kind}: {len(cats)} categories")
 
     # ---- top genes for the viz ----
@@ -392,12 +417,13 @@ def main():
         "genes_detected": [int(x) for x in np.count_nonzero(gmat, axis=0)],
     })
     jdump(os.path.join(vz, f"{ref}.bins.json.gz"), {"ref": ref, "samples": samples, "bins": bin_rows})
-    jdump(os.path.join(vz, f"{ref}.functions.json.gz"), {"ref": ref, "samples": samples, "kinds": func_json})
+    jdump(os.path.join(vz, f"{ref}.functions.json.gz"), {"ref": ref, "samples": samples, "kinds": func_json,
+                                                           "n_total": func_totals})
     jdump(os.path.join(vz, f"{ref}.top_genes.json.gz"), {"ref": ref, "samples": samples, "genes": top_rows})
     # ---- contig t-SNE with per-sample expression ----
     emb = load_contig_embedding(a.contig_explorer, contig_index)
     if emb is not None:
-        ex, ey = emb
+        ex, ey, etax = emb
         tot = cmat.sum(axis=1)
         cand = np.flatnonzero((tot > 0) & ~np.isnan(ex))
         if len(cand) > a.max_map_contigs:
@@ -405,6 +431,13 @@ def main():
         cand.sort()
         clen_arr = clen["length"].to_numpy()
         bnames = bins or []
+        sub = cmat[cand]
+        kb = clen_arr[cand] / 1e3
+        rpkm_p99 = []
+        for j in range(n_s):
+            nz = sub[:, j] > 0
+            tot_j = max(int(sub[:, j].sum()), 1)
+            rpkm_p99.append(round(float(np.percentile(sub[nz, j] / kb[nz] / (tot_j / 1e6), 99)), 2) if nz.any() else 0.0)
         jdump(os.path.join(vz, f"{ref}.contig_map.json.gz"), {
             "ref": ref, "samples": samples,
             "n_contigs_total": int(len(clen)), "n": int(len(cand)),
@@ -413,11 +446,20 @@ def main():
             "length": [int(v) for v in clen_arr[cand]],
             "bins": bnames,
             "bin": [int(contig_bin[i]) if bins else -1 for i in cand],
+            "id": [str(c) for c in clen["contig"].to_numpy()[cand]],
+            "total_reads": [int(v) for v in tot[cand]],
+            "n_detected": [int(v) for v in np.count_nonzero(cmat[cand], axis=1)],
+            # taxon codes into tax_vocab (empty string = unclassified)
+            **{f"{col}_vocab": sorted(set(etax[col][cand])) for col in etax},
+            **{col: (lambda voc: [voc[t] for t in etax[col][cand]])({t: j for j, t in enumerate(sorted(set(etax[col][cand])))})
+               for col in etax},
             # reads on these contigs per sample, for per-million scaling
             "sample_totals": [int(v) for v in cmat[cand].sum(axis=0)],
+            # 99th percentile RPKM of each sample's detected contigs: one
+            # colour ceiling that holds across samples
+            "rpkm_p99": rpkm_p99,
             "files": [f"{ref}.contig_expr.{j:04d}.json.gz" for j in range(n_s)],
         })
-        sub = cmat[cand]
         for j in range(n_s):
             nz = np.flatnonzero(sub[:, j])
             jdump(os.path.join(vz, f"{ref}.contig_expr.{j:04d}.json.gz"), {

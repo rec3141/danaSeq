@@ -21,6 +21,7 @@ process SUMMARIZE_EXPRESSION {
           path(gtdbtk,        stageAs: 'ref/gtdbtk.tsv'),
           path(annotations,   stageAs: 'ref/annotations.tsv'),
           path(contig_explorer, stageAs: 'ref/contig_explorer'),
+          path(kofam,         stageAs: 'ref/kofam.tsv'),
           path(read_counts,   stageAs: 'readcounts/*')
 
     output:
@@ -29,6 +30,14 @@ process SUMMARIZE_EXPRESSION {
 
     script:
     """
+    # KO definitions from KofamScan's detail table (one line per hit; the
+    # marine run's is 20 GB), first definition per KO
+    ko_arg=""
+    if [ -s ref/kofam.tsv ]; then
+        awk -F'\\t' '\$3 ~ /^K[0-9]+\$/ && !seen[\$3]++ { d = \$7; gsub(/^"|"\$/, "", d); print \$3 "\\t" d }' ref/kofam.tsv > ko_names.tsv
+        ko_arg="--ko-names ko_names.tsv"
+    fi
+
     python3 "${projectDir}/bin/summarize_expression.py" \\
         --ref "${ref_name}" \\
         --genes-dir genes --contigs-dir contigs \\
@@ -37,7 +46,7 @@ process SUMMARIZE_EXPRESSION {
         --gene-annot ref/genes.tsv.gz --contig-lengths ref/contig_lengths.tsv \\
         --bins ref/bins.tsv --checkm2 ref/checkm2.tsv --gtdbtk ref/gtdbtk.tsv \\
         --annotations ref/annotations.tsv \\
-        --contig-explorer ref/contig_explorer \\
+        --contig-explorer ref/contig_explorer \$ko_arg \\
         --top-genes ${params.viz_top_genes} --top-functions ${params.viz_top_functions} \\
         --out .
     """

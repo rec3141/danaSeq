@@ -234,6 +234,7 @@ def referencesFromMag(dir_path) {
         checkm2:     firstExisting(["${dir}/binning/checkm2/quality_report.tsv"]),
         gtdbtk:      firstExisting(["${dir}/taxonomy/gtdbtk/gtdbtk_taxonomy.tsv"]),
         annotations: firstExisting(["${dir}/metabolism/merged/merged_annotations.tsv"]),
+        kofam:       firstExisting(["${dir}/metabolism/kofamscan/kofamscan_results.tsv"]),
         // contig t-SNE computed by the mag_analysis viz, reused for the RNA map
         contig_explorer: firstExisting([
             "${dir}/viz/data/contig_explorer_manifest.json.gz",
@@ -333,7 +334,7 @@ workflow {
     ch_ref_gff   = Channel.fromList(refs.collect { r -> [[name: r.name], r.fasta, r.gff ?: empty] })
     ch_ref_extra = Channel.fromList(refs.collect { r ->
         [r.name, r.bins ?: empty, r.checkm2 ?: empty, r.gtdbtk ?: empty, r.annotations ?: empty,
-         r.contig_explorer ?: empty]
+         r.contig_explorer ?: empty, r.kofam ?: empty]
     })
 
     REF_FEATURES(ch_ref_gff)
