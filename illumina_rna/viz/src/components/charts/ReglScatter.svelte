@@ -3,7 +3,8 @@
   import createScatterplot from 'regl-scatterplot';
   import * as d3 from 'd3';
 
-  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, sampleDepthData = null, selectedSample = '', tipFormat = null, sizeExponent = 1 } = $props();
+  let { data = null, colorBy = 'bin', sizeBy = 'length', sizeScale = 1.0, mode = 'pca', colorMap = {}, sizeRange = null, coordExtents = null, onselect = null, onclick = null, searchMatchIds = null, sampleDepthData = null, selectedSample = '', tipFormat = null, sizeExponent = 1,
+        sizeOf = null, sizeMax = null } = $props();
 
   let canvasEl;
   let scatterplot;
@@ -259,11 +260,14 @@
     valueB = new Float32Array(n);
     if (sizeBy === 'fixed') return;
     const sorted = indexMap;
+    // sizeOf/sizeMax: a caller-supplied value (e.g. one sample's expression)
+    // with its own fixed maximum; otherwise the contig's length or depth field
     const field = sizeBy === 'depth' ? 'depth' : 'length';
-    let vmax = sizeRange?.[field];
-    if (!(vmax > 0)) { vmax = 0; for (const c of data.contigs) if (c[field] > vmax) vmax = c[field]; }
+    const get = sizeOf ?? (c => c[field]);
+    let vmax = sizeOf ? sizeMax : sizeRange?.[field];
+    if (!(vmax > 0)) { vmax = 0; for (const c of data.contigs) { const v = get(c); if (v > vmax) vmax = v; } }
     for (let i = 0; i < n; i++) {
-      valueB[i] = Math.pow(Math.min(1, Math.max(0, sorted[i][field]) / (vmax || 1)), sizeExponent);
+      valueB[i] = Math.pow(Math.min(1, Math.max(0, get(sorted[i])) / (vmax || 1)), sizeExponent);
     }
   }
 
@@ -306,7 +310,7 @@
 
   $effect(() => {
     const colorKey = [data, colorBy, mode, colorMap, coordExtents, sampleDepthData, selectedSample];
-    const sizeKey = [sizeBy, sizeExponent, sizeRange];
+    const sizeKey = [sizeBy, sizeExponent, sizeRange, sizeOf, sizeMax];
     const scaleKey = [sizeScale];
     if (!canvasEl || !data?.contigs?.length) return;
     if (!scatterplot) init();

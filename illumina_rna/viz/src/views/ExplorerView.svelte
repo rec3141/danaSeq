@@ -39,25 +39,26 @@
   });
 
   // ── Colour / size controls ──
-  let colorMode = $state('sample');   // 'sample' | 'total' | 'bins' | 'taxa' | 'length'
+  let colorMode = $state('expression');   // 'expression' | 'bins' | 'taxa' | 'length'
   let taxRank = $state('phylum');
   let sizeBy = $state('length');
   let sizeScale = $state(1.0);
   let sizeExponent = $state(0.5);   // size ∝ value^p; 0.5 = sqrt
-  let sampleIdx = $state(0);
+  // Expression selection shared by colour and size: -1 = Total (pooled), else a sample
+  let sampleIdx = $state(-1);
   let layer = $state(null);
   let layerFor = $state(-1);
 
   $effect(() => {
     const m = map, j = sampleIdx;
-    if (!m || colorMode !== 'sample') return;
+    if (!m || j < 0) return;
     loadContigLayer(m, j).then(l => { if (j === sampleIdx) { layer = l; layerFor = j; } });
   });
 
   // Fixed colour ceiling across samples (the largest per-sample 99th percentile)
   let rpkmCeil = $derived(map ? Math.max(1, ...map.rpkm_p99) : 1);
   let sampleDepthData = $derived.by(() => {
-    if (!map || !layer || layerFor !== sampleIdx) return null;
+    if (!map || sampleIdx < 0 || !layer || layerFor !== sampleIdx) return null;
     const total = map.sample_totals[sampleIdx] || 1;
     const l = layer;
     return {
@@ -69,12 +70,20 @@
   let selectedSampleName = $derived(map?.samples?.[sampleIdx] ?? '');
 
   let colorBy = $derived(
-    colorMode === 'sample' ? (sampleDepthData ? 'sample_depth' : 'depth') :
-    colorMode === 'total' ? 'depth' :
+    colorMode === 'expression' ? (sampleDepthData ? 'sample_depth' : 'depth') :
     colorMode === 'bins' ? 'bin' :
     colorMode === 'taxa' ? `kaiju_${taxRank}` : 'length'
   );
   let scatterSize = $derived(sizeBy === 'expression' ? 'depth' : sizeBy);
+  // Size by expression follows the same selection: pooled RPKM for Total,
+  // else that sample's RPKM, each on its own fixed maximum over the whole map
+  let sampleSize = $derived.by(() => {
+    if (sizeBy !== 'expression' || !sampleDepthData || !explorerData) return { fn: null, max: null };
+    const fn = sampleDepthData.depthOf;
+    let max = 0;
+    for (const c of explorerData.contigs) { const v = fn(c); if (v > max) max = v; }
+    return { fn, max };
+  });
 
   const PALETTE = ['#22d3ee','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c',
                    '#2dd4bf','#818cf8','#f472b6','#4ade80','#e879f9','#38bdf8',
@@ -100,13 +109,14 @@
   });
 
   const modeDefs = [
-    { key: 'sample', label: 'Sample' }, { key: 'total', label: 'Total' },
+    { key: 'expression', label: 'Expression' },
     { key: 'bins', label: 'MAGs' }, { key: 'taxa', label: 'Taxon' }, { key: 'length', label: 'Length' },
   ];
   const rankDefs = ['phylum', 'genus'];
   const sizeDefs = [{ key: 'length', label: 'Length' }, { key: 'expression', label: 'Expression' }, { key: 'fixed', label: 'Fixed' }];
   const cycleSize = () => { const k = sizeDefs.map(d => d.key); sizeBy = k[(k.indexOf(sizeBy) + 1) % k.length]; };
-  const step = d => { const n = map?.samples?.length ?? 0; if (n) sampleIdx = (sampleIdx + d + n) % n; };
+  // steps through Total, then each sample
+  const step = d => { const n = (map?.samples?.length ?? 0) + 1; if (n > 1) sampleIdx = ((sampleIdx + 1 + d + n) % n) - 1; };
   let hasTaxa = $derived(!!map?.kaiju_phylum_vocab?.some(Boolean));
 
   // ── Filters: log-scale dual-range sliders on length and pooled expression ──
@@ -253,7 +263,7 @@
   });
   let tableRows = $derived(tableSrc.slice(0, 500).map(c => ({
     ...c,
-    sample_rpkm: sampleDepthData && colorMode === 'sample' ? sampleDepthData.depthOf(c) : null,
+    sample_rpkm: sampleDepthData ? sampleDepthData.depthOf(c) : null,
   })));
   let tableColumns = $derived([
     { key: 'id', label: 'Contig' },
@@ -263,7 +273,7 @@
     { key: 'reads', label: 'Read pairs', render: v => fmtInt(v) },
     { key: 'depth', label: 'Pooled RPKM', render: v => fmtExp(v) },
     { key: 'n_detected', label: 'Samples' },
-    ...(colorMode === 'sample' && sampleDepthData ? [{ key: 'sample_rpkm', label: `RPKM ${selectedSampleName}`, render: v => v == null ? '-' : fmtExp(v) }] : []),
+    ...(sampleDepthData ? [{ key: 'sample_rpkm', label: `RPKM ${selectedSampleName}`, render: v => v == null ? '-' : fmtExp(v) }] : []),
   ]);
   function exportTSV() {
     downloadTsv(`contigs_${selectedContigs ? 'selection' : 'all'}_${tableSrc.length}.tsv`,
@@ -272,7 +282,7 @@
   }
 
   const tip = c => {
-    const s = sampleDepthData && colorMode === 'sample' ? ` | ${selectedSampleName}: ${fmtExp(sampleDepthData.depthOf(c))} RPKM` : '';
+    const s = sampleDepthData ? ` | ${selectedSampleName}: ${fmtExp(sampleDepthData.depthOf(c))} RPKM` : '';
     const tax = c.kaiju_genus || c.kaiju_phylum;
     return `${c.id} | ${c.length.toLocaleString()} bp | ${fmtInt(c.reads)} read pairs | pooled ${fmtExp(c.depth)} RPKM${s}${c.bin ? ` | ${c.bin}` : ''}${tax ? ` | ${tax}` : ''}`;
   };
@@ -302,16 +312,17 @@
       >{d.key === 'taxa' && colorMode === 'taxa' ? `Kaiju ${taxRank}` : d.label}{d.key === 'taxa' ? ' ▾' : ''}</button>
     {/if}
   {/each}
-  {#if colorMode === 'sample'}
+  {#if colorMode === 'expression' || sizeBy === 'expression'}
     <button class="px-2 py-1 rounded-md border border-slate-600 text-slate-400 hover:border-slate-500" onclick={() => step(-1)} title="Previous sample">&#x25C0;</button>
     <select
       class="px-2 py-1 rounded-md border border-slate-600 bg-slate-800 text-slate-300 text-xs focus:border-cyan-400 focus:outline-none cursor-pointer font-mono"
       bind:value={sampleIdx}
     >
+      <option value={-1}>Total (pooled)</option>
       {#each map.samples as s, j}<option value={j}>{s}</option>{/each}
     </select>
     <button class="px-2 py-1 rounded-md border border-slate-600 text-slate-400 hover:border-slate-500" onclick={() => step(1)} title="Next sample">&#x25B6;</button>
-    {#if layerFor !== sampleIdx}<span class="text-slate-500 italic">loading sample...</span>{/if}
+    {#if sampleIdx >= 0 && layerFor !== sampleIdx}<span class="text-slate-500 italic">loading sample...</span>{/if}
   {/if}
   <span class="text-slate-600">|</span>
   <span class="text-slate-400">Size:</span>
@@ -380,20 +391,20 @@
 
 <div class="flex gap-4 mb-6">
   <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 h-[820px] flex flex-col flex-1 min-w-0">
-    <ReglScatter data={filteredData} {colorBy} sizeBy={scatterSize} {sizeScale} {sizeExponent} sizeRange={sizeMax} mode="tsne"
+    <ReglScatter data={filteredData} {colorBy} sizeBy={scatterSize} {sizeScale} {sizeExponent} sizeRange={sizeMax} sizeOf={sampleSize.fn} sizeMax={sampleSize.max} mode="tsne"
       colorMap={stableColorMap} {coordExtents} onselect={ids => selectedIds = ids} onclick={openDetail}
-      {searchMatchIds} {sampleDepthData} selectedSample={colorMode === 'sample' ? selectedSampleName : ''} tipFormat={tip} />
+      {searchMatchIds} {sampleDepthData} selectedSample={sampleIdx >= 0 ? selectedSampleName : ''} tipFormat={tip} />
     <div class="text-xs text-slate-500 mt-2 flex-shrink-0">
       {filteredData.contigs.length.toLocaleString()} of {map.n_contigs_total.toLocaleString()} contigs (those with RNA reads) |
       regl-scatterplot | t-SNE from the MAG analysis |
-      {colorMode === 'sample' ? `colour: RPKM in ${selectedSampleName}, fixed scale to ${fmtExp(rpkmCeil)}` : colorMode === 'total' ? 'colour: pooled RPKM (rank)' : ''} |
+      {colorMode === 'expression' ? (sampleIdx >= 0 ? `colour: RPKM in ${selectedSampleName}, fixed scale to ${fmtExp(rpkmCeil)}` : 'colour: pooled RPKM (rank)') : ''} |
       Shift+drag to lasso | Click point for details
     </div>
   </div>
 
   <div class="w-1/2 min-w-[420px] max-w-[640px]">
     <ContigGenes contig={detail} genes={detailGenes} loading={genesLoading} samples={map.samples}
-      sampleIdx={colorMode === 'sample' ? sampleIdx : null} contigProfile={detailProfile}
+      sampleIdx={sampleIdx >= 0 ? sampleIdx : null} contigProfile={detailProfile}
       query={searchDebounced} onclose={() => detailId = null} />
   </div>
 </div>
