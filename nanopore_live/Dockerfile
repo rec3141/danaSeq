@@ -55,6 +55,18 @@ RUN curl -fsSL \
         -o /opt/conda/envs/dana-tools/bin/tetramer_freqs_esom.pl \
     && chmod +x /opt/conda/envs/dana-tools/bin/tetramer_freqs_esom.pl
 
+# fastsne (read t-SNE of every read; https://github.com/rec3141/fastsne): pinned
+# release, CPU build only (AVX-512 / AVX2 / generic behind a launcher, so the
+# image runs on any x86-64), linked against the tools env's FFTW
+ARG FASTSNE_VERSION=v0.2.0
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends g++ make git ca-certificates > /dev/null \
+    && git clone -q --depth 1 --branch ${FASTSNE_VERSION} https://github.com/rec3141/fastsne /tmp/fastsne \
+    && make -s -C /tmp/fastsne cpu install PREFIX=/usr/local \
+        FFTW_INC=-I/opt/conda/envs/dana-tools/include \
+        FFTW_LIB="-L/opt/conda/envs/dana-tools/lib -Wl,-rpath,/opt/conda/envs/dana-tools/lib" \
+    && rm -rf /tmp/fastsne \
+    && apt-get purge -y g++ make git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
 # ============================================================================
 # Create wrapper scripts so tools are callable from PATH
 # ============================================================================

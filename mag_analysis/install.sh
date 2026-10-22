@@ -334,6 +334,27 @@ post_install_merged() {
             chmod +x "${minpath_dir}/MinPath.py" 2>/dev/null || true
             echo "  MinPath installed to ${minpath_dir}"
         fi
+
+        # fastsne (contig t-SNE; optional, the viz falls back to sklearn): CPU
+        # build against this env's FFTW, plus the GPU build when nvcc is on PATH
+        local fs_version="v0.2.0" fs_src
+        if command -v make &>/dev/null && command -v g++ &>/dev/null; then
+            echo "  Building fastsne ${fs_version}..."
+            fs_src=$(mktemp -d)
+            if git clone -q --depth 1 --branch "${fs_version}" https://github.com/rec3141/fastsne "${fs_src}" \
+                && make -s -C "${fs_src}" cpu FFTW_INC="-I${env_path}/include" \
+                    FFTW_LIB="-L${env_path}/lib -Wl,-rpath,${env_path}/lib"; then
+                if command -v nvcc &>/dev/null; then
+                    make -s -C "${fs_src}" gpu > /dev/null 2>&1 || echo "  [WARNING] fastsne GPU build failed (CPU build kept)"
+                fi
+                make -s -C "${fs_src}" install PREFIX="${env_path}" && echo "  fastsne installed to ${env_path}/bin"
+            else
+                echo "  [WARNING] fastsne build failed; the contig t-SNE will use sklearn"
+            fi
+            rm -rf "${fs_src}"
+        else
+            echo "  [WARNING] fastsne needs make and g++; skipped (contig t-SNE will use sklearn)"
+        fi
     fi
 }
 

@@ -14,5 +14,6 @@ dependencies:
   - plotly
   - glpk
   - umap-learn
+  - fftw            # fastsne_cpu (contig t-SNE)
   - nodejs>=18
   - pip

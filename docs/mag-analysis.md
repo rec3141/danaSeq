@@ -296,6 +296,13 @@ results/
 └── pipeline_info/              Nextflow reports (timeline, trace, DAG)
 ```
 
+The contig explorer's t-SNE uses [fastsne](https://github.com/rec3141/fastsne) when it is installed (the
+containers ship it; the `-gpu` image also has the CUDA build): seconds instead of minutes, and `--dedup 2`
+keeps over-represented genomes from stretching into worms. The viz preprocess picks the engine with
+`--tsne-engine auto|gpu|cpu|sklearn` (auto: GPU, then CPU, then sklearn) and also writes
+`viz/fastsne/viewer.html?data=contigs.fsv`, a WebGL view of the t-SNE, UMAP and PCA maps coloured by bin,
+taxonomy, GC, depth and length (`--no-fastsne-viewer` to skip).
+
 ## Profiles
 
 | Profile | Use case |
