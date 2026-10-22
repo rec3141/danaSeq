@@ -97,6 +97,9 @@ def import_protein_hits(con, imported):
         except Exception as e:
             print(f'[WARNING] protein hits read failed {path}: {e}', file=sys.stderr)
             continue
+        # A chunk re-searched with other cutoffs (same filename) replaces its
+        # previous rows instead of adding to them.
+        con.execute('DELETE FROM protein_hits WHERE db = ? AND chunk = ?', [db, chunk])
         if rows:
             con.executemany('INSERT INTO protein_hits VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
         if annot:
@@ -116,18 +119,45 @@ def import_protein_hits(con, imported):
     print(f'[import_protein_hits] {len(pending)} files, {n_rows} hits', file=sys.stderr)
 
 
+def _stale(con, imported):
+    """Already-imported files whose provenance line no longer matches what was
+    loaded (e.g. CANT-HYD re-searched with --cut_nc instead of --cut_tc)."""
+    loaded = {(db, chunk): params for db, chunk, params in
+              con.execute('SELECT db, chunk, params FROM protein_db_searches').fetchall()}
+    stale = set()
+    for path in sorted(glob.glob('hmm/*.tsv') + glob.glob('protdb/*.tsv')):
+        if path not in imported:
+            continue
+        with open(path) as fh:
+            first = fh.readline().rstrip('\n')
+        if not first.startswith('#'):
+            continue  # legacy file: nothing to compare
+        meta = dict(kv.partition('=')[::2] for kv in first[1:].split('\t'))
+        db = meta.get('db', '')
+        base = os.path.basename(path)[:-len('.tsv')]
+        chunk = base[:-(len(db) + 1)] if base.endswith('.' + db) else base
+        params = '\t'.join(f'{k}={v}' for k, v in meta.items() if k not in ('db', 'n_proteins'))
+        if loaded.get((db, chunk)) != params:
+            stale.add(path)
+    return stale
+
+
 def main():
     """Standalone: import ONLY protein-DB hits for one barcode dir (used by
-    backfills that must not touch the other tables, e.g. mapping)."""
+    backfills that must not touch the other tables, e.g. mapping).
+    --recheck also re-imports files whose cutoffs changed since loading."""
     import duckdb
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from db_schema import ensure_schema
-    os.chdir(sys.argv[1])
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    os.chdir(args[0])
     con = duckdb.connect('dana.duckdb')
     ensure_schema(con)
     imported = {r[0] for r in con.execute(
         "SELECT filename FROM import_log WHERE filename LIKE 'hmm/%' OR filename LIKE 'protdb/%'"
     ).fetchall()}
+    if '--recheck' in sys.argv:
+        imported -= _stale(con, imported)
     import_protein_hits(con, imported)
     con.close()
 

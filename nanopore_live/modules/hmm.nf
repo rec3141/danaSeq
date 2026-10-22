@@ -2,7 +2,7 @@
 // Runs once per [protein file x HMM database]; the search + TSV formatting
 // lives in bin/protein_db_search.sh so out-of-pipeline backfills produce
 // identical output. Default cutoff is the models' trusted cutoff (--cut_tc),
-// as recommended for CANT-HYD (Khot et al. 2022).
+// with per-DB overrides from <db>.opts (CANT-HYD uses its noise cutoff, nc).
 //
 // Output <id>.<db>.tsv: '#'-provenance line (incl. n_proteins searched), header,
 // then one row per hit annotated from <db>.genes.tsv (gene, category, pathway)

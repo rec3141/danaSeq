@@ -57,7 +57,7 @@
       label: 'CANT-HYD',
       blurb: 'Hydrocarbon-degradation marker HMMs (aerobic + anaerobic alkane/aromatic)',
       cite: 'Khot et al. 2022, Front. Microbiol. 12:764058',
-      cutoff: 'hmmsearch, trusted cutoffs (--cut_tc)',
+      cutoff: 'hmmsearch, noise cutoffs (--cut_nc)',
       color: '#fbbf24',
     },
     'Mapping markers': {
