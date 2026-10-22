@@ -46,7 +46,7 @@ process GTDBTK_CLASSIFY {
     declare -A first_with
     for f in all_bins/*.fa; do
         [ -e "\$f" ] || continue
-        key=\$(grep '>' "\$f" | cut -f1 -d' ' | sort | md5sum | cut -c1-32)
+        key=\$(grep '>' "\$f" | sed 's/[[:space:]].*//' | sort | md5sum | cut -c1-32)
         if [ -n "\${first_with[\$key]:-}" ]; then
             printf '%s\t%s\n' "\$(basename "\$f" .fa)" "\${first_with[\$key]}" >> duplicates.tsv
             rm -f "\$f"
