@@ -13,7 +13,10 @@ export const loading = writable(true);
 export const error   = writable(null);
 
 async function fetchJSON(url) {
-  const res = await fetch(url);
+  // microscape.app serves only the .json.gz copy of a data file; local dev
+  // may have only .json. Try the gzipped name first.
+  let res = url.endsWith('.gz') ? await fetch(url) : await fetch(url + '.gz');
+  if (!res.ok && !url.endsWith('.gz')) res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
   // .json.gz is served either with Content-Encoding: gzip (already inflated
   // by the browser) or as raw bytes; peek at the magic number to tell.

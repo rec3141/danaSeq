@@ -50,6 +50,9 @@ def main():
              "references": refs}
     with open(os.path.join(a.out, "index.json"), "w") as fh:
         json.dump(index, fh, indent=1)
+    # microscape.app serves the .gz copy of each data file
+    with gzip.open(os.path.join(a.out, "index.json.gz"), "wt") as fh:
+        json.dump(index, fh)
     print(f"[viz] {len(refs)} reference(s): {', '.join(r['name'] for r in refs)}")
 
 
