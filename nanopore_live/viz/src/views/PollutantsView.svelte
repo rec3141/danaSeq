@@ -88,6 +88,13 @@
       cutoff: 'DIAMOND blastp, ≥50% identity, ≥50% query+subject cover, E≤1e-5',
       color: '#f472b6',
     },
+    'RDase': {
+      label: 'Reductive dehalogenases',
+      blurb: 'rdhA — organohalide respiration (chlorinated ethenes, chlorophenols, PCBs)',
+      cite: 'NCBIfam TIGR02486 + Pfam PF13486',
+      cutoff: 'hmmsearch: TIGR02486 trusted cutoff (rdhA); PF13486 gathering cutoff (rdhA-like)',
+      color: '#2dd4bf',
+    },
     'HADEG': {
       label: 'HADEG',
       blurb: 'Aerobic hydrocarbon & plastic degradation and biosurfactant genes',
@@ -125,6 +132,8 @@
       match: f => (f[0] === 'PAZy') || (f[0] === 'HADEG' && f[1] === 'Plastics') },
     { id: 'mer',    label: 'mer (Hg resistance)', title: 'Mercury resistance genes (BacMet: merA/merB/merR/merT …)',
       match: f => f[0] === 'BacMet' && f[2].startsWith('Mercury') },
+    { id: 'rdh',    label: 'rdhA (organohalides)', title: 'Reductive dehalogenases — organohalide respiration',
+      match: f => f[0] === 'RDase' },
   ];
 
   // ---- Selection: a node in the db -> category -> pathway -> gene tree -----
