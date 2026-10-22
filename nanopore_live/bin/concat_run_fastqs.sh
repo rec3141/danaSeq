@@ -117,6 +117,20 @@ bb_file() {  # validate a file on disk
     bb_parse <<<"$out"
 }
 
+# Read a file the way the server holds it. On a CIFS mount (cache=strict) a
+# read straight after a write is served from this client's page cache, so a
+# checksum of "the copy we just wrote" proves nothing about the NAS. Observed:
+# 20260610 FBA71673 barcode12 passed every check here on 2026-09-21, yet on the
+# server 3.7 MiB of the file had been overwritten with its own data from
+# 7.7 MiB further on (page-aligned), and it no longer decompresses. O_DIRECT
+# bypasses the page cache and goes to the server. Falls back to a plain read
+# only where the filesystem refuses O_DIRECT (e.g. tmpfs).
+direct_cat() {
+    dd if="$1" iflag=direct bs=4M status=none 2>/dev/null && return 0
+    log "WARNING: O_DIRECT read of $1 refused; checking a cached read instead"
+    cat "$1"
+}
+
 # Salvage a cut-off chunk: inflate what there is, keep only records that are
 # structurally whole, recompress.
 #
@@ -253,6 +267,9 @@ collapse_dir() {
             fi
         done
     done
+    # What the result must be, byte for byte: the (possibly repaired) chunks in order.
+    local src_md5 final_md5
+    src_md5=$(cat "${srcs[@]}" | md5sum | cut -d" " -f1)
     if ! out_counts=$(bb_file "$tmp_out"); then
         log "FAIL $d: reformat.sh could not read the concatenated file; nothing removed"
         rm -f "$tmp_out" "$STAGE/.repair.$$."*; TOT_FAIL=$((TOT_FAIL + 1)); return 1
@@ -273,7 +290,7 @@ collapse_dir() {
             # pass pick it up as an input chunk (see the find above).
             log "FAIL $d: could not write the result back"; rm -f "$d/.partial.$out"; rm -rf "$wd"
             TOT_FAIL=$((TOT_FAIL+1)); return 1; }
-        remote_md5=$(md5sum < "$d/.partial.$out" | cut -d" " -f1)
+        remote_md5=$(direct_cat "$d/.partial.$out" | md5sum | cut -d" " -f1)
         if [[ "$local_md5" != "$remote_md5" ]]; then
             log "FAIL $d: the copy back does not match ($local_md5 vs $remote_md5); nothing removed"
             rm -f "$d/.partial.$out"; rm -rf "$wd"; TOT_FAIL=$((TOT_FAIL+1)); return 1
@@ -283,6 +300,14 @@ collapse_dir() {
         rm -rf "$wd"
     else
         mv -f "$tmp_out" "$d/$out" || { log "FAIL $d: could not install $out"; TOT_FAIL=$((TOT_FAIL+1)); return 1; }
+    fi
+    # Last check before the chunks go: the installed file as the server holds it.
+    final_md5=$(direct_cat "$d/$out" | md5sum | cut -d" " -f1)
+    if [[ "$final_md5" != "$src_md5" ]]; then
+        # Keep it for inspection, but as a dotfile so no later pass reads it as a chunk.
+        mv -f "$d/$out" "$d/.failed.$out"
+        log "FAIL $d: $out on disk does not match its chunks ($final_md5 vs $src_md5); chunks kept, result moved to .failed.$out"
+        rm -f "$STAGE/.repair.$$."*; TOT_FAIL=$((TOT_FAIL+1)); return 1
     fi
     { printf '# collapsed\t%s\tchunks %s\treads %s\tbases %s\tsalvaged %s\tvalidator %s\n' \
              "$(now)" "$n" "${in_counts%% *}" "${in_counts##* }" "$ntrunc" \
