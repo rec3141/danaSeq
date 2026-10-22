@@ -70,7 +70,7 @@
   });
 </script>
 
-<div class="flex flex-col bg-slate-800 rounded-lg border border-slate-700 overflow-hidden h-[700px]">
+<div class="flex flex-col bg-slate-800 rounded-lg border border-slate-700 overflow-hidden h-[820px]">
   <div class="flex items-center justify-between px-4 py-2 border-b border-slate-700 flex-shrink-0">
     {#if contig}
       <div class="min-w-0">
@@ -113,7 +113,7 @@
 
     {#if genes?.length}
       <div class="px-3 pt-3 flex-shrink-0">
-        <GeneArrowMap {features} contigLength={contig.length} height={140} colorMode={colorMode === 'type' ? 'type' : 'depth'}
+        <GeneArrowMap {features} contigLength={contig.length} height={120} colorMode={colorMode === 'type' ? 'type' : 'depth'}
           dpLabel={colorMode === 'sample' ? `TPM in ${samples[sampleIdx]}` : 'pooled TPM'} dpUnit="TPM"
           onclick={f => selectedGene = genes.find(g => g.id === f.id) ?? null} />
       </div>
