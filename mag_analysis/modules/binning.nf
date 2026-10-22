@@ -45,7 +45,7 @@ process BIN_SEMIBIN2 {
     set -e
 
     if [ \$semibin_exit -ne 0 ]; then
-        echo "[WARNING] SemiBin2 exited with code \$semibin_exit (dataset may be too small)" >&2
+        echo "[WARNING] SemiBin2 exited with code \$semibin_exit: \$(exit_reason.sh \$semibin_exit)" >&2
         touch semibin_bins.tsv
     elif [ -d semibin_out/output_bins ] && ls semibin_out/output_bins/*.fa.gz 1>/dev/null 2>&1; then
         # Build TSV from FASTA headers (single source of truth)
@@ -56,7 +56,7 @@ process BIN_SEMIBIN2 {
             bin_num=\$(basename "\$bin_file" .fa.gz | grep -oP '\\d+\$')
             bin_name=\$(printf 'semibin_%03d' \$((bin_num + 1)))
             zcat "\$bin_file" > "bins/\${bin_name}.fa"
-            zcat "\$bin_file" | grep '>' | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+            zcat "\$bin_file" | grep '>' | sed 's/^>//; s/[[:space:]].*//' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
             done >> semibin_bins.tsv
         done
@@ -109,7 +109,7 @@ process BIN_METABAT2 {
         bin_num=\$((bin_num + 1))
         bin_name=\$(printf 'metabat_%03d' \$bin_num)
         cp "\$bin_file" "bins/\${bin_name}.fa"
-        grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+        grep '>' "\$bin_file" | sed 's/^>//; s/[[:space:]].*//' | while read -r contig; do
             printf '%s\\t%s\\n' "\$contig" "\$bin_name"
         done >> metabat_bins.tsv
     done
@@ -167,7 +167,7 @@ process BIN_MAXBIN2 {
         bin_num=\$(basename "\$bin_file" .fasta | grep -oP '\\d+\$')
         bin_name=\$(printf 'maxbin_%03d' "\$((10#\$bin_num))")
         cp "\$bin_file" "bins/\${bin_name}.fa"
-        grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+        grep '>' "\$bin_file" | sed 's/^>//; s/[[:space:]].*//' | while read -r contig; do
             printf '%s\\t%s\\n' "\$contig" "\$bin_name"
         done >> maxbin_bins.tsv
     done
@@ -215,7 +215,7 @@ process BIN_LORBIN {
     set -e
 
     if [ \$lorbin_exit -ne 0 ]; then
-        echo "[WARNING] LorBin exited with code \$lorbin_exit (dataset may be too small)" >&2
+        echo "[WARNING] LorBin exited with code \$lorbin_exit: \$(exit_reason.sh \$lorbin_exit)" >&2
         touch lorbin_bins.tsv
     elif [ -d lorbin_out/output_bins ]; then
         # Convert LorBin FASTA bins to DAS_Tool format TSV (contig\\tbin)
@@ -226,7 +226,7 @@ process BIN_LORBIN {
             bin_num=\$(basename "\$bin_file" .fa | grep -oP '\\d+\$')
             bin_name=\$(printf 'lorbin_%03d' "\$((10#\$bin_num))")
             cp "\$bin_file" "bins/\${bin_name}.fa"
-            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+            grep '>' "\$bin_file" | sed 's/^>//; s/[[:space:]].*//' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
             done >> lorbin_bins.tsv
         done
@@ -279,7 +279,7 @@ process BIN_COMEBIN {
     set -e
 
     if [ \$comebin_exit -ne 0 ]; then
-        echo "[WARNING] COMEBin exited with code \$comebin_exit (dataset may be too small)" >&2
+        echo "[WARNING] COMEBin exited with code \$comebin_exit: \$(exit_reason.sh \$comebin_exit)" >&2
         touch comebin_bins.tsv
     elif [ -d comebin_out/comebin_res/comebin_res_bins ]; then
         # Convert COMEBin FASTA bins to DAS_Tool format TSV (contig\\tbin)
@@ -291,7 +291,7 @@ process BIN_COMEBIN {
             bin_num=\$((bin_num + 1))
             bin_name=\$(printf 'comebin_%03d' \$bin_num)
             cp "\$bin_file" "bins/\${bin_name}.fa"
-            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+            grep '>' "\$bin_file" | sed 's/^>//; s/[[:space:]].*//' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
             done >> comebin_bins.tsv
         done
@@ -402,7 +402,7 @@ with open('vamb_abundance.tsv', 'w') as out:
             bin_num=\$((bin_num + 1))
             bin_name=\$(printf 'vamb_%03d' \$bin_num)
             cp "\$bin_file" "bins/\${bin_name}.fa"
-            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+            grep '>' "\$bin_file" | sed 's/^>//; s/[[:space:]].*//' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
             done >> vamb_bins.tsv
         done
@@ -563,7 +563,7 @@ with open('vamb_abundance.tsv', 'w') as out:
             bin_num=\$((bin_num + 1))
             bin_name=\$(printf 'vamb_tax_%03d' \$bin_num)
             cp "\$bin_file" "bins/\${bin_name}.fa"
-            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+            grep '>' "\$bin_file" | sed 's/^>//; s/[[:space:]].*//' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
             done >> vamb_tax_bins.tsv
         done
@@ -658,7 +658,7 @@ process BINETTE_CONSENSUS {
             bin_num=\$((bin_num + 1))
             bin_name=\$(printf 'binette_%03d' \$bin_num)
             cp "\$bin_file" "bins/\${bin_name}.fa"
-            grep '>' "\$bin_file" | tr -d '>' | cut -f1 -d' ' | while read -r contig; do
+            grep '>' "\$bin_file" | sed 's/^>//; s/[[:space:]].*//' | while read -r contig; do
                 printf '%s\\t%s\\n' "\$contig" "\$bin_name"
             done >> binette_bins.tsv
         done
@@ -841,7 +841,12 @@ process DASTOOL_CONSENSUS {
     IFS=',' read -ra F_ARR <<< "${files_csv}"
     IFS=',' read -ra L_ARR <<< "${labels_csv}"
     for i in "\${!F_ARR[@]}"; do
-        if [ -s "\${F_ARR[\$i]}" ]; then
+        # DAS Tool reads exactly two columns (contig, bin) and aborts the whole
+        # consensus on any other shape, so leave out a malformed table instead.
+        bad=\$(awk -F'\\t' 'NF != 2' "\${F_ARR[\$i]}" 2>/dev/null | head -1)
+        if [ -n "\$bad" ]; then
+            echo "[WARNING] Skipping \${L_ARR[\$i]}: \${F_ARR[\$i]} is not a 2-column contig/bin table (e.g. '\$(echo "\$bad" | cut -c1-120)')" >&2
+        elif [ -s "\${F_ARR[\$i]}" ]; then
             [ -n "\$FILTERED_FILES" ] && FILTERED_FILES+=","
             FILTERED_FILES+="\${F_ARR[\$i]}"
             [ -n "\$FILTERED_LABELS" ] && FILTERED_LABELS+=","
@@ -876,7 +881,12 @@ process DASTOOL_CONSENSUS {
     mkdir -p bins
 
     if [ \$dastool_exit -ne 0 ]; then
-        echo "[WARNING] DAS_Tool exited with code \$dastool_exit (no bins above score threshold)" >&2
+        if grep -q 'No bins with bin-score' dastool_out/dastool_DASTool.log 2>/dev/null; then
+            echo "[WARNING] DAS_Tool exited with code \$dastool_exit: no bins above the score threshold" >&2
+        else
+            echo "[WARNING] DAS_Tool exited with code \$dastool_exit; end of its log:" >&2
+            tail -n 20 dastool_out/dastool_DASTool.log >&2 2>/dev/null || true
+        fi
     fi
 
     # ---- Collect DAS_Tool evaluation and summary files ----

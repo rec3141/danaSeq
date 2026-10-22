@@ -506,21 +506,21 @@ if os.path.isfile(jf):
         data = json.load(f)
     for rec in data.get('records', []):
         contig = rec.get('id', 'unknown')
-        for feat in rec.get('areas', rec.get('features', [])):
-            if feat.get('type') == 'region':
-                loc = feat.get('location', '')
-                start = feat.get('start', '')
-                end = feat.get('end', '')
-                products = ','.join(feat.get('products', feat.get('product', ['unknown'])))
-                knowncluster = feat.get('knownclusterblast', [{}])
-                if knowncluster:
-                    kc = knowncluster[0] if isinstance(knowncluster, list) else knowncluster
-                    similar = kc.get('description', 'NA')
-                    sim_pct = kc.get('similarity', 'NA')
-                else:
-                    similar = 'NA'
-                    sim_pct = 'NA'
-                rows.append(f'{contig}_region\\t{contig}\\t{start}\\t{end}\\t{products}\\t{similar}\\t{sim_pct}')
+        # Each entry in 'areas' is one region, numbered from 1 in record order;
+        # KnownClusterBlast results carry that region_number. Area entries
+        # have no 'type' key.
+        kcb = rec.get('modules', {}).get('antismash.modules.clusterblast', {})
+        known = {}
+        for res in kcb.get('knowncluster', {}).get('results', []):
+            ranking = res.get('ranking') or []
+            if ranking and isinstance(ranking[0], (list, tuple)) and len(ranking[0]) >= 2:
+                desc, score = ranking[0][0], ranking[0][1]
+                known[res.get('region_number')] = (desc.get('description', 'NA'), score.get('similarity', 'NA'))
+        for n, area in enumerate(rec.get('areas', []), start=1):
+            products = ','.join(area.get('products', [])) or 'unknown'
+            similar, sim_pct = known.get(n, ('NA', 'NA'))
+            start, end = area.get('start', ''), area.get('end', '')
+            rows.append(f'{contig}.region{n:03d}\\t{contig}\\t{start}\\t{end}\\t{products}\\t{similar}\\t{sim_pct}')
 
 # Fallback: parse region GBKs if JSON parsing yielded nothing
 if not rows:
