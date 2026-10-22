@@ -39,7 +39,8 @@ def parse_attrs(col):
     return out
 
 
-def add_rrna_mask(path, lengths, saf, ann):
+def load_rrna_loci(path, lengths):
+    """Merged rRNA loci per contig: {contig: [[start, end, {types}, {kingdoms}], ...]}"""
     by_contig = {}
     with open(path) as f:
         header = next(f).rstrip("\n").split("\t")
@@ -50,7 +51,7 @@ def add_rrna_mask(path, lengths, saf, ann):
                 continue
             c = p[ix["contig_id"]]
             by_contig.setdefault(c, []).append((int(p[ix["start"]]), int(p[ix["end"]]), p[ix["rrna_type"]], p[ix["kingdom"]]))
-    n = 0
+    loci = {}
     for c, ivs in by_contig.items():
         ivs.sort()
         merged = []
@@ -60,6 +61,19 @@ def add_rrna_mask(path, lengths, saf, ann):
                 m[1] = max(m[1], e); m[2].add(typ); m[3].add(king)
             else:
                 merged.append([s, e, {typ}, {king}])
+        loci[c] = merged
+    return loci
+
+
+def in_rrna(loci, contig, start, end, frac=0.5):
+    """True when at least frac of [start, end] lies inside an rRNA locus."""
+    ov = sum(max(0, min(end, e) - max(start, s) + 1) for s, e, _, _ in loci.get(contig, ()))
+    return ov >= frac * (end - start + 1)
+
+
+def write_rrna_loci(loci, saf, ann):
+    n = 0
+    for c, merged in loci.items():
         for s, e, typs, kings in merged:
             gid = f"rRNA:{c}:{s}-{e}"
             saf.write(f"{gid}\t{c}\t{s}\t{e}\t+\n")
@@ -90,7 +104,12 @@ def main():
             f.write(f"{c}\t{lengths[c]}\n")
 
     types = set(t.strip() for t in a.types.split(",") if t.strip())
-    n_genes = n_missing = 0
+    n_genes = n_missing = n_in_rrna = 0
+    # rRNA genes called by barrnap in the MAG analysis (all kingdoms). Bakta
+    # annotates bacterial/archaeal rRNA but not eukaryotic or divergent rRNA,
+    # and calls ORFs inside them: those CDS are dropped (their reads tie with
+    # the rRNA locus and would otherwise count as expression).
+    loci = load_rrna_loci(a.rrna_tsv, lengths) if a.rrna_tsv else {}
     seen = set()
     with open(f"{a.out}.genes.saf", "w") as saf, \
          gzip.open(f"{a.out}.genes.tsv.gz", "wt", compresslevel=3) as ann:
@@ -115,6 +134,9 @@ def main():
                     gid = at.get(a.attr) or at.get("ID")
                     if not gid or gid in seen:
                         continue
+                    if p[2] == "CDS" and loci and in_rrna(loci, seqid, int(p[3]), int(p[4])):
+                        n_in_rrna += 1
+                        continue
                     seen.add(gid)
                     start, end = int(p[3]), int(p[4])
                     strand = p[6] if p[6] in "+-" else "+"
@@ -124,14 +146,10 @@ def main():
                               f"{product}\t{at.get('gene', '')}\t{at.get('Dbxref', '')}\n")
                     n_genes += 1
 
-        # rRNA genes called by barrnap in the MAG analysis (all kingdoms). Bakta
-        # annotates bacterial/archaeal rRNA but not eukaryotic or divergent
-        # rRNA, whose reads would otherwise land on spurious ORFs. Overlapping
-        # calls are merged into one feature per locus; featureCounts'
-        # --largestOverlap then gives those reads to the rRNA, not the ORF.
-        if a.rrna_tsv:
-            n_mask = add_rrna_mask(a.rrna_tsv, lengths, saf, ann)
-            print(f"[gff_to_saf] {n_mask} rRNA loci from {a.rrna_tsv}", file=sys.stderr)
+        if loci:
+            n_mask = write_rrna_loci(loci, saf, ann)
+            print(f"[gff_to_saf] {n_mask} rRNA loci from {a.rrna_tsv}; "
+                  f"{n_in_rrna} CDS lying >=50% inside them dropped", file=sys.stderr)
 
     print(f"[gff_to_saf] {len(order)} contigs, {n_genes} features ({','.join(sorted(types))})",
           file=sys.stderr)
