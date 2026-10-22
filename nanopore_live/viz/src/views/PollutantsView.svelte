@@ -81,6 +81,13 @@
       cutoff: 'DIAMOND blastp, ≥90% identity, ≥30 aa alignment (BacMet-Scan defaults)',
       color: '#94a3b8',
     },
+    'PAZy': {
+      label: 'PAZy',
+      blurb: 'Experimentally validated plastic-active enzymes (PET, PA, PUR, PLA, PBAT, PHA …)',
+      cite: 'Buchholz et al. 2022 Proteins; Feuerriegel et al. 2026 NAR',
+      cutoff: 'DIAMOND blastp, ≥50% identity, ≥50% query+subject cover, E≤1e-5',
+      color: '#f472b6',
+    },
     'HADEG': {
       label: 'HADEG',
       blurb: 'Aerobic hydrocarbon & plastic degradation and biosurfactant genes',
@@ -114,8 +121,8 @@
       match: f => f[0] === 'CANT-HYD' && /^(ndoB|ndoC|MAH|non-ndoB)/.test(f[3]) },
     { id: 'anaer',  label: 'Anaerobic activation', title: 'Fumarate-addition and carboxylation genes (CANT-HYD assA/bssA/nmsA/abcA/ncA)',
       match: f => f[0] === 'CANT-HYD' && f[2].startsWith('Anaerobic') },
-    { id: 'plastic', label: 'Plastics (HADEG)', title: 'HADEG plastic-degradation enzymes',
-      match: f => f[0] === 'HADEG' && f[1] === 'Plastics' },
+    { id: 'plastic', label: 'Plastics', title: 'Plastic-active enzymes (PAZy, plus HADEG plastics)',
+      match: f => (f[0] === 'PAZy') || (f[0] === 'HADEG' && f[1] === 'Plastics') },
     { id: 'mer',    label: 'mer (Hg resistance)', title: 'Mercury resistance genes (BacMet: merA/merB/merR/merT …)',
       match: f => f[0] === 'BacMet' && f[2].startsWith('Mercury') },
   ];
