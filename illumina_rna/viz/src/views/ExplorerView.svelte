@@ -334,9 +334,9 @@
   >{sizeDefs.find(d => d.key === sizeBy)?.label} &#x25BE;</button>
   <input type="range" min="0.2" max="20" step="0.1" bind:value={sizeScale} class="w-20 h-1 accent-cyan-400 cursor-pointer" />
   <span class="text-slate-500 w-8">{sizeScale.toFixed(1)}x</span>
-  <span class="text-slate-500" title="Size ∝ value^p: 0.5 = square root, 1 = linear, lower compresses the range">value^</span>
-  <input type="range" min="0.1" max="1" step="0.05" bind:value={sizeExponent} class="w-16 h-1 accent-cyan-400 cursor-pointer"
-    title="Size ∝ value^p: 0.5 = square root, 1 = linear, lower compresses the range" />
+  <span class="text-slate-500" title="px = 1 + scale × value^p (length in kb, expression in RPKM); higher p grows larger values more">value^</span>
+  <input type="range" min="0.1" max="1.5" step="0.05" bind:value={sizeExponent} class="w-16 h-1 accent-cyan-400 cursor-pointer"
+    title="px = 1 + scale × value^p (length in kb, expression in RPKM); higher p grows larger values more" />
   <span class="text-slate-500 w-8">{sizeExponent.toFixed(2)}</span>
 </div>
 

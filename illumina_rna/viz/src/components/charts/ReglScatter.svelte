@@ -251,31 +251,27 @@
     prep = { n, x, y, valueA, colorCfg, isCont };
   }
 
-  // ---- Size encoding: size ∝ (value / max)^sizeExponent ----
-  // One raw exponent (0.5 = sqrt; lower compresses, 1 is linear). sizeRange =
-  // { length: max, depth: max } from the full (unfiltered) data, so a point
-  // keeps its size when filters change; without it, the max of `data`.
+  // ---- Size encoding: px = 1 + sizeScale × value^sizeExponent (capped) ----
+  // Raw value, no normalization: a point keeps its size under filtering, and
+  // a larger exponent grows points (for values above 1). Units: length in kb,
+  // depth/expression as given (RPKM); sizeOf overrides the value.
+  const MAX_PX = 80;
   function computeSizes() {
     const { n } = prep;
     valueB = new Float32Array(n);
     if (sizeBy === 'fixed') return;
     const sorted = indexMap;
-    // sizeOf/sizeMax: a caller-supplied value (e.g. one sample's expression)
-    // with its own fixed maximum; otherwise the contig's length or depth field
-    const field = sizeBy === 'depth' ? 'depth' : 'length';
-    const get = sizeOf ?? (c => c[field]);
-    let vmax = sizeOf ? sizeMax : sizeRange?.[field];
-    if (!(vmax > 0)) { vmax = 0; for (const c of data.contigs) { const v = get(c); if (v > vmax) vmax = v; } }
+    const get = sizeOf ?? (sizeBy === 'depth' ? (c => c.depth) : (c => c.length / 1e3));
     for (let i = 0; i < n; i++) {
-      valueB[i] = Math.pow(Math.min(1, Math.max(0, get(sorted[i])) / (vmax || 1)), sizeExponent);
+      const px = 1 + sizeScale * Math.pow(Math.max(0, get(sorted[i])), sizeExponent);
+      valueB[i] = Math.min(1, px / MAX_PX);
     }
   }
 
   function sizeConfig() {
     if (sizeBy === 'fixed') return { sizeBy: null, pointSize: 3 * sizeScale };
-    // pointSize must be a lookup array, not a [min, max] range
-    const pMin = 2 * sizeScale, pMax = 10 * sizeScale;
-    return { sizeBy: 'valueB', pointSize: Array.from({length: 64}, (_, i) => pMin + (i / 63) * (pMax - pMin)) };
+    // valueB = px / MAX_PX; a fine lookup so sizes are near-continuous
+    return { sizeBy: 'valueB', pointSize: Array.from({length: 256}, (_, i) => Math.max(1, (i / 255) * MAX_PX)) };
   }
 
   function upload() {
@@ -298,8 +294,8 @@
     });
   }
 
-  let lastColorKey = [], lastSizeKey = [], lastScaleKey = [];
-  let scaleFrame = 0;
+  let lastColorKey = [], lastSizeKey = [];
+  let sizeFrame = 0;
   const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
   onMount(() => {
@@ -310,19 +306,16 @@
 
   $effect(() => {
     const colorKey = [data, colorBy, mode, colorMap, coordExtents, sampleDepthData, selectedSample];
-    const sizeKey = [sizeBy, sizeExponent, sizeRange, sizeOf, sizeMax];
-    const scaleKey = [sizeScale];
+    const sizeKey = [sizeBy, sizeExponent, sizeScale, sizeOf];
     if (!canvasEl || !data?.contigs?.length) return;
     if (!scatterplot) init();
     if (!prep || !same(colorKey, lastColorKey)) {
       prepare(); computeSizes(); upload();
     } else if (!same(sizeKey, lastSizeKey)) {
-      computeSizes(); upload();
-    } else if (!same(scaleKey, lastScaleKey)) {
-      // lookup only, no re-upload; at most once per frame while dragging
-      if (!scaleFrame) scaleFrame = requestAnimationFrame(() => { scaleFrame = 0; scatterplot?.set(sizeConfig()); });
+      // sliders: at most one resize + upload per frame while dragging
+      if (!sizeFrame) sizeFrame = requestAnimationFrame(() => { sizeFrame = 0; if (scatterplot) { computeSizes(); upload(); } });
     }
-    lastColorKey = colorKey; lastSizeKey = sizeKey; lastScaleKey = scaleKey;
+    lastColorKey = colorKey; lastSizeKey = sizeKey;
   });
 
   // Re-apply search filter when only searchMatchIds changes (no full redraw needed)
