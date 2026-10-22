@@ -541,7 +541,7 @@ if [[ "$SLURM_MODE" == true ]]; then
     PIPE_DIR="${OUTDIR_HOST}/.pipeline-${img_sha:-unknown}"
     if [[ ! -f "$PIPE_DIR/main.nf" ]]; then
         mkdir -p "$PIPE_DIR"
-        "$CONTAINER_RUNTIME" exec -B "$PIPE_DIR" "$SIF_PATH" cp -r /pipeline/. "$PIPE_DIR"/ \
+        "$CONTAINER_RUNTIME" exec -B "$(readlink -f "$PIPE_DIR")" "$SIF_PATH" cp -r /pipeline/. "$(readlink -f "$PIPE_DIR")"/ \
             || die "Could not copy the pipeline out of $SIF_PATH"
     fi
 
@@ -554,6 +554,9 @@ if [[ "$SLURM_MODE" == true ]]; then
              "$WORKDIR_HOST" "$PIPE_DIR" ${BAM_DIR_HOST:+"$BAM_DIR_HOST"} \
              ${DB_DIR_HOST:+"$DB_DIR_HOST"} ${STORE_DIR_HOST:+"$STORE_DIR_HOST"}; do
         RUNOPTS+=(-B "$d")
+        # A path through a symlink (e.g. ~/scratch -> /project/...) also
+        # needs its target bound, or the link dangles inside the container.
+        r=$(readlink -f "$d"); [[ "$r" != "$d" ]] && RUNOPTS+=(-B "$r")
     done
     [[ -n "${DB_DIR_HOST:-}" ]] && RUNOPTS+=(-B "${DB_DIR_HOST}:/data/db:ro")
     for e in "${SQSH_IMAGES[@]}"; do
