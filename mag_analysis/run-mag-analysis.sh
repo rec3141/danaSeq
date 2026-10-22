@@ -598,7 +598,8 @@ if [[ "$SLURM_MODE" == true ]]; then
     [[ "$DO_RESUME" == true ]] && NF_CMD+=(-resume ${RESUME_SESSION})
 
     echo "[INFO] Mode:     Hybrid Slurm (image ${img_sha:-unknown}, Nextflow ${NXF_VER:-host}, account ${SLURM_ACCOUNT})"
-    echo "[INFO] Binners:  ${GPU_SIF:+GPU on $SLURM_GPU_QUEUE}${GPU_SIF:-CPU}"
+    if [[ -n "$GPU_SIF" ]]; then echo "[INFO] Binners:  GPU on $SLURM_GPU_QUEUE ($(basename "$GPU_SIF"))"
+    else echo "[INFO] Binners:  CPU, on the Slurm queue"; fi
     echo "[INFO] Work:     $WORKDIR_HOST"
     echo "[INFO] Running: ${NF_CMD[*]}"
     "${NF_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
