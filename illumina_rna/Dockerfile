@@ -32,6 +32,18 @@ RUN mamba env create -y -p /opt/conda/envs/dana-illumina-rna-rnaseq -f /tmp/rnas
     && rm -f /tmp/rnaseq.yml \
     && mamba clean -afy
 
+# Put the RNA tools on PATH like the base image's wrappers (strobealign comes
+# from the base image's assembly env). The pipeline also activates these envs
+# per process label, so older images without the wrappers still work.
+RUN for tool in featureCounts sortmerna; do \
+        printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-illumina-rna-rnaseq/bin:$PATH\nexec /opt/conda/envs/dana-illumina-rna-rnaseq/bin/%s "$@"\n' "$tool" \
+            > "/usr/local/bin/dana-tools/$tool" \
+        && chmod +x "/usr/local/bin/dana-tools/$tool"; \
+    done \
+    && printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-assembly/bin:$PATH\nexec /opt/conda/envs/dana-mag-assembly/bin/strobealign "$@"\n' \
+        > /usr/local/bin/dana-tools/strobealign \
+    && chmod +x /usr/local/bin/dana-tools/strobealign
+
 # Copy pipeline code
 COPY . /pipeline/
 
