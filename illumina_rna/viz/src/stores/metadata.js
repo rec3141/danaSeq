@@ -1,14 +1,17 @@
 import { writable, derived, get } from 'svelte/store';
-import { index, samples, fmtPct } from './data.js';
+import { samples, fmtPct } from './data.js';
 import { fetchJSON } from './fetchJson.js';
 import { wardOrder } from '../lib/cluster.js';
 
 // ── Sample metadata ──────────────────────────────────────────────────────────
-// A table with one row per sample: shipped in the bundle (pipeline --metadata →
-// metadata.json) or uploaded in the browser (TSV / CSV / XLSX). Both arrive as
-// { source, header[], rows[][] } of strings; matching samples and typing the
-// columns happen here, so the two paths behave the same. An upload is kept in
-// this browser only (localStorage) and replaces the bundled table until cleared.
+// A table with one row per sample, from (first wins):
+//   1. a file uploaded in this browser (TSV / CSV / XLSX; kept in localStorage
+//      until removed),
+//   2. data/metadata.json: { "<sample>": { column: value } }, the shape both the
+//      pipeline (--metadata) and microscape.app's run-editor upload produce
+//      (the server answers that URL with the editor's table when there is one).
+// Both become { source, header[], rows[][] } of strings; matching samples and
+// typing the columns happen here, so every path behaves the same.
 
 export const metaRaw = writable(null);      // { source, origin: 'bundle'|'upload', header, rows }
 let bundled = null;
@@ -18,12 +21,19 @@ function saveUpload(raw) {
   try { raw ? localStorage.setItem(storeKey(), JSON.stringify(raw)) : localStorage.removeItem(storeKey()); } catch { /* storage blocked */ }
 }
 
+/** { "<sample>": { column: value } } → { header, rows } with a sample column. */
+function keyedToRaw(obj, source) {
+  const cols = [];
+  for (const row of Object.values(obj)) for (const k of Object.keys(row ?? {})) if (!cols.includes(k)) cols.push(k);
+  return { source, origin: 'bundle', header: ['sample', ...cols],
+    rows: Object.entries(obj).map(([id, row]) => [id, ...cols.map(c => (row?.[c] == null ? '' : String(row[c])))]) };
+}
+
 export async function initMetadata() {
-  const f = get(index)?.metadata;
-  if (f) {
-    try { bundled = { ...(await fetchJSON(`./data/${f.replace(/\.gz$/, '')}`)), origin: 'bundle' }; }
-    catch (e) { console.warn('metadata.json:', e.message); }
-  }
+  try {
+    const m = await fetchJSON('./data/metadata.json');
+    if (m && typeof m === 'object' && Object.keys(m).length) bundled = keyedToRaw(m, 'metadata.json');
+  } catch { /* none shipped or uploaded on microscape.app */ }
   let upload = null;
   try { upload = JSON.parse(localStorage.getItem(storeKey()) || 'null'); } catch { upload = null; }
   metaRaw.set(upload?.header ? upload : bundled);
@@ -212,10 +222,20 @@ export async function loadMetadataFile(file) {
   return { matched: m.matched, total: m.matched + m.unmatchedRows.length, columns: m.columns.length };
 }
 
+/** Template TSV: one row per sample with everything already known about it:
+ *  flowcell / lane / barcode parsed from the sample name (FLOWCELL_Lnn_BARCODE)
+ *  and the values of the loaded metadata table, plus empty MIxS-style columns. */
 export function metadataTemplate() {
-  const cols = ['sample', 'collection_date', 'lat', 'lon', 'depth_m', 'env_medium', 'site', 'treatment'];
   const names = get(samples)?.samples ?? [];
-  return [cols.join('\t'), ...names.map(n => [n, ...cols.slice(1).map(() => '')].join('\t'))].join('\n') + '\n';
+  const m = get(sampleMeta);
+  const fromName = n => { const x = n.match(/^(.+)_(L\d+)_([^_]+)$/); return x ? { flowcell: x[1], lane: x[2], barcode: x[3] } : {}; };
+  const known = (m?.columns ?? []).map(c => c.key);
+  const cols = ['sample', ...new Set([...(names.some(n => fromName(n).flowcell) ? ['flowcell', 'lane', 'barcode'] : []), ...known,
+    'collection_date', 'lat', 'lon', 'depth_m', 'env_medium', 'site'])];
+  return [cols.join('\t'), ...names.map(n => {
+    const v = { ...fromName(n), ...(m?.bySample[n] ?? {}), sample: n };
+    return cols.map(c => v[c] ?? '').join('\t');
+  })].join('\n') + '\n';
 }
 
 export function metadataTsv() {

@@ -16,7 +16,6 @@
   let { activeTab = 'overview' } = $props();
 
   // ── Sample metadata menu ──
-  let metaOpen = $state(false);
   let metaInput;
   let metaStatus = $state('');
   let metaError = $state(false);
@@ -34,20 +33,15 @@
     if (!file) return;
     const r = await loadMetadataFile(file);
     metaError = !!r.error;
-    metaStatus = r.error ?? `${r.matched} of ${nSamples} samples matched, ${r.columns} column${r.columns === 1 ? '' : 's'}`;
-    if (!r.error) setTimeout(() => { metaStatus = ''; }, 6000);
-  }
-  function onWindowClick(e) {
-    if (metaOpen && !e.target.closest?.('[data-meta-menu]')) metaOpen = false;
+    metaStatus = r.error ?? `${r.matched}/${nSamples} matched`;
+    if (!r.error) setTimeout(() => { metaStatus = ''; }, 5000);
   }
 </script>
-
-<svelte:window onclick={onWindowClick} />
 
 <nav class="bg-slate-900 border-b border-slate-700 sticky top-0 z-50">
   <div class="max-w-screen-2xl mx-auto px-4">
     <div class="flex items-center h-14">
-      <div class="flex items-center gap-2 mr-8 shrink-0">
+      <div class="flex items-center gap-2 mr-4 shrink-0">
         <a href="https://github.com/rec3141/danaSeq" target="_blank" rel="noopener noreferrer"
            class="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 transition-colors">
           <svg class="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
@@ -62,10 +56,10 @@
           </svg>
           <span class="font-semibold text-lg tracking-tight">d&#257;naSeq</span>
         </a>
-        <span class="text-slate-400 text-sm">RNA Dashboard</span>
+        <span class="text-slate-400 text-sm hidden min-[1800px]:inline">RNA Dashboard</span>
         {#if $index?.title}
           <span class="text-slate-600 text-sm mx-1">/</span>
-          <span class="text-slate-400 text-sm truncate max-w-[18rem]" title={$index.title}>{$index.title}</span>
+          <span class="text-slate-400 text-sm truncate max-w-[11rem] min-[1800px]:max-w-[18rem]" title={$index.title}>{$index.title}</span>
         {/if}
       </div>
       <div class="flex gap-1 overflow-x-auto">
@@ -91,40 +85,53 @@
             {#each $index.references as r}<option value={r.name}>{r.name}</option>{/each}
           </select>
         {/if}
-        <div class="relative" data-meta-menu>
+        <!-- Metadata upload (same controls as the nanopore_live dashboard) -->
+        <div class="flex items-center gap-2">
+          <input type="file" accept=".tsv,.txt,.csv,.xlsx" class="hidden" bind:this={metaInput} onchange={upload} />
           <button
-            class="px-3 py-1 rounded-md border transition-colors whitespace-nowrap
-              {$sampleMeta ? 'border-cyan-400/60 text-cyan-400 hover:border-cyan-400' : 'border-slate-600 text-slate-400 hover:text-cyan-400 hover:border-cyan-400'}"
-            onclick={() => metaOpen = !metaOpen}
-            title="Sample metadata: colour, order and compare samples by it"
-          >Metadata{$sampleMeta ? ` · ${$sampleMeta.columns.length}` : ''} &#x25BE;</button>
-          {#if metaOpen}
-            <div class="absolute right-0 mt-1 w-80 bg-slate-800 border border-slate-600 rounded-lg shadow-xl p-3 z-50 text-xs text-slate-300 space-y-2">
-              {#if $sampleMeta}
-                <div>
-                  <div class="text-slate-200 font-medium truncate" title={$sampleMeta.source}>{$sampleMeta.source}</div>
-                  <div class="text-slate-500">{$sampleMeta.origin === 'upload' ? 'Uploaded, kept in this browser only' : 'Shipped with this dashboard'}</div>
-                  <div class="mt-1">{$sampleMeta.matched} of {nSamples} samples matched on <span class="font-mono">{$sampleMeta.idColumn}</span>{#if $sampleMeta.unmatchedRows.length}; <span class="text-amber-400">{$sampleMeta.unmatchedRows.length} row{$sampleMeta.unmatchedRows.length === 1 ? '' : 's'} unmatched</span>{/if}</div>
-                  <div class="text-slate-400 mt-1">{$sampleMeta.columns.map(c => c.key).join(', ') || 'no columns with values'}</div>
-                </div>
-              {:else}
-                <p class="text-slate-400">Add a table with one row per sample (first column, or a <span class="font-mono">sample</span> column, holds the sample name). Its columns become sample annotations: t-SNE colours, heatmap strips, sample order and expression-vs-metadata plots.</p>
-              {/if}
-              <div class="flex flex-wrap gap-2 pt-1">
-                <button class="px-2 py-1 rounded border border-cyan-400 bg-cyan-400/10 text-cyan-400" onclick={() => metaInput.click()}>Upload TSV / CSV / XLSX</button>
-                <button class="px-2 py-1 rounded border border-slate-600 text-slate-400 hover:text-slate-200" onclick={() => save('metadata_template.tsv', metadataTemplate())}>Template</button>
-                {#if $sampleMeta}
-                  <button class="px-2 py-1 rounded border border-slate-600 text-slate-400 hover:text-slate-200" onclick={() => save('metadata.tsv', metadataTsv())}>Download</button>
-                {/if}
-                {#if $sampleMeta?.origin === 'upload'}
-                  <button class="px-2 py-1 rounded border border-slate-600 text-slate-400 hover:text-rose-300 hover:border-rose-400"
-                    onclick={() => { clearUploadedMetadata(); metaStatus = ''; }}>{hasBundledMetadata() ? 'Use shipped table' : 'Remove'}</button>
-                {/if}
-              </div>
-              {#if metaStatus}<p class={metaError ? 'text-rose-400' : 'text-emerald-400'}>{metaStatus}</p>{/if}
-            </div>
+            class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+            onclick={() => metaInput.click()}
+            title={`Upload metadata (TSV / CSV / XLSX): a sample / sample_id / samp_name / id column (or the first column) names the sample${$sampleMeta ? `\nLoaded: ${$sampleMeta.source} (${$sampleMeta.origin === 'upload' ? 'uploaded, this browser only' : 'provided with the dashboard'}), ${$sampleMeta.matched}/${nSamples} samples, ${$sampleMeta.columns.map(c => c.key).join(', ')}` : ''}`}
+          >
+            <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+            </svg>
+            Metadata
+          </button>
+          <button
+            class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+            onclick={() => save('metadata_template.tsv', metadataTemplate())}
+            title="Download a metadata template TSV pre-filled with every sample and its known metadata"
+          >
+            <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            Template
+          </button>
+          {#if $sampleMeta}
+            <button
+              class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+              onclick={() => save(`metadata_${new Date().toISOString().slice(0, 10)}.tsv`, metadataTsv())}
+              title="Download current metadata as TSV"
+            >
+              <svg class="w-3.5 h-3.5 inline -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4 0l-4 4m0 0l-4-4m4 4V4"/>
+              </svg>
+            </button>
           {/if}
-          <input type="file" accept=".tsv,.csv,.txt,.xlsx,.xls" class="hidden" bind:this={metaInput} onchange={upload} />
+          {#if $sampleMeta?.origin === 'upload'}
+            <button
+              class="text-xs px-2 py-1.5 rounded border border-slate-600 text-slate-400 hover:text-rose-300 hover:border-rose-400 transition-colors"
+              onclick={() => { clearUploadedMetadata(); metaStatus = ''; }}
+              title={hasBundledMetadata() ? 'Discard the uploaded table and use the one shipped with the dashboard' : 'Remove the uploaded metadata'}
+            >&#x2715;</button>
+          {/if}
+          {#if metaStatus}
+            <span
+              class="text-[10px] {metaError ? 'text-rose-400 cursor-pointer' : 'text-cyan-400'}"
+              onclick={() => { metaStatus = ''; metaError = false; }}
+            >{metaStatus}{#if metaError} ✕{/if}</span>
+          {/if}
         </div>
         {#if $index?.mag_url}
           <a href={$index.mag_url} target="_blank" rel="noopener noreferrer"

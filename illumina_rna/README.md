@@ -99,10 +99,15 @@ or from a `sample` / `sample_id` / `samp_name` / `id` column. File names
 splits into `lat` and `lon`. Columns are typed as numbers, dates or categories.
 
 - Ship it with the run: `--metadata samples.tsv` (TSV/CSV) writes
-  `viz/metadata.json.gz`.
-- Or upload it from the **Metadata** menu in the header. An upload stays in
-  that browser only and replaces the shipped table until removed. The same
-  menu downloads a template prefilled with the sample names.
+  `viz/metadata.json.gz` (`{"<sample>": {column: value}}`). Every bundle also
+  has `samples.json`, the sample list microscape.app matches against.
+- On microscape.app, a lab admin can upload it in the run's settings page.
+  The server then answers `data/metadata.json` with that table for every
+  viewer, replacing the shipped one.
+- Or upload it with the **Metadata** button in the header. That upload stays
+  in that browser only and wins over the others until removed (✕).
+  **Template** downloads one row per sample, prefilled with the flowcell,
+  lane and barcode from the sample name and any metadata already loaded.
 
 The annotation you pick (sequencing run, read QC, or a metadata column) is
 shared across tabs. It colours the sample t-SNEs, the strip above every
