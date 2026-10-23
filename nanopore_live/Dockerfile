@@ -14,8 +14,8 @@
 # Build:
 #   docker build -t danaseq-realtime .
 #
-# Run (as current user):
-#   docker run --user $(id -u):$(id -g) \
+# Run (as current user; --gpus all puts the read map on the GPU):
+#   docker run --user $(id -u):$(id -g) --gpus all \
 #       -v /path/to/data:/data -v /path/to/krakendb:/kraken_db \
 #       danaseq-realtime \
 #       run /pipeline/main.nf \
@@ -56,16 +56,16 @@ RUN curl -fsSL \
     && chmod +x /opt/conda/envs/dana-tools/bin/tetramer_freqs_esom.pl
 
 # fastsne (read t-SNE of every read; https://github.com/rec3141/fastsne): pinned
-# release, CPU build only (AVX-512 / AVX2 / generic behind a launcher, so the
-# image runs on any x86-64), linked against the tools env's FFTW
-ARG FASTSNE_VERSION=v0.2.0
-RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends g++ make git ca-certificates > /dev/null \
-    && git clone -q --depth 1 --branch ${FASTSNE_VERSION} https://github.com/rec3141/fastsne /tmp/fastsne \
-    && make -s -C /tmp/fastsne cpu install PREFIX=/usr/local \
-        FFTW_INC=-I/opt/conda/envs/dana-tools/include \
-        FFTW_LIB="-L/opt/conda/envs/dana-tools/lib -Wl,-rpath,/opt/conda/envs/dana-tools/lib" \
-    && rm -rf /tmp/fastsne \
-    && apt-get purge -y g++ make git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+# release, self-contained binaries. fastsne (GPU; cuFFT / cuBLAS linked in, needs only
+# the NVIDIA driver) runs whenever a GPU is visible (docker run --gpus all, apptainer
+# --nv); otherwise fastsne_cpu (fully static; AVX-512 / AVX2 / generic, picked at run time).
+ARG FASTSNE_VERSION=v0.2.1
+ARG FASTSNE_SHA256=f96196cbe06fd9ef0d82d79718ec6e11d219954343dabf06659c1db8375836db
+RUN f=fastsne-${FASTSNE_VERSION}-linux-x86_64.tar.gz \
+    && curl -fsSL -o /tmp/$f https://github.com/rec3141/fastsne/releases/download/${FASTSNE_VERSION}/$f \
+    && echo "${FASTSNE_SHA256}  /tmp/$f" | sha256sum -c - \
+    && tar -xzf /tmp/$f --strip-components=1 -C /usr/local && rm /tmp/$f \
+    && /usr/local/bin/fastsne_cpu --help 2>&1 | head -1 | grep -q "^fastsne"
 
 # ============================================================================
 # Create wrapper scripts so tools are callable from PATH

@@ -31,8 +31,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_DIR="${SCRIPT_DIR}/conda-envs"
 ENVS_YAML_DIR="${SCRIPT_DIR}/envs"
 TETRAMER_URL="https://raw.githubusercontent.com/tetramerFreqs/Binning/master/tetramer_freqs_esom.pl"
-# fastsne (read-level t-SNE of every read): pinned release, built against the tools env's FFTW
-FASTSNE_VERSION="v0.2.0"
+# fastsne (read-level t-SNE of every read): pinned release, self-contained binaries
+FASTSNE_VERSION="v0.2.1"
+FASTSNE_SHA256="f96196cbe06fd9ef0d82d79718ec6e11d219954343dabf06659c1db8375836db"
 FASTSNE_URL="https://github.com/rec3141/fastsne"
 
 # Detect conda/mamba
@@ -177,23 +178,22 @@ do_install() {
         echo "  Installed to: ${tetra_bin}"
     fi
 
-    # Build fastsne_cpu into the tools environment (optional: without it the
-    # read t-SNE uses a sklearn sample, as before)
+    # fastsne into the tools environment (optional: without it the read t-SNE uses a
+    # sklearn sample). The read map runs the GPU fastsne (needs only the NVIDIA driver)
+    # when a GPU is visible, else fastsne_cpu.
     echo ""
-    echo "Building fastsne ${FASTSNE_VERSION}..."
-    local tools_env="${ENV_DIR}/dana-tools" fs_src
-    if [[ -d "${tools_env}" ]] && command -v git &>/dev/null && command -v make &>/dev/null && command -v g++ &>/dev/null; then
-        fs_src=$(mktemp -d)
-        if git clone -q --depth 1 --branch "${FASTSNE_VERSION}" "${FASTSNE_URL}" "${fs_src}" \
-            && make -s -C "${fs_src}" cpu install PREFIX="${tools_env}" \
-                FFTW_INC="-I${tools_env}/include" FFTW_LIB="-L${tools_env}/lib -Wl,-rpath,${tools_env}/lib"; then
-            echo "  Installed to: ${tools_env}/bin/fastsne_cpu"
+    echo "Installing fastsne ${FASTSNE_VERSION}..."
+    local tools_env="${ENV_DIR}/dana-tools" fs_tmp fs_tar="fastsne-${FASTSNE_VERSION}-linux-x86_64.tar.gz"
+    if [[ -d "${tools_env}" ]]; then
+        fs_tmp=$(mktemp -d)
+        if curl -fsSL -o "${fs_tmp}/${fs_tar}" "${FASTSNE_URL}/releases/download/${FASTSNE_VERSION}/${fs_tar}" \
+            && echo "${FASTSNE_SHA256}  ${fs_tmp}/${fs_tar}" | sha256sum -c --quiet - \
+            && tar -xzf "${fs_tmp}/${fs_tar}" --strip-components=1 -C "${tools_env}"; then
+            echo "  Installed to: ${tools_env}/bin (fastsne, fastsne_cpu)"
         else
-            echo "  [WARNING] fastsne build failed; read t-SNE will use sklearn"
+            echo "  [WARNING] fastsne download failed; read t-SNE will use sklearn"
         fi
-        rm -rf "${fs_src}"
-    else
-        echo "  [WARNING] needs git, make and g++; skipped (read t-SNE will use sklearn)"
+        rm -rf "${fs_tmp}"
     fi
 
     echo ""
@@ -258,12 +258,14 @@ do_check() {
         fi
     done
 
-    printf "    %-20s" "fastsne_cpu"
-    if [[ -x "${ENV_DIR}/dana-tools/bin/fastsne_cpu" ]]; then
-        echo "OK"
-    else
-        echo "MISSING (optional; read t-SNE falls back to sklearn)"
-    fi
+    for bin in fastsne fastsne_cpu; do
+        printf "    %-20s" "${bin}"
+        if [[ -x "${ENV_DIR}/dana-tools/bin/${bin}" ]]; then
+            echo "OK"
+        else
+            echo "MISSING (optional; read t-SNE falls back to sklearn)"
+        fi
+    done
 
     # Check tetramer script
     printf "    %-20s" "tetramer_freqs"

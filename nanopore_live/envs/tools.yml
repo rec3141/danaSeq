@@ -15,4 +15,3 @@ dependencies:
   - numpy
   - pandas
   - scikit-learn
-  - fftw            # fastsne_cpu (read t-SNE of every read)
