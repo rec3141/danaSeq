@@ -436,9 +436,18 @@ if [[ "$USE_DOCKER" == true ]]; then
         echo "[INFO] Mounting $hmm_counter HMM database(s)"
     fi
 
+    # GPU for the read map (fastsne): passed through when Docker has the NVIDIA
+    # runtime and the host has a GPU; without one the image uses fastsne_cpu
+    GPU_ARGS=()
+    if docker info 2>/dev/null | grep -qi 'runtimes:.*nvidia' \
+        && nvidia-smi -L 2>/dev/null | grep -q GPU; then
+        GPU_ARGS=(--gpus all)
+    fi
+
     DOCKER_CMD=(
         docker run
         --user "$(id -u):$(id -g)"
+        "${GPU_ARGS[@]}"
         "${MOUNTS[@]}"
         "$IMAGE"
         run /pipeline/main.nf
@@ -449,6 +458,7 @@ if [[ "$USE_DOCKER" == true ]]; then
     echo "[INFO] Mode:   Docker"
     echo "[INFO] Input:  $INPUT_HOST"
     echo "[INFO] Output: $OUTDIR_HOST"
+    echo "[INFO] GPU:    ${GPU_ARGS[*]:-none (read map on CPU)}"
     [[ -n "$KRAKEN_DB_HOST" ]] && echo "[INFO] Kraken DB: $KRAKEN_DB_HOST"
     echo "[INFO] Running: ${DOCKER_CMD[*]}"
     echo ""

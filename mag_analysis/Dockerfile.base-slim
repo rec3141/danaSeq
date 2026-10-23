@@ -118,28 +118,18 @@ RUN /opt/conda/envs/dana-mag-pathviz/bin/pip install --no-deps KEGGDecoder && \
         /opt/conda/envs/dana-mag-pathviz/share/minpath && \
     chmod +x /opt/conda/envs/dana-mag-pathviz/share/minpath/MinPath.py
 
-# fastsne (contig t-SNE in the viz preprocess; https://github.com/rec3141/fastsne),
-# pinned release. CPU: AVX-512 / AVX2 / generic builds behind a launcher, linked
-# against the pathviz env's FFTW. cuda variant: also the GPU binary (V100, A30/A100,
-# L40S + PTX), built with a throwaway conda CUDA toolchain and run against the
-# cuFFT / cuBLAS that the CUDA PyTorch env (dana-mag-binning) already carries.
-ARG FASTSNE_VERSION=v0.2.0
-RUN --mount=type=cache,target=/opt/conda/pkgs \
-    git clone -q --depth 1 --branch ${FASTSNE_VERSION} https://github.com/rec3141/fastsne /tmp/fastsne \
-    && make -s -C /tmp/fastsne cpu \
-        FFTW_INC=-I/opt/conda/envs/dana-mag-pathviz/include \
-        FFTW_LIB="-L/opt/conda/envs/dana-mag-pathviz/lib -Wl,-rpath,/opt/conda/envs/dana-mag-pathviz/lib" \
-    && if [ "$TORCH_VARIANT" = cuda ]; then \
-        CONDA_OVERRIDE_CUDA=12.9 mamba create -q -y -p /tmp/cudabuild -c conda-forge \
-            cuda-version=12.9 cuda-nvcc libcufft-dev libcublas-dev cuda-cudart-dev cuda-cccl \
-        && make -s -C /tmp/fastsne gpu NVCC=/tmp/cudabuild/bin/nvcc \
-            CUDA_LIB="-L/tmp/cudabuild/lib -Xlinker -rpath=/opt/conda/envs/dana-mag-binning/lib" \
-        && rm -rf /tmp/cudabuild \
-        && if ldd /tmp/fastsne/fastsne | grep -q "not found"; then ldd /tmp/fastsne/fastsne; exit 1; fi; \
-    fi \
-    && make -s -C /tmp/fastsne install PREFIX=/usr/local \
-    && rm -rf /tmp/fastsne \
-    && /usr/local/bin/fastsne_cpu --help 2>&1 | head -1
+# fastsne (contig t-SNE in the viz preprocess; https://github.com/rec3141/fastsne):
+# pinned release, self-contained binaries: fastsne_cpu (fully static; AVX-512 / AVX2 /
+# generic, picked at run time) and, in the cuda variant, the GPU fastsne (V100, A30/A100,
+# L40S + PTX; cuFFT / cuBLAS linked in, needs only the NVIDIA driver).
+ARG FASTSNE_VERSION=v0.2.1
+ARG FASTSNE_SHA256=f96196cbe06fd9ef0d82d79718ec6e11d219954343dabf06659c1db8375836db
+RUN f=fastsne-${FASTSNE_VERSION}-linux-x86_64.tar.gz \
+    && curl -fsSL -o /tmp/$f https://github.com/rec3141/fastsne/releases/download/${FASTSNE_VERSION}/$f \
+    && echo "${FASTSNE_SHA256}  /tmp/$f" | sha256sum -c - \
+    && tar -xzf /tmp/$f --strip-components=1 -C /usr/local && rm /tmp/$f \
+    && if [ "$TORCH_VARIANT" != cuda ]; then rm /usr/local/bin/fastsne; fi \
+    && /usr/local/bin/fastsne_cpu --help 2>&1 | head -1 | grep -q "^fastsne"
 
 # 10. Standalone envs the merged ones do not cover. Their modules name their
 # own conda env (dana-mag-vamb etc.), and a container run ignores conda, so

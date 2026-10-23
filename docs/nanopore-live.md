@@ -81,8 +81,12 @@ results/
 
 In watch mode, DB_SYNC runs `viz/preprocess/compute_read_tsne.py` whenever
 `tetra_data` grows. With [fastsne](https://github.com/rec3141/fastsne) installed
-(the container ships the CPU build; `install.sh` builds it into `dana-tools`),
-every read is mapped, not a sample:
+every read is mapped, not a sample. The container ships both builds and uses the
+GPU one whenever a GPU is visible: `run-realtime.sh --docker` passes `--gpus all`
+when Docker has the NVIDIA runtime, and an Apptainer run needs `--nv`. Without a
+GPU it runs `fastsne_cpu`. `install.sh` installs both into `dana-tools` from the
+pinned fastsne release (self-contained binaries: the GPU one needs only the NVIDIA
+driver, 525 or newer).
 
 - each sample's `tetra_data` is exported once to `viz/read_map/fsb/`
   (re-exported only when its `dana.duckdb` changes)
@@ -96,8 +100,9 @@ every read is mapped, not a sample:
   coloured by kraken genus, sample or distance to the reference; projected reads
   can be hidden
 
-fastsne_cpu uses half the available cores by default (`--threads`), leaving room
-for basecalling and classification. Without fastsne, or with `--engine sklearn`,
+On a GPU, mapping every read of a 173M-read collection takes about 13 minutes
+(V100-class card). fastsne_cpu uses half the available cores by default
+(`--threads`), leaving room for basecalling and classification. Without fastsne, or with `--engine sklearn`,
 the sampled sklearn t-SNE runs as before.
 
 ## Profiles
