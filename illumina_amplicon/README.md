@@ -3,7 +3,7 @@
 **Amplicon sequencing analysis pipeline — from raw reads to interactive visualization**
 
 [![Nextflow](https://img.shields.io/badge/nextflow-%E2%89%A523.04-brightgreen)](https://www.nextflow.io/)
-[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A Nextflow DSL2 pipeline for amplicon sequencing analysis. Takes demultiplexed
 paired-end FASTQ files and produces ASV tables, taxonomy, phylogeny, ordinations,
@@ -107,4 +107,4 @@ which runs the image's entrypoint with conda disabled.
 
 ## License
 
-BSD-3-Clause — see [LICENSE](LICENSE).
+MIT, the same licence as the rest of danaSeq; see [LICENSE](LICENSE).
