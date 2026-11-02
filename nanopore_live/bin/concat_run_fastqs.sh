@@ -2,8 +2,9 @@
 # concat_run_fastqs.sh
 #
 # Collapse MinKNOW's chunked per-barcode FASTQ files into one .fastq.gz per
-# barcode, in place, and remove the chunks — but only after BBTools has read
-# both the chunks and the result and agreed on what they contain.
+# barcode, in place, and remove the chunks — but only after every chunk has
+# passed gzip -t, the result is byte-for-byte the chunks in order, and BBTools
+# has read the result and reported a non-zero record count.
 #
 # MinKNOW writes plain gzip (not BGZF), so a raw `cat` of the chunks is a
 # valid multi-member gzip. BBTools spans the members (verified: three 100-read

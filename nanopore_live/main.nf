@@ -12,10 +12,9 @@ nextflow.enable.dsl = 2
 // Usage:
 //   nextflow run main.nf --input /path/to/data --run_kraken --annotator bakta -resume
 //
-// Watch mode for live sequencing (--input = parent of run directory):
+// Watch mode for live sequencing (--input = run directory or a parent of it;
+// the depth to fastq_pass/ is auto-detected, see create_fastq_channel()):
 //   nextflow run main.nf --input /path/to/runs --watch --run_db_integration
-//   # Or point --input at the run dir with a shallower glob:
-//   nextflow run main.nf --input /path/to/run_dir --watch --watch_glob 'fastq_pass/barcode*/*.fastq.gz'
 //
 // ============================================================================
 
@@ -63,7 +62,7 @@ def helpMessage() {
                          Each subdir holds <refname>.idx (required), <refname>.fna,
                          <refname>.contigs.json, and an optional meta.json describing
                          the reference. The subdir / .idx basename is the canonical
-                         reference name. See refs/PROTOCOL.md.
+                         reference name. See docs/mapping-references.md.
       --metadata FILE    Sample metadata TSV (flowcell, barcode, lat, lon, etc.)
 
     Database paths:
@@ -78,14 +77,14 @@ def helpMessage() {
     Watch mode (live sequencing):
       --watch               Monitor for new FASTQ files continuously
       --db_sync_minutes N   DB sync interval in minutes [default: 10]
-      --watch_glob GLOB     Override auto-detected watch glob pattern
+      (the watch glob is auto-detected from the depth of fastq_pass/ below --input)
       Note: --watch vs batch mode is locked per --outdir via a .pipeline_mode
       file. Switching modes on the same outdir would corrupt the DuckDB and
       is rejected at startup.
 
     QC parameters:
       --min_readlen N    Minimum read length in bp [default: 1500]
-      --keep_percent N   Filtlong keep percent [default: 80]
+      --keep_percent N   fastq_filter keep percent (best-scoring reads kept) [default: 80]
       --min_file_size N  Minimum FASTQ size in bytes [default: 1000000]
 
     Examples:
@@ -127,9 +126,6 @@ def helpMessage() {
           --run_kraken --kraken_db /path/to/krakendb --annotator bakta
       ./run-realtime.sh --docker --input /data/run1 --outdir /data/output \\
           --run_kraken --kraken_db /path/to/krakendb --annotator bakta
-
-      # Quick test with bundled test data
-      nextflow run main.nf --input test-data -profile test -resume
 
     Live deploy to microscape.app:
       In watch mode, dropping an executable <outdir>/deploy.sh hook causes
@@ -412,7 +408,8 @@ workflow {
     // Stage 1: Validate FASTQ integrity (repair corrupted gzip)
     VALIDATE_FASTQ(ch_input)
 
-    // Stage 2: Quality control — Filtlong for nanopore length+quality filtering
+    // Stage 2: Quality control — bin/fastq_filter (Filtlong-style length+quality
+    // scoring, single pass) for nanopore reads
     // (BBDuk removed: its Illumina-style Q15 end-trimming is inappropriate for
     // nanopore reads and was discarding ~50% of data)
     QC_FASTQ_FILTER(VALIDATE_FASTQ.out.validated)
@@ -458,7 +455,7 @@ workflow {
     // basename is the canonical reference name and becomes the output
     // filename + the `mapping.reference` column in dana.duckdb. Optional
     // meta.json in each subdir is consumed by the SPA preprocess for
-    // species labels — see refs/PROTOCOL.md.
+    // species labels — see docs/mapping-references.md.
     //
     // Inputs are the QC'd nanopore fastqs (length+quality filtered) — kept
     // as fastq, not fasta, so minimap2 can use the quality info.

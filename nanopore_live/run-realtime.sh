@@ -106,7 +106,7 @@ usage() {
     echo "  --db_sync_minutes N  DB sync interval in watch mode [default: 10]"
     echo "  --store_dir DIR      Persistent process output cache (skips completed tasks)"
     echo "  --min_readlen N      Minimum read length in bp [default: 1500]"
-    echo "  --keep_percent N     Filtlong keep percent [default: 80]"
+    echo "  --keep_percent N     fastq_filter keep percent (best-scoring reads kept) [default: 80]"
     echo "  --min_file_size N    Minimum FASTQ size in bytes [default: 1000000]"
     echo ""
     echo "microscape.app live deploy (watch mode + DB_SYNC):"
@@ -124,7 +124,7 @@ usage() {
     echo "  DB_SYNC fires every sync tick. Existing hook is overwritten. Requires"
     echo "  \$MICROSCAPE_API_KEY or ~/.config/microscape/api-key."
     echo ""
-    echo "End-of-run archive (watch mode only):"
+    echo "End-of-run archive (watch mode, local conda mode only — not with --docker):"
     echo "  --archive                Watch for MinKNOW final_summary_*.txt across all FCs"
     echo "                             in --input. Once seen and nextflow has drained,"
     echo "                             SIGTERM nextflow and rsync raw + outputs to the"
@@ -266,6 +266,9 @@ for arg in "${NF_ARGS[@]}"; do
 done
 if [[ "$ARCHIVE" == true ]]; then
     [[ "$ARCHIVE_WATCH_MODE" == true ]] || die "--archive requires --watch"
+    # The completion-watcher and archive_run.sh are only launched in the local
+    # branch below; the Docker branch exits before them.
+    [[ "$USE_DOCKER" == false ]] || die "--archive is not supported with --docker (run archive_run.sh by hand after the run)"
     [[ -n "$ARCHIVE_RAW_DEST" ]] || die "--archive requires --archive_raw_dest or \$ARCHIVE_RAW_DEST"
     [[ -n "$ARCHIVE_OUT_DEST" ]] || die "--archive requires --archive_out_dest or \$ARCHIVE_OUT_DEST"
 fi

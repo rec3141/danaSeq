@@ -9,7 +9,7 @@
 #   dana-bbmap   - BBMap (samtools/libdeflate conflicts with R)
 #   dana-prokka  - Prokka (BioPerl pins perl to 5.26)
 #   dana-bakta   - Bakta (modern alternative to Prokka)
-#   dana-tools   - Everything else (nextflow, openjdk, kraken2, hmmer, R/DuckDB, perl)
+#   dana-tools   - Everything else (nextflow, openjdk, kraken2, hmmer, minimap2, Python/DuckDB, perl)
 #
 # Build:
 #   docker build -t danaseq-realtime .
@@ -82,12 +82,12 @@ RUN mkdir -p /usr/local/bin/dana-tools \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
-    && for tool in bakta; do \
+    && for tool in bakta diamond; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-bakta/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
-    && for tool in nextflow kraken2 gawk hmmsearch perl tetramer_freqs_esom.pl Rscript R; do \
+    && for tool in nextflow kraken2 gawk hmmsearch perl tetramer_freqs_esom.pl; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-tools/bin:$PATH\nexec %s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \

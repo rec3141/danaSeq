@@ -98,8 +98,8 @@ process CLEANUP {
 // Runs as a long-lived process with an internal sleep loop — in watch mode the
 // pipeline never completes (watchPath keeps the DAG alive), so this process
 // runs indefinitely alongside it.  Scans the output directory for barcode
-// subdirectories and loads results into DuckDB.  The R scripts are idempotent
-// (they use import_log to track what's already been loaded).
+// subdirectories and loads results into DuckDB.  The Python loader
+// (bin/import_all.py) is idempotent (import_log tracks what's already loaded).
 
 process DB_SYNC {
     tag "db-sync"
@@ -110,7 +110,7 @@ process DB_SYNC {
 
     input:
     val outdir           // absolute path to output directory
-    val danadir          // path to R scripts directory
+    val danadir          // path to the Python loaders (bin/)
     val sync_seconds     // sleep interval between sync cycles
     val cleanup_enabled  // "true" or "false"
     val metadata_file    // path to sample metadata TSV (or "none")
@@ -165,8 +165,9 @@ process DB_SYNC {
     while true; do
         echo "[INFO] DB_SYNC tick=\${tick}: scanning ${outdir} for barcode directories"
 
-        # Count pending data files to detect new data
-        cur_files=\$(find ${outdir} -mindepth 4 -maxdepth 4 \\( -path '*/kraken/*.tsv' -o -path '*/sketch/*.txt' -o -path '*/tetra/*.lrn' -o -path '*/prokka/*' -o -path '*/bakta/*' -o -path '*/hmm/*.tsv' -o -path '*/protdb/*.tsv' \\) 2>/dev/null | wc -l)
+        # Count pending data files to detect new data. Depth 4 = <FC>/<BC>/<kind>/<file>;
+        # mapping hits sit one level deeper (map/<meta.id>/<ref>.txt).
+        cur_files=\$(find ${outdir} -mindepth 4 -maxdepth 5 \\( -path '*/kraken/*.tsv' -o -path '*/sketch/*.sendsketch_reads.tsv' -o -path '*/tetra/*.lrn' -o -path '*/prokka/*' -o -path '*/bakta/*' -o -path '*/hmm/*.tsv' -o -path '*/protdb/*.tsv' -o -path '*/map/*/*.txt' \\) 2>/dev/null | wc -l)
         has_new_data=false
         if [ \$cur_files -ne \$last_sync_files ]; then
             has_new_data=true

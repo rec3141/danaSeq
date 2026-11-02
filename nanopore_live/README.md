@@ -12,7 +12,7 @@ Data for each sequencing run lives across three locations, by data tier:
 | **Archived reads** | `/matika/seqs/metagenome/nanopore/reads/` | <RUN> folders are rsync'd here; run_logger.sh adds new folders to the run_log.tsv | NAS | Permanent. 
 | **Pipeline outputs (active)** | `/data/scratch/nanopore_live/<RUN>/<FC>/<BC>` | Per-run workspace for `run-realtime.sh` / nextflow — sketches, viz JSONs, intermediate files. | SSD-backed for speed during active analysis. | SSD | Until run is completed |
 | **Pipeline outputs (archived)** | `/vistara/dana/out_dana_bc/<RUN>/<FC>/<BC>` | Same per-run dirs after the pipeline is done — moved off the scratch SSD to free working space. Same layout, longer retention. | USB3 | Long-term (manual cleanup) |
-| **Mapping references** | `/data/scratch/refdbs/mapping_refs/<ref>/` | `.fna` + `.idx` + sidecar files for each mapping reference (AIS / SAR / virus / etc.). See `mapping_refs/PROTOCOL.md`. | SSD | Permanent |
+| **Mapping references** | `/data/scratch/refdbs/mapping_refs/<ref>/` | `.fna` + `.idx` + sidecar files for each mapping reference (AIS / SAR / virus / etc.). See [docs/mapping-references.md](../docs/mapping-references.md). | SSD | Permanent |
 
 ### Archiving a completed run
 
@@ -167,7 +167,7 @@ Always use `--user $(id -u):$(id -g)` so output files are owned by your user.
 MinKNOW FASTQ
     │
     ▼
-VALIDATE_FASTQ          Gzip integrity + BBMap repair
+VALIDATE_FASTQ          Gzip integrity check; damaged files salvaged (bin/fastq_gz_salvage.py)
     │
     ▼
 QC_FASTQ_FILTER         Length + quality filtering (C, streaming)
@@ -177,9 +177,11 @@ CONVERT_TO_FASTA        Header cleanup
     │
     ├──► KRAKEN2_CLASSIFY     Taxonomic classification (batched per sample)
     ├──► BAKTA_CDS / PROKKA   Gene annotation (Bakta default)
-    ├──► HMM_SEARCH           HMMER3 against user-supplied databases
+    │       ├──► HMM_SEARCH         HMMER3 against user-supplied / pollutant HMM databases
+    │       └──► DIAMOND_DB_SEARCH  DIAMOND blastp against .dmnd protein databases
     ├──► SENDSKETCH           Per-read GTDB classification (local sendsketch server)
-    └──► TETRAMER_FREQ        Tetranucleotide composition (C)
+    ├──► TETRAMER_FREQ        Tetranucleotide composition (C)
+    └──► MAP_REFERENCE        minimap2 against --mapping_refs (from the filtered FASTQ)
               │
               ▼
          DB_INTEGRATION        Load results into DuckDB
@@ -203,10 +205,9 @@ CONVERT_TO_FASTA        Header cleanup
 | `--protein_db_opts` | `id=50,qcov=50,scov=50,evalue=1e-5` | DIAMOND cutoffs (HADEG-recommended); per-DB `<name>.opts` overrides |
 | `--pollutant_dbs` | (skip) | Directory of pollutant DBs (`<name>/<name>.hmm` or `.dmnd` + sidecars), e.g. `/data/scratch/refdbs/pollutants` |
 | `--run_sketch` | `false` | Enable per-read GTDB sendsketch classification |
-| `--sendsketch_address` | `http://10.151.50.41:3068/sketch` | Local GTDB sendsketch server URL |
+| `--sendsketch_address` | `$DANA_SENDSKETCH_ADDRESS`, else `http://localhost:3068/sketch` | Local GTDB sendsketch server URL |
 | `--run_tetra` | `false` | Enable tetranucleotide frequency |
-| `--watch` | `false` | Monitor for new files during live sequencing |
-| `--watch_glob` | `*/fastq_pass/barcode*/*.fastq.gz` | Glob pattern for watch mode |
+| `--watch` | `false` | Monitor for new files during live sequencing (watch globs are auto-detected from the depth of `fastq_pass/` below `--input`) |
 | `--db_sync_minutes` | `10` | DuckDB sync interval in watch mode |
 | `--run_db_integration` | `false` | Load results into DuckDB |
 | `--cleanup` | `false` | Compress/delete files after DB import |
@@ -239,15 +240,17 @@ results/
 ├── FLOWCELL/
 │   ├── barcode01/
 │   │   ├── fa/           FASTA (quality-filtered sequences)
-│   │   ├── fq/           Intermediate FASTQ (BBDuk output)
 │   │   ├── kraken/       *.tsv (per-read), *.report (summary)
 │   │   ├── bakta/        Bakta annotations (GFF3, FAA, FFN, TSV)
 │   │   ├── hmm/          *.DBNAME.tsv, *.DBNAME.tbl
-│   │   ├── sketch/       sendsketch_reads.tsv (per-read GTDB classification)
-│   │   ├── tetra/        Tetranucleotide frequencies
-│   │   └── log.txt
+│   │   ├── protdb/       *.DBNAME.tsv, *.DBNAME.tbl (DIAMOND)
+│   │   ├── sketch/       *.sendsketch_reads.tsv (per-read GTDB classification)
+│   │   ├── tetra/        *.lrn, *.lengths (tetranucleotide frequencies)
+│   │   ├── map/<file>/   <ref>.txt (minimap2 hits per input file and reference)
+│   │   └── dana.duckdb   Integrated database (one per barcode)
 │   └── ...
-├── dana.duckdb           Integrated database
+├── viz/                  Dashboard JSON (watch mode; DB_SYNC regenerates each tick)
+├── run_manifest.json     Pipeline version, parameters, containers
 └── pipeline_info/        Nextflow reports (timeline, trace, DAG)
 ```
 
@@ -257,28 +260,28 @@ The `--cleanup` flag compresses or deletes source files after DuckDB import:
 
 | Directory/Files | Action |
 |----------------|--------|
-| `fa/*.fa` | Gzip in place (kept as compressed backup) |
-| `kraken/`, `sketch/`, `tetra/` | Delete (data lives in DuckDB) |
-| `prokka/*/PROKKA_*.tsv` | Delete (loaded into DuckDB) |
-| `prokka/*/PROKKA_*.gff`, `.faa`, `.ffn` | Gzip in place |
-| `hmm/`, `dana.duckdb`, `log.txt` | Kept (not cleaned) |
+| `kraken/`, `sketch/`, `tetra/` (except `tetra/*.lengths`) | Delete (data lives in DuckDB) |
+| `prokka/*/PROKKA_*.tsv`, `bakta/*/*.tsv` | Delete (loaded into DuckDB) |
+| `fa/*.fa`, `.gff`/`.gff3`, `.faa`, `.ffn` | Kept uncompressed (Nextflow `publishDir` would re-copy them on `-resume`) |
+| `hmm/`, `protdb/`, `map/`, `dana.duckdb` | Kept (not cleaned) |
 
-Safe for watch mode -- operates per-file and checks `import_log` before deleting.
+Cleanup runs only for barcode directories whose `import_log` is non-empty (i.e. after at least one successful import).
 
 ## DuckDB Integration
 
-Python scripts in `bin/` load results into per-sample DuckDB databases:
+`bin/import_all.py <barcode_dir>` loads everything in one process and one connection into the per-barcode `dana.duckdb`:
 
-| Script | Data |
+| Step (in `import_all.py`) | Data |
 |--------|------|
-| `kraken_db.py` | Kraken2 per-read classifications |
-| `krakenreport_db.py` | Kraken2 summary reports with full taxonomy |
-| `annotation_db.py` | Bakta/Prokka gene annotations + read-contig mapping |
-| `sketch_db.py` | Sendsketch per-read GTDB classifications |
-| `tetra_db.py` | Tetranucleotide frequencies + sequence index |
-| `db_schema.py` | Shared schema definitions (imported by all scripts) |
+| `import_kraken`, `import_krakenreport` | Kraken2 per-read classifications and summary reports with full taxonomy |
+| `import_annotations` | Bakta/Prokka gene annotations, stats, read-contig mapping |
+| `import_sketch` | Sendsketch per-read GTDB classifications |
+| `import_tetra` | Tetranucleotide frequencies + sequence index |
+| `import_mapping.py` | minimap2 hits (`map/<file>/<ref>.txt`) into `mapping` |
+| `import_protein_hits.py` | HMM / DIAMOND protein-DB hits (see below) |
+| `db_schema.py` | Shared schema definitions |
 
-Scripts are idempotent and track imports via `import_log`. Contig names are prefixed with the batch file ID to prevent collisions across batches.
+The loader is idempotent and tracks imports via `import_log`. Contig names are prefixed with the batch file ID to prevent collisions across batches. (The single-table scripts `kraken_db.py`, `krakenreport_db.py`, `annotation_db.py`, `sketch_db.py`, `tetra_db.py` are legacy and not called by the pipeline.)
 
 `import_protein_hits.py` (called by `import_all.py`, or standalone with a barcode dir) loads the
 protein-DB searches (`hmm/<chunk>.<db>.tsv`, `protdb/<chunk>.<db>.tsv`, written by
@@ -369,7 +372,7 @@ DB_SYNC detects and invokes any executable `<outdir>/deploy.sh` at the end of ea
 
 **Conda environment build fails.** Run `./install.sh --check` to diagnose. Ensure mamba/conda is on PATH.
 
-**Watch mode not picking up files.** Java WatchService requires a flat glob pattern (no `**`). Adjust `--watch_glob` to match your directory depth.
+**Watch mode not picking up files.** Java WatchService requires a flat glob pattern (no `**`). The pipeline derives the depth of `fastq_pass/` from the files present at start-up (or watches depths 0-3 if none exist yet); check the `Watch glob:` lines in the log and point `--input` at the run directory or its parent.
 
 ## References
 

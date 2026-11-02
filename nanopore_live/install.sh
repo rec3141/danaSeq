@@ -14,7 +14,7 @@ set -euo pipefail
 #   dana-bbmap   - BBMap (samtools/libdeflate conflicts with R)
 #   dana-prokka  - Prokka (BioPerl pins perl to 5.26, conflicts with others)
 #   dana-bakta   - Bakta (modern alternative to Prokka, different Python deps)
-#   dana-tools   - Everything else (nextflow, openjdk, kraken2, hmmer, R/DuckDB, perl)
+#   dana-tools   - Everything else (nextflow, openjdk, kraken2, hmmer, minimap2, Python/DuckDB, perl)
 #
 # Each is built from a pinned YAML file in envs/ for reproducibility.
 #
@@ -83,7 +83,7 @@ declare -A ENV_CHECK=(
 )
 
 # Additional binaries to verify in dana-tools
-TOOLS_CHECK=(nextflow java kraken2 hmmsearch minimap2 gawk perl Rscript)
+TOOLS_CHECK=(nextflow java kraken2 hmmsearch minimap2 gawk perl python3)
 
 yaml_to_envname() {
     local yaml="$1"

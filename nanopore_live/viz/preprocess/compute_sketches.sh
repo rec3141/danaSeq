@@ -56,8 +56,9 @@ if [[ -n "$CONDA_ENV" ]]; then
     BBMAP_DIR="$CONDA_ENV/bin"
     export PATH="$CONDA_ENV/bin:$PATH"
   else
-    echo "[ERROR] comparesketch.sh not found in --env $CONDA_ENV/bin/" >&2
-    exit 1
+    # Not fatal: DB_SYNC always passes conda-envs/dana-bbmap, which does not
+    # exist inside the container image; fall back to PATH / a named env below.
+    echo "[WARNING] comparesketch.sh not found in --env $CONDA_ENV/bin/; trying PATH and dana-bbmap" >&2
   fi
 fi
 

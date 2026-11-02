@@ -10,27 +10,27 @@ cd nanopore_live
 
 ./run-realtime.sh --input /path/to/nanopore/run --outdir /path/to/output \
     --run_kraken --kraken_db /path/to/krakendb \
-    --run_prokka --run_sketch --run_tetra
+    --annotator bakta --bakta_db /path/to/bakta/db-light --run_sketch --run_tetra
 ```
 
 ## Pipeline Stages
 
 | Step | Process | Tool | Description |
 |------|---------|------|-------------|
-| 1 | `VALIDATE_FASTQ` | BBMap | Gzip integrity check + read repair |
-| 2 | `QC_BBDUK` | BBDuk | Adapter and quality trimming |
-| 3 | `QC_FASTQ_FILTER` | fastq_filter (C) | Length + quality filtering (streaming) |
-| 4 | `CONVERT_TO_FASTA` | awk | Header cleanup and format conversion |
-| 5a | `KRAKEN2_CLASSIFY` | Kraken2 | Taxonomic classification (batched per sample) |
-| 5b | `PROKKA_ANNOTATE` | Prokka | ORF prediction + functional annotation |
-| 5c | `BAKTA_CDS` / `BAKTA_FULL` | Bakta | CDS-only or full annotation (alternative to Prokka) |
-| 5d | `HMM_SEARCH` | HMMER3 | Profile HMM search against user-supplied databases |
-| 5e | `SENDSKETCH` | BBTools | Rapid taxonomic sketching via MinHash |
-| 5f | `TETRAMER_FREQ` | tetramer_freqs (C) | Tetranucleotide composition profiles |
-| 5g | `MAP_REFERENCE` | minimap2 (ONT) | Per-reference alignment for AIS / custom genomes — see [mapping-references.md](mapping-references.md) |
-| 6 | `DB_INTEGRATION` | R + DuckDB | Load all results into DuckDB |
-| 7 | `DB_SYNC` | R + DuckDB | Periodic sync during watch mode |
-| 8 | `CLEANUP` | bash | Compress/delete source files after DB import |
+| 1 | `VALIDATE_FASTQ` | gzip + `fastq_gz_salvage.py` | Gzip integrity check; damaged files salvaged record by record |
+| 2 | `QC_FASTQ_FILTER` | fastq_filter (C++) | Length + quality filtering (streaming, Filtlong-style scoring) |
+| 3 | `CONVERT_TO_FASTA` | awk | Header cleanup and format conversion |
+| 4a | `KRAKEN2_CLASSIFY` | Kraken2 | Taxonomic classification (batched per sample) |
+| 4b | `PROKKA_ANNOTATE` | Prokka | ORF prediction + functional annotation |
+| 4c | `BAKTA_CDS` / `BAKTA_FULL` | Bakta | CDS-only or full annotation (default annotator) |
+| 4d | `HMM_SEARCH` | HMMER3 | Profile HMM search against user-supplied / pollutant databases |
+| 4e | `DIAMOND_DB_SEARCH` | DIAMOND | blastp of annotation proteins against `.dmnd` databases |
+| 4f | `SENDSKETCH` | BBTools | Per-read GTDB classification via a sendsketch server |
+| 4g | `TETRAMER_FREQ` | tetramer_freqs (C) | Tetranucleotide composition profiles |
+| 4h | `MAP_REFERENCE` | minimap2 (ONT) | Per-reference alignment for AIS / custom genomes — see [mapping-references.md](mapping-references.md) |
+| 5 | `DB_INTEGRATION` | Python + DuckDB | Load all results into DuckDB (batch mode) |
+| 6 | `DB_SYNC` | Python + DuckDB | Periodic sync, dashboard preprocess and deploy hook during watch mode |
+| 7 | `CLEANUP` | bash | Delete imported source files after DB import |
 
 ## Parameters
 
@@ -40,19 +40,23 @@ cd nanopore_live
 | `--outdir` | `results` | Output directory |
 | `--run_kraken` | `false` | Enable Kraken2 classification |
 | `--kraken_db` | (required if kraken) | Path to Kraken2 database |
-| `--run_prokka` | `false` | Enable Prokka annotation |
 | `--annotator` | `bakta` | Gene annotator: `prokka`, `bakta`, or `none` |
-| `--bakta_db` | (required if bakta) | Path to Bakta database |
+| `--bakta_db` | `/data/scratch/refdbs/bakta/db-light` | Path to Bakta database (site-specific default) |
 | `--bakta_full` | `false` | Run full Bakta annotation (ncRNA/tRNA/CRISPR) |
 | `--hmm_databases` | (skip) | Comma-delimited paths to HMM files |
+| `--hmm_cut` | `tc` | hmmsearch cutoff (`tc`/`ga`/`nc`/E-value); per-DB `<name>.opts` overrides |
+| `--protein_dbs` | (skip) | Comma-delimited DIAMOND `.dmnd` paths |
+| `--protein_db_opts` | `id=50,qcov=50,scov=50,evalue=1e-5` | DIAMOND cutoffs |
+| `--pollutant_dbs` | (skip) | Directory of `<name>/<name>.hmm|.dmnd` pollutant databases |
 | `--mapping_refs` | (skip) | Directory of reference subdirs for minimap2 mapping (AIS / custom) — see [mapping-references.md](mapping-references.md) |
-| `--run_sketch` | `false` | Enable Sendsketch profiling |
+| `--run_sketch` | `false` | Enable per-read GTDB sendsketch classification |
+| `--sendsketch_address` | `$DANA_SENDSKETCH_ADDRESS`, else `http://localhost:3068/sketch` | Sendsketch server URL |
 | `--run_tetra` | `false` | Enable tetranucleotide frequency |
-| `--watch` | `false` | Monitor for new files during live sequencing |
-| `--watch_glob` | `*/fastq_pass/barcode*/*.fastq.gz` | Glob pattern for watch mode |
+| `--watch` | `false` | Monitor for new files during live sequencing (watch globs are auto-detected from the depth of `fastq_pass/` below `--input`) |
 | `--db_sync_minutes` | `10` | DuckDB sync interval in watch mode |
 | `--run_db_integration` | `false` | Load results into DuckDB |
-| `--cleanup` | `false` | Compress/delete files after DB import |
+| `--cleanup` | `false` | Delete imported files after DB import |
+| `--metadata` | (none) | Sample metadata TSV passed to the dashboard preprocess |
 | `--min_readlen` | `1500` | Minimum read length after filtering |
 | `--keep_percent` | `80` | Percent of reads to keep (by quality) |
 | `--min_file_size` | `1000000` | Minimum FASTQ file size in bytes (1 MB) |
@@ -65,15 +69,17 @@ results/
 ├── FLOWCELL/
 │   ├── barcode01/
 │   │   ├── fa/           FASTA (quality-filtered sequences)
-│   │   ├── fq/           Intermediate FASTQ (BBDuk output)
 │   │   ├── kraken/       *.tsv (per-read), *.report (summary)
-│   │   ├── prokka/       SAMPLE/PROKKA_* (GFF, FAA, FFN, TSV)
+│   │   ├── bakta/ or prokka/   <id>/<id>.gff3|.faa|.tsv (Bakta) or <id>/PROKKA_* (Prokka)
 │   │   ├── hmm/          *.DBNAME.tsv, *.DBNAME.tbl
-│   │   ├── sketch/       Sendsketch profiles
-│   │   ├── tetra/        Tetranucleotide frequencies
-│   │   └── log.txt
+│   │   ├── protdb/       *.DBNAME.tsv, *.DBNAME.tbl (DIAMOND)
+│   │   ├── sketch/       *.sendsketch_reads.tsv (per-read GTDB classification)
+│   │   ├── tetra/        *.lrn, *.lengths (tetranucleotide frequencies)
+│   │   ├── map/<file>/   <ref>.txt (minimap2 hits per input file and reference)
+│   │   └── dana.duckdb   Integrated database (one per barcode)
 │   └── ...
-├── dana.duckdb           Integrated database
+├── viz/                  Dashboard JSON (watch mode; DB_SYNC regenerates each tick)
+├── run_manifest.json     Pipeline version, parameters, containers
 └── pipeline_info/        Nextflow reports (timeline, trace, DAG)
 ```
 
@@ -105,16 +111,21 @@ the sampled sklearn t-SNE runs as before.
 | Profile | Use case |
 |---------|----------|
 | `standard` | Local execution |
-| `test` | Small test files, reduced resources |
+| `test` | Lower size/length thresholds (no test data are bundled) |
+| `shipboard` | Production workstation: 32 CPUs, 256 GB RAM, 100 GB Kraken2 |
+| `local_tools` | Legacy: conda disabled, tools expected on `PATH` |
 
 ## Resource Requirements
 
+Defaults from `nextflow.config` (batch / watch mode):
+
 | Component | CPUs | RAM | Notes |
 |-----------|------|-----|-------|
-| Kraken2 | 8 | 50-100 GB | Depends on database size; serialized via `maxForks=1` |
-| Prokka/Bakta | 4 | 8 GB | Per-file annotation |
-| HMMER3 | 4 | 4 GB | Per-file search |
-| DuckDB integration | 2 | 4 GB | R-based import scripts |
+| Kraken2 | 4 / 1 | 10 GB (100 GB in `shipboard`) | Depends on database size; serialized via `maxForks=1` |
+| Bakta (`BAKTA_CDS`) | all cores / 1 | 16 GB / 4 GB | Batch: one task at a time; watch: one task per core |
+| minimap2 (`MAP_REFERENCE`) | 1 | 4 GB | At most 16 / 4 concurrent tasks |
+| Other `process_medium` tasks (Prokka, HMMER3, sendsketch, DB sync) | 1 | 4 GB | |
+| Other `process_low` tasks (QC, DIAMOND, tetramers) | 1 | 2 GB | |
 
 ## Watch Mode
 
@@ -124,10 +135,10 @@ Monitor a directory for new FASTQ files during active sequencing:
 ./run-realtime.sh --input /path/to/runs --outdir /path/to/output \
     --watch --db_sync_minutes 10 \
     --run_kraken --kraken_db /path/to/db \
-    --run_prokka --run_db_integration
+    --annotator bakta --run_db_integration
 ```
 
-`DB_SYNC` runs as a long-lived process that periodically loads new results into DuckDB. R scripts are idempotent and track imports via `import_log`.
+`DB_SYNC` runs as a long-lived process that periodically loads new results into DuckDB. The Python loader (`bin/import_all.py`) is idempotent and tracks imports via `import_log`. Watch vs batch mode is locked per `--outdir` (recorded in `<outdir>/.pipeline_mode`).
 
 ## Post-DB Cleanup
 
@@ -135,28 +146,28 @@ The `--cleanup` flag compresses or deletes source files after DuckDB import:
 
 | Directory/Files | Action |
 |----------------|--------|
-| `fa/*.fa` | Gzip in place (kept as compressed backup) |
-| `kraken/`, `sketch/`, `tetra/` | Delete (data lives in DuckDB) |
-| `prokka/*/PROKKA_*.tsv` | Delete (loaded into DuckDB) |
-| `prokka/*/PROKKA_*.gff`, `.faa`, `.ffn` | Gzip in place |
-| `hmm/`, `dana.duckdb`, `log.txt` | Kept (not cleaned) |
+| `kraken/`, `sketch/`, `tetra/` (except `tetra/*.lengths`) | Delete (data lives in DuckDB) |
+| `prokka/*/PROKKA_*.tsv`, `bakta/*/*.tsv` | Delete (loaded into DuckDB) |
+| `fa/*.fa`, `.gff`/`.gff3`, `.faa`, `.ffn` | Kept uncompressed (Nextflow `publishDir` would re-copy them on `-resume`) |
+| `hmm/`, `protdb/`, `map/`, `dana.duckdb` | Kept (not cleaned) |
 
-Safe for watch mode -- operates per-file and checks `import_log` before deleting.
+Cleanup runs only for barcode directories whose `import_log` is non-empty (i.e. after at least one successful import).
 
 ## DuckDB Integration
 
-R scripts in `bin/` load results into DuckDB:
+`bin/import_all.py <barcode_dir>` loads all results into the per-barcode `dana.duckdb` in one process:
 
-| Script | Data |
+| Step | Data |
 |--------|------|
-| `40_kraken_db.r` | Kraken2 classifications |
-| `41_krakenreport_db.r` | Kraken2 summary reports |
-| `42_prokka_db.r` | Prokka annotations |
-| `43_sketch_db.r` | Sendsketch profiles |
-| `44_tetra_db.r` | Tetranucleotide frequencies |
-| `45_stats_db.r` | Assembly statistics |
-| `46_log_db.r` | Processing logs |
-| `47_merge_db.r` | Merge per-run databases |
+| `import_kraken`, `import_krakenreport` | Kraken2 per-read classifications and summary reports |
+| `import_annotations` | Bakta/Prokka gene annotations, stats, read-contig mapping |
+| `import_sketch` | Sendsketch per-read GTDB classifications |
+| `import_tetra` | Tetranucleotide frequencies + sequence index |
+| `import_mapping.py` | minimap2 hits into the `mapping` table |
+| `import_protein_hits.py` | HMM / DIAMOND protein-DB hits |
+| `db_schema.py` | Shared schema definitions |
+
+The loader is idempotent and tracks imports via `import_log`. The legacy R scripts in `bin/` (`47_merge_db.r` etc.) are not called by the pipeline.
 
 ## Input
 

@@ -23,8 +23,10 @@ nextflow run nanopore_live/main.nf \
 ```
 
 Drop a new `refs/<name>/` directory with `<name>.idx` + `meta.json` and
-the next pipeline run (or watch-mode tick) picks it up automatically. No
-code changes needed.
+the next pipeline run picks it up automatically. No code changes needed.
+References are enumerated once at start-up, so a running watch-mode
+pipeline must be restarted (`-resume`) to map against a newly added
+reference.
 
 ## Reference directory layout
 
@@ -42,7 +44,7 @@ code changes needed.
 no spaces** — it becomes:
 
 - the `mapping.reference` value in dana.duckdb;
-- the output filename in each barcode dir (`map/<name>.txt`);
+- the output filename in each barcode dir (`map/<input file>/<name>.txt`);
 - the SPA JSON filename (`ais_<name>.json`);
 - the species `id` in the SPA's `AIS_SPECIES` list.
 
@@ -158,8 +160,8 @@ species cards.
 ### 5. Run the pipeline
 
 Once `<refs_dir>/<name>/<name>.idx` exists, point the pipeline at
-`<refs_dir>` and re-run (or it'll pick up automatically on the next
-watch-mode tick):
+`<refs_dir>` and re-run (a watch-mode run must be restarted; the
+reference list is read at start-up):
 
 ```bash
 nextflow run nanopore_live/main.nf \
@@ -171,7 +173,7 @@ nextflow run nanopore_live/main.nf \
 ```
 
 Outputs land at:
-- **Per-barcode** : `<outdir>/<FC>/<BC>/map/<refname>.txt` (filtered SAM-ish: mapq≥1, aligned_len≥10)
+- **Per-barcode** : `<outdir>/<FC>/<BC>/map/<input file>/<refname>.txt` (filtered SAM-ish: mapq≥1, aligned_len≥10; one subdir per input FASTQ chunk)
 - **DuckDB** : `<outdir>/<FC>/<BC>/dana.duckdb` → table `mapping` (loaded by `import_all.py → import_mapping`)
 
 ### 6. Surface in the SPA
@@ -246,9 +248,10 @@ For one-off batches outside the pipeline:
 | `/matika/projects/project_zebra/build_contig_index.py` | Writes `<name>.contigs.json` from `<name>.fna`. |
 | `/matika/projects/project_zebra/preprocess_ais.py` | Aggregates duckdb → `ais_<name>.json` for the SPA. |
 
-The pipeline integration uses the same `mapping` schema and `import_log`
-key (`map/<refname>.txt`), so files imported by either path round-trip
-cleanly.
+The pipeline integration uses the same `mapping` schema; its `import_log`
+key is the per-chunk path `map/<input file>/<refname>.txt` (the flat
+`map/<refname>.txt` layout written by the standalone script is the older
+layout — see the note in `import_mapping.py`).
 
 ## DuckDB schema
 

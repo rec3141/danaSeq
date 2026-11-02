@@ -24,6 +24,14 @@ DRY_RUN=false
 SELF=$(basename "$0")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# concat_run_fastqs.sh needs BBTools reformat.sh. run-realtime.sh calls this
+# script outside the conda envs, so put the pipeline's dana-bbmap env on PATH
+# when reformat.sh is not already there (otherwise barcodes stay chunked).
+if ! command -v "${REFORMAT:-reformat.sh}" >/dev/null 2>&1 \
+        && [[ -x "$SCRIPT_DIR/../conda-envs/dana-bbmap/bin/reformat.sh" ]]; then
+    export PATH="$SCRIPT_DIR/../conda-envs/dana-bbmap/bin:$PATH"
+fi
+
 usage() {
     cat <<EOF >&2
 Usage: $SELF --input DIR --outdir DIR [--raw-dest DIR] [--out-dest DIR] [--dry-run]
@@ -105,7 +113,7 @@ archive_one() {
 # Verify gzip/BGZF integrity of every archived FASTQ. `gzip -t` catches
 # truncation / hard corruption (non-zero exit); its "trailing garbage" warning
 # catches the appended-junk corruption that silently truncated cat'd BGZF
-# streams (see fastq_filter / mapping_refs/PROTOCOL.md). We verify AFTER the
+# streams (see fastq_filter / docs/mapping-references.md). We verify AFTER the
 # move (rsync is faithful), so this flags corruption that was already present
 # in the pipeline output — letting us catch a bad run before the source dirs
 # are gone for good. Warns rather than failing: the data is already archived,
