@@ -99,8 +99,12 @@ def validateParams() {
         log.error "ERROR: --input is required. Provide path to directory containing *_R1_*.fastq.gz files. Run with --help for usage."
         System.exit(1)
     }
-    if (params.run_remove_human && !params.human_ref) {
-        log.error "ERROR: --run_remove_human requires --human_ref (path to BBTools human reference index directory)."
+    // human_ref has a non-null default, so test that the index is actually
+    // there; REMOVE_HUMAN runs under errorStrategy 'ignore' and would
+    // otherwise fail quietly for every sample.
+    if (params.run_remove_human && !(params.human_ref && file(params.human_ref).exists())) {
+        log.error "ERROR: --run_remove_human requires --human_ref (path to BBTools human reference index directory); " +
+                  "not found: ${params.human_ref}. Pass --human_ref PATH or --run_remove_human false."
         System.exit(1)
     }
 }

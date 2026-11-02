@@ -26,13 +26,13 @@ cd nanopore_assembly
 | Step | Process | Tool | Description |
 |------|---------|------|-------------|
 | 1 | `CONCAT_READS` | cat | Concatenate per-barcode FASTQs into one file per sample |
-| 2 | `PREPARE_READS` | BBDuk / Filtlong | Deduplication, size-selection, quality filtering |
+| 2 | `PREPARE_READS` | fastq_filter | Pooling, read-ID deduplication, size selection (`--filtlong_size`), nano-hq quality check |
 | 3 | `REMOVE_HUMAN` | minimap2 | Remove human-mapped reads (optional) |
 | 4a | `FLYE_ASSEMBLE` | Flye --meta | Long-read metagenome assembly (default) |
 | 4b | `ASSEMBLY_METAMDBG` | metaMDBG | Minimizer-space de Bruijn graph assembly (alternative) |
 | 4c | `ASSEMBLY_MYLOASM` | myloasm | Hybrid overlap/DBG assembly (alternative) |
 | 5 | `FLYE_POLISH` | Flye | Assembly polishing iterations (optional, default for Flye) |
-| 6 | `MAP_READS` | minimap2 + samtools | Per-sample alignment to assembly (flag `-F 0x904`) |
+| 6 | `MAP_READS` | minimap2 + samtools | Per-sample alignment to assembly (flag `-F 0x104`: drops unmapped and secondary, keeps supplementary) |
 | 7 | `CALCULATE_DEPTHS` | CoverM | Coverage depth table in MetaBAT2 format |
 | 8 | `CALCULATE_TNF` | tetramer_freqs (C) | 136-feature tetranucleotide frequency profiles |
 
@@ -43,15 +43,14 @@ cd nanopore_assembly
 | `--input` | (required) | Directory containing `*.fastq.gz` or `fastq_pass/barcode*/` structure |
 | `--outdir` | `results` | Output directory |
 | `--assembler` | `flye` | Assembler: `flye`, `metamdbg`, or `myloasm` |
-| `--read_type` | `auto` | Nanopore read type: `auto`, `nano-hq`, `nano-raw`, `nano-corr` |
+| `--read_type` | (required for `flye`) | Flye read mode: `nano-raw`, `nano-hq` or `nano-corr`; `auto` is accepted with a warning |
 | `--min_overlap` | `1000` | Flye `--min-overlap` parameter |
 | `--polish` | (auto) | Run Flye polisher; auto-enabled for Flye, disabled for others |
-| `--dedupe` | `true` | BBDuk deduplication before assembly |
-| `--dedupe_memory` | `24 GB` | Memory allocated to deduplication |
+| `--dedupe` | `true` | Read-ID deduplication before assembly (awk per barcode, fastq_filter across the pool) |
 | `--filtlong_size` | (skip) | Filtlong target bases (e.g. `40000000000`); skip if not set |
 | `--min_barcode_size` | `10485760` | Skip barcodes with fewer than 10 MB of reads |
 | `--run_remove_human` | `true` | Remove human reads via minimap2 |
-| `--human_ref` | `databases/human_ref/GRCh38_noalt_as.fa.gz` | Path to human reference FASTA or `.mmi` |
+| `--human_ref` | `<repo>/../databases/human_ref/GRCh38_noalt_as.fa.gz` | Path to human reference FASTA or `.mmi`; must exist when `--run_remove_human` is true |
 | `--assembly_cpus` | `16` | CPUs for assembly processes |
 | `--assembly_memory` | `60 GB` | Memory for assembly processes |
 | `--store_dir` | (none) | Persistent cache directory (storeDir) |
@@ -98,14 +97,17 @@ cd ../mag_analysis
 
 ## Resource Requirements
 
-| Component | CPUs | RAM | Notes |
-|-----------|------|-----|-------|
-| Flye assembly | 16 | 60 GB | Scales with metagenome complexity |
-| metaMDBG assembly | 16 | 60 GB | Lower memory than Flye for large datasets |
-| myloasm assembly | 16 | 60 GB | Hybrid overlap/DBG approach |
-| minimap2 mapping | 8 | 16 GB | Per-sample; runs in parallel |
-| CoverM depths | 2 | 4 GB | Operates on all BAMs |
-| Human decontamination | 8 | 16 GB | minimap2 against GRCh38 |
+Defaults from `nextflow.config`; `process_high` is `--assembly_cpus` / `--assembly_memory`.
+
+| Process | Label | CPUs | RAM | Notes |
+|---------|-------|------|-----|-------|
+| `CONCAT_READS` | `process_medium` | 8 | 16 GB | Per barcode; up to 32 in parallel |
+| `PREPARE_READS` (fastq_filter) | `process_high` | 16 | 60 GB | Single pooled task |
+| `REMOVE_HUMAN` (minimap2) | `process_high` | 16 | 60 GB | minimap2 against GRCh38 |
+| Flye / metaMDBG / myloasm assembly, Flye polish | `process_high` | 16 | 60 GB | Scales with metagenome complexity |
+| `MAP_READS` (minimap2) | `process_medium` | 8 | >= 24 GB | Per sample; memory scaled to the assembly size (at least 24 GB, doubled on retry) |
+| `CALCULATE_DEPTHS` (CoverM) | `process_low` | 2 | 4 GB | Operates on all BAMs |
+| `CALCULATE_TNF`, `PUBLISH_UNPOLISHED` | `process_low` | 2 | 4 GB | |
 
 ## Input
 

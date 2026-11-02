@@ -18,6 +18,11 @@ process MAP_READS_BBMAP {
     script:
     def xmx = task.memory ? "-Xmx${(task.memory.toGiga() * 0.85).intValue()}g" : ""
     """
+    # Nextflow runs this with `bash -ue`, without pipefail: a bbmap.sh failure
+    # mid-stream would otherwise leave a truncated BAM that samtools sort
+    # exits 0 on and that passes the non-empty check below.
+    set -o pipefail
+
     # Skip mapping if assembly is empty (e.g. all contigs below min_contig_len)
     if [ ! -s "${assembly}" ] || ! grep -q '>' "${assembly}"; then
         echo "[WARNING] Empty assembly for ${meta.id} — creating empty BAM" >&2

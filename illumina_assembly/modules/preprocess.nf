@@ -10,12 +10,14 @@
 // assembly allocation so multi-GB samples still get real resources.
 def _sizeGb(f)  { (f instanceof Collection ? (f.sum { it.size() } ?: 0L) : f.size()) / 1073741824.0 }
 def cpusFor(f, base, perGb, cap) { Math.min((base + _sizeGb(f) * perGb) as int, cap as int) }
-def memFor(f, base, perGb)       { def gb = (base + Math.ceil(_sizeGb(f) * perGb)) as int; "${gb} GB" }
+def memFor(f, base, perGb, cap)  { def gb = (base + Math.ceil(_sizeGb(f) * perGb)) as int
+                                   def capGb = ("${cap}" as nextflow.util.MemoryUnit).toGiga() as int
+                                   "${Math.min(gb, capGb)} GB" }
 
 process CLUMPIFY {
     tag "${meta.id}"
     cpus   { cpusFor([r1, r2], 4, 2, params.assembly_cpus) }
-    memory { memFor([r1, r2], 8, 16) }
+    memory { memFor([r1, r2], 8, 16, params.assembly_memory) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
@@ -80,7 +82,7 @@ process CLUMPIFY {
 process FILTER_BY_TILE {
     tag "${meta.id}"
     cpus   { cpusFor(reads, 4, 2, params.assembly_cpus) }
-    memory { memFor(reads, 8, 16) }
+    memory { memFor(reads, 8, 16, params.assembly_memory) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
@@ -128,7 +130,7 @@ process FILTER_BY_TILE {
 process BBDUK_TRIM {
     tag "${meta.id}"
     cpus   { cpusFor(reads, 4, 2, params.assembly_cpus) }
-    memory { memFor(reads, 8, 8) }
+    memory { memFor(reads, 8, 8, params.assembly_memory) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
@@ -163,7 +165,7 @@ process BBDUK_TRIM {
 process BBDUK_FILTER {
     tag "${meta.id}"
     cpus   { cpusFor(reads, 4, 2, params.assembly_cpus) }
-    memory { memFor(reads, 8, 8) }
+    memory { memFor(reads, 8, 8, params.assembly_memory) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
@@ -199,7 +201,7 @@ process REMOVE_HUMAN {
     // Higher memory floor than the other steps: bbmap must load the masked
     // human reference index into memory before mapping.
     cpus   { cpusFor(reads, 8, 2, params.assembly_cpus) }
-    memory { memFor(reads, 32, 8) }
+    memory { memFor(reads, 32, 8, params.assembly_memory) }
     conda "${projectDir}/conda-envs/dana-illumina-mag-bbmap"
     publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz'
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }

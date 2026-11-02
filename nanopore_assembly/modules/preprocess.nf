@@ -254,8 +254,8 @@ process PREPARE_READS {
     """
 }
 
-// Map long reads to human reference with minimap2, keep only unmapped reads.
-// Uses samtools -f 4 (unmapped) to extract non-human reads, then converts back to FASTQ.
+// Map long reads to the human reference with minimap2 (PAF output), collect the
+// IDs of reads with any hit, and drop them with fastq_filter --exclude_ids.
 process REMOVE_HUMAN {
     tag "remove-human"
     label 'process_high'

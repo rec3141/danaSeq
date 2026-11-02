@@ -52,7 +52,8 @@ def helpMessage() {
                          first 10,000 reads and is not recommended.
       --min_overlap N    Flye --min-overlap [default: 1000]
       --polish           Enable Flye polishing iterations [default: true for flye]
-      --dedupe           Enable BBDuk deduplication before assembly
+      --dedupe           Read-ID deduplication before assembly (awk per barcode,
+                         fastq_filter across the pool) [default: true]
       --filtlong_size N  Filtlong target bases (e.g. 40000000000); skip if not set
       --onepass_filter   Select those bases with the legacy single-pass streaming
                          threshold. Cheaper on disk, but the kept subset depends on
@@ -99,6 +100,14 @@ def validateParams() {
     }
     if (params.read_type && !(params.read_type in readTypes)) {
         log.error "ERROR: Invalid --read_type '${params.read_type}'. Choose from: ${readTypes.join(', ')}"
+        System.exit(1)
+    }
+    // REMOVE_HUMAN runs under errorStrategy 'ignore', so a missing reference
+    // would otherwise fail quietly and end the run without an assembly.
+    if (params.run_remove_human && !params.assembly_fasta &&
+        !(params.human_ref && file(params.human_ref).exists())) {
+        log.error "ERROR: --run_remove_human requires --human_ref (human reference FASTA or .mmi); " +
+                  "not found: ${params.human_ref}. Pass --human_ref PATH or --run_remove_human false."
         System.exit(1)
     }
     if (params.read_type == 'auto') {

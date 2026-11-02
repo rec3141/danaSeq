@@ -1,6 +1,6 @@
 # Illumina Assembly Pipeline
 
-Multi-assembler consensus pipeline for Illumina paired-end metagenomic reads. Produces deduplicated assemblies with depth tables and BAMs for downstream MAG analysis.
+Multi-assembler pipeline for Illumina paired-end metagenomic reads. Pools the contigs of four assemblers and deduplicates them, and produces the deduplicated assemblies with depth tables and BAMs for downstream MAG analysis.
 
 ## Quick Start
 
@@ -68,7 +68,7 @@ cd illumina_assembly
 |-----------|---------|-------------|
 | `--min_readlen` | `70` | Minimum read length after trimming |
 | `--run_remove_human` | `true` | Remove human reads via removehuman.sh |
-| `--human_ref` | `databases/human_ref` | Path to BBTools human reference index |
+| `--human_ref` | `<repo>/../databases/human_ref` | Path to BBTools human reference index; must exist when `--run_remove_human` is true |
 | `--run_fastqc` | `true` | Run FastQC on final preprocessed reads |
 | `--run_normalize` | `true` | Enable bbnorm coverage normalization |
 
@@ -122,7 +122,7 @@ results/
 └── pipeline_info/              Nextflow reports (timeline, trace, DAG)
 ```
 
-In co-assembly mode, `<sample>` is replaced with `coassembly` for assembly and mapping directories.
+In co-assembly mode the assembly and the depth table are published under `coassembly` (`assembly/coassembly/coassembly.dedupe.fasta`, `mapping/coassembly/coassembly.depths.txt`), but each sample's BAM is still published under its own `mapping/<sample>/` directory. `mag_analysis --bam_dir` reads a single directory, so for a co-assembly the BAMs have to be collected into one directory by hand.
 
 Feed these outputs into `mag_analysis`:
 
@@ -145,15 +145,17 @@ cd ../mag_analysis
 
 ## Resource Requirements
 
-| Component | CPUs | RAM | Notes |
-|-----------|------|-----|-------|
-| Preprocessing (BBTools) | 8 | 16 GB | Per-sample; parallelized |
-| Error correction | 8 | 16 GB | Three sequential phases per sample |
-| SPAdes / metaSPAdes | 24 | 250 GB | Most memory-intensive step |
-| Megahit | 24 | 250 GB | Lower peak memory than SPAdes |
-| Tadpole | 24 | 250 GB | Fast, single k-mer assembly |
-| BBMap read mapping | 8 | 16 GB | Per-sample mapping |
-| Human decontamination | 8 | 16 GB | BBTools removehuman.sh |
+Defaults from `nextflow.config`; `process_high` is `--assembly_cpus` / `--assembly_memory`. The first five preprocessing steps scale with the size of their input instead of using a label, so small samples do not each reserve the whole assembly allocation.
+
+| Process | Label | CPUs | RAM | Notes |
+|---------|-------|------|-----|-------|
+| `CLUMPIFY`, `FILTER_BY_TILE` | (input-scaled) | 4 + 2 per GB of input, capped at `--assembly_cpus` | 8 GB + 16 GB per GB of input, capped at `--assembly_memory` | Per sample |
+| `BBDUK_TRIM`, `BBDUK_FILTER` | (input-scaled) | 4 + 2 per GB | 8 GB + 8 GB per GB, capped | Per sample |
+| `REMOVE_HUMAN` (removehuman.sh) | (input-scaled) | 8 + 2 per GB | 32 GB + 8 GB per GB, capped | Loads the masked human index |
+| `FASTQC`, `QUALITY_TRIM`, `CALCULATE_DEPTHS` | `process_medium` | 8 | 24 GB | 4 h |
+| Error correction (three phases), `NORMALIZE_READS`, `MERGE_READS` | `process_high` | 24 | 250 GB | 24 h; per sample |
+| Tadpole, Megahit, SPAdes, metaSPAdes, `DEDUPE_ASSEMBLIES` | `process_high` | 24 | 250 GB | 24 h; SPAdes/metaSPAdes is the most memory-intensive step |
+| `MAP_READS_BBMAP` | `process_high` | 24 | 250 GB | 24 h; per sample |
 
 ## Input
 

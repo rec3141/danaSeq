@@ -457,7 +457,7 @@ PYEOF
 // consumers (and mag_analysis) always find assembly.fasta.
 process PUBLISH_UNPOLISHED {
     tag "publish-unpolished"
-    label 'process_single'
+    label 'process_low'
     publishDir "${params.outdir}/assembly", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/assembly" : null
 

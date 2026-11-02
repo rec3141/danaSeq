@@ -269,7 +269,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=(docker run --user "$(id -u):$(id -g)")
             CONTAINER_CMD+=("-e" "NXF_HOME=/home/dana/.nextflow")
             for bind in "${BINDS[@]}"; do CONTAINER_CMD+=("-v" "$bind"); done
-            CONTAINER_CMD+=("$CONTAINER_IMAGE" run /pipeline/main.nf)
+            CONTAINER_CMD+=("$CONTAINER_IMAGE" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
         apptainer|singularity)
             container_ca="/etc/ssl/certs/ca-certificates.crt"
@@ -279,7 +279,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=("--env" "SSL_CERT_FILE=${container_ca}")
             CONTAINER_CMD+=("--env" "CURL_CA_BUNDLE=${container_ca}")
             for bind in "${BINDS[@]}"; do CONTAINER_CMD+=("--bind" "$bind"); done
-            CONTAINER_CMD+=("$SIF_PATH" run /pipeline/main.nf)
+            CONTAINER_CMD+=("$SIF_PATH" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
     esac
     CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}" -resume ${RESUME_SESSION})
@@ -290,10 +290,13 @@ if [[ "$USE_CONTAINER" == true ]]; then
     echo "[INFO] Work:   $WORKDIR_HOST"
     echo ""
 
+    # Also holds nextflow.log (-log above): without it Nextflow writes
+    # .nextflow.log into the launch directory, as in the nanopore launcher.
     mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
     NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1 || true)
+    [[ -z "$NF_SESSION" ]] && { NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1) || true; }
     save_run_command "$OUTDIR_HOST" "$NF_SESSION"
     exit $NF_EXIT
 fi
@@ -316,7 +319,7 @@ mkdir -p "$WORKDIR_HOST" || die "Cannot create work directory: $WORKDIR_HOST"
 
 LOCAL_CMD=(
     mamba run -p "${SCRIPT_DIR}/conda-envs/dana-illumina-mag-bbmap"
-    nextflow run "${SCRIPT_DIR}/main.nf"
+    nextflow -log "${OUTDIR_HOST}/pipeline_info/nextflow.log" run "${SCRIPT_DIR}/main.nf"
     --input "$INPUT_HOST"
     --outdir "$OUTDIR_HOST"
     "${NF_ARGS[@]}"
@@ -334,7 +337,7 @@ mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
 "${LOCAL_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
-NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${SCRIPT_DIR}/.nextflow.log" 2>/dev/null | tail -1 || true)
+NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1 || true)
 save_run_command "$OUTDIR_HOST" "$NF_SESSION"
 
 exit $NF_EXIT

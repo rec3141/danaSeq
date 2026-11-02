@@ -586,6 +586,19 @@ static int run_main(int argc, char** argv) {
             // Score
             double score = score_read(qual_buf, slen, window_size);
 
+            // Welford online stats + histogram. Done in both modes, so the
+            // final report describes the whole input whichever way it was
+            // selected.
+            n_scored++;
+            scored_bases += slen;
+            int bin = (int)(score / 100.0 * HIST_BINS);
+            if (bin >= HIST_BINS) bin = HIST_BINS - 1;
+            if (bin < 0) bin = 0;
+            score_hist[bin]++;
+            double delta = score - score_mean;
+            score_mean += delta / n_scored;
+            score_m2 += delta * (score - score_mean);
+
             // --twopass: spill to the score bucket and decide nothing yet.
             if (twopass) {
                 int b = (int)(score / 100.0 * n_buckets);
@@ -598,21 +611,8 @@ static int run_main(int argc, char** argv) {
                          fputs("\n+\n", bf) != EOF &&
                          fwrite(qual_buf, 1, qlen, bf) == (size_t)qlen &&
                          fputc('\n', bf) != EOF, "write spill record");
-                n_scored++;
-                scored_bases += slen;
                 continue;
             }
-
-            // Welford online stats + histogram
-            n_scored++;
-            scored_bases += slen;
-            int bin = (int)(score / 100.0 * HIST_BINS);
-            if (bin >= HIST_BINS) bin = HIST_BINS - 1;
-            if (bin < 0) bin = 0;
-            score_hist[bin]++;
-            double delta = score - score_mean;
-            score_mean += delta / n_scored;
-            score_m2 += delta * (score - score_mean);
 
             // Update threshold: every read for first 100 (fast convergence),
             // then every 100 reads (cheap maintenance)
@@ -765,6 +765,13 @@ static int run_main(int argc, char** argv) {
                 write_bytes(qual_buf, strlen(qual_buf));
                 ++accepted_reads;
                 accepted_bases += cd.len;
+                int kbin = (int)(cd.score / 100.0 * HIST_BINS);
+                if (kbin >= HIST_BINS) kbin = HIST_BINS - 1;
+                if (kbin < 0) kbin = 0;
+                score_hist_kept[kbin]++;
+                // Candidates arrive in descending score, so the last read
+                // accepted is the lowest score kept: the two-pass threshold.
+                threshold = cd.score;
             }
         }
     }

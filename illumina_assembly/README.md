@@ -1,6 +1,6 @@
 # Illumina Assembly Pipeline
 
-Processes Illumina paired-end metagenomic reads through multi-assembler consensus and produces assemblies with depth tables and BAMs for downstream analysis by [mag_analysis](../mag_analysis/).
+Processes Illumina paired-end metagenomic reads through four assemblers, pools and deduplicates their contigs, and produces assemblies with depth tables and BAMs for downstream analysis by [mag_analysis](../mag_analysis/).
 
 ## Quick Start
 

@@ -70,16 +70,18 @@ Feed these into mag_analysis:
 | `--assembler` | `flye` | `flye`, `metamdbg`, or `myloasm` |
 | `--metamdbg_gfa` | true | Run `metaMDBG gfa`: publishes `assembly_graph_basespace.gfa.gz` and `assembly_graph_basespace_paths.tsv` (realigns all reads; ~1 h at 32 threads for 300 Gbp) |
 | `--polish` | auto | Flye polishing (auto: true for flye, false for others) |
-| `--dedupe` | true | BBDuk deduplication before assembly |
+| `--read_type` | (required for flye) | Flye read mode: `nano-raw`, `nano-hq` or `nano-corr` |
+| `--dedupe` | true | Read-ID deduplication before assembly (awk per barcode, fastq_filter across the pool) |
 | `--filtlong_size` | null | Filtlong target bases (e.g. `40000000000`) |
 | `--run_remove_human` | true | Remove human reads via minimap2 |
+| `--human_ref` | `../../databases/human_ref/GRCh38_noalt_as.fa.gz` | Human reference FASTA or `.mmi` (must exist when `--run_remove_human` is true) |
 | `--assembly_cpus` | 16 | CPUs for assembly |
 | `--assembly_memory` | `60 GB` | Memory for assembly |
 
 ## Pipeline
 
 ```
-Sample FASTQs → Concat per barcode → Dedupe + Filtlong → Remove human
+Sample FASTQs → Concat per barcode → fastq_filter (dedupe + size-select) → Remove human
     → Flye/metaMDBG/myloasm co-assembly → Polish (optional)
     → minimap2 mapping → CoverM depths
     → Tetranucleotide frequencies

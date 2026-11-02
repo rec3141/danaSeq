@@ -29,11 +29,11 @@ process MERGE_READS {
 
     if [ ! -s "${meta.id}.merged.fq.gz" ]; then
         echo "[WARNING] No merged reads for ${meta.id}" >&2
-        touch "${meta.id}.merged.fq.gz"
+        gzip -c < /dev/null > "${meta.id}.merged.fq.gz"   # valid empty gzip, not a zero-byte file
     fi
     if [ ! -s "${meta.id}.unmerged.fq.gz" ]; then
         echo "[WARNING] No unmerged reads for ${meta.id}" >&2
-        touch "${meta.id}.unmerged.fq.gz"
+        gzip -c < /dev/null > "${meta.id}.unmerged.fq.gz"
     fi
     """
 }
@@ -65,7 +65,7 @@ process QUALITY_TRIM {
 
     if [ ! -s "${meta.id}.qtrimmed.fq.gz" ]; then
         echo "[WARNING] Quality trimming produced empty output for ${meta.id}" >&2
-        touch "${meta.id}.qtrimmed.fq.gz"
+        gzip -c < /dev/null > "${meta.id}.qtrimmed.fq.gz"   # valid empty gzip, not a zero-byte file
     fi
     """
 }

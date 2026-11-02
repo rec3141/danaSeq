@@ -75,7 +75,8 @@ usage() {
     echo "  --assembler STR      flye, metamdbg, or myloasm [default: flye]"
     echo "  --assembly_fasta F   Map-only: map reads to this existing assembly; skips read"
     echo "                       pooling, human-read removal, assembly and polishing"
-    echo "  --dedupe             BBDuk deduplication before assembly"
+    echo "  --dedupe BOOL        Read-ID deduplication before assembly [default: true]"
+    echo "  --human_ref PATH     Human reference FASTA or .mmi for --run_remove_human"
     echo "  --filtlong_size N    Filtlong target bases; skip if not set"
     echo "  --min_overlap N      Flye --min-overlap [default: 1000]"
     echo "  --polish BOOL        Run Flye polisher [default: auto]"
@@ -97,6 +98,7 @@ usage() {
 
 INPUT_HOST=""
 OUTDIR_HOST=""
+HUMAN_REF_HOST=""
 # Default work dir: node-local scratch when running under Slurm (the large
 # read intermediates then never touch the shared filesystem and vanish with
 # the job; use --store_dir to keep the assembly for resume/MAG), else /tmp.
@@ -139,6 +141,11 @@ while (( $# )); do
         --outdir)
             [[ -z "${2:-}" ]] && die "--outdir requires a directory path"
             OUTDIR_HOST="$(realpath -m "$2")"
+            shift 2 ;;
+        --human_ref)
+            [[ -z "${2:-}" ]] && die "--human_ref requires a path to a FASTA or .mmi"
+            HUMAN_REF_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
+            NF_ARGS+=("--human_ref" "$HUMAN_REF_HOST")
             shift 2 ;;
         --workdir|-w)
             [[ -z "${2:-}" ]] && die "--workdir requires a directory path"
@@ -287,6 +294,16 @@ if [[ "$USE_CONTAINER" == true ]]; then
     BINDS+=("${INPUT_HOST}:/data/input:ro")
     BINDS+=("${OUTDIR_HOST}:/data/output")
     NF_ARGS=("--input" "/data/input" "--outdir" "/data/output" "${NF_ARGS[@]}")
+
+    # The human reference is a file (FASTA or .mmi), so bind its directory
+    # read-only and point the pipeline at the copy inside the container.
+    if [[ -n "${HUMAN_REF_HOST:-}" ]]; then
+        BINDS+=("$(dirname "$HUMAN_REF_HOST"):/data/human_ref:ro")
+        _href_in="/data/human_ref/$(basename "$HUMAN_REF_HOST")"
+        for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+            NF_ARGS[$i]="${NF_ARGS[$i]//${HUMAN_REF_HOST}/${_href_in}}"
+        done
+    fi
 
     if [[ -n "${STORE_DIR_HOST:-}" ]]; then
         BINDS+=("${STORE_DIR_HOST}:/data/store")
