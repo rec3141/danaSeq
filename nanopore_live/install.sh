@@ -32,8 +32,8 @@ ENV_DIR="${SCRIPT_DIR}/conda-envs"
 ENVS_YAML_DIR="${SCRIPT_DIR}/envs"
 TETRAMER_URL="https://raw.githubusercontent.com/tetramerFreqs/Binning/master/tetramer_freqs_esom.pl"
 # fastsne (read-level t-SNE of every read): pinned release, self-contained binaries
-FASTSNE_VERSION="v0.2.1"
-FASTSNE_SHA256="f96196cbe06fd9ef0d82d79718ec6e11d219954343dabf06659c1db8375836db"
+FASTSNE_VERSION="v0.2.2"
+FASTSNE_SHA256="07ebdb1718ff3e28daabb6463114f0bd2d7965c4e287a4b282074831ff6a1e66"
 FASTSNE_URL="https://github.com/rec3141/fastsne"
 
 # Detect conda/mamba
