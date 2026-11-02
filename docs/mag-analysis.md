@@ -57,6 +57,7 @@ cd mag_analysis
 | 4a | `PROKKA_ANNOTATE` | Prokka | ORF prediction + functional annotation |
 | 4b | `BAKTA_BASIC` | Bakta | CDS annotation (lightweight) |
 | 4c | `BAKTA_EXTRA` | Bakta | Full-database annotation (CDS, sORFs, expert systems; rRNA/tRNA/ncRNA and CRISPR are skipped) |
+| 4d | `BAKTA_EXTRA_IDS` | Python | Renames `BAKTA_EXTRA` features to the `BAKTA_BASIC` locus tag of the CDS at the same coordinates, since all protein tools run on the basic proteins; sORFs get new tags after the last basic one. Writes `locus_tag_map.tsv` |
 
 ### Taxonomy
 

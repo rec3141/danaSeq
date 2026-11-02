@@ -83,9 +83,19 @@ def resolve_path(results_dir, *parts):
 
 
 def load_annotation_tsv(results_dir):
-    """Load best available annotation TSV: BAKTA_EXTRA > BAKTA_BASIC > PROKKA."""
+    """Load best available annotation TSV: BAKTA_EXTRA > BAKTA_BASIC > PROKKA.
+
+    The extra run is used only once BAKTA_EXTRA_IDS has given it the basic
+    run's locus tags (marked by locus_tag_map.tsv); before that its tags do not
+    match the basic-keyed KofamScan/eggNOG/dbCAN annotations.
+    """
+    extra = resolve_path(results_dir, 'annotation', 'bakta', 'extra', 'annotation.tsv')
+    extra_ok = os.path.exists(os.path.join(os.path.dirname(extra), 'locus_tag_map.tsv'))
+    if os.path.exists(extra) and not extra_ok:
+        print(f"  [WARNING] {extra} has its own locus tags (no locus_tag_map.tsv); "
+              "using the basic Bakta TSV", file=sys.stderr)
     candidates = [
-        resolve_path(results_dir, 'annotation', 'bakta', 'extra', 'annotation.tsv'),
+        *([extra] if extra_ok else []),
         resolve_path(results_dir, 'annotation', 'bakta', 'basic', 'annotation.tsv'),
         resolve_path(results_dir, 'annotation', 'prokka', 'annotation.tsv'),
     ]
