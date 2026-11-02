@@ -87,7 +87,7 @@ def helpMessage() {
       --run_viz          Build interactive dashboard [default: false]
 
     Shortcut:
-      --all              Enable all optional modules (still requires DB paths)
+      --all              run-mag-analysis.sh only: expands to every --run_* flag (still requires DB paths)
 
     """.stripIndent()
 }
@@ -559,7 +559,9 @@ workflow {
                 ECOSSDB_SCORE.out.scores,
                 ECOSSDB_MAP.out.catalog,
                 ECOSSDB_MAP.out.mag_profiles,
-                ch_es_hierarchy
+                ch_es_hierarchy,
+                DASTOOL_CONSENSUS.out.contig2bin,
+                ch_es_mapping
             )
         }
     }

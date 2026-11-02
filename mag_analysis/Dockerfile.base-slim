@@ -2,8 +2,9 @@
 # Dana MAG Assembly Pipeline - Slim Base Image
 # ============================================================================
 #
-# Merged conda environments (9 envs instead of 35).
-# See envs/MERGE_PLAN.md for rationale and dry-run test results.
+# Merged conda environments: one env per tool group (envs/merged/*.yml, plus
+# the standalone vamb/comebin/whokaryote/binette/gtdbtk/antismash envs from
+# envs/*.yml) instead of one env per tool.
 #
 # Build:
 #   docker build -f Dockerfile.base-slim -t danaseq-mag-base-slim .

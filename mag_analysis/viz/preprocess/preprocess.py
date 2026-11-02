@@ -380,8 +380,10 @@ def build_overview(results_dir, assembly_info, depths_df, dastool_summary, check
 
     for _, ds_row in dastool_summary.iterrows():
         mag_name = ds_row['bin']
+        # CheckM2 scores the DAS Tool FASTAs under their dastool- names
+        # (including the _sub bins); fall back to the source binner's bin.
         short_name = mag_name.replace('dastool-', '')
-        cm_row = checkm2_lookup.get(short_name)
+        cm_row = checkm2_lookup.get(mag_name, checkm2_lookup.get(short_name))
         if cm_row is not None:
             comp = cm_row['Completeness']
             cont = cm_row['Contamination']
@@ -586,10 +588,14 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
         contigs = mag_contigs.get(mag_name, [])
 
         # CheckM2 quality
+        # CheckM2 scores the DAS Tool FASTAs under their dastool- names
+        # (including the _sub bins); fall back to the source binner's bin.
         short_name = mag_name.replace('dastool-', '')
         checkm2_row = None
         if checkm2_df is not None:
-            matches = checkm2_df[checkm2_df['Name'] == short_name]
+            matches = checkm2_df[checkm2_df['Name'] == mag_name]
+            if len(matches) == 0:
+                matches = checkm2_df[checkm2_df['Name'] == short_name]
             if len(matches) > 0:
                 checkm2_row = matches.iloc[0]
 

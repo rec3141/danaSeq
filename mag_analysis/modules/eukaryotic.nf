@@ -119,7 +119,7 @@ process METAEUK_PREDICT {
     path("metaeuk_headers.tsv"),        emit: headers
 
     script:
-    def mem_limit = params.metaeuk_mem_limit ?: '50G'
+    def mem_limit = params.metaeuk_mem_limit ?: '24G'
     def min_len   = params.metaeuk_min_length ?: 20
     def max_intron = params.metaeuk_max_intron ?: 10000
     """

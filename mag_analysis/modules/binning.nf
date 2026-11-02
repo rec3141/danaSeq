@@ -1,13 +1,15 @@
-// Binning: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, VAMB,
+// Binning: SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, VAMB, VAMB-tax,
 //          DAS_Tool consensus, Binette consensus, MAGScoT consensus.
 //
-// Up to six binners run in parallel, each emitting a DAS_Tool-format TSV (contig\tbin).
+// Up to seven binners run in parallel, each emitting a DAS_Tool-format TSV (contig\tbin).
 // All outputs are mixed into ch_binner_results in main.nf and collected by
 // DASTOOL_CONSENSUS for score-based consensus integration.
 // BINETTE_CONSENSUS and MAGSCOT_CONSENSUS run in parallel with DAS_Tool as
 // alternative consensus methods for quality comparison.
 //
-// Each binner catches failures and emits an empty TSV so the pipeline continues.
+// MetaBAT2 and MaxBin2 emit an empty TSV when they find no bins; the ML binners
+// (SemiBin2, LorBin, COMEBin, VAMB, VAMB-tax) exit non-zero on failure so that
+// storeDir keeps no empty result and they rerun on resume (errorStrategy carries on).
 // DAS_Tool filters out empty inputs and handles the "no bins above threshold" case.
 // CHECKM2 runs on all binner + consensus FASTAs for quality assessment.
 

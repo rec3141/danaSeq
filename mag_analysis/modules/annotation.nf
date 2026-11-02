@@ -1,4 +1,4 @@
-// Gene annotation: Prokka on co-assembly
+// Gene annotation: Prokka or Bakta (basic/extra) on the assembly
 
 process PROKKA_ANNOTATE {
     tag "prokka"
@@ -117,8 +117,8 @@ process BAKTA_BASIC {
     """
 }
 
-// Gene annotation: Bakta extra (full DB — CDS + CRISPR + sORF + expert systems)
-// Uses the Bakta full database. Skips RNA annotation (handled by RNA_CLASSIFY module).
+// Gene annotation: Bakta extra (full DB — CDS + sORF + expert systems; CRISPR skipped, see below)
+// Uses the Bakta full database. Skips RNA/ncRNA annotation (handled by RNA_CLASSIFY module).
 // Runs in parallel with downstream tools; does not block the pipeline.
 
 process BAKTA_EXTRA {

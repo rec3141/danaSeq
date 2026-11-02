@@ -56,7 +56,7 @@ cd mag_analysis
 |------|---------|------|-------------|
 | 4a | `PROKKA_ANNOTATE` | Prokka | ORF prediction + functional annotation |
 | 4b | `BAKTA_BASIC` | Bakta | CDS annotation (lightweight) |
-| 4c | `BAKTA_EXTRA` | Bakta | Full annotation (ncRNA, tRNA, CRISPR, sORFs) |
+| 4c | `BAKTA_EXTRA` | Bakta | Full-database annotation (CDS, sORFs, expert systems; rRNA/tRNA/ncRNA and CRISPR are skipped) |
 
 ### Taxonomy
 
@@ -66,8 +66,8 @@ cd mag_analysis
 | 5b | `KAIJU_CLASSIFY` | Kaiju | Protein-level MAG classification |
 | 5c | `KRAKEN2_CLASSIFY` | Kraken2 | k-mer-based classification |
 | 5d | `SENDSKETCH_CLASSIFY` | BBTools sendsketch | MinHash taxonomy (GTDB) |
-| 5e | `RNA_CLASSIFY` | barrnap + BLAST | rRNA extraction + SILVA classification |
-| 5f | `GTDBTK_CLASSIFY` | GTDB-Tk | Genome-based taxonomy (requires ~120 GB RAM) |
+| 5e | `RNA_CLASSIFY` | barrnap + VSEARCH | rRNA extraction + SILVA classification |
+| 5f | `GTDBTK_CLASSIFY` | GTDB-Tk | Genome-based taxonomy (160 GB RAM declared) |
 
 ### Metabolism
 
@@ -76,16 +76,16 @@ cd mag_analysis
 | 6a | `KOFAMSCAN` | KofamScan | KEGG ortholog assignment via HMM profiles |
 | 6b | `EMAPPER` | eggNOG-mapper | Ortholog annotation (COG, GO, KEGG, CAZy) |
 | 6c | `DBCAN` | dbCAN | CAZyme annotation via HMM + diamond + HMMER |
-| 6d | `MERGE_ANNOTATIONS` | R | Merge KofamScan + eggNOG + dbCAN per gene |
-| 6e | `MAP_TO_BINS` | R | Assign annotations to MAGs |
-| 6f | `KEGG_MODULES` | R | KEGG module completeness per MAG |
+| 6d | `MERGE_ANNOTATIONS` | Python | Merge KofamScan + eggNOG + dbCAN per gene |
+| 6e | `MAP_TO_BINS` | Python | Assign annotations to MAGs |
+| 6f | `KEGG_MODULES` | Python | KEGG module completeness per MAG (55 bundled modules) |
 | 6g | `MINPATH` | MinPath | Pathway parsimony analysis |
 | 6h | `KEGG_DECODER` | KEGG-Decoder | Metabolic pathway heatmaps |
 | 6i | `ANTISMASH` | antiSMASH | Biosynthetic gene cluster detection |
-| 6j | `ECOSSDB_MAP` | R | Ecosystem services mapping (CICES 5.2) |
-| 6k | `ECOSSDB_SCORE` | R | Ecosystem service scoring per MAG |
-| 6l | `ECOSSDB_SDG` | R | UN Sustainable Development Goal mapping |
-| 6m | `ECOSSDB_VIZ` | R | Ecosystem services visualization |
+| 6j | `ECOSSDB_MAP` | Python (ecossdb) | Ecosystem services mapping (CICES 5.2) |
+| 6k | `ECOSSDB_SCORE` | Python (ecossdb) | Ecosystem service scoring |
+| 6l | `ECOSSDB_SDG` | Python (ecossdb) | UN Sustainable Development Goal mapping |
+| 6m | `ECOSSDB_VIZ` | Python (ecossdb) | Ecosystem services visualization |
 
 ### Mobile Genetic Elements
 
@@ -111,8 +111,8 @@ cd mag_analysis
 
 | Step | Process | Tool | Description |
 |------|---------|------|-------------|
-| 9 | `CALCULATE_GENE_DEPTHS` | samtools + R | Per-gene coverage from BAMs |
-| 10 | `VIZ_PREPROCESS` | R + Svelte | Interactive dashboard generation |
+| 9 | `CALCULATE_GENE_DEPTHS` | samtools + Python | Per-gene coverage from BAMs |
+| 10 | `VIZ_PREPROCESS` | Python + Svelte | Interactive dashboard generation |
 
 ## Parameters
 
@@ -158,6 +158,11 @@ the representative; `NA` if the pair falls below skani's 80% ANI screen),
 `failed_quality` (outside the completeness/contamination thresholds), or
 `no_checkm2` (no CheckM2 estimate, e.g. a bin above `--checkm2_max_bin_bp`).
 
+Note: the bin-size cut-offs `--binette_min_bin_bp`, `--binette_max_bin_bp`,
+`--checkm2_max_bin_bp` and `--gtdbtk_max_bin_bp` are compared against the bin
+FASTA's size in bytes, which approximates its length in bp (headers and line
+breaks included). `--derep_min_size_bp` counts sequence bases.
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--run_derep` | `false` | Dereplicate the consensus bins with galah (needs `--checkm2_db`) |
@@ -172,7 +177,8 @@ the representative; `NA` if the pair falls below skani's 80% ANI screen),
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--annotator` | `bakta` | Gene annotator: `prokka`, `bakta`, or `none` |
-| `--bakta_db` | (required if bakta) | Path to Bakta database |
+| `--bakta_light_db` | (required if bakta) | Path to the Bakta light database (`BAKTA_BASIC`) |
+| `--bakta_db` | (required if `--bakta_extra`) | Path to the Bakta full database (`BAKTA_EXTRA`) |
 | `--bakta_extra` | `false` | Run full Bakta annotation |
 
 ### Taxonomy
@@ -186,7 +192,7 @@ the representative; `NA` if the pair falls below skani's 80% ANI screen),
 | `--run_sendsketch` | `false` | Run sendsketch GTDB taxonomy |
 | `--run_rrna` | `false` | Run rRNA classification (SILVA) |
 | `--silva_ssu_db` | (required if rrna) | SILVA SSU database path |
-| `--rrna_min_identity` | `0.80` | Minimum identity for rRNA BLAST |
+| `--rrna_min_identity` | `0.80` | Minimum identity for the rRNA VSEARCH search |
 | `--run_gtdbtk` | `false` | Run GTDB-Tk classification |
 | `--gtdbtk_db` | (required if gtdbtk) | GTDB-Tk database path |
 
@@ -234,7 +240,7 @@ the representative; `NA` if the pair falls below skani's 80% ANI screen),
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--all` | `false` | Enable all analysis modules |
+| `--all` | `false` | `run-mag-analysis.sh` only: expands to every `--run_*` flag (not a Nextflow param) |
 | `--db_dir` | (none) | Auto-resolve database paths from standard layout |
 | `--store_dir` | (none) | Persistent cache directory (storeDir) |
 | `--run_viz` | `false` | Build interactive Svelte dashboard |
@@ -312,18 +318,23 @@ taxonomy, GC, depth and length (`--no-fastsne-viewer` to skip).
 
 ## Resource Requirements
 
+Defaults from `nextflow.config`; the `--medium_cpus/--medium_memory`,
+`--binning_cpus/--binning_memory`, `--bakta_cpus/--bakta_memory` and
+`--assembly_cpus/--assembly_memory` parameters resize whole groups of processes.
+
 | Component | CPUs | RAM | Notes |
 |-----------|------|-----|-------|
-| MetaBAT2 / MaxBin2 | 16 | 60 GB | Default `process_high` label |
-| SemiBin2 | 8 | 16 GB | GPU optional |
-| COMEBin | 8 | 16 GB | GPU; skipped on CPU unless `--comebin_on_cpu` |
-| Prokka / Bakta | 16 | 60 GB | Per-bin annotation |
-| Bakta (extra) | 16 | 24 GB | Full annotation mode |
-| eggNOG-mapper | 16 | 48 GB | Batched protein annotation |
-| MetaEuk | 16 | 32 GB | Eukaryotic gene prediction |
-| GTDB-Tk | 16 | 120 GB | Most memory-intensive step |
-| Kraken2 | 8 | 24 GB | Depends on database |
-| CheckM2 | 16 | 60 GB | Quality assessment |
+| MetaBAT2 | 8 | 16 GB | `process_medium` label (`--medium_*`) |
+| MaxBin2 | 8 | 16 GB | Sized with the binners (`--binning_*`) |
+| SemiBin2 / LorBin / VAMB | 8 | 16 GB | `process_gpu` label (`--binning_*`); GPU optional |
+| COMEBin | 8 | 16 GB | `process_gpu`; skipped on CPU unless `--comebin_on_cpu` |
+| Prokka | 8 | 16 GB | `process_medium` |
+| Bakta (basic and extra) | 8 | 24 GB | `--bakta_*` |
+| eggNOG-mapper | 8 | 48 GB | Batched protein annotation |
+| MetaEuk | 8 | 32 GB | Eukaryotic gene prediction |
+| GTDB-Tk | 16 | 160 GB | Most memory-intensive step (R232 placement needs >=140 GB) |
+| Kraken2 / Kaiju | 8 | 24 GB | `process_kraken` label; depends on database |
+| CheckM2 | 8 | 16 GB | `process_medium` |
 
 ## Databases
 
@@ -352,7 +363,7 @@ Use `--db_dir` to auto-resolve paths from a standard layout:
 ## Design Notes
 
 - **Seven-binner consensus.** SemiBin2, MetaBAT2, MaxBin2, LorBin, COMEBin, VAMB, VAMB-tax feed into DAS Tool + Binette + MAGScoT for consensus refinement.
-- **Modular activation.** Every analysis module is off by default; use `--run_*` flags or `--all` to enable selectively.
+- **Modular activation.** MetaBAT2, DAS Tool, Bakta annotation (`--annotator bakta`) and ECOSSDB (`--run_ecossdb`, when metabolism runs) are on by default; every other module is off until enabled with its `--run_*` flag, or with the launcher's `--all`.
 - **Technology-agnostic.** Accepts assemblies from Nanopore, Illumina, HiFi, or any external assembler. Only requires FASTA + MetaBAT2-format depth table.
 - **Persistent caching.** Use `--store_dir` to skip completed processes across runs, even after `work/` cleanup.
-- **MIMAG quality standards.** CheckM2 classifies MAGs as high (>90% completeness, <5% contamination), medium (>50%, <10%), or low quality.
+- **Quality tiers.** The viz preprocessing tiers MAGs from CheckM2 completeness/contamination as HQ (>=90%, <5%), MQ (>=50%, <10%) or LQ; the MIMAG rRNA/tRNA criteria are not applied.

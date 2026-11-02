@@ -318,7 +318,7 @@ process KEGG_MODULES {
 
     script:
     """
-    # Evaluate ~150 KEGG module definitions against KO presence per MAG
+    # Evaluate the 55 bundled KEGG module definitions against KO presence per MAG
     # Outputs completeness matrix (MAG x module) + clustered SVG heatmap
     # Covers: carbon fixation, nitrogen, sulfur, methane, ETC, vitamins, central carbon
 
@@ -446,6 +446,7 @@ process ANTISMASH {
     tag "antismash"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-antismash"
+    publishDir "${params.outdir}/metabolism/antismash", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/antismash" : null
 
     input:
@@ -539,15 +540,16 @@ for r in rows:
 // ============================================================================
 // ECOSSDB — Ecosystem Services Profiling
 // ============================================================================
-// NB: ecossdb's bin dir is inlined into each beforeScript below rather than a
-// top-level `def` — Nextflow 26's strict parser rejects bare top-level
+// NB: ecossdb's bin dir is put on PATH at the top of each script below rather
+// than in a process-level beforeScript (which would replace the global one in
+// nextflow.config and lose OMP_NUM_THREADS and the pipeline_timing START line)
+// or a top-level `def` — Nextflow 26's strict parser rejects bare top-level
 // statements ("Statements cannot be mixed with script declarations").
 
 process ECOSSDB_MAP {
     tag "ecossdb_map"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-classify"
-    beforeScript "export PATH=${projectDir}/ecossdb/bin:\$PATH"
     publishDir "${params.outdir}/metabolism/ecossdb", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb" : null
 
@@ -566,6 +568,7 @@ process ECOSSDB_MAP {
     script:
     """
     set -euo pipefail
+    export PATH=${projectDir}/ecossdb/bin:\$PATH
 
     # 1. Normalize annotations (strip ko: prefix, unify columns)
     normalize_annotations.py \
@@ -599,7 +602,6 @@ process ECOSSDB_SCORE {
     tag "ecossdb_score"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-classify"
-    beforeScript "export PATH=${projectDir}/ecossdb/bin:\$PATH"
     publishDir "${params.outdir}/metabolism/ecossdb", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb_score" : null
 
@@ -614,6 +616,7 @@ process ECOSSDB_SCORE {
 
     script:
     """
+    export PATH=${projectDir}/ecossdb/bin:\$PATH
     score_es.py \
         --catalog ${catalog} \
         --mapping ${es_mapping} \
@@ -627,7 +630,6 @@ process ECOSSDB_SDG {
     tag "ecossdb_sdg"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-classify"
-    beforeScript "export PATH=${projectDir}/ecossdb/bin:\$PATH"
     publishDir "${params.outdir}/metabolism/ecossdb/sdg", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb_sdg" : null
 
@@ -643,6 +645,7 @@ process ECOSSDB_SDG {
 
     script:
     """
+    export PATH=${projectDir}/ecossdb/bin:\$PATH
     map_es_to_sdg.py \
         --scores ${scores} \
         --crosswalk ${crosswalk} \
@@ -657,7 +660,6 @@ process ECOSSDB_VIZ {
     tag "ecossdb_viz"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-classify"
-    beforeScript "export PATH=${projectDir}/ecossdb/bin:\$PATH"
     publishDir "${params.outdir}/metabolism/ecossdb", mode: 'copy', enabled: !params.store_dir
     storeDir params.store_dir ? "${params.store_dir}/metabolism/ecossdb_viz" : null
 
@@ -666,6 +668,8 @@ process ECOSSDB_VIZ {
     path catalog
     path mag_profiles
     path hierarchy_json
+    path contig2bin
+    path es_mapping
 
     output:
     path 'ecosystem_services.json',    emit: json
@@ -673,11 +677,16 @@ process ECOSSDB_VIZ {
 
     script:
     """
+    export PATH=${projectDir}/ecossdb/bin:\$PATH
+    # --contig2bin and --mapping are what es_to_json.py needs to build the
+    # bin x pathway heatmap (pathway_heatmap) used by the Ecosystem view.
     es_to_json.py \
         --scores ${scores} \
         --catalog ${catalog} \
         --mag-profiles ${mag_profiles} \
         --hierarchy ${hierarchy_json} \
+        --contig2bin ${contig2bin} \
+        --mapping ${es_mapping} \
         --output ecosystem_services.json
     """
 }

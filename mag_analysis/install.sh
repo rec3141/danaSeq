@@ -10,9 +10,8 @@ set -euo pipefail
 #
 # Merged environments (9 envs, matching the slim Docker image):
 #   dana-mag-assembly  - Flye, metaMDBG, myloasm, BBMap, minimap2, samtools, filtlong
-#   dana-mag-binning   - MetaBAT2, MaxBin2, SemiBin2, COMEBin, LorBin, DAS_Tool
+#   dana-mag-binning   - MetaBAT2, MaxBin2, SemiBin2, LorBin, DAS_Tool
 #   dana-mag-quality   - geNomad, CheckV, CheckM2, Tiara
-#   dana-mag-whokaryote- Whokaryote (pinned scikit-learn 1.0.2 for its RF models)
 #   dana-mag-annotate  - Bakta, eggNOG-mapper, MarFERReT/DIAMOND
 #   dana-mag-classify  - Kaiju, Kraken2, barrnap/vsearch, KofamScan, MetaEuk
 #   dana-mag-genomic   - IntegronFinder, IslandPath, MacSyFinder, DefenseFinder, dbCAN
@@ -20,12 +19,14 @@ set -euo pipefail
 #   dana-mag-strain    - Strainy, Floria, InStrain
 #   dana-mag-derep     - galah, skani
 #
-# Standalone environments (too large or conflicting to merge):
-#   dana-mag-prokka    - Prokka gene annotation
+# Standalone environments (7 envs; too large or conflicting to merge):
+#   dana-mag-prokka    - Prokka gene annotation (conda only; not in the Docker image)
 #   dana-mag-gtdbtk    - GTDB-Tk phylogenetic classification
 #   dana-mag-vamb      - VAMB variational autoencoder binning
+#   dana-mag-comebin   - COMEBin contrastive-learning binning
 #   dana-mag-binette   - Binette consensus refinement
 #   dana-mag-antismash - antiSMASH secondary metabolite prediction
+#   dana-mag-whokaryote- Whokaryote (pinned scikit-learn 1.0.2 for its RF models)
 #
 # Usage:
 #   ./install.sh              # Install all environments

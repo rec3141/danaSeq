@@ -2,7 +2,7 @@
 """Evaluate KEGG module completeness per MAG and generate a heatmap.
 
 Reads per-MAG annotation TSVs (from map_annotations_to_bins.py), extracts KO
-assignments, evaluates ~150 bundled KEGG module definitions, and outputs a
+assignments, evaluates the 55 bundled KEGG module definitions, and outputs a
 completeness matrix (MAG x module) plus an SVG heatmap.
 
 Each module is defined as a list of steps, where each step is a set of
