@@ -80,7 +80,8 @@ process VIZ_PREPROCESS {
         cd "\${VIZ_BUILD}"
         npm ci --prefer-offline 2>/dev/null || npm install --no-audit --no-fund
         mkdir -p public/data
-        cp "\${VIZ_DIR}"/data/* public/data/
+        # -r: data/ holds subdirectories too (fastsne/)
+        cp -r "\${VIZ_DIR}"/data/. public/data/
         npm run build
         cp -r dist "\${VIZ_DIR}/site"
         cp -r "${params.outdir}/pipeline_info" "\${VIZ_DIR}/site/pipeline_info" 2>/dev/null || true
