@@ -2,7 +2,7 @@
 #
 # dada2_denoise.py — Denoise, merge pairs, and build a sequence table (per plate)
 #
-# Python mirror of dada2_denoise.R. For each sample on a plate:
+# Successor to the removed R script dada2_denoise.R. For each sample on a plate:
 #   1. Dereplicate forward and reverse filtered reads via dada2py
 #   2. Apply the DADA2 denoising algorithm using pre-learned error models
 #   3. Merge denoised forward/reverse pairs via C-level NW alignment

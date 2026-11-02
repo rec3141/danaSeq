@@ -1,7 +1,8 @@
 // Build visualization data package from all pipeline outputs.
 //
-// R mode: builds app_data.rds + app.R (Shiny)
-// Python mode: builds JSON files for Svelte app (samples.json, asvs.json.gz, etc.)
+// BUILD_VIZ writes the JSON files the Svelte app loads (samples.json,
+// asvs.json.gz, etc.). The file name is historical: the Shiny/R app it once
+// built is gone, and nothing writes app_data.rds or app.R any more.
 //
 // When --build_viz_site is true, BUNDLE_VIZ_SITE builds a static Svelte app
 // that can be opened directly in a browser (no server needed).
@@ -25,12 +26,15 @@ process BUILD_VIZ {
     output:
     path("*.json"),    emit: json, optional: true
     path("*.json.gz"), emit: json_gz, optional: true
-    path("app_data.rds"), emit: app_data, optional: true
-    path("app.R"),        emit: app_script, optional: true
 
     script:
+    // The primary reference — first named in --ref_databases, as RENORMALIZE and
+    // the app take it — so the per-ASV lineage strings come from the same
+    // database and not from whichever taxonomy file sorts first.
+    def primary_db = (params.ref_databases
+        ? params.ref_databases.tokenize(';')[0].tokenize(':')[0].trim() : '')
     """
-    build_viz.py \
+    PRIMARY_DB="${primary_db}" build_viz.py \
         "${seqtab}" \
         "${renorm}" \
         "." \
@@ -50,6 +54,7 @@ process BUNDLE_VIZ_SITE {
     input:
     path(viz_json)
     path(viz_json_gz)
+    path(tree)          // phylo_tree.nwk from BUILD_PHYLOGENY, or the NO_TREE sentinel
 
     output:
     path("dist/**"), emit: site
@@ -60,10 +65,12 @@ process BUNDLE_VIZ_SITE {
     cp -r ${projectDir}/viz viz_build
     cd viz_build
     npm install --prefer-offline 2>/dev/null || npm install
-    # Copy data files into public/data for the static build
+    # Copy data files into public/data for the static build. The inputs are
+    # staged in the task dir, one level up from viz_build.
     mkdir -p public/data
-    cp ${viz_json} public/data/ 2>/dev/null || true
-    cp ${viz_json_gz} public/data/ 2>/dev/null || true
+    for f in ${viz_json} ${viz_json_gz}; do cp "../\$f" public/data/; done
+    # The app fetches data/tree.nwk for its Phylogeny view.
+    [ "${tree}" = NO_TREE ] || cp ../${tree} public/data/tree.nwk
     npx vite build
     mv dist ..
     """

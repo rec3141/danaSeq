@@ -49,14 +49,13 @@ RUN curl -fsSL https://get.nextflow.io | bash \
 # Copy environment specs
 COPY envs/ /tmp/envs/
 
-# Upstream HEAD of the remaining git dependency, resolved by CI at build time.
-#
-# An unpinned URL does not change, so Docker restores the cached layer and pip
-# never re-fetches: papa2's version PR merged three minutes before a build and
-# the image still shipped a four-month-old commit. Naming the SHA here changes
-# the layer key whenever upstream moves, so "unpinned" actually means latest.
-# It is recorded rather than enforced: what was really installed is read back
-# from pip's direct_url.json by bin/tool_versions.sh.
+# papa2 is PINNED by envs/python.yml (git+...papa2.git@v1.0.1); bumping that
+# tag is how the image moves. PAPA2_SHA is papa2's upstream HEAD as CI resolved
+# it at build time, and is only echoed into the build log below: it changes the
+# layer key whenever upstream moves (so the pinned tag is re-fetched rather than
+# restored from a stale cached layer) but does not choose the version. What was
+# really installed is read back from pip's direct_url.json by
+# bin/tool_versions.sh.
 ARG PAPA2_SHA=main
 
 # Create Python environment (papa2 from git, everything else from conda)

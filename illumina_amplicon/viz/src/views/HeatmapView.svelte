@@ -278,7 +278,7 @@
 
     let { z, sampleIds, asvIds, asvLabels, rowDendro, colDendro } = heatmapData;
 
-    // If phylogeny ordering selected, reorder columns by NJ tree leaf order
+    // If phylogeny ordering selected, reorder columns by tree leaf order (FastTree)
     if (usePhyloOrder) {
       try {
         const tree = parseNewick(store.treeNewick);
@@ -421,7 +421,7 @@
     colDendroSvg.setAttribute('height', COL_DENDRO_H);
 
     if (colDendro._phyloLines) {
-      // NJ tree: line segments format (depth from root: 0=root, maxDepth=leaves)
+      // Phylogenetic tree: line segments format (depth from root: 0=root, maxDepth=leaves)
       const { lines: dLines, nLeaves, maxDepth: treeMaxD } = colDendro._phyloLines;
       const nL = Math.max(nLeaves - 1, 1);
       const halfCell = cellW / 2;
@@ -582,7 +582,7 @@
 
       <!-- Title -->
       <div class="absolute top-1 left-1/2 -translate-x-1/2 text-xs text-faint pointer-events-none">
-        {heatmapData.nSamples} samples × {visibleAsvCount}/{heatmapData.nAsvs} ASVs (max RA ≥{(filters.heatmapMinMaxRA ?? 1).toFixed(1)}%) — {usePhyloOrder ? 'Phylogeny (NJ)' : 'Ward'}
+        {heatmapData.nSamples} samples × {visibleAsvCount}/{heatmapData.nAsvs} ASVs (max RA ≥{(filters.heatmapMinMaxRA ?? 1).toFixed(1)}%) — {usePhyloOrder ? 'Phylogeny (tree)' : 'Ward'}
       </div>
 
       <!-- Tooltip -->

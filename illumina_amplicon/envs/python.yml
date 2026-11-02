@@ -12,6 +12,7 @@ dependencies:
   - matplotlib
   - scipy
   - numpy
+  - pandas
   - pip
   - pip:
     # Pinned, and bumped deliberately — papa2 does the denoising, so its commit

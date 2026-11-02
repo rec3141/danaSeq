@@ -25,42 +25,40 @@ docker run --rm -v $(pwd):/data ghcr.io/rec3141/danaseq-illumina-amplicon \
 # Pull and convert to SIF
 apptainer pull danaseq-illumina-amplicon.sif docker://ghcr.io/rec3141/danaseq-illumina-amplicon:latest
 
-# Run the pipeline
-apptainer exec danaseq-illumina-amplicon.sif nextflow run /pipeline/main.nf \
+# Run the pipeline through the image entrypoint (`run`, not `exec`: the
+# entrypoint loads /pipeline/docker.config, which turns conda off so the
+# tools already on PATH are used)
+apptainer run danaseq-illumina-amplicon.sif run /pipeline/main.nf \
     --input /path/to/reads \
     --ref_databases "silva:/path/to/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
     --outdir results \
     -resume
 ```
 
-## Nextflow with Container Profile
+## Launcher
 
-Nextflow can pull and manage the container automatically:
+`run-illumina-amplicon.sh` does the above for you: it picks Apptainer >
+Singularity > Docker > local conda, pulls the image if needed (`--pull`, or
+`--sif PATH` for a pre-built SIF), binds `--outdir` and `--input`, forwards
+the host CA bundle, and appends `-resume`:
 
 ```bash
-# Docker
-nextflow run rec3141/danaSeq -entry illumina_amplicon \
+cd danaSeq/illumina_amplicon
+./run-illumina-amplicon.sh --runtime apptainer \
     --input /path/to/reads \
-    --ref_databases "silva:/path/to/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
-    -with-docker ghcr.io/rec3141/danaseq-illumina-amplicon:latest \
-    -resume
-
-# Singularity/Apptainer
-nextflow run rec3141/danaSeq -entry illumina_amplicon \
-    --input /path/to/reads \
-    --ref_databases "silva:/path/to/silva.fasta:Domain,Phylum,Class,Order,Family,Genus" \
-    -with-singularity docker://ghcr.io/rec3141/danaseq-illumina-amplicon:latest \
-    -resume
+    --ref_databases "silva:/path/to/silva.fasta:Domain,Phylum,Class,Order,Family,Genus"
 ```
+
+There are no `docker`/`singularity` Nextflow profiles in this pipeline.
 
 ## What's Inside
 
-The container includes both Python and R environments:
+The container includes:
 
 | Component | Version | Source |
 |-----------|---------|--------|
 | Nextflow | latest | nextflow.io |
-| papa2 | v1.0.0 (pinned release, bumped deliberately) | [GitHub release](https://github.com/rec3141/papa2/releases) via pip |
+| papa2 | v1.0.1 (pinned tag in `envs/python.yml`, bumped deliberately) | [GitHub release](https://github.com/rec3141/papa2/releases) via pip |
 | cutadapt | latest | bioconda |
 | MAFFT + FastTree | latest | bioconda |
 
@@ -72,6 +70,6 @@ so the pipeline runs on one engine.
 
 ```bash
 git clone https://github.com/rec3141/danaSeq.git
-cd danaSeq/illumina_amplicon
+cd danaSeq
 docker build -t danaseq-illumina-amplicon illumina_amplicon
 ```

@@ -46,11 +46,11 @@ def helpMessage() {
 
     Denoising parameters:
       --maxEE N            Max expected errors [default: 2]
-      --truncQ N           Truncation quality [default: 11]
+      --truncQ N           Truncate at first base with quality <= N [default: 2]
       --maxN N             Max Ns [default: 0]
       --truncLen_fwd N     Truncate forward reads at position N [default: 0 = off]
       --truncLen_rev N     Truncate reverse reads at position N [default: 0 = off]
-      --min_overlap N      Min overlap for pair merging [default: 10]
+      --min_overlap N      Min overlap for pair merging [default: 12]
       --chimera_method M   pooled | consensus | per-sample [default: pooled]
 
     QC filtering:
@@ -66,14 +66,15 @@ def helpMessage() {
     Taxonomy:
       --ref_databases STR  Reference databases (semicolon-separated):
                            "name:path:Level1,Level2,..." [default: none]
-      --run_phylogeny      Build phylogenetic tree [default: false]
+      --taxonomy_seed N    RNG seed for taxonomy bootstraps [default: 100]
+      --run_phylogeny      Build phylogenetic tree (MAFFT + FastTree) [default: false]
 
     Metadata:
       --metadata PATH      MIMARKS-compliant TSV/CSV metadata file [default: none]
       --sample_id_column S Column name matching sample IDs [default: sample_name]
 
     Network:
-      --min_prevalence N   Min samples per ASV for SparCC [default: 5]
+      --min_prevalence N   Min samples per ASV for the co-occurrence network [default: 5]
 
     Resources:
       --threads N          General thread count [default: 8]
@@ -606,7 +607,8 @@ workflow {
     // 10. t-SNE clustering (samples + ASVs)
     CLUSTER_TSNE(FILTER_SEQTAB.out.seqtab, ch_primer_assignment)
 
-    // 11. SparCC network analysis, where there is renormalized data to run it on.
+    // 11. Co-occurrence network (CLR + Pearson; not SparCC despite the process
+    //     name), where there is renormalized data to run it on.
     //     Renormalization is by taxonomic group, so a run with no taxonomy has
     //     no groups and no network — the ASV table is what it has.
     ch_network = Channel.empty()
@@ -643,11 +645,17 @@ workflow {
         ch_primer_assignment
     )
 
-    // 13. Optional: bundle static viz site (requires Node.js)
+    // 13. Optional: bundle static viz site (requires Node.js). The tree goes in
+    //     too, or the bundled Phylogeny tab has nothing to show; run_manifest.json
+    //     is written by onComplete below, after this process, and is copied into
+    //     the published site from there.
     if (params.build_viz_site) {
+        ch_tree = (params.run_phylogeny ? BUILD_PHYLOGENY.out.tree : Channel.empty())
+            .ifEmpty(file('NO_TREE'))
         BUNDLE_VIZ_SITE(
             BUILD_VIZ.out.json.collect(),
-            BUILD_VIZ.out.json_gz.collect()
+            BUILD_VIZ.out.json_gz.collect(),
+            ch_tree
         )
     }
 
@@ -721,6 +729,7 @@ workflow {
                     // process -> container image; image tags give tool versions
                     containers          : workflow.container,
                     reference_databases : params.ref_databases,
+                    taxonomy_seed       : params.taxonomy_seed,
                     denoise             : 'papa2 (DADA2-compatible)',
                     parameters          : [
                         skip_primer_removal  : params.skip_primer_removal,
@@ -748,6 +757,13 @@ workflow {
                 new File(vizDir, 'run_manifest.json').text =
                     groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest))
                 println "[INFO] Wrote run manifest: ${params.outdir}/viz/run_manifest.json"
+                // The bundled site (--build_viz_site) was built before this handler
+                // ran, so hand it the manifest now; its loader reads data/run_manifest.json.
+                def siteData = new File("${params.outdir}/site/dist/data")
+                if (siteData.isDirectory()) {
+                    new File(siteData, 'run_manifest.json').text = new File(vizDir, 'run_manifest.json').text
+                    println "[INFO] Copied run manifest into ${params.outdir}/site/dist/data/"
+                }
             }
         } catch (Exception e) {
             println "[WARN] Could not write run_manifest.json: ${e.message}"

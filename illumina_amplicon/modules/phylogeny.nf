@@ -1,7 +1,8 @@
 // Phylogenetic tree construction.
 //
-// Aligns unique ASV sequences and builds a neighbor-joining tree.
-// R uses DECIPHER; Python uses MAFFT + BioPython/scipy.
+// Aligns unique ASV sequences with MAFFT and infers a tree with FastTree
+// (-gtr -nt -fastest); falls back to BioPython neighbor-joining only when no
+// FastTree binary is found.
 // Optional — only needed for UniFrac and phylogeny-aware ordinations.
 
 

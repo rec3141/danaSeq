@@ -3,8 +3,8 @@
 
 Vendored from the microscape package (microscape/quality.py).
 
-Must stay in step with bin/dada2_auto_trim.R, the R engine's implementation —
-the two are compared byte-for-byte on real and synthetic libraries.
+Was kept in step with the R engine's dada2_auto_trim.R (since removed from this
+repository); the two were compared byte-for-byte on real and synthetic libraries.
 """
 import gzip
 import glob

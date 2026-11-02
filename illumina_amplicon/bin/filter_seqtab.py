@@ -2,7 +2,7 @@
 #
 # filter_seqtab.py — Quality-control filtering on long-format sequence data
 #
-# Python mirror of filter_seqtab.R. Applies a cascade of filters to remove
+# Successor to the removed R script filter_seqtab.R. Applies a cascade of filters to remove
 # noise and low-confidence observations. Operates entirely in long format
 # (pandas DataFrame) — never builds the full dense matrix, so memory use
 # is proportional to non-zero entries.

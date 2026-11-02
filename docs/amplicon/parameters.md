@@ -3,7 +3,7 @@
 All parameters can be set via command line (`--param value`) or in a params file.
 
 ```bash
-nextflow run rec3141/danaSeq -entry illumina_amplicon --help
+nextflow run main.nf --help
 ```
 
 ---
@@ -15,13 +15,6 @@ nextflow run rec3141/danaSeq -entry illumina_amplicon --help
 | `--input` | required | Directory of paired-end `*.fastq.gz` files |
 | `--outdir` | `results` | Output directory |
 | `--store_dir` | off | Persistent cache directory (skip completed steps across runs) |
-
----
-
-## Language and Engine
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
 
 ---
 
@@ -42,11 +35,11 @@ nextflow run rec3141/danaSeq -entry illumina_amplicon --help
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--maxEE` | `2` | Max expected errors per read |
-| `--truncQ` | `11` | Truncate at first base with quality <= Q |
+| `--truncQ` | `2` | Truncate at first base with quality <= Q |
 | `--maxN` | `0` | Max Ns allowed |
 | `--truncLen_fwd` | `0` | Truncate forward reads at position N (0 = off) |
 | `--truncLen_rev` | `0` | Truncate reverse reads at position N (0 = off) |
-| `--min_overlap` | `10` | Minimum overlap for paired-read merging |
+| `--min_overlap` | `12` | Minimum overlap for paired-read merging |
 
 ---
 
@@ -66,7 +59,8 @@ nextflow run rec3141/danaSeq -entry illumina_amplicon --help
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--ref_databases` | required | Reference databases, semicolon-separated: `"name:path:Level1,Level2,..."` |
-| `--run_phylogeny` | `false` | Build MSA + NJ phylogenetic tree |
+| `--taxonomy_seed` | `100` | RNG seed for the taxonomy bootstraps (fixed for reproducible confidence values) |
+| `--run_phylogeny` | `false` | Build MSA + FastTree phylogenetic tree |
 
 **Example:**
 ```bash
@@ -88,7 +82,7 @@ nextflow run rec3141/danaSeq -entry illumina_amplicon --help
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--min_prevalence` | `5` | Min samples an ASV must appear in for network analysis |
+| `--min_prevalence` | `5` | Min samples (a count) an ASV must appear in for network analysis |
 
 ---
 
@@ -96,6 +90,5 @@ nextflow run rec3141/danaSeq -entry illumina_amplicon --help
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--threads` | `8` | General thread count |
-| `--dada_cpus` | `8` | CPUs for DADA2 processes |
-| `--dada_memory` | `16 GB` | Memory for DADA2 processes |
+| `--denoise_cpus` | `8` | CPUs for the `process_high` steps (error learning, denoising, chimera removal, taxonomy, phylogeny, network) |
+| `--denoise_memory` | `16 GB` | Memory for the `process_high` steps |

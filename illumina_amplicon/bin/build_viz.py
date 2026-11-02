@@ -58,8 +58,8 @@ def load_pickle(path):
 def write_json(obj, path, compress=False):
     """Write an object as JSON, optionally gzip-compressed.
 
-    When compress=True, writes both .json.gz and .json versions.
-    When compress=False, writes only .json.
+    When compress=True, writes only the .json.gz file (the app's loader tries
+    the .gz first). When compress=False, writes only .json.
     """
     json_str = json.dumps(obj, separators=(",", ":"), allow_nan=False)
 
@@ -564,7 +564,16 @@ def load_taxonomy_dir(taxonomy_dir):
         log_warn("No taxonomy files found anywhere")
         return taxonomy_dict
 
-    for tax_file in sorted(tax_files):
+    # The primary database first: BUILD_VIZ passes the first name in
+    # --ref_databases as PRIMARY_DB, which is what RENORMALIZE and the app treat
+    # as primary. Every next(iter(taxonomy_dict)) below relies on this order;
+    # sorted filenames alone made it 'pr2' before 'silva'.
+    primary_db = os.environ.get("PRIMARY_DB", "")
+    tax_files = sorted(
+        tax_files,
+        key=lambda f: (os.path.basename(f) != f"{primary_db}_taxonomy.pkl", f),
+    )
+    for tax_file in tax_files:
         # Extract database name from filename: <db_name>_taxonomy.pkl
         basename = os.path.basename(tax_file)
         db_name = basename.replace("_taxonomy.pkl", "").replace("_taxonomy.pickle", "")

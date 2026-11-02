@@ -2,7 +2,7 @@
 #
 # dada2_learn_errors.py — Learn error rates from filtered reads (per plate)
 #
-# Python mirror of dada2_learn_errors.R. Uses dada2py.learn_errors() to
+# Successor to the removed R script dada2_learn_errors.R. Uses dada2py.learn_errors() to
 # learn per-plate error models from filtered FASTQ files. Saves error
 # matrices as pickle files and generates diagnostic error-rate plots.
 #

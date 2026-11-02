@@ -28,6 +28,7 @@ process ASSIGN_TAXONOMY {
         "${seqtab}" "${ref_db}" "${db_name}" \
         ${levels_cli} \
         --threads ${task.cpus} \
+        --seed ${params.taxonomy_seed} \
         --verbose
     """
 }

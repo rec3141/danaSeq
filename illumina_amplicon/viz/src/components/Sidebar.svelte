@@ -605,7 +605,7 @@
             <select bind:value={filters.heatmapAsvTree} class="mt-1 w-full rounded border border-line bg-raised px-2 py-1 text-sm text-fg">
               <option value="ward">Ward Clustering</option>
               {#if store.treeNewick}
-                <option value="phylogeny">Phylogeny (NJ)</option>
+                <option value="phylogeny">Phylogeny (tree)</option>
               {/if}
             </select>
           </label>

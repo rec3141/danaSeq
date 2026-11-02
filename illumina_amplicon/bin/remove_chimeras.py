@@ -2,7 +2,7 @@
 #
 # remove_chimeras.py — de novo chimera removal using papa2's C library
 #
-# Python mirror of remove_chimeras.R. Converts long-format count data to a
+# Successor to the removed R script remove_chimeras.R. Converts long-format count data to a
 # dense matrix and calls papa2's remove_bimera_denovo(), the same algorithm as
 # R's removeBimeraDenovo.
 #

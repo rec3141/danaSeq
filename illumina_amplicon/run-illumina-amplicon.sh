@@ -48,8 +48,10 @@ OUTDIR="results"
 INPUT_DIR=""
 for i in "${!NF_ARGS[@]}"; do
     case "${NF_ARGS[$i]}" in
-        --outdir) OUTDIR="${NF_ARGS[$((i+1))]}" ;;
-        --input)  INPUT_DIR="${NF_ARGS[$((i+1))]}" ;;
+        --outdir)   OUTDIR="${NF_ARGS[$((i+1))]}" ;;
+        --outdir=*) OUTDIR="${NF_ARGS[$i]#--outdir=}" ;;
+        --input)    INPUT_DIR="${NF_ARGS[$((i+1))]}" ;;
+        --input=*)  INPUT_DIR="${NF_ARGS[$i]#--input=}" ;;
     esac
 done
 OUTDIR="$(mkdir -p "$OUTDIR" && cd "$OUTDIR" && pwd)"

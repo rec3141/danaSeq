@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-network_sparcc.py - Run SparCC-style correlation analysis using CLR approach.
+network_sparcc.py - CLR + Pearson co-occurrence network (not the SparCC algorithm).
 
 Usage: network_sparcc.py <renorm_merged.pkl> <min_prevalence> <cpus>
+
+  min_prevalence is a SAMPLE COUNT: the minimum number of samples an ASV must be
+  present in (matches --min_prevalence, default 5, and the viz's Min prevalence
+  slider, which also counts samples).
 
 Outputs:
   sparcc_correlations.pkl  - Melted edge list DataFrame (node1, node2, correlation, weight, color)
@@ -60,7 +64,7 @@ def main():
         sys.exit(1)
 
     renorm_pkl = sys.argv[1]
-    min_prevalence = float(sys.argv[2])
+    min_prevalence = int(float(sys.argv[2]))
     n_cpus = int(sys.argv[3])
 
     log_info(f"Loading renormalized data from {renorm_pkl}")
@@ -96,11 +100,13 @@ def main():
     n_asvs_total = wide.shape[1]
     log_info(f"Count matrix: {n_samples} samples x {n_asvs_total} ASVs")
 
-    # Filter ASVs by prevalence (fraction of samples where ASV is present)
-    prevalence = (wide > 0).sum(axis=0) / n_samples
+    # Filter ASVs by prevalence: the number of samples an ASV is present in.
+    # --min_prevalence is a sample count (default 5); comparing a count against a
+    # fraction in [0, 1] kept no ASV at all and left the network always empty.
+    prevalence = (wide > 0).sum(axis=0)
     keep_mask = prevalence >= min_prevalence
     n_kept = keep_mask.sum()
-    log_info(f"Prevalence filter (>= {min_prevalence}): keeping {n_kept}/{n_asvs_total} ASVs")
+    log_info(f"Prevalence filter (>= {min_prevalence} samples): keeping {n_kept}/{n_asvs_total} ASVs")
 
     if n_kept < 2:
         log_error("Fewer than 2 ASVs pass the prevalence filter. Cannot compute correlations.")
@@ -125,7 +131,7 @@ def main():
     clr_matrix = clr_transform(wide_filtered.values)
 
     # Compute Pearson correlation on CLR-transformed data
-    log_info("Computing CLR-based correlations (SparCC approximation)")
+    log_info("Computing Pearson correlations on CLR-transformed counts")
     cor_matrix = compute_clr_correlation(clr_matrix)
 
     # Create correlation DataFrame

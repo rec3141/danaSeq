@@ -6,11 +6,11 @@
 |------|---------|------|-------------|
 | 1 | `DEMULTIPLEX` | Mr_Demuxy | Optional inner-barcode demultiplexing |
 | 2 | `REMOVE_PRIMERS` | cutadapt | Primer trimming (auto-selects by 16S/18S/ITS prefix) |
-| 3 | `DADA2_FILTER_TRIM` | papa2 | Per-sample quality filtering (maxEE, truncQ, PhiX) |
-| 4 | `DADA2_LEARN_ERRORS` | papa2 | Per-plate error model learning (LOESS) |
-| 5 | `DADA2_DENOISE` | papa2 | Denoising, pair merging, per-plate chimera removal |
+| 3 | `FILTER_TRIM` | papa2 | Per-sample quality filtering (maxEE, truncQ, PhiX) |
+| 4 | `LEARN_ERRORS` | papa2 | Per-plate error model learning (LOESS) |
+| 5 | `DENOISE` | papa2 | Denoising, pair merging, per-plate chimera removal |
 | 6 | `MERGE_SEQTABS` | papa2 | Merge per-plate tables (long-format) |
-| 7 | `REMOVE_CHIMERAS` | papa2 | Consensus chimera removal on merged data |
+| 7 | `REMOVE_CHIMERAS` | papa2 | Chimera removal on merged data (pooled by default; `--chimera_method`) |
 | 8 | `FILTER_SEQTAB` | `filter_seqtab.py` | Length, prevalence, abundance, and depth filtering |
 
 !!! note "Per-plate processing"
@@ -24,7 +24,7 @@
 | Step | Process | Tool | Description |
 |------|---------|------|-------------|
 | 9 | `ASSIGN_TAXONOMY` | papa2 | Naive Bayesian classification (parallel per ref DB) |
-| 10 | `BUILD_PHYLOGENY` | `build_phylogeny.py` + MAFFT | MSA + NJ tree (optional, `--run_phylogeny`) |
+| 10 | `BUILD_PHYLOGENY` | `build_phylogeny.py` + MAFFT + FastTree | MSA + FastTree tree (optional, `--run_phylogeny`) |
 | 11 | `RENORMALIZE` | `renormalize.py` | Group ASVs by taxonomy, normalize within groups |
 
 !!! tip "Multiple databases"
@@ -39,7 +39,7 @@
 |------|---------|------|-------------|
 | 12 | `LOAD_METADATA` | `load_metadata.py` | Sample metadata integration (MIMARKS) |
 | 13 | `CLUSTER_TSNE` | `cluster_tsne.py` | Bray-Curtis + t-SNE ordination (samples and ASVs) |
-| 14 | `NETWORK_SPARCC` | `network_sparcc.py` | SparCC-style CLR correlation networks |
+| 14 | `NETWORK_SPARCC` | `network_sparcc.py` | CLR + Pearson co-occurrence network (not the SparCC algorithm) |
 | 15 | `BUILD_VIZ` | `build_viz.py` | JSON export for Svelte web viewer |
 
 ---
@@ -65,8 +65,10 @@ memory for large datasets (4K+ samples, 100K+ ASVs).
 
 | Profile | Description |
 |---------|-------------|
-| `conda` | Auto-create conda environments from `envs/*.yml` |
-| `docker` | Use Docker container |
-| `singularity` | Use Singularity/Apptainer container |
-| `slurm` | Submit jobs to SLURM cluster |
+| `standard` | Local executor (default) |
+| `slurm` | Submit each task as a Slurm job |
 | `test` | Reduced resources for CI/testing |
+
+Conda environments (`envs/python.yml`) are created automatically; there is no
+`conda` profile. Container execution goes through `run-illumina-amplicon.sh`
+(see [Container](container.md)); there are no `docker`/`singularity` profiles.

@@ -2,7 +2,8 @@
 //
 // Three-step post-DADA2 processing:
 //   1. MERGE_SEQTABS   — combine per-plate sequence tables (long-format output)
-//   2. REMOVE_CHIMERAS — sparse consensus chimera removal (long-format I/O)
+//   2. REMOVE_CHIMERAS — chimera removal, pooled by default (--chimera_method)
+//                        (long-format I/O)
 //   3. FILTER_SEQTAB   — length, prevalence, abundance filtering (long → long + wide)
 //
 

@@ -14,7 +14,7 @@ export const store = $state({
   network: { edges: [] },
   taxonomy: {},
   taxonomyDb: null,   // which reference is on screen; null means the primary
-  treeNewick: '',      // phylogeny (NJ) tree
+  treeNewick: '',      // phylogeny (FastTree) Newick tree
   provenance: null,    // per-step read counts (data/provenance.json)
   // Which study this is. Written at deploy by OMC, which knows the accession —
   // the pipeline is handed a directory of reads and never learns it. Absent for

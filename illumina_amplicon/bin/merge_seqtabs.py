@@ -2,7 +2,7 @@
 #
 # merge_seqtabs.py — Merge per-plate sequence tables using long-format approach
 #
-# Python mirror of merge_seqtabs.R. Discovers per-plate pickle files, melts
+# Successor to the removed R script merge_seqtabs.R. Discovers per-plate pickle files, melts
 # each to long format (sample, sequence, count), concatenates, and aggregates
 # any duplicate (sample, sequence) pairs by summing counts.
 #

@@ -1,5 +1,6 @@
-// SparCC / CLR co-occurrence network analysis.
-// R uses SpiecEasi::sparcc(); Python uses CLR + Pearson correlation.
+// Co-occurrence network: CLR transform (pseudocount 0.5) + Pearson correlation
+// between ASVs, keeping |r| > 0.1. Not the SparCC algorithm — the process and
+// file names are kept for compatibility with existing results and the viz.
 
 
 process NETWORK_SPARCC {
