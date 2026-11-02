@@ -49,6 +49,7 @@ import gzip
 import json
 import os
 import re
+import sys
 
 import numpy as np
 
@@ -342,9 +343,19 @@ def write_sample_depths(output_dir, ids, chunks, sample_depths):
     zero = [0.0] * n_s
     out_chunks = []
     max_depth = 0.0
+    n_nan = 0
     for ch in chunks:
         lo, hi = ch['offset'], ch['offset'] + ch['count']
         mat = np.array([depths.get(cid) or zero for cid in ids[lo:hi]], dtype=np.float64)
+        # JSON has no NaN; report where it came from and write 0 there.
+        bad = ~np.isfinite(mat)
+        if bad.any():
+            if n_nan == 0:
+                r, c = np.argwhere(bad)[0]
+                print(f"  [WARNING] non-finite per-sample depth, first at contig "
+                      f"{ids[lo + r]} sample {samples[c]}; written as 0", file=sys.stderr)
+            n_nan += int(bad.sum())
+            mat[bad] = 0.0
         if mat.size:
             max_depth = max(max_depth, float(mat.max()))
         idx_lists, val_lists, counts = [], [], []
@@ -362,11 +373,15 @@ def write_sample_depths(output_dir, ids, chunks, sample_depths):
         })
         out_chunks.append({'index': ch['index'], 'file': fname, 'offset': lo,
                            'count': hi - lo, 'nonzero': counts})
+    if n_nan:
+        print(f"  [WARNING] {n_nan} non-finite per-sample depth values written as 0", file=sys.stderr)
     remove_stale_parts(output_dir, DEPTHS, len(chunks))
     manifest = {
         'format': 'danaseq-contig-sample-depths', 'version': FORMAT_VERSION,
         'samples': samples,
-        'maxDepth': sample_depths.get('maxDepth', round(max_depth, 4)),
+        'maxDepth': (sample_depths['maxDepth']
+                     if np.isfinite(sample_depths.get('maxDepth', np.nan))
+                     else round(max_depth, 4)),
         'aligned_to': f'{EXPLORER}_manifest.json',
         'chunks': out_chunks,
     }
