@@ -101,7 +101,8 @@ fi
 
 # --- Copy data into public/ for build ----------------------------------------
 echo "==> Copying data files..."
-cp "${VIZ_DATA}"/* "${VIZ_DIR}/public/data/" 2>/dev/null || true
+# -r: data/ holds subdirectories too (fastsne/)
+cp -r "${VIZ_DATA}"/. "${VIZ_DIR}/public/data/"
 
 # --- Install deps if needed --------------------------------------------------
 cd "$VIZ_DIR"
