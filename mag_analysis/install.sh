@@ -338,7 +338,7 @@ post_install_merged() {
 
         # fastsne (contig t-SNE; optional, the viz falls back to sklearn): pinned
         # release, self-contained binaries (GPU fastsne needs only the NVIDIA driver)
-        local fs_version="v0.2.1" fs_sha256="f96196cbe06fd9ef0d82d79718ec6e11d219954343dabf06659c1db8375836db" fs_tmp
+        local fs_version="v0.2.2" fs_sha256="07ebdb1718ff3e28daabb6463114f0bd2d7965c4e287a4b282074831ff6a1e66" fs_tmp
         local fs_tar="fastsne-${fs_version}-linux-x86_64.tar.gz"
         echo "  Installing fastsne ${fs_version}..."
         fs_tmp=$(mktemp -d)

@@ -439,8 +439,10 @@ def kraken_genus(name, cache={}):
 
 
 def build_read_map(samples, out_dir, fs, args):
-    """Export, (re)build the reference when needed, project changed samples. Returns the map table
-    (id, x, y, nn_dist, kind, sample, genus) for every read, or None if there are too few reads."""
+    """Export, (re)build the reference when needed, project changed samples. Writes the map table of every
+    read (id, x, y, nn_dist, kind, sample, genus) to <out_dir>/read_map/map_table.tsv, one sample at a time
+    (100M+ reads do not fit in memory as one table). Returns (path, reads, reference reads), or None if
+    there are too few reads."""
     import pandas as pd
     binary, kind = fs
     work = Path(out_dir) / 'read_map'
@@ -494,23 +496,30 @@ def build_read_map(samples, out_dir, fs, args):
         tmp.unlink()
         print(f"[INFO] projected {sum(n for _, _, n in stale):,} reads of {len(stale)} changed samples", file=sys.stderr)
 
-    # one table for all reads; reference reads keep their embedded positions
-    parts = []
-    for sid, f, n in files:
-        p = pd.read_csv(proj_dir / (f.stem + '.tsv'), sep='\t', dtype={'id': str})
-        m = pd.read_csv(f.with_suffix('.meta.tsv'), sep='\t', dtype=str, keep_default_na=False)
-        p['sample'] = sid
-        p['genus'] = [kraken_genus(t) if t else '' for t in m['taxon']]
-        parts.append(p)
-    tab = pd.concat(parts, ignore_index=True)
-    ref = pd.read_csv(ref_tsv, sep='\t', dtype={'id': str}).drop_duplicates('id').set_index('id')
-    isref = tab['id'].isin(ref.index).to_numpy()
-    tab.loc[isref, ['x', 'y']] = ref.loc[tab.loc[isref, 'id'], ['x', 'y']].to_numpy()
-    tab['kind'] = np.where(isref, 'reference', 'projected')
-    return tab
+    # one table for all reads, written sample by sample; reference reads keep their embedded positions
+    ref = pd.read_csv(ref_tsv, sep='\t', dtype={'id': str}, usecols=['id', 'x', 'y'])
+    ref = ref.drop_duplicates('id').set_index('id')
+    tsv = work / 'map_table.tsv'
+    tmp = tsv.with_suffix('.tsv.tmp')
+    n = nref = 0
+    with open(tmp, 'w') as out:
+        out.write('id\tx\ty\tnn_dist\tkind\tsample\tgenus\n')
+        for sid, f, _ in files:
+            p = pd.read_csv(proj_dir / (f.stem + '.tsv'), sep='\t', dtype={'id': str})
+            m = pd.read_csv(f.with_suffix('.meta.tsv'), sep='\t', dtype=str, keep_default_na=False)
+            isref = p['id'].isin(ref.index).to_numpy()
+            p.loc[isref, ['x', 'y']] = ref.loc[p.loc[isref, 'id'], ['x', 'y']].to_numpy()
+            p['kind'] = np.where(isref, 'reference', 'projected')
+            p['sample'] = sid
+            p['genus'] = [kraken_genus(t) if t else '' for t in m['taxon']]
+            p[['id', 'x', 'y', 'nn_dist', 'kind', 'sample', 'genus']].to_csv(out, sep='\t', index=False, header=False)
+            n += len(p)
+            nref += int(isref.sum())
+    os.replace(tmp, tsv)
+    return tsv, n, nref
 
 
-def write_read_viewer(tab, out_dir, fs):
+def write_read_viewer(tsv, n, nref, out_dir, fs):
     """Paged fastsne viewer of every read: <out_dir>/read_map/viewer.html?data=reads.json"""
     share = fastsne_share(fs[0])
     pack, viewer = share / 'tools' / 'pack_viewer.py', share / 'viewer.html'
@@ -518,16 +527,13 @@ def write_read_viewer(tab, out_dir, fs):
         print(f"[WARNING] {share} has no pack_viewer.py / viewer.html; skipping the all-reads viewer", file=sys.stderr)
         return
     vdir = Path(out_dir) / 'read_map'
-    tsv = vdir / 'map_table.tsv'
-    tab[['id', 'x', 'y', 'nn_dist', 'kind', 'sample', 'genus']].to_csv(tsv, sep='\t', index=False)
     for old in vdir.glob('reads.p*.fsv'):
         old.unlink()
     cmd = [sys.executable, pack, vdir / 'reads.json', '--emb', f't-SNE={tsv}', '--kind', f'{tsv}:kind',
            '--layer', f'genus={tsv}:genus', '--layer', f'sample={tsv}:sample',
            '--layer', f'distance to reference={tsv}:nn_dist~log',
-           '--title', f'{len(tab):,} reads ({(tab.kind == "reference").sum():,} reference + projected)']
+           '--title', f'{n:,} reads ({nref:,} reference + projected)']
     r = subprocess.run([str(c) for c in cmd], capture_output=True, text=True)
-    tsv.unlink()
     if r.returncode != 0:
         print(f"[WARNING] pack_viewer failed: {r.stderr[-500:]}", file=sys.stderr)
         return
@@ -535,28 +541,32 @@ def write_read_viewer(tab, out_dir, fs):
     print(f"[SUCCESS] all-reads viewer: {vdir / 'viewer.html'}?data=reads.json", file=sys.stderr)
 
 
-def write_read_explorer_fastsne(samples, tab, args):
+def write_read_explorer_fastsne(samples, tsv, n, args):
     """read_explorer.json: a --max-reads sample (metadata as for the sklearn path) placed on the full map."""
-    xy = tab.set_index('id')[['x', 'y']]
-    xy = xy[~xy.index.duplicated()]
+    import pandas as pd
     max_per_sample = max(100, args.max_reads // max(1, len(samples)))
     all_reads = []
     for s in samples:
         reads, _ = extract_reads(s['db_path'], s['id'], max_per_sample, load_lengths(s['dir']), want_tetra=False)
         all_reads.extend(reads)
-    all_reads = [r for r in all_reads if r['id'] in xy.index][:args.max_reads]
-    if all_reads:
-        c = xy.loc[[r['id'] for r in all_reads]].to_numpy()
-        for r, (x, y) in zip(all_reads, c):
-            r['tsne_x'] = round(float(x), 3)
-            r['tsne_y'] = round(float(y), 3)
+    # their positions, in one pass over the map table
+    want = {r['id'] for r in all_reads}
+    xy = {}
+    for c in pd.read_csv(tsv, sep='\t', usecols=['id', 'x', 'y'], dtype={'id': str}, chunksize=5_000_000):
+        c = c[c['id'].isin(want)]
+        xy.update(zip(c['id'], zip(c['x'], c['y'])))
+    all_reads = [r for r in all_reads if r['id'] in xy][:args.max_reads]
+    for r in all_reads:
+        x, y = xy[r['id']]
+        r['tsne_x'] = round(float(x), 3)
+        r['tsne_y'] = round(float(y), 3)
     output_path = os.path.join(args.output, 'read_explorer.json')
     tmp = output_path + '.tmp'
     with open(tmp, 'w') as f:
         json.dump({'reads': all_reads}, f, separators=(',', ':'))
     os.replace(tmp, output_path)
     size = os.path.getsize(output_path) / 1024 / 1024
-    print(f"[SUCCESS] read_explorer.json: {size:.1f} MB ({len(all_reads)} of {len(tab):,} mapped reads)", file=sys.stderr)
+    print(f"[SUCCESS] read_explorer.json: {size:.1f} MB ({len(all_reads)} of {n:,} mapped reads)", file=sys.stderr)
 
 
 def main():
@@ -582,11 +592,13 @@ def main():
 
     fs = find_fastsne(args.engine)
     if fs:
-        tab = build_read_map(samples, args.output, fs, args)
-        if tab is not None:
+        m = build_read_map(samples, args.output, fs, args)
+        if m is not None:
+            tsv, n, nref = m
             if not args.no_viewer:
-                write_read_viewer(tab, args.output, fs)
-            write_read_explorer_fastsne(samples, tab, args)
+                write_read_viewer(tsv, n, nref, args.output, fs)
+            write_read_explorer_fastsne(samples, tsv, n, args)
+            tsv.unlink()
             return
         print("[INFO] too few reads for fastsne; using sklearn", file=sys.stderr)
 

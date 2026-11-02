@@ -123,8 +123,8 @@ RUN /opt/conda/envs/dana-mag-pathviz/bin/pip install --no-deps KEGGDecoder && \
 # pinned release, self-contained binaries: fastsne_cpu (fully static; AVX-512 / AVX2 /
 # generic, picked at run time) and, in the cuda variant, the GPU fastsne (V100, A30/A100,
 # L40S + PTX; cuFFT / cuBLAS linked in, needs only the NVIDIA driver).
-ARG FASTSNE_VERSION=v0.2.1
-ARG FASTSNE_SHA256=f96196cbe06fd9ef0d82d79718ec6e11d219954343dabf06659c1db8375836db
+ARG FASTSNE_VERSION=v0.2.2
+ARG FASTSNE_SHA256=07ebdb1718ff3e28daabb6463114f0bd2d7965c4e287a4b282074831ff6a1e66
 RUN f=fastsne-${FASTSNE_VERSION}-linux-x86_64.tar.gz \
     && curl -fsSL -o /tmp/$f https://github.com/rec3141/fastsne/releases/download/${FASTSNE_VERSION}/$f \
     && echo "${FASTSNE_SHA256}  /tmp/$f" | sha256sum -c - \
