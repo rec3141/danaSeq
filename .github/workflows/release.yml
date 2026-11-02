@@ -45,11 +45,20 @@ jobs:
             dockerfile: nanopore_assembly/Dockerfile.base
             timeout: 30
             large: false
+          # cpu and cuda builds of the same Dockerfile (TORCH_VARIANT), as in
+          # build-base-slim.yml; the cuda one is the base of danaseq-mag-analysis-gpu.
           - name: danaseq-mag-base-slim
             context: mag_analysis
             dockerfile: mag_analysis/Dockerfile.base-slim
-            timeout: 60
+            timeout: 350
             large: true
+            torch_variant: cpu
+          - name: danaseq-mag-base-slim-gpu
+            context: mag_analysis
+            dockerfile: mag_analysis/Dockerfile.base-slim
+            timeout: 350
+            large: true
+            torch_variant: cuda
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.timeout }}
     steps:
@@ -88,6 +97,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ${{ matrix.torch_variant && format('TORCH_VARIANT={0}', matrix.torch_variant) || '' }}
 
   # ── Pipeline images (after bases) ─────────────────────────────────────
   pipelines:
@@ -106,11 +117,30 @@ jobs:
             dockerfile: illumina_assembly/Dockerfile
             timeout: 15
             large: false
+          - name: danaseq-illumina-rna
+            context: illumina_rna
+            dockerfile: illumina_rna/Dockerfile
+            timeout: 45
+            large: false
+          - name: danaseq-illumina-amplicon
+            context: illumina_amplicon
+            dockerfile: illumina_amplicon/Dockerfile
+            timeout: 60
+            large: false
+          # Two variants from the same Dockerfile, as in build-mag-analysis.yml:
+          # the gpu one sits on the base built with CUDA PyTorch.
           - name: danaseq-mag-analysis
             context: mag_analysis
             dockerfile: mag_analysis/Dockerfile
             timeout: 60
             large: true
+            base: danaseq-mag-base-slim
+          - name: danaseq-mag-analysis-gpu
+            context: mag_analysis
+            dockerfile: mag_analysis/Dockerfile
+            timeout: 60
+            large: true
+            base: danaseq-mag-base-slim-gpu
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.timeout }}
     steps:
@@ -127,7 +157,11 @@ jobs:
       - name: Restart Docker daemon
         if: matrix.large
         run: sudo systemctl restart docker
+      # submodules: mag_analysis/ecossdb is a submodule; without it the
+      # mag_analysis image ships without ECOSSDB (build-mag-analysis.yml does the same).
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -142,6 +176,20 @@ jobs:
             type=raw,value=latest
             type=semver,pattern={{version}}
             type=sha,prefix=
+      - name: Stamp build time
+        id: stamp
+        run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      # The image is built from mag_analysis/ alone; viz/deploy.sh (the
+      # microscape.app deploy hook's target) needs the shared deployer beside it.
+      - name: Stage shared deploy tool
+        if: matrix.context == 'mag_analysis'
+        run: cp tools/microscape_deploy.sh mag_analysis/viz/microscape_deploy.sh
+      # Resolve papa2's HEAD so the pip layer's cache key moves when it does
+      # (see build-illumina-amplicon.yml).
+      - name: Resolve upstream dependency HEAD
+        id: papa2
+        if: matrix.context == 'illumina_amplicon'
+        run: echo "sha=$(git ls-remote https://github.com/rec3141/papa2.git HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
@@ -149,6 +197,16 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Baked into the image so a run launched from the .sif can report what
+          # it is. The image tag already carries the SHA, but nothing inside can
+          # read it — without these the Dockerfile's ARG defaults win and every
+          # run records commit_id "unknown".
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_REF=${{ github.ref_name }}
+            BUILD_DATE=${{ steps.stamp.outputs.build_date }}
+            ${{ matrix.base && format('BASE_IMAGE=ghcr.io/{0}/{1}:latest', github.repository_owner, matrix.base) || '' }}
+            ${{ steps.papa2.outputs.sha && format('PAPA2_SHA={0}', steps.papa2.outputs.sha) || '' }}
 
   # ── nanopore_live (independent, no base) ──────────────────────────────
   nanopore-live:
@@ -166,7 +224,6 @@ jobs:
           remove-codeql: true
           remove-docker-images: true
       - name: Restart Docker daemon
-        if: matrix.large
         run: sudo systemctl restart docker
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -183,6 +240,9 @@ jobs:
             type=raw,value=latest
             type=semver,pattern={{version}}
             type=sha,prefix=
+      - name: Stamp build time
+        id: stamp
+        run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: nanopore_live
@@ -190,3 +250,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Baked into the image so a run launched from the .sif can report what
+          # it is (see build-nanopore-live.yml).
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_REF=${{ github.ref_name }}
+            BUILD_DATE=${{ steps.stamp.outputs.build_date }}

@@ -38,7 +38,7 @@ process MAP_READS_STROBEALIGN {
     label 'process_map'
     label 'env_align'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir { "${params.outdir}/mapping/${meta.id}/${ref.name}" }, mode: 'symlink',
+    publishDir { "${params.outdir}/mapping/${meta.id}/${ref.name}" }, mode: 'copy',
         pattern: '*.{bam,flagstat.txt,log}', enabled: !params.store_dir
     storeDir { params.store_dir ? "${params.store_dir}/mapping/${meta.id}/${ref.name}" : null }
 
@@ -107,8 +107,9 @@ process MAP_READS_BBMAP {
     tag "${meta.id}_vs_${ref.name}"
     label 'process_map'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    // Symlink works across filesystems (hardlinks fail between devices).
-    publishDir { "${params.outdir}/mapping/${meta.id}/${ref.name}" }, mode: 'symlink',
+    // Copied, not symlinked, so the published BAMs survive a cleaned work/ dir
+    // (as in illumina_assembly/modules/mapping.nf).
+    publishDir { "${params.outdir}/mapping/${meta.id}/${ref.name}" }, mode: 'copy',
         pattern: '*.{bam,bai,covhist.txt,covstats.txt,flagstat.txt,idxstats.tsv}', enabled: !params.store_dir
     storeDir { params.store_dir ? "${params.store_dir}/mapping/${meta.id}/${ref.name}" : null }
 

@@ -3,7 +3,7 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://rec3141.github.io/danaSeq/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Metagenomic analysis pipelines and data visualization dashboards for Oxford Nanopore and Illumina sequencing data. Five Nextflow DSL2 pipelines cover real-time read processing, long-read assembly, short-read assembly, metatranscriptomic RNA-seq, and downstream MAG analysis.
+Metagenomic analysis pipelines and data visualization dashboards for Oxford Nanopore and Illumina sequencing data. Six Nextflow DSL2 pipelines cover real-time read processing, long-read assembly, short-read assembly, metatranscriptomic RNA-seq, 16S/18S/ITS amplicon denoising, and downstream MAG analysis.
 
 **[Full documentation](https://rec3141.github.io/danaSeq/)**
 
@@ -16,7 +16,7 @@ Metagenomic analysis pipelines and data visualization dashboards for Oxford Nano
 | **[illumina_assembly](illumina_assembly/)** | Multi-assembler consensus assembly | Tadpole, Megahit, SPAdes, metaSPAdes, BBMap |
 | **[illumina_rna](illumina_rna/)** | Metatranscriptomic RNA-seq vs references | SortMeRNA, BBmap, subread/featureCounts |
 | **[illumina_amplicon](illumina_amplicon/)** | 16S/18S/ITS amplicon denoising to ASVs | cutadapt, papa2 (DADA2), MAFFT, SparCC |
-| **[mag_analysis](mag_analysis/)** | Downstream MAG analysis | 7-binner consensus, DAS Tool, Binette, 50+ processes |
+| **[mag_analysis](mag_analysis/)** | Downstream MAG analysis | 7-binner consensus, DAS Tool, Binette, 49 processes |
 
 ## Quick Start
 

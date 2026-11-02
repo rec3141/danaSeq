@@ -1,0 +1,35 @@
+name: Tests
+
+# Small local regressions only (tests/): compile fastq_filter from source and
+# run it on synthetic reads. No pipeline datasets are involved.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'nanopore_assembly/bin/fastq_filter.cpp'
+      - 'tests/**'
+      - '.github/workflows/tests.yml'
+  pull_request:
+    paths:
+      - 'nanopore_assembly/bin/fastq_filter.cpp'
+      - 'tests/**'
+      - '.github/workflows/tests.yml'
+  workflow_dispatch:
+
+jobs:
+  fastq-filter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends g++ zlib1g-dev
+
+      - name: Run fastq_filter regressions
+        run: python3 tests/test_fastq_filter.py -v

@@ -9,7 +9,7 @@ process QC_READS {
     tag "${meta.id}"
     label 'process_high'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'symlink', pattern: '*.{fq.gz,log}', enabled: !params.store_dir
+    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.{fq.gz,log}', enabled: !params.store_dir
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:
@@ -119,7 +119,7 @@ process REMOVE_HUMAN {
     label 'process_map'
     label 'env_align'
     conda "${projectDir}/conda-envs/dana-illumina-rna-bbmap"
-    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'symlink', pattern: '*.fq.gz', enabled: !params.store_dir
+    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.fq.gz', enabled: !params.store_dir
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:

@@ -7,9 +7,10 @@ set -uo pipefail
 #
 # Each wrapper (run-<pipeline>.sh) looks for a dot-file beside itself:
 #   <repo>/<component>/.danaseq-<name>.sif
-# This script is what writes those. Rebuild all six, or name the ones you want:
+# This script is what writes those. Rebuild all seven (six pipelines plus the
+# -gpu variant of mag_analysis), or name the ones you want:
 #
-#   ./tools/rebuild-sifs.sh                      # all six
+#   ./tools/rebuild-sifs.sh                      # all seven
 #   ./tools/rebuild-sifs.sh mag_analysis         # just one
 #   ./tools/rebuild-sifs.sh --local              # never submit to SLURM
 #   ./tools/rebuild-sifs.sh --slurm              # submit everything as one job
@@ -60,6 +61,7 @@ JOB_CPUS="${DANASEQ_SIFBUILD_CPUS:-8}"
 IMAGES=(
     "nanopore_live|danaseq-live|nanopore_live|.danaseq-live.sif|1"
     "mag_analysis|danaseq-mag-analysis|mag_analysis|.danaseq-mag-analysis.sif|1"
+    "mag_analysis_gpu|danaseq-mag-analysis-gpu|mag_analysis|.danaseq-mag-analysis-gpu.sif|1"
     "nanopore_assembly|danaseq-nanopore-assembly|nanopore_assembly|.danaseq-nanopore-assembly.sif|0"
     "illumina_assembly|danaseq-illumina-assembly|illumina_assembly|.danaseq-illumina-assembly.sif|0"
     "illumina_rna|danaseq-illumina-rna|illumina_rna|.danaseq-illumina-rna.sif|0"

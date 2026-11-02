@@ -24,14 +24,14 @@ set -euo pipefail
 #   ./download-databases.sh --bakta-light      # Download Bakta light database (~1.4 GB)
 #   ./download-databases.sh --kofam            # Download KOfam profiles (~4 GB)
 #   ./download-databases.sh --eggnog           # Download eggNOG diamond database (~12 GB)
-#   ./download-databases.sh --dbcan            # Download dbCAN databases (~2 GB)
-#   ./download-databases.sh --metaeuk          # Download MetaEuk OrthoDB Eukaryota (~23 GB)
+#   ./download-databases.sh --dbcan            # Download dbCAN databases (~5 GB)
+#   ./download-databases.sh --metaeuk          # Download MetaEuk OrthoDB v11 Eukaryota (~8.5 GB)
 #   ./download-databases.sh --kraken2         # Download Kraken2 PlusPFP-8 (~8 GB)
 #   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
 #   ./download-databases.sh --pr2             # Download PR2 SSU (eukaryotic rRNA, ~350 MB)
 #   ./download-databases.sh --silva132        # Download SILVA 132 train set (pre-2021 names, ~60 MB)
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
-#   ./download-databases.sh --gtdbtk          # Download GTDB-Tk r226 reference data (~132 GB)
+#   ./download-databases.sh --gtdbtk          # Download GTDB-Tk r232 reference data (~61 GB, ~98 GB extracted)
 #   ./download-databases.sh --antismash      # Download antiSMASH databases (~7 GB, more once indexed)
 #   ./download-databases.sh --docker            # Use Docker to run tool CLIs
 #   ./download-databases.sh --apptainer         # Use Apptainer/Singularity (auto-pulls SIF)
@@ -267,14 +267,14 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "bakta-light" "~1.4 GB" "Bakta light annotation db (faster downloads, reduced annotation)"
     printf "  %-12s %-8s  %s\n" "kofam"    "~4 GB"   "KOfam profiles + ko_list (KEGG Orthology via HMM)"
     printf "  %-12s %-8s  %s\n" "eggnog"   "~12 GB"  "eggNOG-mapper DIAMOND db (COG/GO/EC/KEGG/Pfam)"
-    printf "  %-12s %-8s  %s\n" "dbcan"    "~2 GB"   "dbCAN HMM + DIAMOND + substrate db (CAZyme annotation)"
+    printf "  %-12s %-8s  %s\n" "dbcan"    "~5 GB"   "dbCAN HMM + DIAMOND + substrate db (CAZyme annotation)"
     printf "  %-12s %-8s  %s\n" "metaeuk"  "~8.5 GB" "MetaEuk OrthoDB v11 Eukaryota (eukaryotic gene prediction)"
     printf "  %-12s %-8s  %s\n" "kraken2"  "~8 GB"   "Kraken2 PlusPFP-8 (k-mer contig-level taxonomy)"
     printf "  %-12s %-8s  %s\n" "silva"    "~900 MB" "SILVA 138.2 SSU + LSU NR99 (rRNA gene classification)"
     printf "  %-12s %-8s  %s\n" "pr2"      "~350 MB" "PR2 5.1.1 SSU (eukaryotic rRNA; SILVA under-resolves protists)"
     printf "  %-12s %-8s  %s\n" "silva132" "~60 MB"  "SILVA 132 train set (pre-2021 names: Proteobacteria, not Pseudomonadota)"
     printf "  %-12s %-8s  %s\n" "marferret" "~9 GB"  "MarFERReT v1.1.1 marine eukaryotic proteins (DIAMOND + taxonomy + Pfam)"
-    printf "  %-12s %-8s  %s\n" "gtdbtk"   "~132 GB" "GTDB-Tk r226 reference data (phylogenetic MAG classification)"
+    printf "  %-12s %-8s  %s\n" "gtdbtk"   "~61 GB"  "GTDB-Tk r232 reference data, ~98 GB extracted (phylogenetic MAG classification)"
     echo ""
     echo "  Note: Tiara, Whokaryote, and IslandPath HMM profiles are bundled with"
     echo "  their conda packages (no separate database download needed)."
@@ -293,14 +293,15 @@ show_databases() {
     echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
     echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
     echo "  --bakta_db         ${DB_DIR}/bakta/db"
-    echo "  --bakta_light_db   ${DB_DIR}/bakta/db-light"
+    echo "  --bakta_light_db   ${DB_DIR}/bakta/db-light   (mag_analysis; nanopore_live: --bakta_db ${DB_DIR}/bakta/db-light)"
     echo "  --kofam_db   ${DB_DIR}/kofam_db"
     echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
     echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
     echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
     echo "  --kraken2_db ${DB_DIR}/kraken2_db"
-    echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
-    echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
+    echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta   (mag_analysis)"
+    echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta   (mag_analysis)"
+    echo "  --ref_databases \"silva:${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta:Domain,Phylum,Class,Order,Family,Genus\"   (illumina_amplicon)"
     echo "  --marferret_db ${DB_DIR}/marferret_db"
     echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
     echo ""
@@ -330,8 +331,8 @@ if $INTERACTIVE; then
     echo " 10) bakta-light - Bakta light annotation database (~1.4 GB)"
     echo " 11) kofam     - KOfam profiles (KEGG Orthology, ~4 GB)"
     echo " 12) eggnog    - eggNOG-mapper DIAMOND db (~12 GB)"
-    echo " 13) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~2 GB)"
-    echo " 14) metaeuk   - MetaEuk OrthoDB v12 Eukaryota (~23 GB)"
+    echo " 13) dbcan     - dbCAN HMM + DIAMOND db (CAZyme, ~5 GB)"
+    echo " 14) metaeuk   - MetaEuk OrthoDB v11 Eukaryota (~8.5 GB)"
     echo " 15) kraken2   - Kraken2 PlusPFP-8 (contig taxonomy, ~8 GB)"
     echo " 16) silva     - SILVA SSU + LSU NR99 (rRNA classification, ~900 MB)"
     echo " 17) marferret - MarFERReT marine eukaryotic proteins (~9 GB)"
@@ -841,7 +842,8 @@ download_bakta_light() {
         ${CONDA_CMD} run -p "${bakta_env}" bakta_db download --output "${db_path}" --type light || return 1
     fi
     echo "[SUCCESS] Bakta light database downloaded to ${db_path}/db-light"
-    echo "  Use with: --bakta_light_db ${db_path}/db-light"
+    echo "  Use with: --bakta_light_db ${db_path}/db-light   (mag_analysis)"
+    echo "            --bakta_db ${db_path}/db-light         (nanopore_live)"
 }
 
 download_kofam() {
@@ -1074,8 +1076,9 @@ download_silva() {
     sync_amplicon_registry
 
     echo "[SUCCESS] SILVA databases downloaded to ${db_path}"
-    echo "  Use with: --silva_ssu_db ${ssu_fasta}"
-    echo "            --silva_lsu_db ${lsu_fasta}"
+    echo "  Use with: --silva_ssu_db ${ssu_fasta}   (mag_analysis)"
+    echo "            --silva_lsu_db ${lsu_fasta}   (mag_analysis)"
+    echo "            --ref_databases \"silva:${ssu_fasta}:${SILVA_RANKS}\"   (illumina_amplicon)"
 }
 
 # Ranks are a property of the release, not the database: PR2 5.x inserted
@@ -1090,11 +1093,13 @@ SILVA132_RANKS="Domain,Phylum,Class,Order,Family,Genus"
 PR2_RANKS="Domain,Supergroup,Division,Subdivision,Class,Order,Family,Genus,Species"
 SILVA_RANKS="Domain,Phylum,Class,Order,Family,Genus"
 
-# Which references the amplicon pipeline should use, read at run time from
-# ${DB_DIR}/amplicon_taxonomy.tsv. Order is precedence: the first row is the
-# primary, and renormalisation, the groups and the ASV-level labels come from
-# it. Rows are only ever added, never reordered or removed, so an operator who
-# has arranged this file keeps their arrangement.
+# Registry of the amplicon references on this host, ${DB_DIR}/amplicon_taxonomy.tsv.
+# illumina_amplicon does not read the file itself: it takes the same rows as
+# --ref_databases "name:path:ranks;...", and the ready-made value is printed
+# after each sync. Order is precedence: the first row is the primary, and
+# renormalisation, the groups and the ASV-level labels come from it. Rows are
+# only ever added, never reordered or removed, so an operator who has arranged
+# this file keeps their arrangement.
 sync_amplicon_registry() {
     local reg="${DB_DIR}/amplicon_taxonomy.tsv"
     local silva_ssu="${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
@@ -1129,6 +1134,12 @@ sync_amplicon_registry() {
         echo "[INFO] primary taxonomy reference: ${primary}  (first row of ${reg})"
         echo "       Renormalisation, the groups and the ASV-level labels come from it."
         echo "       Reorder the rows to change which."
+        # The pipeline reads --ref_databases, not this file; hand over the rows
+        # in that form so the registry's order is what the run uses.
+        local ref_dbs
+        ref_dbs=$(grep -v '^[[:space:]]*#' "${reg}" | grep -v '^[[:space:]]*$' \
+                  | awk -F'\t' '{ printf "%s%s:%s:%s", (NR > 1 ? ";" : ""), $1, $2, $3 }')
+        echo "       illumina_amplicon: --ref_databases \"${ref_dbs}\""
     fi
 }
 
@@ -1496,14 +1507,15 @@ else
     ! $DOWNLOAD_MACSYFINDER || echo "  --macsyfinder_models ${DB_DIR}/macsyfinder_models"
     ! $DOWNLOAD_DEFENSEFINDER || echo "  --defensefinder_models ${DB_DIR}/defensefinder_models"
     ! $DOWNLOAD_BAKTA         || echo "  --bakta_db         ${DB_DIR}/bakta/db"
-    ! $DOWNLOAD_BAKTA_LIGHT   || echo "  --bakta_light_db   ${DB_DIR}/bakta/db-light"
+    ! $DOWNLOAD_BAKTA_LIGHT   || echo "  --bakta_light_db   ${DB_DIR}/bakta/db-light   (mag_analysis; nanopore_live: --bakta_db ${DB_DIR}/bakta/db-light)"
     ! $DOWNLOAD_KOFAM   || echo "  --kofam_db   ${DB_DIR}/kofam_db"
     ! $DOWNLOAD_EGGNOG  || echo "  --eggnog_db  ${DB_DIR}/eggnog_db"
     ! $DOWNLOAD_DBCAN   || echo "  --dbcan_db   ${DB_DIR}/dbcan_db"
     ! $DOWNLOAD_METAEUK || echo "  --metaeuk_db ${DB_DIR}/metaeuk_db/metaeuk_db"
     ! $DOWNLOAD_KRAKEN2 || echo "  --kraken2_db ${DB_DIR}/kraken2_db"
-    ! $DOWNLOAD_SILVA   || echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta"
-    ! $DOWNLOAD_SILVA   || echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta"
+    ! $DOWNLOAD_SILVA   || echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta   (mag_analysis)"
+    ! $DOWNLOAD_SILVA   || echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta   (mag_analysis)"
+    ! $DOWNLOAD_SILVA   || echo "  --ref_databases \"silva:${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta:${SILVA_RANKS}\"   (illumina_amplicon)"
     ! $DOWNLOAD_MARFERRET || echo "  --marferret_db ${DB_DIR}/marferret_db"
     ! $DOWNLOAD_GTDBTK   || echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
     ! $DOWNLOAD_ANTISMASH || echo "  --antismash_db ${DB_DIR}/antismash_db"

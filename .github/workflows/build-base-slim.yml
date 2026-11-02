@@ -1,7 +1,22 @@
 name: Build slim base image (merged envs)
 
 on:
+  # Base inputs must trigger this build. build-mag-analysis.yml deliberately
+  # excludes them from its own paths, so without this a change to the envs or
+  # to Dockerfile.base-slim rebuilt nothing until someone dispatched by hand.
+  push:
+    branches: [main]
+    paths:
+      - 'mag_analysis/Dockerfile.base-slim'
+      - 'mag_analysis/envs/**'
+      - 'mag_analysis/docker/**'
+      - '.github/workflows/build-base-slim.yml'
   workflow_dispatch:
+
+# One build of the base at a time, in the order queued (see build-assembly-base.yml).
+concurrency:
+  group: image-danaseq-mag-base-slim
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -77,3 +92,16 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+  # Rebuild the leaf over the base this run just published, as
+  # build-assembly-base.yml does for its leaves.
+  mag-analysis:
+    needs: build
+    permissions:
+      # write, not read: the called workflow calls publish-sif.yml, which
+      # pushes the SIF and records the promoted digest to deploy/<image>.json.
+      # A called workflow cannot hold more permission than its caller grants,
+      # at any depth, and granting less fails the whole run at startup.
+      contents: write
+      packages: write
+    uses: ./.github/workflows/build-mag-analysis.yml

@@ -46,7 +46,7 @@ process REMOVE_RRNA_SORTMERNA {
     label 'process_high'
     label 'env_rnaseq'
     conda "${projectDir}/conda-envs/dana-illumina-rna-rnaseq"
-    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'symlink', pattern: '*.{fq.gz,log}', enabled: !params.store_dir
+    publishDir { "${params.outdir}/preprocess/${meta.id}" }, mode: 'copy', pattern: '*.{fq.gz,log}', enabled: !params.store_dir
     storeDir { params.store_dir ? "${params.store_dir}/preprocess/${meta.id}" : null }
 
     input:

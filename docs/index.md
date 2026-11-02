@@ -7,7 +7,7 @@ Metagenomic and amplicon analysis pipelines for Oxford Nanopore and Illumina seq
 ```
 danaSeq/
 ├── nanopore_live/          Real-time analysis during sequencing
-│   │                       9 modules, 14 processes -> DuckDB
+│   │                       11 modules, 16 processes -> DuckDB
 │
 ├── nanopore_assembly/      Long-read assembly + mapping + depth
 │   │                       3 modules: preprocess, assembly, mapping
@@ -34,9 +34,9 @@ danaSeq/
 │   ├── viz/                Interactive Svelte dashboard (gene-expression heatmap)
 │
 └── mag_analysis/           Technology-agnostic downstream analysis
-    │                       10 modules: binning, annotation, taxonomy, rrna,
-    │                       metabolism, mge, eukaryotic, gene_depths,
-    │                       phylogeny, viz
+    │                       11 modules, 49 processes: binning, derep, annotation,
+    │                       taxonomy, rrna, metabolism, mge, eukaryotic,
+    │                       gene_depths, phylogeny, viz
     ├── viz/                Interactive Svelte dashboard
     └── bin/                Pipeline scripts
 ```
@@ -49,7 +49,8 @@ danaSeq/
 | [**nanopore_assembly**](nanopore-assembly.md) | Long-read assembly + mapping + depth | Flye, metaMDBG, myloasm, minimap2, CoverM |
 | [**illumina_assembly**](illumina-assembly.md) | Multi-assembler consensus assembly | Tadpole, Megahit, SPAdes, metaSPAdes, BBMap |
 | [**illumina_rna**](illumina-rna.md) | Metatranscriptomic RNA-seq vs references | SortMeRNA, BBmap, subread/featureCounts |
-| [**mag_analysis**](mag-analysis.md) | Technology-agnostic downstream analysis | 7-binner consensus, DAS Tool, Binette, 50+ processes |
+| [**illumina_amplicon**](illumina-amplicon.md) | 16S/18S/ITS amplicon denoising to ASVs | cutadapt, papa2 (DADA2), MAFFT, SparCC |
+| [**mag_analysis**](mag-analysis.md) | Technology-agnostic downstream analysis | 7-binner consensus, DAS Tool, Binette, 49 processes |
 
 ## Getting Started
 
@@ -66,7 +67,7 @@ cd danaSeq
 |--------|----------|-------|
 | **Conda** | Local/laptop development | `cd <pipeline> && ./install.sh` |
 | **Docker** | Reproducible runs, CI | `docker pull ghcr.io/rec3141/danaseq-mag-analysis:latest` |
-| **Apptainer** | HPC clusters | `./run-*.sh --apptainer` (auto-pulls SIF) |
+| **Apptainer** | HPC clusters | `./run-*.sh --apptainer --pull` on first use (`illumina_amplicon`: `--runtime apptainer --pull`); or place every SIF at once with `tools/rebuild-sifs.sh`. `nanopore_live` runs under conda or `--docker` only |
 
 ### 3. Download databases
 

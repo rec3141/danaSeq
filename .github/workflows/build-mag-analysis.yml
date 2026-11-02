@@ -11,6 +11,7 @@ on:
       - '.github/workflows/build-mag-analysis.yml'
       - 'tools/microscape_deploy.sh'
   workflow_dispatch:
+  workflow_call:
 
 env:
   REGISTRY: ghcr.io
