@@ -659,9 +659,17 @@ workflow {
         ch_viz1_input = STAGE_INPUTS.out.tnf.ifEmpty(STAGE_INPUTS.out.assembly).collect()
         VIZ_STAGE1(ch_viz1_input, false, false)
 
+        // The stages all write the same viz/data directory, so each one also
+        // waits for the one before it (done or failed: a failed stage emits
+        // nothing and the channel just closes). Without this, a resumed run
+        // whose inputs are all stored starts every stage at once, and they
+        // remove and rename each other's files.
+        ch_viz_prev = VIZ_STAGE1.out.done
+
         // Stage 2: annotation done
         if (effective_annotator != 'none') {
-            VIZ_STAGE2(ch_proteins.collect(), true, false)
+            VIZ_STAGE2(ch_proteins.collect().mix(ch_viz_prev).collect(), true, false)
+            ch_viz_prev = VIZ_STAGE2.out.done
         }
 
         // Stage 3: binning + quality done
@@ -669,7 +677,7 @@ workflow {
         if (params.checkm2_db) {
             ch_viz_stage3 = ch_viz_stage3.mix(CHECKM2.out.report.collect())
         }
-        VIZ_STAGE3(ch_viz_stage3.collect(), true, false)
+        VIZ_STAGE3(ch_viz_stage3.mix(ch_viz_prev).collect(), true, false)
 
         // Stage 4: final barrier
         ch_viz_stage4 = DASTOOL_CONSENSUS.out.summary.collect()
@@ -727,7 +735,7 @@ workflow {
         if (params.run_gtdbtk && params.gtdbtk_db) {
             ch_viz_stage4 = ch_viz_stage4.mix(GTDBTK_CLASSIFY.out.taxonomy.collect())
         }
-        VIZ_STAGE4(ch_viz_stage4.collect(), true, true)
+        VIZ_STAGE4(ch_viz_stage4.mix(VIZ_STAGE3.out.done).collect(), true, true)
     }
 
     workflow.onComplete = {
