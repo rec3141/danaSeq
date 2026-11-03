@@ -106,6 +106,10 @@ else
 fi
 [[ -n "$API_KEY" ]] || die "API key is empty"
 
+# Absolute, because the build and staging below run from inside $VIZ_DIR.
+PREPROCESS_DIR="$(cd "$PREPROCESS_DIR" && pwd)"
+VIZ_DIR="$(cd "$VIZ_DIR" && pwd)"
+
 shopt -s nullglob
 preproc_files=("$PREPROCESS_DIR"/*.json "$PREPROCESS_DIR"/*.json.gz)
 shopt -u nullglob
@@ -125,10 +129,12 @@ else
     info "skipping build — reusing existing dist/"
 fi
 
-info "staging preprocess output (${#preproc_files[@]} files) into dist/data/"
+# The whole directory: besides the top-level JSON it holds subdirectories
+# (fastsne/ with its viewer and data).
+info "staging preprocess output ($(find "$PREPROCESS_DIR" -type f | wc -l) files) into dist/data/"
 rm -rf dist/data
 mkdir -p dist/data
-cp "${preproc_files[@]}" dist/data/
+cp -r "$PREPROCESS_DIR"/. dist/data/
 
 TARBALL="$(mktemp -t "${SLUG}.XXXXXX.tgz")"
 trap 'rm -f "$TARBALL"' EXIT
