@@ -32,7 +32,12 @@ case "$CLUSTER" in
             module load apptainer
             export APPTAINER_CACHEDIR=/home/rec3141/scratch/apptainer_cache
             export APPTAINER_TMPDIR=${SLURM_TMPDIR:-/tmp}
-            if [ -n "${SLURM_TMPDIR:-}" ]; then export TMPDIR=$SLURM_TMPDIR APPTAINERENV_TMPDIR=$SLURM_TMPDIR; fi
+            # Tools inside the image use TMPDIR, so the node-local dir is also bound into
+            # every container (APPTAINER_BINDPATH), including ones the launchers start.
+            if [ -n "${SLURM_TMPDIR:-}" ]; then
+                export TMPDIR=$SLURM_TMPDIR APPTAINERENV_TMPDIR=$SLURM_TMPDIR
+                export APPTAINER_BINDPATH=${APPTAINER_BINDPATH:+$APPTAINER_BINDPATH,}$SLURM_TMPDIR
+            fi
         }
         cexec() { local sif=$1; shift; apptainer exec --bind /scratch --bind "${SLURM_TMPDIR:-/tmp}" "$sif" "$@"; } ;;
     grex)
