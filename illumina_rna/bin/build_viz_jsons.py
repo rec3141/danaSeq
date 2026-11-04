@@ -97,7 +97,7 @@ def main():
     names = list(dict.fromkeys(n for r in refs for n in r.pop("_samples")))
     with gzip.open(os.path.join(a.out, "samples.json.gz"), "wt") as fh:
         json.dump([{"id": n, "name": n} for n in names], fh)
-    if a.metadata:
+    if a.metadata and os.path.basename(a.metadata) != "NO_FILE":  # the empty "no metadata" placeholder
         meta = read_metadata(a.metadata, names)
         with gzip.open(os.path.join(a.out, "metadata.json.gz"), "wt") as fh:
             json.dump(meta, fh)

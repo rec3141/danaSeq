@@ -65,7 +65,8 @@ process VIZ_PREPROCESS {
     path("*.json*"), emit: json
 
     script:
-    def meta_arg = metadata.name != 'NO_FILE' ? "--metadata ${metadata}" : ''
+    // With stageAs the name keeps the meta/ prefix, so match on the file name only
+    def meta_arg = metadata.fileName.toString() != 'NO_FILE' ? "--metadata ${metadata}" : ''
     """
     python3 "${projectDir}/bin/build_viz_jsons.py" \\
         --tables tables ${meta_arg} \\
