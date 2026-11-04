@@ -125,7 +125,8 @@ process BAKTA_EXTRA {
     tag "bakta_extra"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-annotate"
-    publishDir "${params.outdir}/annotation/bakta/extra", mode: 'copy', enabled: !params.store_dir
+    publishDir "${params.outdir}/annotation/bakta/extra", mode: 'copy', enabled: !params.store_dir,
+        saveAs: { fn -> fn == 'annotation.png' ? fn : null }
     storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/extra" : null
 
     input:
@@ -176,5 +177,40 @@ process BAKTA_EXTRA {
     sed '/^##FASTA/Q' bakta_out/annotation.gff3 > annotation.gff3
     cp bakta_out/annotation.hypotheticals.faa bakta_out/annotation.gbff bakta_out/annotation.png . 2>/dev/null || true
     rm -rf "\$TMPDIR"
+    """
+}
+
+// Give BAKTA_EXTRA features the BAKTA_BASIC locus tag of the CDS at the same
+// coordinates. Every protein tool (KofamScan, eggNOG, dbCAN, DefenseFinder, ...)
+// runs on the basic proteins, so joins by locus tag are only correct after this.
+// Features the basic run lacks (sORFs) get new tags after the last basic tag.
+// In storeDir mode the rewritten files replace BAKTA_EXTRA's in place;
+// locus_tag_map.tsv marks the directory as done.
+
+process BAKTA_EXTRA_IDS {
+    tag "bakta_extra_ids"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-annotate"
+    publishDir "${params.outdir}/annotation/bakta/extra", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/annotation/bakta/extra" : null
+
+    input:
+    path(basic_tsv, stageAs: 'basic/annotation.tsv')
+    path(extra_files, stageAs: 'extra_raw/*')
+
+    output:
+    path("annotation.faa"),  emit: proteins
+    path("annotation.gff3"), emit: gff
+    path("annotation.tsv"),  emit: tsv
+    path("annotation.hypotheticals.faa"), emit: hypotheticals, optional: true
+    path("annotation.gbff"), emit: gbff, optional: true
+    path("locus_tag_map.tsv"), emit: map
+
+    script:
+    """
+    reconcile_bakta_ids.py \
+        --basic-tsv basic/annotation.tsv \
+        --extra-dir extra_raw \
+        --outdir .
     """
 }

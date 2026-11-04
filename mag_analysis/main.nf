@@ -173,6 +173,7 @@ include { GTDBTK_CLASSIFY }     from './modules/phylogeny'
 include { PROKKA_ANNOTATE }     from './modules/annotation'
 include { BAKTA_BASIC }          from './modules/annotation'
 include { BAKTA_EXTRA }          from './modules/annotation'
+include { BAKTA_EXTRA_IDS }      from './modules/annotation'
 include { KAIJU_CONTIG_CLASSIFY } from './modules/taxonomy'
 include { KAIJU_CLASSIFY }      from './modules/taxonomy'
 include { KRAKEN2_CLASSIFY }   from './modules/taxonomy'
@@ -305,7 +306,17 @@ workflow {
                 .combine(ch_assembly)
                 .map { prot, asm -> asm }
             BAKTA_EXTRA(ch_assembly_after_basic)
-            ch_annotation_tsv = BAKTA_EXTRA.out.tsv
+            // Protein tools below keep using the basic proteins/GFF; this
+            // renames extra-run features to the basic locus tags so the
+            // two runs can be joined by ID.
+            BAKTA_EXTRA_IDS(
+                BAKTA_BASIC.out.tsv,
+                BAKTA_EXTRA.out.tsv
+                    .mix(BAKTA_EXTRA.out.gff, BAKTA_EXTRA.out.proteins,
+                         BAKTA_EXTRA.out.hypotheticals, BAKTA_EXTRA.out.gbff)
+                    .collect()
+            )
+            ch_annotation_tsv = BAKTA_EXTRA_IDS.out.tsv
         }
     }
 
@@ -685,7 +696,7 @@ workflow {
             ch_viz_stage4 = ch_viz_stage4.mix(CHECKM2.out.report.collect())
         }
         if (effective_annotator == 'bakta' && params.bakta_extra) {
-            ch_viz_stage4 = ch_viz_stage4.mix(BAKTA_EXTRA.out.tsv.collect())
+            ch_viz_stage4 = ch_viz_stage4.mix(BAKTA_EXTRA_IDS.out.tsv.collect())
         }
         if (params.run_genomad && params.genomad_db) {
             ch_viz_stage4 = ch_viz_stage4.mix(GENOMAD_CLASSIFY.out.summary.collect())

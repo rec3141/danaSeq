@@ -218,10 +218,17 @@ def referencesFromMag(dir_path) {
     if (!dir.isDirectory()) error "ERROR: --from_mag directory does not exist: ${dir_path}"
     def fasta = firstExisting(["${dir}/assembly/assembly.fasta"])
     if (!fasta) error "ERROR: no assembly/assembly.fasta under --from_mag ${dir_path}"
+    // The extra Bakta run's locus tags only match the basic run (which the
+    // kofam/eggNOG/dbCAN tables are keyed by) once BAKTA_EXTRA_IDS has
+    // rewritten them; its locus_tag_map.tsv marks that.
+    def extraGff = file("${dir}/annotation/bakta/extra/annotation.gff3")
+    def extraOk  = file("${dir}/annotation/bakta/extra/locus_tag_map.tsv").exists()
+    if (extraGff.exists() && !extraOk)
+        log.warn "[WARNING] ${extraGff} has its own locus tags (no locus_tag_map.tsv from BAKTA_EXTRA_IDS); using the basic Bakta GFF so annotations join to the right genes."
     def gff = firstExisting([
-        "${dir}/annotation/bakta/extra/annotation.gff3",
+        extraOk ? "${dir}/annotation/bakta/extra/annotation.gff3" : null,
         "${dir}/annotation/bakta/basic/annotation.gff3",
-    ]) ?: file("${dir}/annotation/prokka").with { it.isDirectory() ? it.listFiles().find { f -> f.name.endsWith('.gff') } : null }
+    ].findAll()) ?: file("${dir}/annotation/prokka").with { it.isDirectory() ? it.listFiles().find { f -> f.name.endsWith('.gff') } : null }
     def bs = params.bin_set
     def bins = firstExisting([
         "${dir}/binning/${bs}/contig2bin.tsv",
