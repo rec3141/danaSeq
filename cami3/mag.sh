@@ -1,5 +1,5 @@
 #!/bin/bash
-# Kitchen-sink danaSeq MAG analysis (--all) of one CAMI III co-assembly on fir.
+# Kitchen-sink danaSeq MAG analysis (--all) of one CAMI III co-assembly on fir or grex.
 #   sbatch --job-name=mag-toy-long --dependency=afterok:<asm job> mag.sh toy long
 # Types: long, short (danaSeq assemblies), gsa_long, gsa_short (CAMI anonymous GSA
 # mapped by map-gsa.sh, the scoreable baseline).

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Standard danaSeq co-assembly of one CAMI III read set on fir: every sample of
+# Standard danaSeq co-assembly of one CAMI III read set on fir or grex: every sample of
 # the dataset co-assembled, then each sample mapped back for per-contig depths.
 #   sbatch --job-name=asm-toy-long  asm.sh toy  long     (nanopore_assembly, Flye)
 #   sbatch --job-name=asm-toy-short asm.sh toy  short    (illumina_assembly, co-assembly)

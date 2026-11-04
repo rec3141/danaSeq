@@ -1,6 +1,6 @@
 # Cluster settings for the cami3 scripts. Every script sources this file, so the
-# same scripts run on fir and on grex. It detects the cluster (grex has project
-# 6043541; CAMI3_CLUSTER overrides) and sets:
+# same scripts run on fir and on grex. It detects the cluster (CAMI3_CLUSTER
+# overrides) and sets:
 #   CLUSTER, BASE, GENICE, DB, HUMAN_FA, HUMAN_BBMAP, ASM_MEM, BIG_PARTITION
 #   container_setup   exports the apptainer/singularity environment
 #   cexec SIF ARGS    runs a command inside an image, with the data paths bound
@@ -9,8 +9,14 @@
 # grex: data and work dirs must live on /project (6043541), whose inode quota is
 #       tight (4.0M soft), so check `lfs quota -p 6043541 /project` before big runs.
 #       Big jobs go to genoa (192 cores, 750 GB), so the assembly memory is capped below that.
+# fir sets CC_CLUSTER (as do other Alliance clusters) and its nodes are *.fir.* or fc*;
+# grex has neither, but has singularity-ce under /opt. /project/6043541 exists on both.
 if [ -z "${CAMI3_CLUSTER:-}" ]; then
-    if [ -d /project/6043541 ]; then CAMI3_CLUSTER=grex; else CAMI3_CLUSTER=fir; fi
+    case "${CC_CLUSTER:-}:$(hostname -f 2>/dev/null)" in
+        fir:*|*.fir.*|*:fc[0-9]*) CAMI3_CLUSTER=fir ;;
+        *) if [ -d /opt/singularity-ce-4.4.1 ]; then CAMI3_CLUSTER=grex
+           else echo "[ERROR] cannot tell fir from grex; set CAMI3_CLUSTER" >&2; exit 1; fi ;;
+    esac
 fi
 CLUSTER=$CAMI3_CLUSTER
 GENICE=/home/rec3141/GENICE
