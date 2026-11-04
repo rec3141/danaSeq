@@ -30,14 +30,17 @@ MAP=$C/sample_subject_mapping.tsv
 [ -s "$DEP" ] && [ -s "$MAP" ] || { echo "[ERROR] need $DEP and the sample-subject mapping" >&2; exit 1; }
 
 # subset_depth <out> <sample names...>: keep the given samples' mean/variance column
-# pairs and recompute totalAvgDepth as their sum, as jgi_summarize does.
+# pairs, in source order, and recompute totalAvgDepth the way the source table does.
+# jgi_summarize (short reads) sums the per-sample means; nanopore's
+# jgi_depth_table.awk (long reads) averages them.
+case "$TYPE" in long) TOTAL=mean ;; short) TOTAL=sum ;; *) echo "type must be long or short" >&2; exit 1 ;; esac
 subset_depth() {
     local out=$1; shift
-    awk -F'\t' -v keep="$*" 'BEGIN{OFS="\t"; n=split(keep,k," "); for(i=1;i<=n;i++) want[k[i]]=1}
+    awk -F'\t' -v keep="$*" -v total="$TOTAL" 'BEGIN{OFS="\t"; n=split(keep,k," "); for(i=1;i<=n;i++) want[k[i]]=1}
         NR==1{ printf "%s\t%s\t%s", $1,$2,$3
                for(i=4;i<=NF;i+=2){ s=$i; sub(/\.sorted(\.bam)?$/,"",s); if(s in want){cols[++m]=i; printf "\t%s\t%s",$i,$(i+1)} }
                print ""; if(m!=n){print "[ERROR] matched "m" of "n" samples" > "/dev/stderr"; exit 3}; next }
-        { t=0; for(j=1;j<=m;j++) t+=$(cols[j]); printf "%s\t%s\t%s", $1,$2,t
+        { t=0; for(j=1;j<=m;j++) t+=$(cols[j]); if(total=="mean") t/=m; printf "%s\t%s\t%s", $1,$2,t
           for(j=1;j<=m;j++) printf "\t%s\t%s", $(cols[j]), $(cols[j]+1); print "" }' "$DEP" > "$out"
 }
 
@@ -46,6 +49,13 @@ ALL=$(awk -F'\t' 'NR>1{print $1}' "$MAP" | tr '\n' ' ')
 subset_depth "$O/depths/one_sample.txt" sample_0
 subset_depth "$O/depths/one_subject.txt" $S1
 subset_depth "$O/depths/all_samples.txt" $ALL
+echo "S1 samples: $S1"
+# Check: all_samples must reproduce the source table, apart from float formatting.
+awk -F'\t' 'NR==FNR{if(FNR>1) for(i=3;i<=NF;i++) v[FNR,i]=$i; n=NF; next}
+    FNR>1{ if(NF!=n){print "[ERROR] column count differs at row "FNR > "/dev/stderr"; exit 4}
+           for(i=3;i<=NF;i++){ a=$i; b=v[FNR,i]; d=a-b; if(d<0)d=-d
+               if(d>1e-4*(b<0?-b:b)+1e-6){print "[ERROR] all_samples differs at row "FNR" col "i": "a" vs "b > "/dev/stderr"; exit 4} } }
+    END{print "all_samples reproduces the source depth table"}' "$DEP" "$O/depths/all_samples.txt"
 
 run_metabat() {  # run_metabat <config> [depth file]
     local cfg=$1 dep=${2:-}
