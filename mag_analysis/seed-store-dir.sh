@@ -163,6 +163,9 @@ link_dir "$RESULTS/mge/defensefinder" "$STORE/mge/defensefinder"
 link_dir "$RESULTS/metabolism/kofamscan" "$STORE/metabolism/kofamscan"
 link_dir "$RESULTS/metabolism/emapper" "$STORE/metabolism/emapper"
 link_dir "$RESULTS/metabolism/dbcan" "$STORE/metabolism/dbcan"
+for d in "$RESULTS"/metabolism/protein_dbs/*/; do
+    [[ -d "$d" ]] && link_dir "${d%/}" "$STORE/metabolism/protein_dbs/$(basename "$d")"
+done
 link_dir "$RESULTS/metabolism/merged" "$STORE/metabolism/merged"
 link_dir "$RESULTS/metabolism/modules" "$STORE/metabolism/modules"
 link_dir "$RESULTS/metabolism/minpath" "$STORE/metabolism/minpath"

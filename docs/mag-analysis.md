@@ -77,16 +77,44 @@ cd mag_analysis
 | 6a | `KOFAMSCAN` | KofamScan | KEGG ortholog assignment via HMM profiles |
 | 6b | `EMAPPER` | eggNOG-mapper | Ortholog annotation (COG, GO, KEGG, CAZy) |
 | 6c | `DBCAN` | dbCAN | CAZyme annotation via HMM + diamond + HMMER |
-| 6d | `MERGE_ANNOTATIONS` | Python | Merge KofamScan + eggNOG + dbCAN per gene |
-| 6e | `MAP_TO_BINS` | Python | Assign annotations to MAGs |
-| 6f | `KEGG_MODULES` | Python | KEGG module completeness per MAG (55 bundled modules) |
-| 6g | `MINPATH` | MinPath | Pathway parsimony analysis |
-| 6h | `KEGG_DECODER` | KEGG-Decoder | Metabolic pathway heatmaps |
-| 6i | `ANTISMASH` | antiSMASH | Biosynthetic gene cluster detection |
-| 6j | `ECOSSDB_MAP` | Python (ecossdb) | Ecosystem services mapping (CICES 5.2) |
-| 6k | `ECOSSDB_SCORE` | Python (ecossdb) | Ecosystem service scoring |
-| 6l | `ECOSSDB_SDG` | Python (ecossdb) | UN Sustainable Development Goal mapping |
-| 6m | `ECOSSDB_VIZ` | Python (ecossdb) | Ecosystem services visualization |
+| 6d | `PROTEIN_DB_HMM`, `PROTEIN_DB_DIAMOND` | hmmsearch, DIAMOND | Protein reference DBs under `--pollutant_dbs` (CANT-HYD, HADEG, PGAP/TIGRFAM, ...), one task per DB |
+| 6e | `MERGE_ANNOTATIONS` | Python | Merge KofamScan + eggNOG + dbCAN + protein-DB hits per gene |
+| 6f | `MAP_TO_BINS` | Python | Assign annotations to MAGs |
+| 6g | `KEGG_MODULES` | Python | KEGG module completeness per MAG (55 bundled modules) |
+| 6h | `MINPATH` | MinPath | Pathway parsimony analysis |
+| 6i | `KEGG_DECODER` | KEGG-Decoder | Metabolic pathway heatmaps |
+| 6j | `ANTISMASH` | antiSMASH | Biosynthetic gene cluster detection |
+| 6k | `ECOSSDB_MAP` | Python (ecossdb) | Ecosystem services mapping (CICES 5.2) |
+| 6l | `ECOSSDB_SCORE` | Python (ecossdb) | Ecosystem service scoring |
+| 6m | `ECOSSDB_SDG` | Python (ecossdb) | UN Sustainable Development Goal mapping |
+| 6n | `ECOSSDB_VIZ` | Python (ecossdb) | Ecosystem services visualization |
+
+#### Protein reference databases
+
+`--pollutant_dbs DIR` (with `--run_metabolism`; `--db_dir` resolves
+`<db_dir>/pollutants`) searches the annotation proteins against every database
+in `DIR`, one subdirectory per database. The layout is the one nanopore_live's
+`--pollutant_dbs` reads, so one directory serves both pipelines:
+
+| File | Meaning |
+|------|---------|
+| `<name>/<name>.hmm` | HMM profiles, searched with `hmmsearch` |
+| `<name>/<name>.dmnd` | DIAMOND database, searched with `diamond blastp` (best hit per protein) |
+| `<name>/<name>.genes.tsv` | Optional catalogue: `target gene category pathway subpathway description [threshold score_type motif]` |
+| `<name>/<name>.opts` | Optional cutoff: `tc`, `ga`, `nc` or an E-value for HMMs; `id=,qcov=,scov=,evalue=,len=,bits=` for DIAMOND |
+
+Without an `.opts` file, HMMs use `--hmm_cut` (default `tc`), or the
+catalogue's per-target thresholds when `<name>.genes.tsv` has a `threshold`
+column; DIAMOND uses `--protein_db_opts`. Each database's hits are in
+`metabolism/protein_dbs/<name>/<name>.protein_db.tsv`, and
+`merged_annotations.tsv` gains a `protein_db_hits` column (`<db>:<gene>`,
+comma-separated). The results are stored per database, so adding one later
+searches only that one; after changing a database or its `.opts`, delete its
+`metabolism/protein_dbs/<name>/` to search it again.
+
+`./download-databases.sh --pgap` writes `<db_dir>/pollutants/PGAP/`: NCBI's
+PGAP HMMs, which hold the maintained TIGRFAMs (accessions `TIGR*`) plus
+NCBIfam and PRK models, searched at their trusted cutoffs.
 
 ### Mobile Genetic Elements
 
@@ -205,6 +233,9 @@ breaks included). `--derep_min_size_bp` counts sequence bases.
 | `--kofam_db` | (required if metabolism) | KofamScan database path |
 | `--eggnog_db` | (required if metabolism) | eggNOG database path |
 | `--dbcan_db` | (required if metabolism) | dbCAN database path |
+| `--pollutant_dbs` | `null` | Directory of protein reference DBs (see Protein reference databases) |
+| `--hmm_cut` | `tc` | Default hmmsearch cutoff: `tc`, `ga`, `nc` or an E-value |
+| `--protein_db_opts` | `id=50,qcov=50,scov=50,evalue=1e-5` | Default DIAMOND cutoffs |
 | `--emapper_batch_size` | `50000` | eggNOG-mapper batch size (proteins) |
 | `--run_antismash` | `false` | Run antiSMASH BGC detection |
 | `--antismash_db` | (required if antismash) | antiSMASH database path |
@@ -280,6 +311,7 @@ results/
 │   ├── kofamscan/              KEGG ortholog assignments
 │   ├── emapper/                eggNOG annotations
 │   ├── dbcan/                  CAZyme annotations
+│   ├── protein_dbs/<name>/     Protein reference DB hits (--pollutant_dbs)
 │   ├── merged/                 Merged annotation table
 │   ├── per_mag/                Per-MAG annotation summaries
 │   ├── modules/                KEGG module completeness
@@ -353,6 +385,7 @@ Or download individually:
 ./download-databases.sh --checkv    # CheckV (~2 GB)
 ./download-databases.sh --kaiju     # Kaiju nr_euk (~60 GB)
 ./download-databases.sh --gtdbtk    # GTDB-Tk (~85 GB)
+./download-databases.sh --pgap      # NCBI PGAP HMMs incl. TIGRFAM (~2.7 GB)
 ```
 
 Use `--db_dir` to auto-resolve paths from a standard layout:

@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Merge KofamScan, eggNOG-mapper, and dbCAN annotations into a unified per-protein TSV.
+"""Merge KofamScan, eggNOG-mapper, dbCAN and protein-DB annotations into a unified per-protein TSV.
 
-Joins on protein_id across three annotation sources:
+Joins on protein_id across these annotation sources:
   - KofamScan:  KEGG Orthology assignments (adaptive threshold filtering)
   - eggNOG-mapper: COG, GO, EC, KEGG, Pfam, description
   - dbCAN:      CAZyme consensus (requires agreement from >= 2/3 methods)
+  - protein DBs: protein_db_search.sh hits (CANT-HYD, HADEG, ...), one file per DB
 
 Output columns:
-  protein_id, contig_id, KO, COG_category, GOs, EC, KEGG_Pathway, PFAMs, CAZy, description
+  protein_id, contig_id, KO, COG_category, GOs, EC, KEGG_Pathway, PFAMs, CAZy, description,
+  protein_db_hits ("<db>:<gene>" per hit, comma-separated; <gene> is the
+  catalogue gene name, else the HMM/subject id)
 
 Usage:
     merge_annotations.py --kofamscan kofamscan_results.tsv \
                          --emapper emapper_results.emapper.annotations \
                          --dbcan overview.txt \
+                         --protein_db CANT-HYD.protein_db.tsv --protein_db HADEG.protein_db.tsv \
                          -o merged_annotations.tsv
 """
 
@@ -180,6 +184,34 @@ def parse_dbcan(path):
     return results
 
 
+def parse_protein_db(path, hits):
+    """Add the hits of one protein_db_search.sh TSV to hits[protein_id].
+
+    Line 1 is '#' provenance, line 2 the header
+    (gene_id db target gene category pathway subpathway evalue score pident qcov scov),
+    then one row per (protein, target) hit.
+    """
+    n = 0
+    try:
+        with open(path) as fh:
+            rows = csv.DictReader((l for l in fh if not l.startswith('#')), delimiter='\t')
+            for row in rows:
+                gene_id = (row.get('gene_id') or '').strip()
+                db = (row.get('db') or '').strip()
+                name = (row.get('gene') or '').strip() or (row.get('target') or '').strip()
+                # protein_db_hits is comma-separated; product names can contain commas.
+                name = name.replace(',', ';')
+                if not gene_id or not db or not name:
+                    continue
+                hits.setdefault(gene_id, set()).add(f'{db}:{name}')
+                n += 1
+    except FileNotFoundError:
+        print(f"[WARNING] protein DB file not found: {path}", file=sys.stderr)
+    except Exception as e:
+        print(f"[WARNING] Error parsing protein DB file {path}: {e}", file=sys.stderr)
+    print(f"[INFO] {path}: {n} hits", file=sys.stderr)
+
+
 def extract_contig_id(protein_id):
     """Extract contig ID from Prokka/Bakta protein IDs.
 
@@ -195,15 +227,17 @@ def extract_contig_id(protein_id):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Merge KofamScan, eggNOG-mapper, and dbCAN annotations')
+        description='Merge KofamScan, eggNOG-mapper, dbCAN and protein-DB annotations')
     parser.add_argument('--kofamscan', help='KofamScan detail-tsv output')
     parser.add_argument('--emapper', help='eggNOG-mapper .emapper.annotations file')
     parser.add_argument('--dbcan', help='dbCAN overview.txt file')
+    parser.add_argument('--protein_db', action='append', default=[],
+                        help='protein_db_search.sh TSV (repeatable, one per database)')
     parser.add_argument('-o', '--output', default='-',
                         help='Output TSV (default: stdout)')
     args = parser.parse_args()
 
-    if not any([args.kofamscan, args.emapper, args.dbcan]):
+    if not any([args.kofamscan, args.emapper, args.dbcan, args.protein_db]):
         print("[ERROR] At least one annotation source is required", file=sys.stderr)
         sys.exit(1)
 
@@ -211,19 +245,23 @@ def main():
     ko_map = parse_kofamscan(args.kofamscan)
     emapper_map = parse_emapper(args.emapper)
     dbcan_map = parse_dbcan(args.dbcan)
+    pdb_map = {}
+    for path in args.protein_db:
+        parse_protein_db(path, pdb_map)
 
     print(f"[INFO] KofamScan: {len(ko_map)} proteins with KO assignments", file=sys.stderr)
     print(f"[INFO] eggNOG-mapper: {len(emapper_map)} proteins annotated", file=sys.stderr)
     print(f"[INFO] dbCAN: {len(dbcan_map)} proteins with CAZyme assignments", file=sys.stderr)
+    print(f"[INFO] Protein DBs: {len(pdb_map)} proteins with hits", file=sys.stderr)
 
     # Collect all protein IDs
-    all_proteins = sorted(set(ko_map.keys()) | set(emapper_map.keys()) | set(dbcan_map.keys()))
+    all_proteins = sorted(set(ko_map) | set(emapper_map) | set(dbcan_map) | set(pdb_map))
     print(f"[INFO] Total unique proteins: {len(all_proteins)}", file=sys.stderr)
 
     # Write merged output
     out_fh = open(args.output, 'w') if args.output != '-' else sys.stdout
     header = ['protein_id', 'contig_id', 'KO', 'COG_category', 'GOs', 'EC',
-              'KEGG_Pathway', 'PFAMs', 'CAZy', 'description']
+              'KEGG_Pathway', 'PFAMs', 'CAZy', 'description', 'protein_db_hits']
     print('\t'.join(header), file=out_fh)
 
     for protein_id in all_proteins:
@@ -247,6 +285,7 @@ def main():
             em.get('PFAMs', ''),
             cazy,
             em.get('description', ''),
+            ','.join(sorted(pdb_map.get(protein_id, ()))),
         ]
         print('\t'.join(row), file=out_fh)
 

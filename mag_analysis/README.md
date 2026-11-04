@@ -90,6 +90,7 @@ results/
 │   ├── kofamscan/              KEGG Orthology
 │   ├── emapper/                eggNOG annotations
 │   ├── dbcan/                  CAZyme annotations
+│   ├── protein_dbs/<name>/     Protein reference DB hits (--pollutant_dbs: CANT-HYD, PGAP, ...)
 │   ├── merged/                 Unified annotation table
 │   ├── per_mag/                Per-bin annotation tables
 │   ├── modules/                KEGG module completeness
@@ -116,7 +117,7 @@ All modules are optional and controlled via `--run_*` flags. Use `--all` to enab
 | **Taxonomy** | Kaiju, Kraken2, Sendsketch, rRNA (SILVA) | `--run_kaiju`, etc. |
 | **Eukaryotic** | Tiara, Whokaryote, MetaEuk, MarFERReT | `--run_eukaryotic` |
 | **MGE** | geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder | `--run_genomad`, etc. |
-| **Metabolism** | KofamScan, eggNOG, dbCAN, KEGG modules, MinPath, KEGG-Decoder, antiSMASH | `--run_metabolism` |
+| **Metabolism** | KofamScan, eggNOG, dbCAN, protein reference DBs (hmmsearch/DIAMOND), KEGG modules, MinPath, KEGG-Decoder, antiSMASH | `--run_metabolism`, `--pollutant_dbs` |
 | **Ecosystem** | ECOSSDB (CICES 5.2 + UN SDG targets) | `--run_ecossdb` |
 | **Quality** | CheckM2 | `--checkm2_db` |
 | **Dereplication** | galah + skani (species-level, CheckM2-ranked) | `--run_derep` |
@@ -132,7 +133,7 @@ assembly.fasta + depths.txt + BAMs (optional)
      ├── Taxonomy (Kaiju, Kraken2, Sendsketch, rRNA)
      ├── Eukaryotic (Tiara, Whokaryote)
      ├── MGE (geNomad, CheckV, IntegronFinder, IslandPath, MacSyFinder, DefenseFinder)
-     ├── Metabolism (KofamScan, eggNOG, dbCAN → merge → per-MAG → KEGG/MinPath/Decoder)
+     ├── Metabolism (KofamScan, eggNOG, dbCAN, protein DBs → merge → per-MAG → KEGG/MinPath/Decoder)
      │
      ├── Binning (7 binners → DAS Tool + Binette + MAGScoT → CheckM2)
      ├── Phylogenetics (GTDB-Tk)

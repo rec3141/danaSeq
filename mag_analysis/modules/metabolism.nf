@@ -1,5 +1,6 @@
 // Metabolic profiling: KofamScan (KEGG Orthology), eggNOG-mapper (COG/GO/EC/Pfam),
-// dbCAN3 (CAZyme detection), annotation merging, bin mapping, and KEGG module scoring.
+// dbCAN3 (CAZyme detection), protein reference DBs (HMM/DIAMOND, e.g. CANT-HYD),
+// annotation merging, bin mapping, and KEGG module scoring.
 //
 // Architecture: "annotate once, map to bins" — all tools run on the full .faa,
 // then annotations are partitioned by contig2bin assignments (DAS_Tool + all binners).
@@ -236,6 +237,57 @@ process DBCAN {
     """
 }
 
+// Protein reference DBs (--pollutant_dbs: CANT-HYD, HADEG, TIGRFAM, ...): one
+// task per database, on the same proteins as KofamScan. The search and the
+// output format are bin/protein_db_search.sh, shared with nanopore_live.
+// Output <db>.protein_db.tsv: a '#' provenance line, a header, then one row
+// per (protein, target) hit, with gene/category/pathway from <db>.genes.tsv
+// when the database has one. MERGE_ANNOTATIONS adds the hits to the per-protein
+// table. storeDir keys on the output alone, so after changing a database or
+// its .opts, delete metabolism/protein_dbs/<db>/ to search it again.
+
+process PROTEIN_DB_HMM {
+    tag "${dbname}"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-genomic"
+    publishDir "${params.outdir}/metabolism/protein_dbs/${dbname}", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/protein_dbs/${dbname}" : null
+
+    input:
+    tuple path(proteins), val(dbname), path(hmm_db), val(annot), val(hmm_cut)
+
+    output:
+    path("${dbname}.protein_db.tsv"), emit: tsv
+    path("${dbname}.protein_db.tbl"), emit: tbl
+
+    script:
+    """
+    protein_db_search.sh hmm "${hmm_db}" "${dbname}" "${dbname}.protein_db" ${task.cpus} \\
+        "${hmm_cut}" "${annot}" "${proteins}"
+    """
+}
+
+process PROTEIN_DB_DIAMOND {
+    tag "${dbname}"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-annotate"
+    publishDir "${params.outdir}/metabolism/protein_dbs/${dbname}", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/protein_dbs/${dbname}" : null
+
+    input:
+    tuple path(proteins), val(dbname), path(dmnd), val(annot), val(opts)
+
+    output:
+    path("${dbname}.protein_db.tsv"), emit: tsv
+    path("${dbname}.protein_db.tbl"), emit: tbl
+
+    script:
+    """
+    protein_db_search.sh diamond "${dmnd}" "${dbname}" "${dbname}.protein_db" ${task.cpus} \\
+        "${opts}" "${annot}" "${proteins}"
+    """
+}
+
 process MERGE_ANNOTATIONS {
     tag "merge"
     label 'process_low'
@@ -251,14 +303,19 @@ process MERGE_ANNOTATIONS {
     path("merged_annotations.tsv"), emit: merged
 
     script:
-    // Build flags dynamically based on which annotation tools ran
-    def kofam_file   = labels.contains('kofamscan') ? annotation_files.find { it.name.contains('kofamscan') } : null
-    def emapper_file = labels.contains('emapper')   ? annotation_files.find { it.name.contains('emapper') }   : null
-    def dbcan_file   = labels.contains('dbcan')      ? annotation_files.find { it.name.contains('overview') }  : null
+    // Build flags dynamically based on which annotation tools ran. A single
+    // staged file arrives as a Path rather than a list.
+    def files        = annotation_files instanceof List ? annotation_files : [annotation_files]
+    def pdb_files    = files.findAll { it.name.endsWith('.protein_db.tsv') }
+    def tool_files   = files - pdb_files
+    def kofam_file   = labels.contains('kofamscan') ? tool_files.find { it.name.contains('kofamscan') } : null
+    def emapper_file = labels.contains('emapper')   ? tool_files.find { it.name.contains('emapper') }   : null
+    def dbcan_file   = labels.contains('dbcan')      ? tool_files.find { it.name.contains('overview') }  : null
     def flags = []
     if (kofam_file)   flags << "--kofamscan ${kofam_file}"
     if (emapper_file) flags << "--emapper ${emapper_file}"
     if (dbcan_file)   flags << "--dbcan ${dbcan_file}"
+    pdb_files.sort { it.name }.each { flags << "--protein_db ${it}" }
     """
     # Merge annotation sources into unified per-protein TSV
     # Tools that ran: ${labels.join(', ')}

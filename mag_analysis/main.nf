@@ -76,6 +76,14 @@ def helpMessage() {
 
     Metabolic profiling:
       --run_metabolism, --run_antismash, --run_ecossdb
+      --pollutant_dbs DIR  Protein reference DBs searched with the annotation proteins
+                           (needs --run_metabolism): one subdir per DB holding
+                           <name>.hmm (hmmsearch) and/or <name>.dmnd (DIAMOND blastp),
+                           an optional <name>.genes.tsv catalogue and <name>.opts
+                           cutoff, e.g. CANT-HYD, HADEG, TIGRFAM. Same layout as
+                           nanopore_live --pollutant_dbs.
+      --hmm_cut STR        Default hmmsearch cutoff: tc|ga|nc or an E-value [default: tc]
+      --protein_db_opts STR  Default DIAMOND cutoffs [default: id=50,qcov=50,scov=50,evalue=1e-5]
 
     Eukaryotic:
       --run_eukaryotic, --run_metaeuk, --run_marferret
@@ -110,6 +118,33 @@ def runComebin() {
     if (params.store_dir && file("${params.store_dir}/binning/comebin/comebin_bins.tsv").exists()) return true
     log.warn "COMEBin skipped: no GPU visible (--gpu ${params.gpu}). Run it where one is, or pass --comebin_on_cpu true."
     return false
+}
+
+// Protein reference DBs under --pollutant_dbs for one search method (ext 'hmm'
+// or 'dmnd'): [ [dbname, dbfile, annot_path_or_NONE, cutoff_opts], ... ], one
+// entry per <sub>/<sub>.<ext>. Cutoff: <name>.opts beside the DB file, else the
+// catalogue's per-target thresholds (hmm, when <name>.genes.tsv has a
+// `threshold` column), else the default. Matches nanopore_live's
+// protein_db_entries, so a DB directory gives the same hits in both pipelines.
+def proteinDbEntries(String ext, String default_opts) {
+    if (!params.pollutant_dbs) return []
+    def root = file(params.pollutant_dbs)
+    if (!root.isDirectory()) error "ERROR: --pollutant_dbs is not a directory: ${params.pollutant_dbs}"
+    def entries = []
+    root.listFiles().findAll { it.isDirectory() }.sort { it.name }.each { sub ->
+        def f = file("${sub}/${sub.name}.${ext}")
+        if (!f.exists()) return
+        def annot = file("${sub}/${sub.name}.genes.tsv")
+        def optsf = file("${sub}/${sub.name}.opts")
+        def opts  = default_opts
+        if (optsf.exists()) {
+            opts = optsf.text.readLines().find { it.trim() && !it.trim().startsWith('#') }?.trim() ?: default_opts
+        } else if (ext == 'hmm' && annot.exists() && annot.readLines()[0].split('\t').contains('threshold')) {
+            opts = 'catalogue'
+        }
+        entries << [ sub.name, f, annot.exists() ? annot.toString() : 'NONE', opts ]
+    }
+    return entries
 }
 
 def gpuVisible() {
@@ -192,6 +227,8 @@ include { MARFERRET_CLASSIFY }  from './modules/eukaryotic'
 include { KOFAMSCAN }           from './modules/metabolism'
 include { EMAPPER }             from './modules/metabolism'
 include { DBCAN }               from './modules/metabolism'
+include { PROTEIN_DB_HMM }      from './modules/metabolism'
+include { PROTEIN_DB_DIAMOND }  from './modules/metabolism'
 include { MERGE_ANNOTATIONS }   from './modules/metabolism'
 include { MAP_TO_BINS }         from './modules/metabolism'
 include { KEGG_MODULES }        from './modules/metabolism'
@@ -417,6 +454,27 @@ workflow {
             ch_annot_for_merge = ch_annot_for_merge.mix(
                 DBCAN.out.overview.map { ['dbcan', it] }
             )
+        }
+
+        // Protein reference DBs (CANT-HYD, HADEG, TIGRFAM, ...): one task per DB.
+        def hmm_entries  = proteinDbEntries('hmm', params.hmm_cut)
+        def dmnd_entries = proteinDbEntries('dmnd', params.protein_db_opts)
+        if (hmm_entries) {
+            log.info "HMM databases: ${hmm_entries.collect { "${it[0]} (${it[3]})" }.join(', ')}"
+            PROTEIN_DB_HMM(ch_proteins.combine(Channel.fromList(hmm_entries)))
+            ch_annot_for_merge = ch_annot_for_merge.mix(
+                PROTEIN_DB_HMM.out.tsv.map { ['protein_db', it] }
+            )
+        }
+        if (dmnd_entries) {
+            log.info "DIAMOND databases: ${dmnd_entries.collect { "${it[0]} (${it[3]})" }.join(', ')}"
+            PROTEIN_DB_DIAMOND(ch_proteins.combine(Channel.fromList(dmnd_entries)))
+            ch_annot_for_merge = ch_annot_for_merge.mix(
+                PROTEIN_DB_DIAMOND.out.tsv.map { ['protein_db', it] }
+            )
+        }
+        if (params.pollutant_dbs && !hmm_entries && !dmnd_entries) {
+            log.warn "--pollutant_dbs ${params.pollutant_dbs} holds no <name>/<name>.hmm or .dmnd; no protein DB searched."
         }
     }
 
