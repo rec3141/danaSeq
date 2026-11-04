@@ -237,7 +237,7 @@ process DBCAN {
     """
 }
 
-// Protein reference DBs (--pollutant_dbs: CANT-HYD, HADEG, TIGRFAM, ...): one
+// Protein reference DBs (--protein_db_dir: CANT-HYD, HADEG, TIGRFAM, ...): one
 // task per database, on the same proteins as KofamScan. The search and the
 // output format are bin/protein_db_search.sh, shared with nanopore_live.
 // Output <db>.protein_db.tsv: a '#' provenance line, a header, then one row

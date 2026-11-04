@@ -77,7 +77,7 @@ cd mag_analysis
 | 6a | `KOFAMSCAN` | KofamScan | KEGG ortholog assignment via HMM profiles |
 | 6b | `EMAPPER` | eggNOG-mapper | Ortholog annotation (COG, GO, KEGG, CAZy) |
 | 6c | `DBCAN` | dbCAN | CAZyme annotation via HMM + diamond + HMMER |
-| 6d | `PROTEIN_DB_HMM`, `PROTEIN_DB_DIAMOND` | hmmsearch, DIAMOND | Protein reference DBs under `--pollutant_dbs` (CANT-HYD, HADEG, PGAP/TIGRFAM, ...), one task per DB |
+| 6d | `PROTEIN_DB_HMM`, `PROTEIN_DB_DIAMOND` | hmmsearch, DIAMOND | Protein reference DBs under `--protein_db_dir` (CANT-HYD, HADEG, PGAP/TIGRFAM, ...), one task per DB |
 | 6e | `MERGE_ANNOTATIONS` | Python | Merge KofamScan + eggNOG + dbCAN + protein-DB hits per gene |
 | 6f | `MAP_TO_BINS` | Python | Assign annotations to MAGs |
 | 6g | `KEGG_MODULES` | Python | KEGG module completeness per MAG (55 bundled modules) |
@@ -91,8 +91,8 @@ cd mag_analysis
 
 #### Protein reference databases
 
-`--pollutant_dbs DIR` (with `--run_metabolism`; `--db_dir` resolves
-`<db_dir>/pollutants`) searches the annotation proteins against every database
+`--protein_db_dir DIR` (with `--run_metabolism`; `--db_dir` resolves
+`<db_dir>/protein_dbs`) searches the annotation proteins against every database
 in `DIR`, one subdirectory per database. The layout is the one nanopore_live's
 `--pollutant_dbs` reads, so one directory serves both pipelines:
 
@@ -112,7 +112,7 @@ comma-separated). The results are stored per database, so adding one later
 searches only that one; after changing a database or its `.opts`, delete its
 `metabolism/protein_dbs/<name>/` to search it again.
 
-`./download-databases.sh --pgap` writes `<db_dir>/pollutants/PGAP/`: NCBI's
+`./download-databases.sh --pgap` writes `<db_dir>/protein_dbs/PGAP/`: NCBI's
 PGAP HMMs, which hold the maintained TIGRFAMs (accessions `TIGR*`) plus
 NCBIfam and PRK models, searched at their trusted cutoffs.
 
@@ -233,7 +233,7 @@ breaks included). `--derep_min_size_bp` counts sequence bases.
 | `--kofam_db` | (required if metabolism) | KofamScan database path |
 | `--eggnog_db` | (required if metabolism) | eggNOG database path |
 | `--dbcan_db` | (required if metabolism) | dbCAN database path |
-| `--pollutant_dbs` | `null` | Directory of protein reference DBs (see Protein reference databases) |
+| `--protein_db_dir` | `null` | Directory of protein reference DBs (see Protein reference databases) |
 | `--hmm_cut` | `tc` | Default hmmsearch cutoff: `tc`, `ga`, `nc` or an E-value |
 | `--protein_db_opts` | `id=50,qcov=50,scov=50,evalue=1e-5` | Default DIAMOND cutoffs |
 | `--emapper_batch_size` | `50000` | eggNOG-mapper batch size (proteins) |
@@ -311,7 +311,7 @@ results/
 │   ├── kofamscan/              KEGG ortholog assignments
 │   ├── emapper/                eggNOG annotations
 │   ├── dbcan/                  CAZyme annotations
-│   ├── protein_dbs/<name>/     Protein reference DB hits (--pollutant_dbs)
+│   ├── protein_dbs/<name>/     Protein reference DB hits (--protein_db_dir)
 │   ├── merged/                 Merged annotation table
 │   ├── per_mag/                Per-MAG annotation summaries
 │   ├── modules/                KEGG module completeness

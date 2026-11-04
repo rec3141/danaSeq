@@ -50,7 +50,7 @@ resolve_db_dir() {
         [--kofam_db]="kofam_db"
         [--eggnog_db]="eggnog_db"
         [--dbcan_db]="dbcan_db"
-        [--pollutant_dbs]="pollutants"
+        [--protein_db_dir]="protein_dbs"
         [--macsyfinder_models]="macsyfinder_models"
         [--defensefinder_models]="defensefinder_models"
         [--marferret_db]="marferret_db"
@@ -162,10 +162,10 @@ usage() {
     echo "Shortcuts:"
     echo "  --all              Enable all optional modules (still requires DB paths)"
     echo "  --db_dir DIR       Auto-resolve database paths from download-databases.sh layout"
-    echo "                     (<db_dir>/pollutants becomes --pollutant_dbs)"
+    echo "                     (<db_dir>/protein_dbs becomes --protein_db_dir)"
     echo ""
     echo "Protein reference DBs (with --run_metabolism or --all):"
-    echo "  --pollutant_dbs DIR  One subdir per DB: <name>/<name>.hmm and/or .dmnd, optional"
+    echo "  --protein_db_dir DIR  One subdir per DB: <name>/<name>.hmm and/or .dmnd, optional"
     echo "                     <name>.genes.tsv and <name>.opts (e.g. CANT-HYD, HADEG, TIGRFAM)"
     echo ""
     echo "Caching & Resume:"
@@ -203,7 +203,7 @@ WORKDIR_HOST="${SLURM_TMPDIR:-/tmp}/mag_analysis_work"
 RESUME_SESSION=""
 DO_RESUME=false
 DB_DIR_HOST=""
-POLLUTANT_DBS_HOST=""
+PROTEIN_DB_DIR_HOST=""
 STORE_DIR_HOST=""
 
 # Store mode keeps every finished stage in $OUTDIR (storeDir), so a timeout or
@@ -270,11 +270,11 @@ while (( $# )); do
             DB_DIR_HOST="$(realpath "$2")"
             resolve_db_dir "$DB_DIR_HOST"
             shift 2 ;;
-        --pollutant_dbs)
-            [[ -z "${2:-}" ]] && die "--pollutant_dbs requires a directory path"
-            [[ -d "$2" ]] || die "--pollutant_dbs directory does not exist: $2"
-            POLLUTANT_DBS_HOST="$(realpath "$2")"
-            NF_ARGS+=("--pollutant_dbs" "$POLLUTANT_DBS_HOST")
+        --protein_db_dir)
+            [[ -z "${2:-}" ]] && die "--protein_db_dir requires a directory path"
+            [[ -d "$2" ]] || die "--protein_db_dir directory does not exist: $2"
+            PROTEIN_DB_DIR_HOST="$(realpath "$2")"
+            NF_ARGS+=("--protein_db_dir" "$PROTEIN_DB_DIR_HOST")
             shift 2 ;;
         --store_dir)
             [[ -z "${2:-}" ]] && die "--store_dir requires a directory path"
@@ -507,12 +507,12 @@ if [[ "$USE_CONTAINER" == true ]]; then
         done
     fi
 
-    # An explicit --pollutant_dbs outside --db_dir gets its own mount; one
+    # An explicit --protein_db_dir outside --db_dir gets its own mount; one
     # inside it is covered by the /data/db rewrite below.
-    if [[ -n "$POLLUTANT_DBS_HOST" && ( -z "${DB_DIR_HOST:-}" || "$POLLUTANT_DBS_HOST" != "${DB_DIR_HOST}"/* ) ]]; then
-        BINDS+=("${POLLUTANT_DBS_HOST}:/data/pollutant_dbs:ro")
+    if [[ -n "$PROTEIN_DB_DIR_HOST" && ( -z "${DB_DIR_HOST:-}" || "$PROTEIN_DB_DIR_HOST" != "${DB_DIR_HOST}"/* ) ]]; then
+        BINDS+=("${PROTEIN_DB_DIR_HOST}:/data/protein_dbs:ro")
         for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
-            [[ "${NF_ARGS[$i]}" == "$POLLUTANT_DBS_HOST" ]] && NF_ARGS[$i]=/data/pollutant_dbs
+            [[ "${NF_ARGS[$i]}" == "$PROTEIN_DB_DIR_HOST" ]] && NF_ARGS[$i]=/data/protein_dbs
         done
     fi
 

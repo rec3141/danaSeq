@@ -300,8 +300,8 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "earthdna" "~1.3 GB" "EarthDNA SILVA 144 globe + ASV placement models (illumina_amplicon PLACE_GLOBE)"
     printf "  %-12s %-8s  %s\n" "marferret" "~9 GB"  "MarFERReT v1.1.1 marine eukaryotic proteins (DIAMOND + taxonomy + Pfam)"
     printf "  %-12s %-8s  %s\n" "gtdbtk"   "~61 GB"  "GTDB-Tk r232 reference data, ~98 GB extracted (phylogenetic MAG classification)"
-    printf "  %-12s %-8s  %s\n" "pgap"     "~2.7 GB" "NCBI PGAP HMMs: TIGRFAM + NCBIfam + PRK (mag_analysis --pollutant_dbs)"
-    printf "  %-12s %-8s  %s\n" "funfam"   "~1.4 GB" "CATH FunFam HMMs v4.3.0, 212,872 models; not in --all (mag_analysis --pollutant_dbs)"
+    printf "  %-12s %-8s  %s\n" "pgap"     "~2.7 GB" "NCBI PGAP HMMs: TIGRFAM + NCBIfam + PRK (mag_analysis --protein_db_dir)"
+    printf "  %-12s %-8s  %s\n" "funfam"   "~1.4 GB" "CATH FunFam HMMs v4.3.0, 212,872 models; not in --all (mag_analysis --protein_db_dir)"
     echo ""
     echo "  Note: Tiara, Whokaryote, and IslandPath HMM profiles are bundled with"
     echo "  their conda packages (no separate database download needed)."
@@ -332,7 +332,7 @@ show_databases() {
     echo "  --earthdna_db ${DB_DIR}/earthdna_db/${EARTHDNA_RELEASE}   (illumina_amplicon)"
     echo "  --marferret_db ${DB_DIR}/marferret_db"
     echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
-    echo "  --pollutant_dbs ${DB_DIR}/pollutants   (pgap; mag_analysis and nanopore_live)"
+    echo "  --protein_db_dir ${DB_DIR}/protein_dbs   (pgap, funfam; mag_analysis)"
     echo ""
 }
 
@@ -880,12 +880,12 @@ download_bakta_light() {
 
 # NCBI PGAP HMMs (https://ftp.ncbi.nlm.nih.gov/hmm/current/): the maintained
 # TIGRFAMs (accessions TIGR*, source JCVI) plus NCBIfam and PRK models, each
-# with its own trusted cutoff. Written as one --pollutant_dbs entry,
-# <db_dir>/pollutants/PGAP/. Model names are not unique across the
+# with its own trusted cutoff. Written as one --protein_db_dir entry,
+# <db_dir>/protein_dbs/PGAP/. Model names are not unique across the
 # collection, so each model is renamed to its accession, and PGAP.genes.tsv is
 # keyed by accession.
 download_pgap() {
-    local db_path="${DB_DIR}/pollutants/PGAP"
+    local db_path="${DB_DIR}/protein_dbs/PGAP"
     local url="https://ftp.ncbi.nlm.nih.gov/hmm/current"
     if [ -s "${db_path}/PGAP.hmm" ] && [ -s "${db_path}/PGAP.genes.tsv" ]; then
         echo "[INFO] PGAP HMMs already exist at ${db_path}"
@@ -937,17 +937,17 @@ download_pgap() {
     rm -f "${db_path}/hmm_PGAP.LIB"
 
     echo "[SUCCESS] PGAP HMMs (${n_out} models) downloaded to ${db_path}"
-    echo "  Use with: --pollutant_dbs ${DB_DIR}/pollutants"
+    echo "  Use with: --protein_db_dir ${DB_DIR}/protein_dbs"
 }
 
 # CATH FunFam HMMs (v4.3.0, 2020, the last release with them): functional
 # families within CATH superfamilies, each with a trusted cutoff (TC). Written
-# as <db_dir>/pollutants/CATH-FunFam/. Names are <superfamily>-FF-<n>, so
+# as <db_dir>/protein_dbs/CATH-FunFam/. Names are <superfamily>-FF-<n>, so
 # --funfam-superfamilies (comma-separated codes, or code prefixes such as
 # 3.40.50) keeps only those superfamilies: the full library is ~11x PGAP, too
 # slow for a co-assembly's proteins.
 download_funfam() {
-    local db_path="${DB_DIR}/pollutants/CATH-FunFam"
+    local db_path="${DB_DIR}/protein_dbs/CATH-FunFam"
     local url="ftp://orengoftp.biochem.ucl.ac.uk/cath/releases/all-releases/v4_3_0"
     if [ -s "${db_path}/CATH-FunFam.hmm" ] && [ -s "${db_path}/CATH-FunFam.genes.tsv" ]; then
         echo "[INFO] CATH FunFam HMMs already exist at ${db_path}"
@@ -1002,7 +1002,7 @@ download_funfam() {
     rm -f "${db_path}/funfam-hmm3-v4_3_0.lib.gz"
 
     echo "[SUCCESS] CATH FunFam HMMs (${n_out} models) downloaded to ${db_path}"
-    echo "  Use with: --pollutant_dbs ${DB_DIR}/pollutants"
+    echo "  Use with: --protein_db_dir ${DB_DIR}/protein_dbs"
 }
 
 download_kofam() {
@@ -1716,6 +1716,6 @@ else
     ! $DOWNLOAD_GTDBTK   || echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
     ! $DOWNLOAD_ANTISMASH || echo "  --antismash_db ${DB_DIR}/antismash_db"
     ! $DOWNLOAD_MAGSCOT   || echo "  --magscot_hmm_dir ${DB_DIR}/magscot_hmm"
-    ! $DOWNLOAD_PGAP      || echo "  --pollutant_dbs ${DB_DIR}/pollutants"
-    ! $DOWNLOAD_FUNFAM    || echo "  --pollutant_dbs ${DB_DIR}/pollutants   (CATH-FunFam)"
+    ! $DOWNLOAD_PGAP      || echo "  --protein_db_dir ${DB_DIR}/protein_dbs"
+    ! $DOWNLOAD_FUNFAM    || echo "  --protein_db_dir ${DB_DIR}/protein_dbs   (CATH-FunFam)"
 fi

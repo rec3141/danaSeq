@@ -76,7 +76,7 @@ def helpMessage() {
 
     Metabolic profiling:
       --run_metabolism, --run_antismash, --run_ecossdb
-      --pollutant_dbs DIR  Protein reference DBs searched with the annotation proteins
+      --protein_db_dir DIR  Protein reference DBs searched with the annotation proteins
                            (needs --run_metabolism): one subdir per DB holding
                            <name>.hmm (hmmsearch) and/or <name>.dmnd (DIAMOND blastp),
                            an optional <name>.genes.tsv catalogue and <name>.opts
@@ -120,16 +120,16 @@ def runComebin() {
     return false
 }
 
-// Protein reference DBs under --pollutant_dbs for one search method (ext 'hmm'
+// Protein reference DBs under --protein_db_dir for one search method (ext 'hmm'
 // or 'dmnd'): [ [dbname, dbfile, annot_path_or_NONE, cutoff_opts], ... ], one
 // entry per <sub>/<sub>.<ext>. Cutoff: <name>.opts beside the DB file, else the
 // catalogue's per-target thresholds (hmm, when <name>.genes.tsv has a
 // `threshold` column), else the default. Matches nanopore_live's
 // protein_db_entries, so a DB directory gives the same hits in both pipelines.
 def proteinDbEntries(String ext, String default_opts) {
-    if (!params.pollutant_dbs) return []
-    def root = file(params.pollutant_dbs)
-    if (!root.isDirectory()) error "ERROR: --pollutant_dbs is not a directory: ${params.pollutant_dbs}"
+    if (!params.protein_db_dir) return []
+    def root = file(params.protein_db_dir)
+    if (!root.isDirectory()) error "ERROR: --protein_db_dir is not a directory: ${params.protein_db_dir}"
     def entries = []
     root.listFiles().findAll { it.isDirectory() }.sort { it.name }.each { sub ->
         def f = file("${sub}/${sub.name}.${ext}")
@@ -473,8 +473,8 @@ workflow {
                 PROTEIN_DB_DIAMOND.out.tsv.map { ['protein_db', it] }
             )
         }
-        if (params.pollutant_dbs && !hmm_entries && !dmnd_entries) {
-            log.warn "--pollutant_dbs ${params.pollutant_dbs} holds no <name>/<name>.hmm or .dmnd; no protein DB searched."
+        if (params.protein_db_dir && !hmm_entries && !dmnd_entries) {
+            log.warn "--protein_db_dir ${params.protein_db_dir} holds no <name>/<name>.hmm or .dmnd; no protein DB searched."
         }
     }
 
