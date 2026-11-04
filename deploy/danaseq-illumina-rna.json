@@ -1,9 +1,9 @@
 {
   "image": "danaseq-illumina-rna",
-  "digest": "sha256:21c448896ab250d73e46eabc10178480f270bf31e5786edb1832faf01093d0d8",
-  "commit": "8baabe717e94f61b812c8c61c548ee57b3e5c235",
-  "base_digest": "sha256:a3b51bed1f53439061cef38a9ef6e1385cda8e324d02c0fca822275cdb737339",
-  "built": "2026-11-02T04:42:00Z",
-  "sif": "oras://ghcr.io/rec3141/danaseq-illumina-rna:sif-8baabe717e94f61b812c8c61c548ee57b3e5c235",
-  "sif_sha256": "c60042c06bac00eb65a2b7ad7e54bc2387f88da08532b6df82058e362937f6e0"
+  "digest": "sha256:1ce26bf806cb3f118f31a43895beb173e3a783019de75fc09b7e97defb6110fa",
+  "commit": "677d0fef8cc6ea8d46ea62fdf3451870fca1931d",
+  "base_digest": "sha256:3b03dd48e83aea084a683c713243304c0611431dfce99acb26d6a2c07e39f3de",
+  "built": "2026-11-04T04:31:22Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-illumina-rna:sif-677d0fef8cc6ea8d46ea62fdf3451870fca1931d",
+  "sif_sha256": "c28e4ffb01eccef68056d1dfbaeed77bc39651d0e300743834165abe585322a0"
 }
