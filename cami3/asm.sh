@@ -3,6 +3,8 @@
 # the dataset co-assembled, then each sample mapped back for per-contig depths.
 #   sbatch --job-name=asm-toy-long  asm.sh toy  long     (nanopore_assembly, Flye)
 #   sbatch --job-name=asm-toy-short asm.sh toy  short    (illumina_assembly, co-assembly)
+# CAMI's simulated ONT R10.4.1 reads exceed nano-hq's 5% error envelope, so
+# nano-hq drops every read; nano-raw keeps them.
 # Inputs come from prep-reads.sh. To continue after a timeout or failure,
 # resubmit with --resume as a third argument. A first run must not pass it: with
 # no run history, the launcher adopts ~/.nextflow/history and resumes an
@@ -41,7 +43,7 @@ case "$TYPE" in
                --outdir "$C/assembly_long" \
                --workdir "$C/work_assembly_long" \
                --human_ref "$HUMAN_FA" \
-               --read_type nano-hq \
+               --read_type nano-raw \
                --assembly_cpus 128 --assembly_memory '700 GB' \
                "${RESUME[@]}" ;;
     short) "$GENICE/danaSeq/illumina_assembly/run-illumina-assembly.sh" --container \
