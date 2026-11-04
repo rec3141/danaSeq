@@ -337,7 +337,7 @@ viz/deploy.sh --preprocess-dir <outdir>/viz \
     --deploy_slug genice_ci --deploy_name "GenIce CI"
 ```
 
-Or drop the hook by hand at `<outdir>/deploy.sh`:
+Or drop the hook by hand at `<sync dir>/deploy.sh`, where the sync dir is `--store_dir` when one is set (DB_SYNC scans the store dir and builds `viz/` there), otherwise `--outdir`:
 
 ```bash
 #!/usr/bin/env bash
@@ -346,7 +346,7 @@ exec /data/dev/danaSeq/nanopore_live/viz/deploy.sh \
     --slug genice_ci --name "GenIce CI"
 ```
 
-DB_SYNC detects and invokes any executable `<outdir>/deploy.sh` at the end of each sync tick, so every live-sequencing refresh rebuilds + re-pushes.
+DB_SYNC detects and invokes any executable `<sync dir>/deploy.sh` at the end of each sync tick, so every live-sequencing refresh rebuilds + re-pushes.
 
 **API key:** read from `$MICROSCAPE_API_KEY` if set, else `~/.config/microscape/api-key`.
 

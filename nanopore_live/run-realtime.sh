@@ -120,8 +120,9 @@ usage() {
     echo "                                       read it (requires API key with"
     echo "                                       can_publish_public=1)"
     echo "  --deploy_public          DEPRECATED — alias of --deploy_visibility shared"
-    echo "  Setting --deploy_slug + --deploy_name writes <outdir>/deploy.sh that"
-    echo "  DB_SYNC fires every sync tick. Existing hook is overwritten. Requires"
+    echo "  Setting --deploy_slug + --deploy_name writes deploy.sh into the dir"
+    echo "  DB_SYNC syncs (--store_dir if set, else --outdir); DB_SYNC fires it"
+    echo "  every sync tick. Existing hook is overwritten. Requires"
     echo "  \$MICROSCAPE_API_KEY or ~/.config/microscape/api-key."
     echo ""
     echo "End-of-run archive (watch mode, local conda mode only — not with --docker):"
@@ -175,6 +176,7 @@ ARCHIVE_RAW_DEST="${ARCHIVE_RAW_DEST:-}"
 ARCHIVE_OUT_DEST="${ARCHIVE_OUT_DEST:-}"
 ARCHIVE_POLL=30
 POLLUTANT_DBS_HOST=""
+STORE_DIR_HOST=""
 
 while (( $# )); do
     case "$1" in
@@ -221,6 +223,13 @@ while (( $# )); do
             [[ -z "${2:-}" ]] && die "--session requires a session ID"
             RESUME_SESSION="$2"
             AUTO_SESSION=false
+            shift 2 ;;
+        --store_dir)
+            # Passed through to Nextflow, and remembered because DB_SYNC scans the
+            # store dir (not --outdir) when one is set: viz/ and deploy.sh live there.
+            [[ -z "${2:-}" ]] && die "--store_dir requires a directory path"
+            STORE_DIR_HOST="$(realpath -m "$2")"
+            NF_ARGS+=("--store_dir" "$STORE_DIR_HOST")
             shift 2 ;;
         --deploy_slug)
             [[ -z "${2:-}" ]] && die "--deploy_slug requires a value"
@@ -301,11 +310,17 @@ fi
 [[ -w "$OUTDIR_HOST" ]] || die "Output directory is not writable: $OUTDIR_HOST"
 
 # ============================================================================
-# microscape.app deploy hook — DB_SYNC invokes <outdir>/deploy.sh each tick
+# microscape.app deploy hook — DB_SYNC invokes <sync dir>/deploy.sh each tick,
+# where the sync dir is --store_dir when set (main.nf hands DB_SYNC the store
+# dir, and viz/ is built there), otherwise --outdir.
 # ============================================================================
 
 if [[ -n "$DEPLOY_SLUG" ]]; then
-    DEPLOY_HOOK="${OUTDIR_HOST}/deploy.sh"
+    DEPLOY_DIR="${STORE_DIR_HOST:-$OUTDIR_HOST}"
+    if [[ ! -d "$DEPLOY_DIR" ]]; then
+        mkdir -p "$DEPLOY_DIR" || die "Cannot create deploy hook directory: $DEPLOY_DIR"
+    fi
+    DEPLOY_HOOK="${DEPLOY_DIR}/deploy.sh"
     deploy_tail="    --slug $(printf '%q' "$DEPLOY_SLUG") --name $(printf '%q' "$DEPLOY_NAME") --visibility ${DEPLOY_VISIBILITY}"
     # Quote slug/name through printf %q so spaces and special chars survive
     printf '%s\n' \
