@@ -130,11 +130,12 @@ else
 fi
 
 # The whole directory: besides the top-level JSON it holds subdirectories
-# (fastsne/ with its viewer and data).
-info "staging preprocess output ($(find "$PREPROCESS_DIR" -type f | wc -l) files) into dist/data/"
+# (fastsne/ with its viewer and data). Symlinks are followed: callers such as
+# live_deploy.sh stage the data as links to the real files.
+info "staging preprocess output ($(find -L "$PREPROCESS_DIR" -type f | wc -l) files) into dist/data/"
 rm -rf dist/data
 mkdir -p dist/data
-cp -r "$PREPROCESS_DIR"/. dist/data/
+cp -rL "$PREPROCESS_DIR"/. dist/data/
 
 TARBALL="$(mktemp -t "${SLUG}.XXXXXX.tgz")"
 trap 'rm -f "$TARBALL"' EXIT
