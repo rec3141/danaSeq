@@ -1,6 +1,8 @@
 #!/bin/bash
 # Kitchen-sink danaSeq MAG analysis (--all) of one CAMI III co-assembly on fir.
 #   sbatch --job-name=mag-toy-long --dependency=afterok:<asm job> mag.sh toy long
+# Types: long, short (danaSeq assemblies), gsa_long, gsa_short (CAMI anonymous GSA
+# mapped by map-gsa.sh, the scoreable baseline).
 # Reads assembly_<type>/ from asm.sh and writes mag_<type>/. The launcher keeps
 # its work dir on node-local $SLURM_TMPDIR and stores finished task outputs, so
 # a resubmission picks up where the last job stopped.
@@ -32,7 +34,8 @@ done
 # and mapping/<sample>/<sample>.sorted.bam; its BAMs and indexes are hard-linked into
 # one flat directory (same filesystem, so the links resolve inside the container).
 case "$TYPE" in
-    long)  FASTA=$ASM/assembly/assembly.fasta; DEPTHS=$ASM/mapping/depths.txt; BAMS=$ASM/mapping ;;
+    long|gsa_long|gsa_short)
+           FASTA=$ASM/assembly/assembly.fasta; DEPTHS=$ASM/mapping/depths.txt; BAMS=$ASM/mapping ;;
     short) FASTA=$ASM/assembly/coassembly/coassembly.dedupe.fasta
            DEPTHS=$ASM/mapping/coassembly/coassembly.depths.txt
            BAMS=$ASM/mapping_flat; mkdir -p "$BAMS"
