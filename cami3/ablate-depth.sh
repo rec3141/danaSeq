@@ -60,10 +60,20 @@ echo "S1 samples: $S1"
 run_metabat() {  # run_metabat <config> [depth file]
     local cfg=$1 dep=${2:-}
     local d=$O/binning/$cfg; mkdir -p "$d"
+    rm -f "$d"/bin.*.fa
     cexec "$SIF" metabat2 -i "$A/assembly/assembly.fasta" ${dep:+-a "$dep"} -m 1500 --seed 1 \
-        -t "$SLURM_CPUS_PER_TASK" --saveCls --noBinOut -o "$d/cls"
-    # --saveCls writes contig<TAB>cluster, with 0 for unbinned.
-    awk -F'\t' -v c="$cfg" '$2!=0{printf "%s\t%s_%04d\n",$1,c,$2}' "$d/cls" > "$d/${cfg}_bins.tsv"
+        -t "$SLURM_CPUS_PER_TASK" -o "$d/bin"
+    # The bin FASTAs are the authoritative membership: this MetaBAT2 build's
+    # --saveCls matrix holds internal cluster IDs (including clusters below
+    # minClsSize), not bin numbers. Keep only the contig<TAB>bin table.
+    local f n
+    for f in "$d"/bin.*.fa; do
+        [ -e "$f" ] || continue
+        n=${f##*/bin.}; n=${n%.fa}
+        awk -v b="$(printf '%s_%04d' "$cfg" "$n")" '/^>/{sub(/^>/,""); sub(/[ \t].*/,""); print $0"\t"b}' "$f"
+    done > "$d/${cfg}_bins.tsv"
+    rm -f "$d"/bin.*.fa
+    [ -s "$d/${cfg}_bins.tsv" ] || { echo "[ERROR] $cfg: no bins written" >&2; exit 1; }
     echo "$cfg: $(cut -f2 "$d/${cfg}_bins.tsv" | sort -u | wc -l) bins, $(wc -l < "$d/${cfg}_bins.tsv") contigs binned"
 }
 run_metabat tnf_only
