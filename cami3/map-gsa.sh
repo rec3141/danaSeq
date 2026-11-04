@@ -24,8 +24,9 @@ C=/scratch/rec3141/cami3/$DS
 A=$C/assembly_gsa_$TYPE
 SIF=/home/rec3141/GENICE/danaSeq/nanopore_assembly/.danaseq-nanopore-assembly.sif
 module load apptainer
-run() { apptainer exec --bind /scratch "$SIF" "$@"; }
 T=${SLURM_TMPDIR:-/tmp}
+# Node-local TMP is bound explicitly; samtools sort writes its temp files there.
+run() { apptainer exec --bind /scratch --bind "$T" "$SIF" "$@"; }
 mkdir -p "$A/assembly" "$A/mapping"
 case "$TYPE" in long) PRESET=map-ont ;; short) PRESET=sr ;; *) echo "type must be long or short" >&2; exit 1 ;; esac
 
