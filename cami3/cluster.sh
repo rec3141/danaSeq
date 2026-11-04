@@ -40,6 +40,14 @@ case "$CLUSTER" in
         case ":$PATH:" in *:/opt/slurm/bin:*) ;; *) export PATH=/opt/slurm/bin:$PATH ;; esac
         ASM_MEM='650 GB'
         BIG_PARTITION=genoa
+        # grex jobs get no SLURM_TMPDIR, and node /tmp may be too small for
+        # decompressed reads, so each job gets a temp dir on /project that is
+        # removed when the job exits.
+        if [ -z "${SLURM_TMPDIR:-}" ] && [ -n "${SLURM_JOB_ID:-}" ]; then
+            export SLURM_TMPDIR=$BASE/tmp/job_$SLURM_JOB_ID
+            mkdir -p "$SLURM_TMPDIR"
+            trap 'rm -rf "$SLURM_TMPDIR"' EXIT
+        fi
         container_setup() {
             export PATH=/opt/singularity-ce-4.4.1/bin:$PATH
             export APPTAINER_CACHEDIR=/home/rec3141/scratch/apptainer_cache
