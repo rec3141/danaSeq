@@ -32,6 +32,7 @@ case "$CLUSTER" in
             module load apptainer
             export APPTAINER_CACHEDIR=/home/rec3141/scratch/apptainer_cache
             export APPTAINER_TMPDIR=${SLURM_TMPDIR:-/tmp}
+            if [ -n "${SLURM_TMPDIR:-}" ]; then export TMPDIR=$SLURM_TMPDIR APPTAINERENV_TMPDIR=$SLURM_TMPDIR; fi
         }
         cexec() { local sif=$1; shift; apptainer exec --bind /scratch --bind "${SLURM_TMPDIR:-/tmp}" "$sif" "$@"; } ;;
     grex)
@@ -52,7 +53,14 @@ case "$CLUSTER" in
             export PATH=/opt/singularity-ce-4.4.1/bin:$PATH
             export APPTAINER_CACHEDIR=/home/rec3141/scratch/apptainer_cache
             export APPTAINER_TMPDIR=/home/rec3141/scratch/apptainer_cache/tmp
+            # Singularity CE reads its own variable names, so set both spellings.
+            export SINGULARITY_CACHEDIR=$APPTAINER_CACHEDIR SINGULARITY_TMPDIR=$APPTAINER_TMPDIR
             mkdir -p "$APPTAINER_TMPDIR"
+            # Tools inside the image use TMPDIR; the per-job dir is on /project,
+            # which the ~/scratch bind below covers.
+            if [ -n "${SLURM_TMPDIR:-}" ]; then
+                export TMPDIR=$SLURM_TMPDIR SINGULARITYENV_TMPDIR=$SLURM_TMPDIR APPTAINERENV_TMPDIR=$SLURM_TMPDIR
+            fi
             # ~/scratch is a symlink into /project; bind the resolved path, or links through it dangle.
             local real; real=$(readlink -f "$HOME/scratch")
             export SINGULARITY_BIND="$real" APPTAINER_BINDPATH="$real"
