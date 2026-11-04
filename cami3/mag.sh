@@ -53,7 +53,7 @@ done
 if [ -s "$ASM/mapping/unmapped_samples.txt" ]; then
     echo "[WARNING] $(wc -l < "$ASM/mapping/unmapped_samples.txt") samples are missing from depths.txt" >&2
 fi
-echo "[INFO] BAMs: $(ls "$BAMS"/*.sorted.bam | wc -l)  depth columns: $(head -1 "$DEPTHS" | tr "\t" "\n" | grep -c "sorted.bam$")"
+echo "[INFO] BAMs: $(ls "$BAMS"/*.sorted.bam | wc -l)  depth columns: $(head -1 "$DEPTHS" | tr "\t" "\n" | grep -cE "sorted(\.bam)?$")"
 TNF=(); [ -s "$ASM/assembly/tnf.tsv" ] && TNF=(--tnf "$ASM/assembly/tnf.tsv")
 
 module load apptainer

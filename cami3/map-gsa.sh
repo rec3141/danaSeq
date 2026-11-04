@@ -85,7 +85,8 @@ depths)
         # The illumina_assembly recipe: jgi_summarize_bam_contig_depths at its default identity.
         run jgi_summarize_bam_contig_depths --outputDepth "$A/mapping/depths.txt.part" "$A"/mapping/sample_*.sorted.bam
     fi
-    COLS=$(head -1 "$A/mapping/depths.txt.part" | tr '\t' '\n' | grep -c 'sorted.bam$' || true)
+    # jgi_summarize names columns sample_N.sorted (no .bam); the CoverM converter keeps .bam.
+    COLS=$(head -1 "$A/mapping/depths.txt.part" | tr '\t' '\n' | grep -cE 'sorted(\.bam)?$' || true)
     if [ "$COLS" -ne $(( LAST + 1 )) ]; then echo "[ERROR] depths has $COLS sample columns, expected $(( LAST + 1 ))" >&2; exit 1; fi
     mv "$A/mapping/depths.txt.part" "$A/mapping/depths.txt"
     echo "depths: $COLS sample columns, $(( $(wc -l < "$A/mapping/depths.txt") - 1 )) contigs" ;;
