@@ -26,16 +26,31 @@ for l in "$ASM"/assembly/*; do
     t=$(readlink "$l" 2>/dev/null) || continue
     case "$t" in /data/store/*) ln -sfn "../${t#/data/store/}" "$l" ;; esac
 done
-for f in assembly/assembly.fasta mapping/depths.txt; do
-    if [ ! -s "$ASM/$f" ]; then
-        echo "[ERROR] $ASM/$f is missing or empty; the assembly did not finish" >&2
+# nanopore_assembly writes assembly/assembly.fasta, mapping/depths.txt and
+# mapping/*.sorted.bam. illumina_assembly (co-assembly) writes
+# assembly/coassembly/coassembly.dedupe.fasta, mapping/coassembly/coassembly.depths.txt
+# and mapping/<sample>/<sample>.sorted.bam; its BAMs and indexes are hard-linked into
+# one flat directory (same filesystem, so the links resolve inside the container).
+case "$TYPE" in
+    long)  FASTA=$ASM/assembly/assembly.fasta; DEPTHS=$ASM/mapping/depths.txt; BAMS=$ASM/mapping ;;
+    short) FASTA=$ASM/assembly/coassembly/coassembly.dedupe.fasta
+           DEPTHS=$ASM/mapping/coassembly/coassembly.depths.txt
+           BAMS=$ASM/mapping_flat; mkdir -p "$BAMS"
+           for b in "$ASM"/mapping/*/*.sorted.bam; do
+               ln -f "$b" "$BAMS/" && ln -f "$b.bai" "$BAMS/" || { echo "[ERROR] cannot link $b" >&2; exit 1; }
+           done ;;
+    *) echo "[ERROR] type must be long or short, got $TYPE" >&2; exit 1 ;;
+esac
+for f in "$FASTA" "$DEPTHS"; do
+    if [ ! -s "$f" ]; then
+        echo "[ERROR] $f is missing or empty; the assembly did not finish" >&2
         exit 1
     fi
 done
 if [ -s "$ASM/mapping/unmapped_samples.txt" ]; then
     echo "[WARNING] $(wc -l < "$ASM/mapping/unmapped_samples.txt") samples are missing from depths.txt" >&2
 fi
-echo "[INFO] BAMs: $(ls "$ASM"/mapping/*.sorted.bam | wc -l)  depth columns: $(head -1 "$ASM/mapping/depths.txt" | tr "\t" "\n" | grep -c "sorted.bam$")"
+echo "[INFO] BAMs: $(ls "$BAMS"/*.sorted.bam | wc -l)  depth columns: $(head -1 "$DEPTHS" | tr "\t" "\n" | grep -c "sorted.bam$")"
 TNF=(); [ -s "$ASM/assembly/tnf.tsv" ] && TNF=(--tnf "$ASM/assembly/tnf.tsv")
 
 module load apptainer
@@ -44,11 +59,13 @@ export APPTAINER_TMPDIR=${SLURM_TMPDIR:-/tmp}
 export NXF_SYNTAX_PARSER=v1
 # OpenBLAS in the image segfaults above 128 threads; tasks inherit this.
 export OPENBLAS_NUM_THREADS=64
+L=$C/launch_mag_$TYPE
+mkdir -p "$L" && cd "$L" || exit 1
 
 "$GENICE/danaSeq/mag_analysis/run-mag-analysis.sh" --container \
-    --assembly "$ASM/assembly/assembly.fasta" \
-    --depths "$ASM/mapping/depths.txt" \
-    --bam_dir "$ASM/mapping/" \
+    --assembly "$FASTA" \
+    --depths "$DEPTHS" \
+    --bam_dir "$BAMS/" \
     "${TNF[@]}" \
     --outdir "$C/mag_$TYPE" \
     --db_dir /home/rec3141/scratch/databases \

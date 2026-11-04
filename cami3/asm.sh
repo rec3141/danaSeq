@@ -19,21 +19,28 @@ set -uo pipefail
 DS=$1 TYPE=$2 RESUME=(${3:+--resume})
 C=/scratch/rec3141/cami3/$DS
 GENICE=/home/rec3141/GENICE
-HUMAN=/home/rec3141/scratch/databases/human_ref/hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz
+# Nanopore removes human reads with minimap2 against the FASTA; Illumina runs
+# removehuman.sh, which takes the BBMap index directory (holding ref/).
+HUMAN_FA=/home/rec3141/scratch/databases/human_ref/hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz
+HUMAN_BBMAP=/home/rec3141/scratch/databases/human_ref
 module load apptainer
 export APPTAINER_CACHEDIR=/home/rec3141/scratch/apptainer_cache
 export APPTAINER_TMPDIR=${SLURM_TMPDIR:-/tmp}
 # The image's nextflow.config needs Nextflow's legacy config parser.
 export NXF_SYNTAX_PARSER=v1
-# Nextflow history and the work dir stay on /scratch so --resume works from a new job.
-cd "$C" || exit 1
+# Each dataset/read type launches from its own directory, so its .nextflow
+# history is separate: the illumina launcher always passes -resume, which with no
+# session ID resumes the last run in the launch directory. Work dirs and history
+# stay on /scratch so a resubmitted job can resume.
+L=$C/launch_assembly_$TYPE
+mkdir -p "$L" && cd "$L" || exit 1
 
 case "$TYPE" in
     long)  "$GENICE/danaSeq/nanopore_assembly/run-nanopore-assembly.sh" --container \
                --input "$C/input_long" \
                --outdir "$C/assembly_long" \
                --workdir "$C/work_assembly_long" \
-               --human_ref "$HUMAN" \
+               --human_ref "$HUMAN_FA" \
                --read_type nano-hq \
                --assembly_cpus 128 --assembly_memory '700 GB' \
                "${RESUME[@]}" ;;
@@ -41,7 +48,7 @@ case "$TYPE" in
                --input "$C/input_short" \
                --outdir "$C/assembly_short" \
                --workdir "$C/work_assembly_short" \
-               --human_ref "$HUMAN" \
+               --human_ref "$HUMAN_BBMAP" \
                --coassembly true \
                --assembly_cpus 128 --assembly_memory '700 GB' \
                "${RESUME[@]}" ;;
