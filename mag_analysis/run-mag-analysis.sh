@@ -50,6 +50,7 @@ resolve_db_dir() {
         [--kofam_db]="kofam_db"
         [--eggnog_db]="eggnog_db"
         [--dbcan_db]="dbcan_db"
+        [--protein_db_dir]="protein_dbs"
         [--macsyfinder_models]="macsyfinder_models"
         [--defensefinder_models]="defensefinder_models"
         [--marferret_db]="marferret_db"
@@ -161,6 +162,11 @@ usage() {
     echo "Shortcuts:"
     echo "  --all              Enable all optional modules (still requires DB paths)"
     echo "  --db_dir DIR       Auto-resolve database paths from download-databases.sh layout"
+    echo "                     (<db_dir>/protein_dbs becomes --protein_db_dir)"
+    echo ""
+    echo "Protein reference DBs (with --run_metabolism or --all):"
+    echo "  --protein_db_dir DIR  One subdir per DB: <name>/<name>.hmm and/or .dmnd, optional"
+    echo "                     <name>.genes.tsv and <name>.opts (e.g. CANT-HYD, HADEG, TIGRFAM)"
     echo ""
     echo "Caching & Resume:"
     echo "  --workdir DIR      Nextflow work directory (default: \$SLURM_TMPDIR/mag_analysis_work, else /tmp/...)"
@@ -197,6 +203,7 @@ WORKDIR_HOST="${SLURM_TMPDIR:-/tmp}/mag_analysis_work"
 RESUME_SESSION=""
 DO_RESUME=false
 DB_DIR_HOST=""
+PROTEIN_DB_DIR_HOST=""
 STORE_DIR_HOST=""
 
 # Store mode keeps every finished stage in $OUTDIR (storeDir), so a timeout or
@@ -262,6 +269,12 @@ while (( $# )); do
             [[ -d "$2" ]] || die "--db_dir directory does not exist: $2"
             DB_DIR_HOST="$(realpath "$2")"
             resolve_db_dir "$DB_DIR_HOST"
+            shift 2 ;;
+        --protein_db_dir)
+            [[ -z "${2:-}" ]] && die "--protein_db_dir requires a directory path"
+            [[ -d "$2" ]] || die "--protein_db_dir directory does not exist: $2"
+            PROTEIN_DB_DIR_HOST="$(realpath "$2")"
+            NF_ARGS+=("--protein_db_dir" "$PROTEIN_DB_DIR_HOST")
             shift 2 ;;
         --store_dir)
             [[ -z "${2:-}" ]] && die "--store_dir requires a directory path"
@@ -491,6 +504,15 @@ if [[ "$USE_CONTAINER" == true ]]; then
         BINDS+=("${BAM_DIR_HOST}:/data/bams:ro")
         for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
             NF_ARGS[$i]="${NF_ARGS[$i]//${BAM_DIR_HOST}/\/data\/bams}"
+        done
+    fi
+
+    # An explicit --protein_db_dir outside --db_dir gets its own mount; one
+    # inside it is covered by the /data/db rewrite below.
+    if [[ -n "$PROTEIN_DB_DIR_HOST" && ( -z "${DB_DIR_HOST:-}" || "$PROTEIN_DB_DIR_HOST" != "${DB_DIR_HOST}"/* ) ]]; then
+        BINDS+=("${PROTEIN_DB_DIR_HOST}:/data/protein_dbs:ro")
+        for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+            [[ "${NF_ARGS[$i]}" == "$PROTEIN_DB_DIR_HOST" ]] && NF_ARGS[$i]=/data/protein_dbs
         done
     fi
 

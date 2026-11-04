@@ -7,6 +7,8 @@
 # and any out-of-pipeline backfill driver, so every route produces byte-for-byte
 # the same output for the same inputs.
 #
+# mag_analysis/bin/protein_db_search.sh is a copy; change both together.
+#
 # Usage:
 #   protein_db_search.sh hmm     <db.hmm>  <dbname> <out_prefix> <cpus> <hmm_cut>  <annot.tsv|NONE> <faa>...
 #   protein_db_search.sh diamond <db.dmnd> <dbname> <out_prefix> <cpus> <dmnd_opts> <annot.tsv|NONE> <faa>...

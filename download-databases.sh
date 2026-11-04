@@ -34,6 +34,10 @@ set -euo pipefail
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
 #   ./download-databases.sh --gtdbtk          # Download GTDB-Tk r232 reference data (~61 GB, ~98 GB extracted)
 #   ./download-databases.sh --antismash      # Download antiSMASH databases (~7 GB, more once indexed)
+#   ./download-databases.sh --pgap           # Download NCBI PGAP HMMs (TIGRFAM + NCBIfam + PRK, ~2.7 GB)
+#   ./download-databases.sh --funfam         # Download CATH FunFam HMMs v4.3.0 (212,872 models, ~1.4 GB gz)
+#   ./download-databases.sh --funfam --funfam-superfamilies 3.40.50.300,1.10.10
+#                                             # Only these CATH superfamilies (or code prefixes)
 #   ./download-databases.sh --docker            # Use Docker to run tool CLIs
 #   ./download-databases.sh --apptainer         # Use Apptainer/Singularity (auto-pulls SIF)
 #   ./download-databases.sh --container         # Auto-detect: apptainer > singularity > docker
@@ -159,6 +163,9 @@ DOWNLOAD_MARFERRET=false
 DOWNLOAD_GTDBTK=false
 DOWNLOAD_ANTISMASH=false
 DOWNLOAD_MAGSCOT=false
+DOWNLOAD_PGAP=false
+DOWNLOAD_FUNFAM=false
+FUNFAM_SUPERFAMILIES=""
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -196,6 +203,9 @@ while (( $# )); do
         --gtdbtk)    DOWNLOAD_GTDBTK=true; INTERACTIVE=false; shift ;;
         --antismash) DOWNLOAD_ANTISMASH=true; INTERACTIVE=false; shift ;;
         --magscot)   DOWNLOAD_MAGSCOT=true; INTERACTIVE=false; shift ;;
+        --pgap)      DOWNLOAD_PGAP=true; INTERACTIVE=false; shift ;;
+        --funfam)    DOWNLOAD_FUNFAM=true; INTERACTIVE=false; shift ;;
+        --funfam-superfamilies) FUNFAM_SUPERFAMILIES="$2"; shift 2 ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -228,6 +238,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_GTDBTK=true
     DOWNLOAD_ANTISMASH=true
     DOWNLOAD_MAGSCOT=true
+    DOWNLOAD_PGAP=true
 fi
 
 # Auto-detect container runtime if --container was used
@@ -289,6 +300,8 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "earthdna" "~1.3 GB" "EarthDNA SILVA 144 globe + ASV placement models (illumina_amplicon PLACE_GLOBE)"
     printf "  %-12s %-8s  %s\n" "marferret" "~9 GB"  "MarFERReT v1.1.1 marine eukaryotic proteins (DIAMOND + taxonomy + Pfam)"
     printf "  %-12s %-8s  %s\n" "gtdbtk"   "~61 GB"  "GTDB-Tk r232 reference data, ~98 GB extracted (phylogenetic MAG classification)"
+    printf "  %-12s %-8s  %s\n" "pgap"     "~2.7 GB" "NCBI PGAP HMMs: TIGRFAM + NCBIfam + PRK (mag_analysis --protein_db_dir)"
+    printf "  %-12s %-8s  %s\n" "funfam"   "~1.4 GB" "CATH FunFam HMMs v4.3.0, 212,872 models; not in --all (mag_analysis --protein_db_dir)"
     echo ""
     echo "  Note: Tiara, Whokaryote, and IslandPath HMM profiles are bundled with"
     echo "  their conda packages (no separate database download needed)."
@@ -319,6 +332,7 @@ show_databases() {
     echo "  --earthdna_db ${DB_DIR}/earthdna_db/${EARTHDNA_RELEASE}   (illumina_amplicon)"
     echo "  --marferret_db ${DB_DIR}/marferret_db"
     echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
+    echo "  --protein_db_dir ${DB_DIR}/protein_dbs   (pgap, funfam; mag_analysis)"
     echo ""
 }
 
@@ -862,6 +876,133 @@ download_bakta_light() {
     echo "[SUCCESS] Bakta light database downloaded to ${db_path}/db-light"
     echo "  Use with: --bakta_light_db ${db_path}/db-light   (mag_analysis)"
     echo "            --bakta_db ${db_path}/db-light         (nanopore_live)"
+}
+
+# NCBI PGAP HMMs (https://ftp.ncbi.nlm.nih.gov/hmm/current/): the maintained
+# TIGRFAMs (accessions TIGR*, source JCVI) plus NCBIfam and PRK models, each
+# with its own trusted cutoff. Written as one --protein_db_dir entry,
+# <db_dir>/protein_dbs/PGAP/. Model names are not unique across the
+# collection, so each model is renamed to its accession, and PGAP.genes.tsv is
+# keyed by accession.
+download_pgap() {
+    local db_path="${DB_DIR}/protein_dbs/PGAP"
+    local url="https://ftp.ncbi.nlm.nih.gov/hmm/current"
+    if [ -s "${db_path}/PGAP.hmm" ] && [ -s "${db_path}/PGAP.genes.tsv" ]; then
+        echo "[INFO] PGAP HMMs already exist at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading NCBI PGAP HMMs (~2.7 GB)..."
+    echo "  Destination: ${db_path}"
+    mkdir -p "${db_path}"
+
+    wget -q -O "${db_path}/RELEASE_NOTES.txt" "${url}/RELEASE_NOTES.txt"
+    wget -q -O "${db_path}/hmm_PGAP.tsv" "${url}/hmm_PGAP.tsv"
+    wget -q -O "${db_path}/hmm_PGAP.LIB" "${url}/hmm_PGAP.LIB"
+
+    # NAME precedes ACC in each model: hold NAME, then write the accession in its place.
+    awk '/^NAME / { held = 1; next }
+         /^ACC /  { if (held) print "NAME  " $2; held = 0 }
+         { print }' "${db_path}/hmm_PGAP.LIB" > "${db_path}/PGAP.hmm.tmp"
+    local n_lib n_out
+    n_lib=$(grep -c '^NAME ' "${db_path}/hmm_PGAP.LIB")
+    n_out=$(grep -c '^NAME ' "${db_path}/PGAP.hmm.tmp")
+    if [ "$n_lib" != "$n_out" ]; then
+        echo "[ERROR] PGAP: ${n_lib} models in hmm_PGAP.LIB but ${n_out} renamed; a model lacks ACC" >&2
+        return 1
+    fi
+    mv "${db_path}/PGAP.hmm.tmp" "${db_path}/PGAP.hmm"
+
+    # Catalogue for protein_db_search.sh: target gene category pathway subpathway description.
+    # gene = gene symbol, else the product name (most models have no symbol);
+    # category = model source (TIGRFAM / NCBIfam / PRK), pathway = family type.
+    awk -F'\t' -v OFS='\t' '
+        NR == 1 { for (i = 1; i <= NF; i++) c[$i] = i
+                  print "target", "gene", "category", "pathway", "subpathway", "description"; next }
+        { src = $c["source"]
+          cat = (src == "JCVI") ? "TIGRFAM" : (src == "NCBIFAM") ? "NCBIfam" : (src ~ /PRK/) ? "PRK" : src
+          gene = ($c["gene_symbol"] != "") ? $c["gene_symbol"] : $c["product_name"]
+          print $c["#ncbi_accession"], gene, cat, $c["family_type"], $c["ec_numbers"], $c["product_name"] }
+    ' "${db_path}/hmm_PGAP.tsv" > "${db_path}/PGAP.genes.tsv"
+
+    printf '# PGAP models carry trusted cutoffs (TC); NCBI annotates with them.\ntc\n' > "${db_path}/PGAP.opts"
+    {
+        echo "NCBI PGAP HMMs, ${url}/"
+        grep -m1 'Release number' "${db_path}/RELEASE_NOTES.txt" | sed 's/^ *//'
+        echo "Downloaded $(date +%F); ${n_out} models; NAME set to ACC (accession)."
+        echo "TIGRFAMs: accessions TIGR*, source JCVI (https://www.ncbi.nlm.nih.gov/refseq/annotation_prok/tigrfams/)."
+    } > "${db_path}/source.txt"
+    rm -f "${db_path}/hmm_PGAP.LIB"
+
+    echo "[SUCCESS] PGAP HMMs (${n_out} models) downloaded to ${db_path}"
+    echo "  Use with: --protein_db_dir ${DB_DIR}/protein_dbs"
+}
+
+# CATH FunFam HMMs (v4.3.0, 2020, the last release with them): functional
+# families within CATH superfamilies, each with a trusted cutoff (TC). Written
+# as <db_dir>/protein_dbs/CATH-FunFam/. Names are <superfamily>-FF-<n>, so
+# --funfam-superfamilies (comma-separated codes, or code prefixes such as
+# 3.40.50) keeps only those superfamilies: the full library is ~11x PGAP, too
+# slow for a co-assembly's proteins.
+download_funfam() {
+    local db_path="${DB_DIR}/protein_dbs/CATH-FunFam"
+    local url="ftp://orengoftp.biochem.ucl.ac.uk/cath/releases/all-releases/v4_3_0"
+    if [ -s "${db_path}/CATH-FunFam.hmm" ] && [ -s "${db_path}/CATH-FunFam.genes.tsv" ]; then
+        echo "[INFO] CATH FunFam HMMs already exist at ${db_path}"
+        echo "  Delete ${db_path} and re-run to force re-download (or to change --funfam-superfamilies)."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading CATH FunFam HMMs v4.3.0 (~1.4 GB)..."
+    echo "  Destination: ${db_path}"
+    [ -z "$FUNFAM_SUPERFAMILIES" ] || echo "  Superfamilies: ${FUNFAM_SUPERFAMILIES}"
+    mkdir -p "${db_path}"
+
+    wget -q -O "${db_path}/funfam-hmm3-v4_3_0.lib.gz" "${url}/sequence-data/funfam-hmm3-v4_3_0.lib.gz"
+    wget -q -O "${db_path}/cath-names-v4_3_0.txt" "${url}/cath-classification-data/cath-names-v4_3_0.txt"
+
+    # Keep whole models (records end at "//") whose superfamily matches the list.
+    gzip -dc "${db_path}/funfam-hmm3-v4_3_0.lib.gz" | awk -v keep="$FUNFAM_SUPERFAMILIES" '
+        BEGIN { n = split(keep, k, ",") }
+        function wanted(sf,   i) {
+            if (n == 0) return 1
+            for (i = 1; i <= n; i++) if (sf == k[i] || index(sf, k[i] ".") == 1) return 1
+            return 0
+        }
+        { rec = rec $0 "\n" }
+        /^NAME / { split($2, a, "-FF-"); ok = wanted(a[1]) }
+        /^\/\// { if (ok) printf "%s", rec; rec = ""; ok = 0 }
+    ' > "${db_path}/CATH-FunFam.hmm"
+    local n_out
+    n_out=$(grep -c '^NAME ' "${db_path}/CATH-FunFam.hmm" || true)
+    if [ "${n_out:-0}" -eq 0 ]; then
+        echo "[ERROR] CATH FunFam: no models kept (--funfam-superfamilies '${FUNFAM_SUPERFAMILIES}')" >&2
+        return 1
+    fi
+
+    # Catalogue: category = CATH class, pathway = superfamily code,
+    # subpathway = superfamily name (where CATH names one).
+    awk -v OFS='\t' '
+        FNR == NR { if ($1 !~ /^#/ && $1 != "") { nm = $0; sub(/^[^:]*:/, "", nm); name[$1] = nm }; next }
+        FNR == 1 { print "target", "gene", "category", "pathway", "subpathway", "description" }
+        /^NAME / { split($2, a, "-FF-"); split(a[1], c, ".")
+                   print $2, "", name[c[1]], a[1], name[a[1]], "" }
+    ' "${db_path}/cath-names-v4_3_0.txt" "${db_path}/CATH-FunFam.hmm" > "${db_path}/CATH-FunFam.genes.tsv"
+
+    printf '# FunFam models carry trusted cutoffs (TC).\ntc\n' > "${db_path}/CATH-FunFam.opts"
+    {
+        echo "CATH FunFam HMMs v4.3.0, ${url}/sequence-data/funfam-hmm3-v4_3_0.lib.gz"
+        echo "Downloaded $(date +%F); ${n_out} models; superfamilies: ${FUNFAM_SUPERFAMILIES:-all}."
+        echo "Overlapping hits are not resolved (no cath-resolve-hits): a protein can hit"
+        echo "several FunFams, each above its own TC."
+    } > "${db_path}/source.txt"
+    rm -f "${db_path}/funfam-hmm3-v4_3_0.lib.gz"
+
+    echo "[SUCCESS] CATH FunFam HMMs (${n_out} models) downloaded to ${db_path}"
+    echo "  Use with: --protein_db_dir ${DB_DIR}/protein_dbs"
 }
 
 download_kofam() {
@@ -1536,6 +1677,14 @@ if $DOWNLOAD_MAGSCOT; then
     ( download_magscot ) || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_PGAP; then
+    ( download_pgap ) || failed=$((failed + 1))
+fi
+
+if $DOWNLOAD_FUNFAM; then
+    ( download_funfam ) || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -1567,4 +1716,6 @@ else
     ! $DOWNLOAD_GTDBTK   || echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
     ! $DOWNLOAD_ANTISMASH || echo "  --antismash_db ${DB_DIR}/antismash_db"
     ! $DOWNLOAD_MAGSCOT   || echo "  --magscot_hmm_dir ${DB_DIR}/magscot_hmm"
+    ! $DOWNLOAD_PGAP      || echo "  --protein_db_dir ${DB_DIR}/protein_dbs"
+    ! $DOWNLOAD_FUNFAM    || echo "  --protein_db_dir ${DB_DIR}/protein_dbs   (CATH-FunFam)"
 fi
