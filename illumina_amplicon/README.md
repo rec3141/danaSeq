@@ -58,6 +58,7 @@ which is pip-installed from GitHub at a pinned tag:
 | 10 | RENORMALIZE | Taxonomic grouping and within-group proportions |
 | 11 | CLUSTER_TSNE | t-SNE ordination of samples and ASVs |
 | 12 | NETWORK_SPARCC | CLR + Pearson co-occurrence network (not the SparCC algorithm) |
+| 13 | PLACE_GLOBE | Place each ASV on the [EarthDNA](https://github.com/rec3141/earthdna) globe of full-length SSU references (optional, `--earthdna_db`) |
 
 ## Parameters
 
@@ -76,8 +77,25 @@ nextflow run main.nf --help
 | `--truncQ` | `2` | Truncate at first base with quality <= Q |
 | `--min_overlap` | `12` | Min overlap for pair merging |
 | `--run_phylogeny` | `false` | Build phylogenetic tree |
+| `--earthdna_db` | off | EarthDNA reference directory; places ASVs on the globe and writes `viz/globe.json.gz` |
 | `--denoise_cpus` | `8` | CPUs for the heavy (`process_high`) steps |
 | `--denoise_memory` | `16 GB` | Memory for the heavy (`process_high`) steps |
+
+## EarthDNA globe
+
+With `--earthdna_db`, PLACE_GLOBE works out which SSU region each ASV covers by mapping it (vsearch, both
+strands) to aligned SILVA references, then places it with fastsne on a model built from references cut to that
+region, so the ASVs of any primer set, and of runs that mix 16S and 18S assays, land on one shared globe. ASVs
+that are not SSU (ITS, 28S LSU, COI) are counted as unplaced. `viz/globe.json.gz` holds id, longitude, latitude,
+distance to the nearest reference and region for each placed ASV; microscape.app/earthdna shows every run a user
+can see on that globe. On a 27,606-ASV run (16S V4 + 18S V9) the step takes about 40 s on 8 CPUs.
+
+The reference (SILVA 144, 9 regions, ~1.3 GB download, ~2 GB on disk) is on Zenodo
+([10.5281/zenodo.23936867](https://doi.org/10.5281/zenodo.23936867)):
+
+```bash
+./download-databases.sh --earthdna      # then --earthdna_db databases/earthdna_db/silva144
+```
 
 ## Profiles
 

@@ -30,6 +30,7 @@ set -euo pipefail
 #   ./download-databases.sh --silva           # Download SILVA SSU + LSU NR99 (~900 MB)
 #   ./download-databases.sh --pr2             # Download PR2 SSU (eukaryotic rRNA, ~350 MB)
 #   ./download-databases.sh --silva132        # Download SILVA 132 train set (pre-2021 names, ~60 MB)
+#   ./download-databases.sh --earthdna        # Download EarthDNA globe + placement models (~1.3 GB, ~2 GB extracted)
 #   ./download-databases.sh --marferret       # Download MarFERReT marine eukaryotic database (~9 GB)
 #   ./download-databases.sh --gtdbtk          # Download GTDB-Tk r232 reference data (~61 GB, ~98 GB extracted)
 #   ./download-databases.sh --antismash      # Download antiSMASH databases (~7 GB, more once indexed)
@@ -55,9 +56,18 @@ ENV_DIR="${SCRIPT_DIR}/mag_analysis/conda-envs"
 if [ ! -d "${ENV_DIR}" ] && [ -d "${SCRIPT_DIR}/nanopore_assembly/conda-envs" ]; then
     ENV_DIR="${SCRIPT_DIR}/nanopore_assembly/conda-envs"
 fi
+# EarthDNA (github.com/rec3141/earthdna): a spherical t-SNE map of every SILVA
+# SSU NR99 reference, plus per-region models that place a run's ASVs on it.
+# Each Zenodo version is pinned by record and checksum; the concept DOI
+# 10.5281/zenodo.23936866 always resolves to the newest.
+EARTHDNA_RELEASE="silva144"
+EARTHDNA_URL="https://zenodo.org/records/23936867/files/earthdna_silva144.tar.gz"
+EARTHDNA_SHA256="6cdc4a53e05225dd165e0181ca8c3aff25eb376415d43b6c25f355d3d264ac14"
+
 USE_CONTAINER=false
 CONTAINER_RUNTIME=""   # docker, apptainer, or singularity (set by --docker/--apptainer/--container)
 CONTAINER_IMAGE="ghcr.io/rec3141/danaseq-mag-analysis:latest"
+
 SIF_PATH=""            # resolved path to .sif file (apptainer/singularity only)
 
 # Usable memory in whole GB — the smaller of physical RAM and any cgroup cap.
@@ -144,6 +154,7 @@ DOWNLOAD_KRAKEN2=false
 DOWNLOAD_SILVA=false
 DOWNLOAD_PR2=false
 DOWNLOAD_SILVA132=false
+DOWNLOAD_EARTHDNA=false
 DOWNLOAD_MARFERRET=false
 DOWNLOAD_GTDBTK=false
 DOWNLOAD_ANTISMASH=false
@@ -180,6 +191,7 @@ while (( $# )); do
         --silva)     DOWNLOAD_SILVA=true; INTERACTIVE=false; shift ;;
         --pr2)       DOWNLOAD_PR2=true; INTERACTIVE=false; shift ;;
         --silva132)  DOWNLOAD_SILVA132=true; INTERACTIVE=false; shift ;;
+        --earthdna)  DOWNLOAD_EARTHDNA=true; INTERACTIVE=false; shift ;;
         --marferret) DOWNLOAD_MARFERRET=true; INTERACTIVE=false; shift ;;
         --gtdbtk)    DOWNLOAD_GTDBTK=true; INTERACTIVE=false; shift ;;
         --antismash) DOWNLOAD_ANTISMASH=true; INTERACTIVE=false; shift ;;
@@ -211,6 +223,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_SILVA=true
     DOWNLOAD_PR2=true
     DOWNLOAD_SILVA132=true
+    DOWNLOAD_EARTHDNA=true
     DOWNLOAD_MARFERRET=true
     DOWNLOAD_GTDBTK=true
     DOWNLOAD_ANTISMASH=true
@@ -273,6 +286,7 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "silva"    "~900 MB" "SILVA 138.2 SSU + LSU NR99 (rRNA gene classification)"
     printf "  %-12s %-8s  %s\n" "pr2"      "~350 MB" "PR2 5.1.1 SSU (eukaryotic rRNA; SILVA under-resolves protists)"
     printf "  %-12s %-8s  %s\n" "silva132" "~60 MB"  "SILVA 132 train set (pre-2021 names: Proteobacteria, not Pseudomonadota)"
+    printf "  %-12s %-8s  %s\n" "earthdna" "~1.3 GB" "EarthDNA SILVA 144 globe + ASV placement models (illumina_amplicon PLACE_GLOBE)"
     printf "  %-12s %-8s  %s\n" "marferret" "~9 GB"  "MarFERReT v1.1.1 marine eukaryotic proteins (DIAMOND + taxonomy + Pfam)"
     printf "  %-12s %-8s  %s\n" "gtdbtk"   "~61 GB"  "GTDB-Tk r232 reference data, ~98 GB extracted (phylogenetic MAG classification)"
     echo ""
@@ -302,6 +316,7 @@ show_databases() {
     echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta   (mag_analysis)"
     echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta   (mag_analysis)"
     echo "  --ref_databases \"silva:${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta:Domain,Phylum,Class,Order,Family,Genus\"   (illumina_amplicon)"
+    echo "  --earthdna_db ${DB_DIR}/earthdna_db/${EARTHDNA_RELEASE}   (illumina_amplicon)"
     echo "  --marferret_db ${DB_DIR}/marferret_db"
     echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
     echo ""
@@ -338,9 +353,10 @@ if $INTERACTIVE; then
     echo " 17) marferret - MarFERReT marine eukaryotic proteins (~9 GB)"
     echo " 18) pr2       - PR2 SSU eukaryotic rRNA classification (~350 MB)"
     echo " 19) silva132  - SILVA 132 train set, pre-2021 nomenclature (~60 MB)"
-    echo " 20) all       - All databases"
+    echo " 20) earthdna  - EarthDNA globe + ASV placement models (~1.3 GB)"
+    echo " 21) all       - All databases"
     echo ""
-    read -rp "Choice [1-20, or names]: " choice
+    read -rp "Choice [1-21, or names]: " choice
 
     case "$choice" in
         1|human)        DOWNLOAD_HUMAN=true ;;
@@ -361,8 +377,9 @@ if $INTERACTIVE; then
         16|silva)       DOWNLOAD_SILVA=true ;;
         18|pr2)         DOWNLOAD_PR2=true ;;
         19|silva132)    DOWNLOAD_SILVA132=true ;;
+        20|earthdna)    DOWNLOAD_EARTHDNA=true ;;
         17|marferret)   DOWNLOAD_MARFERRET=true ;;
-        20|all)         DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_SILVA132=true; DOWNLOAD_MARFERRET=true ;;
+        21|all)         DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_SILVA132=true; DOWNLOAD_EARTHDNA=true; DOWNLOAD_MARFERRET=true ;;
         *)
             # Parse space-separated names
             for item in $choice; do
@@ -385,15 +402,16 @@ if $INTERACTIVE; then
                     16|silva)       DOWNLOAD_SILVA=true ;;
                     18|pr2)         DOWNLOAD_PR2=true ;;
                     19|silva132)    DOWNLOAD_SILVA132=true ;;
+                    20|earthdna)    DOWNLOAD_EARTHDNA=true ;;
                     17|marferret)   DOWNLOAD_MARFERRET=true ;;
-                    all)            DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_SILVA132=true; DOWNLOAD_MARFERRET=true ;;
+                    all)            DOWNLOAD_HUMAN=true; DOWNLOAD_GENOMAD=true; DOWNLOAD_CHECKV=true; DOWNLOAD_CHECKM=true; DOWNLOAD_CHECKM2=true; DOWNLOAD_KAIJU=true; DOWNLOAD_MACSYFINDER=true; DOWNLOAD_DEFENSEFINDER=true; DOWNLOAD_BAKTA=true; DOWNLOAD_BAKTA_LIGHT=true; DOWNLOAD_KOFAM=true; DOWNLOAD_EGGNOG=true; DOWNLOAD_DBCAN=true; DOWNLOAD_METAEUK=true; DOWNLOAD_KRAKEN2=true; DOWNLOAD_SILVA=true; DOWNLOAD_PR2=true; DOWNLOAD_SILVA132=true; DOWNLOAD_EARTHDNA=true; DOWNLOAD_MARFERRET=true ;;
                     *) echo "[WARNING] Unknown selection: $item" >&2 ;;
                 esac
             done
             ;;
     esac
 
-    if ! $DOWNLOAD_HUMAN && ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_BAKTA_LIGHT && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_PR2 && ! $DOWNLOAD_SILVA132 && ! $DOWNLOAD_MARFERRET; then
+    if ! $DOWNLOAD_HUMAN && ! $DOWNLOAD_GENOMAD && ! $DOWNLOAD_CHECKV && ! $DOWNLOAD_CHECKM && ! $DOWNLOAD_CHECKM2 && ! $DOWNLOAD_KAIJU && ! $DOWNLOAD_MACSYFINDER && ! $DOWNLOAD_DEFENSEFINDER && ! $DOWNLOAD_BAKTA && ! $DOWNLOAD_BAKTA_LIGHT && ! $DOWNLOAD_KOFAM && ! $DOWNLOAD_EGGNOG && ! $DOWNLOAD_DBCAN && ! $DOWNLOAD_METAEUK && ! $DOWNLOAD_KRAKEN2 && ! $DOWNLOAD_SILVA && ! $DOWNLOAD_PR2 && ! $DOWNLOAD_SILVA132 && ! $DOWNLOAD_EARTHDNA && ! $DOWNLOAD_MARFERRET; then
         echo "No databases selected. Exiting."
         exit 0
     fi
@@ -1184,6 +1202,30 @@ download_pr2() {
     sync_amplicon_registry
 }
 
+download_earthdna() {
+    local db_path="${DB_DIR}/earthdna_db"
+    if [ -f "${db_path}/${EARTHDNA_RELEASE}/manifest.json" ]; then
+        echo "[INFO] EarthDNA ${EARTHDNA_RELEASE} already exists at ${db_path}/${EARTHDNA_RELEASE}"
+        echo "  Delete it and re-run to force re-download."
+        return 0
+    fi
+
+    echo ""
+    echo "[INFO] Downloading EarthDNA ${EARTHDNA_RELEASE} reference (~1.3 GB compressed, ~2 GB on disk)..."
+    echo "  Source: doi.org/10.5281/zenodo.23936867"
+    echo "  Destination: ${db_path}"
+
+    mkdir -p "${db_path}"
+    local tgz="${db_path}/earthdna_${EARTHDNA_RELEASE}.tar.gz"
+    wget -q --show-progress -O "${tgz}" "${EARTHDNA_URL}"
+    echo "${EARTHDNA_SHA256}  ${tgz}" | sha256sum -c --quiet - || { echo "[ERROR] checksum mismatch: ${tgz}" >&2; return 1; }
+    tar -xzf "${tgz}" -C "${db_path}"
+    rm -f "${tgz}"
+
+    echo "[SUCCESS] EarthDNA reference ready: ${db_path}/${EARTHDNA_RELEASE}"
+    echo "  Use with: --earthdna_db ${db_path}/${EARTHDNA_RELEASE}   (illumina_amplicon)"
+}
+
 download_silva132() {
     local db_path="${DB_DIR}/silva_db"
     local fasta="${db_path}/silva_nr_v132_train_set.fa"
@@ -1474,6 +1516,10 @@ if $DOWNLOAD_SILVA132; then
     ( download_silva132 ) || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_EARTHDNA; then
+    ( download_earthdna ) || failed=$((failed + 1))
+fi
+
 if $DOWNLOAD_MARFERRET; then
     ( download_marferret ) || failed=$((failed + 1))
 fi
@@ -1516,6 +1562,7 @@ else
     ! $DOWNLOAD_SILVA   || echo "  --silva_ssu_db ${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta   (mag_analysis)"
     ! $DOWNLOAD_SILVA   || echo "  --silva_lsu_db ${DB_DIR}/silva_db/SILVA_138.2_LSURef_NR99.fasta   (mag_analysis)"
     ! $DOWNLOAD_SILVA   || echo "  --ref_databases \"silva:${DB_DIR}/silva_db/SILVA_138.2_SSURef_NR99.fasta:${SILVA_RANKS}\"   (illumina_amplicon)"
+    ! $DOWNLOAD_EARTHDNA  || echo "  --earthdna_db ${DB_DIR}/earthdna_db/${EARTHDNA_RELEASE}   (illumina_amplicon)"
     ! $DOWNLOAD_MARFERRET || echo "  --marferret_db ${DB_DIR}/marferret_db"
     ! $DOWNLOAD_GTDBTK   || echo "  --gtdbtk_db  ${DB_DIR}/gtdbtk_db"
     ! $DOWNLOAD_ANTISMASH || echo "  --antismash_db ${DB_DIR}/antismash_db"

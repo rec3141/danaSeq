@@ -129,6 +129,7 @@ include { LOAD_METADATA }     from './modules/metadata'
 include { CLUSTER_TSNE }      from './modules/cluster'
 include { NETWORK_SPARCC }    from './modules/network'
 include { BUILD_VIZ }         from './modules/shiny'
+include { PLACE_GLOBE }       from './modules/globe'
 include { BUNDLE_VIZ_SITE }  from './modules/shiny'
 
 // ============================================================================
@@ -617,6 +618,13 @@ workflow {
         ch_network = NETWORK_SPARCC.out.correlations
     }
 
+    // 11b. EarthDNA globe placement (optional — needs --earthdna_db)
+    ch_globe = Channel.empty()
+    if (params.earthdna_db) {
+        PLACE_GLOBE(FILTER_SEQTAB.out.seqtab, file(params.earthdna_db, checkIfExists: true))
+        ch_globe = PLACE_GLOBE.out.placements
+    }
+
     // 12. Build visualization. This runs whatever else did or did not: an assay
     //     whose primers match neither SSU reference is skipped for taxonomy on
     //     purpose, and skipping its viz too would leave a finished run with
@@ -642,7 +650,8 @@ workflow {
         CLUSTER_TSNE.out.sample_tsne.ifEmpty(file('NO_SAMPLE_TSNE')),
         CLUSTER_TSNE.out.seq_tsne.ifEmpty(file('NO_SEQ_TSNE')),
         ch_network.ifEmpty(file('NO_NETWORK')),
-        ch_primer_assignment
+        ch_primer_assignment,
+        ch_globe.ifEmpty(file('NO_GLOBE'))
     )
 
     // 13. Optional: bundle static viz site (requires Node.js). The tree goes in
