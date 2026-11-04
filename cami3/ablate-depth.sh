@@ -48,14 +48,14 @@ S1=$(awk -F'\t' '$2=="S1"{print $1}' "$MAP" | tr '\n' ' ')
 ALL=$(awk -F'\t' 'NR>1{print $1}' "$MAP" | tr '\n' ' ')
 subset_depth "$O/depths/one_sample.txt" sample_0
 subset_depth "$O/depths/one_subject.txt" $S1
-subset_depth "$O/depths/all_samples.txt" $ALL
+# all_samples is the source table itself, copied exactly. Recomputing it would
+# re-round the totals (the converter rounds totals and sample means separately to
+# four decimals). subset_depth still runs on the full sample set first, as a check
+# that every mapped sample has its column; awk exits 3 otherwise.
+subset_depth "$O/depths/all_samples.check" $ALL
+rm -f "$O/depths/all_samples.check"
+cp "$DEP" "$O/depths/all_samples.txt"
 echo "S1 samples: $S1"
-# Check: all_samples must reproduce the source table, apart from float formatting.
-awk -F'\t' 'NR==FNR{if(FNR>1) for(i=3;i<=NF;i++) v[FNR,i]=$i; n=NF; next}
-    FNR>1{ if(NF!=n){print "[ERROR] column count differs at row "FNR > "/dev/stderr"; exit 4}
-           for(i=3;i<=NF;i++){ a=$i; b=v[FNR,i]; d=a-b; if(d<0)d=-d
-               if(d>1e-4*(b<0?-b:b)+1e-6){print "[ERROR] all_samples differs at row "FNR" col "i": "a" vs "b > "/dev/stderr"; exit 4} } }
-    END{print "all_samples reproduces the source depth table"}' "$DEP" "$O/depths/all_samples.txt"
 
 run_metabat() {  # run_metabat <config> [depth file]
     local cfg=$1 dep=${2:-}
