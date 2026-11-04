@@ -533,6 +533,34 @@ def build_renorm_stats(renorm_data):
 # Load taxonomy files from a directory
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Build globe.json.gz — ASV positions on the EarthDNA globe (PLACE_GLOBE)
+# ---------------------------------------------------------------------------
+
+def build_globe(placements_path, seq_to_id):
+    """ASV id, lon, lat, distance to the nearest reference and region, for microscape.app/earthdna.
+
+    Positions are degrees on the reference globe named in globe_summary.json (published beside the
+    placements); ASVs that matched no SSU region (ITS, LSU, non-ribosomal) are absent.
+    """
+    log_info("Building globe.json.gz")
+    pl = pd.read_csv(placements_path, sep="\t")
+    regions = sorted(pl["region"].unique())
+    rix = {r: i for i, r in enumerate(regions)}
+    rows = [[seq_to_id[r.sequence], round(float(r.lon), 4), round(float(r.lat), 4),
+             round(float(r.nn_dist), 4), rix[r.region]]
+            for r in pl.itertuples() if r.sequence in seq_to_id]
+    # Nextflow stages a symlink; the summary sits beside its target in the PLACE_GLOBE task
+    summary_path = os.path.join(os.path.dirname(os.path.realpath(placements_path)), "globe_summary.json")
+    reference = None
+    if os.path.exists(summary_path):
+        with open(summary_path) as fh:
+            reference = json.load(fh).get("reference")
+    log_info(f"globe.json.gz: {len(rows)} of {len(seq_to_id)} ASVs placed")
+    return {"fields": ["id", "lon", "lat", "nn_dist", "region"], "regions": regions,
+            "reference": reference, "asvs": rows}
+
+
 def _absent(path):
     """True for the NO_* sentinels Nextflow feeds when an input never ran."""
     return not path or os.path.basename(str(path)).startswith("NO_")
@@ -770,7 +798,7 @@ def main():
         log_error(
             "Usage: build_viz.py <seqtab.pkl> <renorm.pkl> <taxonomy_dir> "
             "<metadata.pkl_or_NONE> <sample_tsne.pkl> <seq_tsne.pkl> <network.pkl> "
-            "[primer_assignment.tsv_or_NONE]"
+            "[primer_assignment.tsv_or_NONE] [globe_placements.tsv_or_NONE]"
         )
         sys.exit(1)
 
@@ -781,8 +809,9 @@ def main():
     sample_tsne_path = sys.argv[5]
     seq_tsne_path = sys.argv[6]
     network_path = sys.argv[7]
-    # Optional 8th arg so older callers keep working.
+    # Optional 8th and 9th args so older callers keep working.
     assignment_path = sys.argv[8] if len(sys.argv) > 8 else None
+    globe_path = sys.argv[9] if len(sys.argv) > 9 else None
 
     # --- Load data ---
     seqtab = load_pickle(seqtab_path)
@@ -888,6 +917,8 @@ def main():
     # asvs.json.gz
     asvs, seq_to_id = build_asvs(seqtab, seq_tsne, renorm_table_list, taxonomy_dict)
     write_json(asvs, "asvs.json.gz", compress=True)
+    if not _absent(globe_path):
+        write_json(build_globe(globe_path, seq_to_id), "globe.json.gz", compress=True)
 
     # counts.json.gz
     counts = build_counts(seqtab, seq_to_id)

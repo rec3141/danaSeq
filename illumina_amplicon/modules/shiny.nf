@@ -22,6 +22,7 @@ process BUILD_VIZ {
     path(seq_tsne)
     path(network)
     path(primer_assignment)
+    path(globe)
 
     output:
     path("*.json"),    emit: json, optional: true
@@ -42,7 +43,8 @@ process BUILD_VIZ {
         "${sample_tsne}" \
         "${seq_tsne}" \
         "${network}" \
-        "${primer_assignment}"
+        "${primer_assignment}" \
+        "${globe}"
     """
 }
 
