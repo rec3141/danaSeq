@@ -60,9 +60,9 @@ fi
 # SSU NR99 reference, plus per-region models that place a run's ASVs on it.
 # Each Zenodo version is pinned by record and checksum; the concept DOI
 # 10.5281/zenodo.23936866 always resolves to the newest.
-EARTHDNA_RELEASE="silva144"
-EARTHDNA_URL="https://zenodo.org/records/23936867/files/earthdna_silva144.tar.gz"
-EARTHDNA_SHA256="6cdc4a53e05225dd165e0181ca8c3aff25eb376415d43b6c25f355d3d264ac14"
+EARTHDNA_RELEASE="silva144-2"
+EARTHDNA_URL="https://zenodo.org/records/23941986/files/earthdna_silva144-2.tar.gz"
+EARTHDNA_SHA256="9a6d78d97365746a680c4d73356929e1d67cbf3c71d9867acb04bf7721208a78"
 
 USE_CONTAINER=false
 CONTAINER_RUNTIME=""   # docker, apptainer, or singularity (set by --docker/--apptainer/--container)
@@ -1211,8 +1211,8 @@ download_earthdna() {
     fi
 
     echo ""
-    echo "[INFO] Downloading EarthDNA ${EARTHDNA_RELEASE} reference (~1.3 GB compressed, ~2 GB on disk)..."
-    echo "  Source: doi.org/10.5281/zenodo.23936867"
+    echo "[INFO] Downloading EarthDNA ${EARTHDNA_RELEASE} reference (~1.8 GB compressed, ~2.5 GB on disk)..."
+    echo "  Source: doi.org/10.5281/zenodo.23941986"
     echo "  Destination: ${db_path}"
 
     mkdir -p "${db_path}"
