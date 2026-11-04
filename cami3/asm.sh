@@ -15,19 +15,15 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=192
 #SBATCH --mem=0
-#SBATCH --output=/scratch/rec3141/cami3/logs/%x-%j.out
-#SBATCH --error=/scratch/rec3141/cami3/logs/%x-%j.err
+#SBATCH --output=logs/%x-%j.out
+#SBATCH --error=logs/%x-%j.err
 set -uo pipefail
 DS=$1 TYPE=$2 RESUME=(${3:+--resume})
-C=/scratch/rec3141/cami3/$DS
-GENICE=/home/rec3141/GENICE
-# Nanopore removes human reads with minimap2 against the FASTA; Illumina runs
-# removehuman.sh, which takes the BBMap index directory (holding ref/).
-HUMAN_FA=/home/rec3141/scratch/databases/human_ref/hg19_main_mask_ribo_animal_allplant_allfungus.fa.gz
-HUMAN_BBMAP=/home/rec3141/scratch/databases/human_ref
-module load apptainer
-export APPTAINER_CACHEDIR=/home/rec3141/scratch/apptainer_cache
-export APPTAINER_TMPDIR=${SLURM_TMPDIR:-/tmp}
+. "${SLURM_SUBMIT_DIR:-$(dirname "$0")}/cluster.sh"
+C=$BASE/$DS
+# Nanopore removes human reads with minimap2 against HUMAN_FA; Illumina runs
+# removehuman.sh, which takes the BBMap index directory HUMAN_BBMAP (holding ref/).
+container_setup
 # The image's nextflow.config needs Nextflow's legacy config parser.
 export NXF_SYNTAX_PARSER=v1
 # Each dataset/read type launches from its own directory, so its .nextflow
@@ -44,7 +40,7 @@ case "$TYPE" in
                --workdir "$C/work_assembly_long" \
                --human_ref "$HUMAN_FA" \
                --read_type nano-raw \
-               --assembly_cpus 128 --assembly_memory '700 GB' \
+               --assembly_cpus 128 --assembly_memory "$ASM_MEM" \
                "${RESUME[@]}" ;;
     short) "$GENICE/danaSeq/illumina_assembly/run-illumina-assembly.sh" --container \
                --input "$C/input_short" \
@@ -52,7 +48,7 @@ case "$TYPE" in
                --workdir "$C/work_assembly_short" \
                --human_ref "$HUMAN_BBMAP" \
                --coassembly true \
-               --assembly_cpus 128 --assembly_memory '700 GB' \
+               --assembly_cpus 128 --assembly_memory "$ASM_MEM" \
                "${RESUME[@]}" ;;
     *) echo "[ERROR] type must be long or short, got $TYPE" >&2; exit 1 ;;
 esac

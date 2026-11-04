@@ -14,12 +14,13 @@
 #SBATCH --time=0-06:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=8G
-#SBATCH --output=/scratch/rec3141/cami3/logs/%x-%A_%a.out
-#SBATCH --error=/scratch/rec3141/cami3/logs/%x-%A_%a.err
+#SBATCH --output=logs/%x-%A_%a.out
+#SBATCH --error=logs/%x-%A_%a.err
 set -euo pipefail
 DS=$1
 N=${SLURM_ARRAY_TASK_ID:?run as an array job}
-C=/scratch/rec3141/cami3/$DS
+. "${SLURM_SUBMIT_DIR:-$(dirname "$0")}/cluster.sh"
+C=$BASE/$DS
 mkdir -p "$C/input_long" "$C/input_short"
 T=${SLURM_TMPDIR:-/tmp}
 

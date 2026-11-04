@@ -14,13 +14,13 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=192
 #SBATCH --mem=0
-#SBATCH --output=/scratch/rec3141/cami3/logs/%x-%j.out
-#SBATCH --error=/scratch/rec3141/cami3/logs/%x-%j.err
+#SBATCH --output=logs/%x-%j.out
+#SBATCH --error=logs/%x-%j.err
 set -uo pipefail
 DS=$1 TYPE=$2
-C=/scratch/rec3141/cami3/$DS
+. "${SLURM_SUBMIT_DIR:-$(dirname "$0")}/cluster.sh"
+C=$BASE/$DS
 ASM=$C/assembly_$TYPE
-GENICE=/home/rec3141/GENICE
 
 # The assembly pipeline links assembly/* to /data/store/..., its in-container
 # path; point those at the same files relative to the assembly dir.
@@ -56,10 +56,11 @@ fi
 echo "[INFO] BAMs: $(ls "$BAMS"/*.sorted.bam | wc -l)  depth columns: $(head -1 "$DEPTHS" | tr "\t" "\n" | grep -cE "sorted(\.bam)?$")"
 TNF=(); [ -s "$ASM/assembly/tnf.tsv" ] && TNF=(--tnf "$ASM/assembly/tnf.tsv")
 
-module load apptainer
-export APPTAINER_CACHEDIR=/home/rec3141/scratch/apptainer_cache
-export APPTAINER_TMPDIR=${SLURM_TMPDIR:-/tmp}
+container_setup
 export NXF_SYNTAX_PARSER=v1
+# grex must keep its work dir on /project; on fir the launcher's default
+# (node-local SLURM_TMPDIR plus a store dir) applies.
+WORKDIR=(); [ "$CLUSTER" = grex ] && WORKDIR=(--workdir "$C/work_mag_$TYPE")
 # OpenBLAS in the image segfaults above 128 threads; tasks inherit this.
 export OPENBLAS_NUM_THREADS=64
 L=$C/launch_mag_$TYPE
@@ -71,7 +72,8 @@ mkdir -p "$L" && cd "$L" || exit 1
     --bam_dir "$BAMS/" \
     "${TNF[@]}" \
     --outdir "$C/mag_$TYPE" \
-    --db_dir /home/rec3141/scratch/databases \
+    --db_dir "$DB" \
+    "${WORKDIR[@]}" \
     --all --run_integronfinder false \
     --binning_cpus 32 --binning_memory "160 GB" \
     --bakta_cpus 64 --bakta_memory "300 GB" \

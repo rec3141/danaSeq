@@ -16,17 +16,18 @@
 #SBATCH --time=0-12:00:00
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=64G
-#SBATCH --output=/scratch/rec3141/cami3/logs/%x-%A_%a.out
-#SBATCH --error=/scratch/rec3141/cami3/logs/%x-%A_%a.err
+#SBATCH --output=logs/%x-%A_%a.out
+#SBATCH --error=logs/%x-%A_%a.err
 set -euo pipefail
 DS=$1 TYPE=$2 STEP=$3
-C=/scratch/rec3141/cami3/$DS
+. "${SLURM_SUBMIT_DIR:-$(dirname "$0")}/cluster.sh"
+C=$BASE/$DS
 A=$C/assembly_gsa_$TYPE
-SIF=/home/rec3141/GENICE/danaSeq/nanopore_assembly/.danaseq-nanopore-assembly.sif
-module load apptainer
+SIF=$GENICE/danaSeq/nanopore_assembly/.danaseq-nanopore-assembly.sif
+container_setup
 T=${SLURM_TMPDIR:-/tmp}
-# Node-local TMP is bound explicitly; samtools sort writes its temp files there.
-run() { apptainer exec --bind /scratch --bind "$T" "$SIF" "$@"; }
+# cexec (cluster.sh) binds the data paths and node-local TMP, where samtools sort writes.
+run() { cexec "$SIF" "$@"; }
 mkdir -p "$A/assembly" "$A/mapping"
 case "$TYPE" in long) PRESET=map-ont ;; short) PRESET=sr ;; *) echo "type must be long or short" >&2; exit 1 ;; esac
 
