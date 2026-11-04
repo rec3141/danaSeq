@@ -87,6 +87,17 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.version="${GIT_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
+# fastsne_cpu (https://github.com/rec3141/fastsne): PLACE_GLOBE projects ASVs onto the
+# EarthDNA placement models with it. Pinned release, fully static (AVX-512 / AVX2 / generic,
+# picked at run time); placement is CPU work, so the GPU build is left out of the image.
+ARG FASTSNE_VERSION=v0.3.0
+ARG FASTSNE_SHA256=89721878de1a03b48329ba4d61f68cdcd867e9723480a3c5959e8cbe5a7e00b5
+RUN f=fastsne-${FASTSNE_VERSION}-linux-x86_64.tar.gz \
+    && curl -fsSL -o /tmp/$f https://github.com/rec3141/fastsne/releases/download/${FASTSNE_VERSION}/$f \
+    && echo "${FASTSNE_SHA256}  /tmp/$f" | sha256sum -c - \
+    && tar -xzf /tmp/$f --strip-components=1 -C /usr/local && rm /tmp/$f /usr/local/bin/fastsne \
+    && /usr/local/bin/fastsne_cpu --help 2>&1 | head -1 | grep -q "^fastsne"
+
 # Copy pipeline code
 COPY . /pipeline/
 RUN chmod +x /pipeline/bin/*.py /pipeline/bin/*.sh /pipeline/entrypoint.sh
