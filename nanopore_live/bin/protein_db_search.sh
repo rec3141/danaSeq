@@ -17,6 +17,18 @@
 #                'catalogue': per-target thresholds from the annot.tsv columns
 #                `threshold` + `score_type` (full|domain), applied exactly like
 #                kofam_scan (full-sequence score, or best 1-domain score)
+#                Any of these may be followed by the word 'resolve' (e.g. "1e-3
+#                resolve"): per-domain hits then go through cath-resolve-hits,
+#                and only (protein, model) pairs in each protein's best
+#                non-overlapping domain set are kept. For libraries of
+#                overlapping families such as CATH FunFam.
+#   PROTEIN_DB_CHUNK (env, hmm mode): proteins per hmmsearch job. Unset or 0
+#                runs one hmmsearch; above that, the proteins are split into
+#                chunks searched PROTEIN_DB_THREADS (default 4) threads each,
+#                cpus/threads jobs at a time. hmmsearch gains little past a few
+#                threads, so on a big node one job per DB leaves most CPUs idle.
+#                Every chunk is searched with -Z <all proteins>, so E-values and
+#                hits match a single search; rows come out in chunk order.
 #   dmnd_opts  : "id=50,qcov=50,scov=50,evalue=1e-5[,len=N]" (any subset; these are
 #                defaults; len = minimum alignment length in aa, default 0;
 #                bits = minimum bit score, or 'catalogue' for per-target bit scores
@@ -66,8 +78,11 @@ n_prot=$(grep -c '^>' combined_proteins.faa || true)
 
 case "$mode" in
 hmm)
-    case "$opts" in
-        tc|ga|nc)  cut_args=(--cut_"$opts") ;;
+    cut=${opts%% *}; resolve=false
+    case " $opts " in *" resolve "*) resolve=true ;; esac
+    dom_args=()
+    case "$cut" in
+        tc|ga|nc)  cut_args=(--cut_"$cut") ;;
         catalogue)
             [ "$annot" != NONE ] && [ -s "$annot" ] || { echo "protein_db_search.sh: hmm_cut=catalogue needs annot.tsv" >&2; exit 2; }
             # Report everything at/above the lowest per-target threshold; the
@@ -75,16 +90,35 @@ hmm)
             tmin=$(awk -F'\t' 'NR==1 {for (i=1;i<=NF;i++) if ($i=="threshold") c=i; next}
                                  c && $c != "" && (m == "" || $c+0 < m) {m = $c+0} END {print (m == "" ? 0 : m)}' "$annot")
             cut_args=(-T "$tmin" --domT "$tmin") ;;
-        *)         cut_args=(-E "$opts") ;;
+        *)         cut_args=(-E "$cut") ;;
     esac
-    if [ "$n_prot" -gt 0 ]; then
+    chunk=${PROTEIN_DB_CHUNK:-0}
+    if [ "$n_prot" -gt 0 ] && [ "$chunk" -gt 0 ] && [ "$n_prot" -gt "$chunk" ]; then
+        threads=${PROTEIN_DB_THREADS:-4}
+        jobs=$(( cpus / threads )); [ "$jobs" -ge 1 ] || jobs=1
+        mkdir -p hmm_chunks
+        awk -v bs="$chunk" '
+            BEGIN { fn = sprintf("hmm_chunks/chunk_%05d.faa", 0) }
+            /^>/ { if (n >= bs) { close(fn); c++; fn = sprintf("hmm_chunks/chunk_%05d.faa", c); n = 0 } n++ }
+            { print > fn }' combined_proteins.faa
+        echo "protein_db_search.sh: ${dbname}: ${n_prot} proteins in $(ls hmm_chunks | wc -l) chunks, ${jobs} jobs x ${threads} threads" >&2
+        $resolve && dom_args=(--domtblout {}.domtbl)
+        ls hmm_chunks/chunk_*.faa | xargs -P "$jobs" -I{} \
+            hmmsearch "${cut_args[@]}" -Z "$n_prot" --noali --cpu "$threads" \
+                --tblout {}.tbl "${dom_args[@]}" -o /dev/null "$db" {}
+        cat hmm_chunks/chunk_*.faa.tbl > "$out.tbl"
+        ! $resolve || cat hmm_chunks/chunk_*.faa.domtbl > "$out.domtbl"
+        rm -rf hmm_chunks
+    elif [ "$n_prot" -gt 0 ]; then
+        $resolve && dom_args=(--domtblout "$out.domtbl")
         hmmsearch "${cut_args[@]}" --noali --cpu "$cpus" \
-            --tblout "$out.tbl" -o /dev/null "$db" combined_proteins.faa
+            --tblout "$out.tbl" "${dom_args[@]}" -o /dev/null "$db" combined_proteins.faa
     else
         : > "$out.tbl"
+        ! $resolve || : > "$out.domtbl"
     fi
     # tblout: target(1) query(3) full-seq E-value(5) full score(6) best-1-domain score(9)
-    grep -v '^#' "$out.tbl" | awk -v OFS='\t' -v mode="$opts" -v annot="$annot" '
+    grep -v '^#' "$out.tbl" | awk -v OFS='\t' -v mode="$cut" -v annot="$annot" '
         BEGIN {
             if (mode == "catalogue") {
                 while ((getline line < annot) > 0) {
@@ -102,7 +136,19 @@ hmm)
             }
             print $1, $3, $5, $6, "", "", ""
         }' > hits.raw || true
-    params="method=hmmsearch	cutoff=$opts"
+    params="method=hmmsearch	cutoff=$cut"
+    if $resolve; then
+        # cath-resolve-hits output: query-id (protein) match-id (model) score boundaries ...
+        grep -v '^#' "$out.domtbl" > domtbl.in || true
+        cath-resolve-hits --input-format hmmer_domtblout --quiet \
+            --hits-text-to-file resolved.txt domtbl.in
+        awk -v OFS='\t' 'FNR == NR { if ($0 !~ /^#/) keep[$1 SUBSEP $2] = 1; next }
+                         (($1 SUBSEP $2) in keep)' resolved.txt hits.raw > hits.resolved
+        mv hits.resolved hits.raw
+        mv resolved.txt "$out.resolved.txt"
+        rm -f domtbl.in
+        params="$params	resolve=cath-resolve-hits"
+    fi
     ;;
 diamond)
     id=50; qcov=50; scov=50; evalue=1e-5; minlen=0; bits=

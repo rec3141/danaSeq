@@ -243,7 +243,9 @@ process DBCAN {
 // Output <db>.protein_db.tsv: a '#' provenance line, a header, then one row
 // per (protein, target) hit, with gene/category/pathway from <db>.genes.tsv
 // when the database has one. MERGE_ANNOTATIONS adds the hits to the per-protein
-// table. storeDir keys on the output alone, so after changing a database or
+// table. HMM searches over more than --protein_db_chunk proteins run as
+// parallel chunked hmmsearch jobs (see protein_db_search.sh); --protein_db_cpus
+// sizes both steps. storeDir keys on the output alone, so after changing a database or
 // its .opts, delete metabolism/protein_dbs/<db>/ to search it again.
 
 process PROTEIN_DB_HMM {
@@ -262,7 +264,8 @@ process PROTEIN_DB_HMM {
 
     script:
     """
-    protein_db_search.sh hmm "${hmm_db}" "${dbname}" "${dbname}.protein_db" ${task.cpus} \\
+    PROTEIN_DB_CHUNK=${params.protein_db_chunk} \\
+        protein_db_search.sh hmm "${hmm_db}" "${dbname}" "${dbname}.protein_db" ${task.cpus} \\
         "${hmm_cut}" "${annot}" "${proteins}"
     """
 }

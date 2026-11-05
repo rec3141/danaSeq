@@ -101,7 +101,7 @@ in `DIR`, one subdirectory per database. The layout is the one nanopore_live's
 | `<name>/<name>.hmm` | HMM profiles, searched with `hmmsearch` |
 | `<name>/<name>.dmnd` | DIAMOND database, searched with `diamond blastp` (best hit per protein) |
 | `<name>/<name>.genes.tsv` | Optional catalogue: `target gene category pathway subpathway description [threshold score_type motif]` |
-| `<name>/<name>.opts` | Optional cutoff: `tc`, `ga`, `nc` or an E-value for HMMs; `id=,qcov=,scov=,evalue=,len=,bits=` for DIAMOND |
+| `<name>/<name>.opts` | Optional cutoff: `tc`, `ga`, `nc` or an E-value for HMMs, optionally followed by `resolve`; `id=,qcov=,scov=,evalue=,len=,bits=` for DIAMOND |
 
 Without an `.opts` file, HMMs use `--hmm_cut` (default `tc`), or the
 catalogue's per-target thresholds when `<name>.genes.tsv` has a `threshold`
@@ -112,9 +112,26 @@ comma-separated). The results are stored per database, so adding one later
 searches only that one; after changing a database or its `.opts`, delete its
 `metabolism/protein_dbs/<name>/` to search it again.
 
+An HMM search over more than `--protein_db_chunk` proteins (default 50,000) is
+split into chunks searched in parallel, 4 `hmmsearch` threads per chunk, since
+one `hmmsearch` gains little from more threads. E-values are computed against
+the whole protein set, so the hits are those of a single search. Give the step
+the node with `--protein_db_cpus`: on 72,231 proteins PGAP took ~2.2 CPU-hours
+and the full CATH FunFam library ~8.7, and both scale with total protein length.
+
+With `resolve` (e.g. `1e-3 resolve`), the per-domain hits go through
+`cath-resolve-hits`, and only each protein's best non-overlapping set of models
+is kept. This is for libraries of overlapping families, such as CATH FunFam,
+where one protein otherwise matches dozens of related models.
+
+`./download-databases.sh --funfam` writes `<db_dir>/protein_dbs/CATH-FunFam/`:
+CATH FunFam v4.3.0 (212,872 models), searched at `1e-3 resolve`;
+`--funfam-superfamilies 3.40.50.300,1.10.8` keeps only some superfamilies.
+
 `./download-databases.sh --pgap` writes `<db_dir>/protein_dbs/PGAP/`: NCBI's
 PGAP HMMs, which hold the maintained TIGRFAMs (accessions `TIGR*`) plus
-NCBIfam and PRK models, searched at their trusted cutoffs.
+NCBIfam and PRK models, searched at their noise cutoffs (`nc`; the trusted
+cutoffs NCBI uses for genomes are often too strict for metagenomes).
 
 ### Mobile Genetic Elements
 
@@ -236,6 +253,8 @@ breaks included). `--derep_min_size_bp` counts sequence bases.
 | `--protein_db_dir` | `null` | Directory of protein reference DBs (see Protein reference databases) |
 | `--hmm_cut` | `tc` | Default hmmsearch cutoff: `tc`, `ga`, `nc` or an E-value |
 | `--protein_db_opts` | `id=50,qcov=50,scov=50,evalue=1e-5` | Default DIAMOND cutoffs |
+| `--protein_db_chunk` | `50000` | Proteins per parallel hmmsearch job (`0`: one search per database) |
+| `--protein_db_cpus` | `--medium_cpus` | CPUs for each protein DB search |
 | `--emapper_batch_size` | `50000` | eggNOG-mapper batch size (proteins) |
 | `--run_antismash` | `false` | Run antiSMASH BGC detection |
 | `--antismash_db` | (required if antismash) | antiSMASH database path |

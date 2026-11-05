@@ -84,6 +84,8 @@ def helpMessage() {
                            nanopore_live --pollutant_dbs.
       --hmm_cut STR        Default hmmsearch cutoff: tc|ga|nc or an E-value [default: tc]
       --protein_db_opts STR  Default DIAMOND cutoffs [default: id=50,qcov=50,scov=50,evalue=1e-5]
+      --protein_db_chunk N   Proteins per parallel hmmsearch job; 0 = one search [default: 50000]
+      --protein_db_cpus N    CPUs for each protein DB search [default: --medium_cpus]
 
     Eukaryotic:
       --run_eukaryotic, --run_metaeuk, --run_marferret

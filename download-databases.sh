@@ -880,7 +880,7 @@ download_bakta_light() {
 
 # NCBI PGAP HMMs (https://ftp.ncbi.nlm.nih.gov/hmm/current/): the maintained
 # TIGRFAMs (accessions TIGR*, source JCVI) plus NCBIfam and PRK models, each
-# with its own trusted cutoff. Written as one --protein_db_dir entry,
+# with its own cutoffs, searched at the noise cutoff. Written as one --protein_db_dir entry,
 # <db_dir>/protein_dbs/PGAP/. Model names are not unique across the
 # collection, so each model is renamed to its accession, and PGAP.genes.tsv is
 # keyed by accession.
@@ -903,8 +903,13 @@ download_pgap() {
     wget -q -O "${db_path}/hmm_PGAP.LIB" "${url}/hmm_PGAP.LIB"
 
     # NAME precedes ACC in each model: hold NAME, then write the accession in its place.
-    awk '/^NAME / { held = 1; next }
+    # A few models lack a noise cutoff (NC), which makes hmmsearch --cut_nc fail;
+    # give those their gathering cutoff (GA) as NC, before the STATS lines.
+    awk '/^NAME / { held = 1; ga = ""; nc = 0; next }
          /^ACC /  { if (held) print "NAME  " $2; held = 0 }
+         /^GA /   { ga = $0; sub(/^GA/, "NC", ga) }
+         /^NC /   { nc = 1 }
+         /^STATS / { if (!nc && ga != "") print ga; nc = 1 }
          { print }' "${db_path}/hmm_PGAP.LIB" > "${db_path}/PGAP.hmm.tmp"
     local n_lib n_out
     n_lib=$(grep -c '^NAME ' "${db_path}/hmm_PGAP.LIB")
@@ -927,7 +932,9 @@ download_pgap() {
           print $c["#ncbi_accession"], gene, cat, $c["family_type"], $c["ec_numbers"], $c["product_name"] }
     ' "${db_path}/hmm_PGAP.tsv" > "${db_path}/PGAP.genes.tsv"
 
-    printf '# PGAP models carry trusted cutoffs (TC); NCBI annotates with them.\ntc\n' > "${db_path}/PGAP.opts"
+    # Noise cutoff: the trusted cutoffs NCBI annotates genomes with are often too
+    # strict for metagenome proteins.
+    printf '# PGAP noise cutoff (NC; models without one use GA)\nnc\n' > "${db_path}/PGAP.opts"
     {
         echo "NCBI PGAP HMMs, ${url}/"
         grep -m1 'Release number' "${db_path}/RELEASE_NOTES.txt" | sed 's/^ *//'
@@ -941,7 +948,8 @@ download_pgap() {
 }
 
 # CATH FunFam HMMs (v4.3.0, 2020, the last release with them): functional
-# families within CATH superfamilies, each with a trusted cutoff (TC). Written
+# families within CATH superfamilies, searched at E <= 1e-3 and resolved to the
+# best non-overlapping FunFam per domain with cath-resolve-hits. Written
 # as <db_dir>/protein_dbs/CATH-FunFam/. Names are <superfamily>-FF-<n>, so
 # --funfam-superfamilies (comma-separated codes, or code prefixes such as
 # 3.40.50) keeps only those superfamilies: the full library is ~11x PGAP, too
@@ -992,12 +1000,16 @@ download_funfam() {
                    print $2, "", name[c[1]], a[1], name[a[1]], "" }
     ' "${db_path}/cath-names-v4_3_0.txt" "${db_path}/CATH-FunFam.hmm" > "${db_path}/CATH-FunFam.genes.tsv"
 
-    printf '# FunFam models carry trusted cutoffs (TC).\ntc\n' > "${db_path}/CATH-FunFam.opts"
+    # FunFam models have only trusted cutoffs (TC), which are often too strict for
+    # metagenome proteins. Search at E <= 1e-3 instead and let cath-resolve-hits
+    # keep each protein's best non-overlapping FunFam per domain; unresolved, a
+    # protein matches dozens of related FunFams.
+    printf '# E-value cutoff, then cath-resolve-hits per protein\n1e-3 resolve\n' > "${db_path}/CATH-FunFam.opts"
     {
         echo "CATH FunFam HMMs v4.3.0, ${url}/sequence-data/funfam-hmm3-v4_3_0.lib.gz"
         echo "Downloaded $(date +%F); ${n_out} models; superfamilies: ${FUNFAM_SUPERFAMILIES:-all}."
-        echo "Overlapping hits are not resolved (no cath-resolve-hits): a protein can hit"
-        echo "several FunFams, each above its own TC."
+        echo "Searched at E <= 1e-3; cath-resolve-hits keeps each protein's best"
+        echo "non-overlapping FunFam per domain (CATH-FunFam.opts: 1e-3 resolve)."
     } > "${db_path}/source.txt"
     rm -f "${db_path}/funfam-hmm3-v4_3_0.lib.gz"
 
