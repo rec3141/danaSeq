@@ -252,7 +252,8 @@ RUN mkdir -p /usr/local/bin/dana-tools \
     done \
     # --- genomic env ---
     && for tool in defense-finder macsyfinder macsydata msf_data \
-                   integron_finder run_dbcan dbcan_build hmmscan hmmsearch; do \
+                   integron_finder run_dbcan dbcan_build hmmscan hmmsearch \
+                   cath-resolve-hits; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-genomic/bin:$PATH\nexec /opt/conda/envs/dana-mag-genomic/bin/%s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
