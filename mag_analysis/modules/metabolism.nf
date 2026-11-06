@@ -291,6 +291,87 @@ process PROTEIN_DB_DIAMOND {
     """
 }
 
+// MetaCyc pathways (--metacyc_db, --metacyc_refs): bin/metacyc_scorer.py, standard library
+// Python. METACYC_SEARCH runs DIAMOND against the open reference of Rhea-annotated UniProtKB
+// proteins; METACYC_PATHWAYS turns those hits plus the Bakta, KofamScan and eggNOG ECs/KOs into
+// MetaCyc reactions and calls pathways per DAS Tool MAG and for the community with PathoLogic's
+// published rules, each call with an evidence-based confidence. MetaCyc itself is licensed and
+// comes only from the user's --metacyc_db; it is read at run time and never copied into outputs
+// beyond pathway/reaction IDs and names.
+// One DIAMOND process uses all its threads well, and each parallel chunk would rebuild the
+// 4.6-Gaa reference index, so the proteins are searched in one task (the chunked-parallel
+// split in protein_db_search.sh is for hmmsearch, which stops scaling at a few threads).
+
+process METACYC_SEARCH {
+    tag "metacyc"
+    label 'process_medium'
+    conda "${projectDir}/conda-envs/dana-mag-annotate"
+    publishDir "${params.outdir}/metabolism/metacyc", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/metacyc" : null
+
+    input:
+    path(proteins)
+    path(refs)
+
+    output:
+    path("metacyc_hits.tsv.gz"), emit: hits
+
+    script:
+    """
+    # Written under a temporary name: storeDir would keep a partial file from a failed run.
+    diamond blastp -q "${proteins}" -d "${refs}/seqref/seqref.dmnd" -o hits.part \\
+        -p ${task.cpus} --outfmt 6 qseqid sseqid pident length qlen slen evalue bitscore \\
+        --id 30 --query-cover 50 --subject-cover 50 -e 1e-10 --top 10 \\
+        --${params.metacyc_sensitivity} -b ${params.metacyc_block_size} -c 1 --tmpdir .
+    gzip -1 hits.part
+    mv hits.part.gz metacyc_hits.tsv.gz
+    """
+}
+
+process METACYC_PATHWAYS {
+    tag "metacyc"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-classify"
+    publishDir "${params.outdir}/metabolism/metacyc", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/metabolism/metacyc" : null
+
+    input:
+    path(hits)
+    path(annotation_tsv)
+    path(merged)
+    path(contig2bin)
+    path(gff)
+    path(ko_list, stageAs: 'ko_list.tsv')
+    tuple val(tax_source), path(taxonomy, stageAs: 'taxonomy_input.tsv')
+    path(metacyc_db)
+    path(metacyc_refs)
+
+    output:
+    path("metacyc_pathways.tsv"),      emit: pathways
+    path("metacyc_reactions.tsv.gz"),  emit: reactions
+    path("metacyc_bin_taxonomy.tsv"),  emit: taxonomy
+
+    script:
+    def ko_arg  = params.kofam_db ? "--ko-list ko_list.tsv" : ''
+    def tax_arg = tax_source == 'gtdbtk'     ? "--gtdbtk taxonomy_input.tsv"
+                : tax_source == 'sendsketch' ? "--sendsketch taxonomy_input.tsv --gff ${gff}"
+                : ''
+    """
+    # Taxonomic ranges from: ${tax_source}
+    metacyc_scorer.py run \\
+        --bakta-tsv "${annotation_tsv}" \\
+        --merged "${merged}" \\
+        --hits "${hits}" \\
+        --contig2bin "${contig2bin}" \\
+        --metacyc "${metacyc_db}" \\
+        --refs "${metacyc_refs}" \\
+        ${ko_arg} ${tax_arg} \\
+        --chunk ${params.metacyc_chunk} \\
+        --outdir out
+    mv out/metacyc_pathways.tsv out/metacyc_reactions.tsv.gz out/metacyc_bin_taxonomy.tsv .
+    """
+}
+
 process MERGE_ANNOTATIONS {
     tag "merge"
     label 'process_low'

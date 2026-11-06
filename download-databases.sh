@@ -38,6 +38,12 @@ set -euo pipefail
 #   ./download-databases.sh --funfam         # Download CATH FunFam HMMs v4.3.0 (212,872 models, ~1.4 GB gz)
 #   ./download-databases.sh --funfam --funfam-superfamilies 3.40.50.300,1.10.10
 #                                             # Only these CATH superfamilies (or code prefixes)
+#   ./download-databases.sh --metacyc-refs   # Open references for MetaCyc pathways (Rhea, UniProt DIAMOND, GTDB; ~5.5 GB kept)
+#   ./download-databases.sh --metacyc SRC    # Install licensed MetaCyc from SRC: BioCyc flat-file tarball or dir,
+#                                             # Pathway Tools installer, or Pathway Tools .sif (not in --all)
+#   ./download-databases.sh --metacyc SRC --metacyc-runtime RT
+#                                             # Installer on an Apptainer-only host: RT = MetaPathways image
+#                                             # (.sif of quay.io/hallamlab/metapathways) or its ptools-base sandbox
 #   ./download-databases.sh --docker            # Use Docker to run tool CLIs
 #   ./download-databases.sh --apptainer         # Use Apptainer/Singularity (auto-pulls SIF)
 #   ./download-databases.sh --container         # Auto-detect: apptainer > singularity > docker
@@ -166,6 +172,9 @@ DOWNLOAD_MAGSCOT=false
 DOWNLOAD_PGAP=false
 DOWNLOAD_FUNFAM=false
 FUNFAM_SUPERFAMILIES=""
+DOWNLOAD_METACYC_REFS=false
+METACYC_SRC=""
+METACYC_RUNTIME=""
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -206,6 +215,9 @@ while (( $# )); do
         --pgap)      DOWNLOAD_PGAP=true; INTERACTIVE=false; shift ;;
         --funfam)    DOWNLOAD_FUNFAM=true; INTERACTIVE=false; shift ;;
         --funfam-superfamilies) FUNFAM_SUPERFAMILIES="$2"; shift 2 ;;
+        --metacyc-refs) DOWNLOAD_METACYC_REFS=true; INTERACTIVE=false; shift ;;
+        --metacyc)   METACYC_SRC="$2"; INTERACTIVE=false; shift 2 ;;
+        --metacyc-runtime) METACYC_RUNTIME="$2"; shift 2 ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -239,6 +251,7 @@ if $DOWNLOAD_ALL; then
     DOWNLOAD_ANTISMASH=true
     DOWNLOAD_MAGSCOT=true
     DOWNLOAD_PGAP=true
+    DOWNLOAD_METACYC_REFS=true
 fi
 
 # Auto-detect container runtime if --container was used
@@ -302,6 +315,8 @@ show_databases() {
     printf "  %-12s %-8s  %s\n" "gtdbtk"   "~61 GB"  "GTDB-Tk r232 reference data, ~98 GB extracted (phylogenetic MAG classification)"
     printf "  %-12s %-8s  %s\n" "pgap"     "~2.7 GB" "NCBI PGAP HMMs: TIGRFAM + NCBIfam + PRK (mag_analysis --protein_db_dir)"
     printf "  %-12s %-8s  %s\n" "funfam"   "~1.4 GB" "CATH FunFam HMMs v4.3.0, 212,872 models; not in --all (mag_analysis --protein_db_dir)"
+    printf "  %-12s %-8s  %s\n" "metacyc-refs" "~5.5 GB" "Rhea + UniProt DIAMOND reference + GTDB->NCBI for MetaCyc pathways (mag_analysis --metacyc_refs)"
+    printf "  %-12s %-8s  %s\n" "metacyc"  "~140 MB" "Licensed MetaCyc from your flat files/installer/.sif: --metacyc SRC; not in --all (mag_analysis --metacyc_db)"
     echo ""
     echo "  Note: Tiara, Whokaryote, and IslandPath HMM profiles are bundled with"
     echo "  their conda packages (no separate database download needed)."
@@ -1017,6 +1032,66 @@ download_funfam() {
     echo "  Use with: --protein_db_dir ${DB_DIR}/protein_dbs"
 }
 
+# Open references for MetaCyc pathways (mag_analysis --metacyc_refs): Rhea, KEGG ko->reaction,
+# GTDB r226 -> NCBI taxids, and a DIAMOND database of Rhea-annotated UniProtKB proteins (Swiss-Prot
+# plus one per UniRef90 cluster). Built by mag_analysis/bin/metacyc_scorer.py build-refs:
+# downloads UniProt idmapping (7 GB) and streams TrEMBL (~40 GB) through a filter, so expect
+# ~1 h, ~15 GB scratch at peak and ~5.5 GB kept. Rebuild per UniProt/Rhea release.
+download_metacyc_refs() {
+    local db_path="${DB_DIR}/metacyc_refs"
+    if [ -s "${db_path}/seqref/seqref.dmnd" ] && [ -s "${db_path}/VERSION.json" ]; then
+        echo "[INFO] MetaCyc open references already exist at ${db_path}"
+        echo "  Delete ${db_path} and re-run to rebuild (e.g. for a new UniProt release)."
+        return 0
+    fi
+    echo ""
+    echo "[INFO] Building MetaCyc open references (~1 h, ~5.5 GB kept)..."
+    echo "  Destination: ${db_path}"
+    local threads; threads=$(nproc 2>/dev/null || echo 4); [ "$threads" -gt 16 ] && threads=16
+    if $USE_CONTAINER; then
+        container_run sh -c "export PATH=/opt/conda/envs/dana-mag-annotate/bin:\$PATH; \
+            python3 /pipeline/bin/metacyc_scorer.py build-refs --refs /data/db/metacyc_refs --threads ${threads}" || return 1
+    else
+        local env_bin="${ENV_DIR}/dana-mag-annotate/bin"
+        if [ ! -x "${env_bin}/diamond" ]; then
+            echo "[ERROR] diamond not found in ${env_bin}. Run mag_analysis/install.sh first or use --docker/--apptainer." >&2
+            return 1
+        fi
+        PATH="${env_bin}:${PATH}" python3 "${SCRIPT_DIR}/mag_analysis/bin/metacyc_scorer.py" build-refs \
+            --refs "${db_path}" --threads "${threads}" || return 1
+    fi
+    echo "[SUCCESS] MetaCyc open references built in ${db_path}"
+    echo "  Use with: --metacyc_refs ${db_path}"
+}
+
+# Licensed MetaCyc (mag_analysis --metacyc_db), from whatever the user has: a BioCyc flat-file
+# tarball or directory, a Pathway Tools Linux installer (installed unattended as the calling
+# user into a scratch dir, flat files exported, install deleted), or a Pathway Tools .sif.
+# Never part of --all and never put into images or the repo: SRI licenses it per user/site.
+install_metacyc() {
+    local src="$1" db_path="${DB_DIR}/metacyc" mode
+    if [ -s "${db_path}/pathways.dat" ] && [ -s "${db_path}/VERSION.json" ]; then
+        echo "[INFO] MetaCyc already installed at ${db_path}: $(grep -o '"release": "[^"]*"' "${db_path}/VERSION.json")"
+        echo "  Delete ${db_path} and re-run to replace it."
+        return 0
+    fi
+    [ -e "$src" ] || { echo "[ERROR] --metacyc: ${src} does not exist" >&2; return 1; }
+    if [ -d "$src" ] || tar -tf "$src" >/dev/null 2>&1; then mode=--flatfiles
+    elif [[ "$src" == *.sif ]]; then mode=--sif
+    elif head -c 4 "$src" | grep -q 'ELF'; then mode=--installer
+    else echo "[ERROR] --metacyc: ${src} is not a flat-file tarball/dir, a .sif or a Pathway Tools installer" >&2; return 1
+    fi
+    echo ""
+    echo "[INFO] Installing MetaCyc (${mode#--}) from ${src}"
+    echo "  Destination: ${db_path} (owner-only; licensed data, do not share)"
+    local runtime_args=()
+    [ -n "$METACYC_RUNTIME" ] && runtime_args=(--runtime "$METACYC_RUNTIME")
+    python3 "${SCRIPT_DIR}/mag_analysis/bin/metacyc_scorer.py" setup --db-dir "${DB_DIR}" "$mode" "$src" \
+        "${runtime_args[@]}" || return 1
+    echo "[SUCCESS] MetaCyc installed in ${db_path}"
+    echo "  Use with: --metacyc_db ${db_path}"
+}
+
 download_kofam() {
     local db_path="${DB_DIR}/kofam_db"
     if [ -d "${db_path}/profiles" ] && [ -f "${db_path}/ko_list" ]; then
@@ -1697,6 +1772,14 @@ if $DOWNLOAD_FUNFAM; then
     ( download_funfam ) || failed=$((failed + 1))
 fi
 
+if $DOWNLOAD_METACYC_REFS; then
+    ( download_metacyc_refs ) || failed=$((failed + 1))
+fi
+
+if [ -n "$METACYC_SRC" ]; then
+    ( install_metacyc "$METACYC_SRC" ) || failed=$((failed + 1))
+fi
+
 echo ""
 if (( failed > 0 )); then
     echo "[WARNING] ${failed} database download(s) failed"
@@ -1730,4 +1813,6 @@ else
     ! $DOWNLOAD_MAGSCOT   || echo "  --magscot_hmm_dir ${DB_DIR}/magscot_hmm"
     ! $DOWNLOAD_PGAP      || echo "  --protein_db_dir ${DB_DIR}/protein_dbs"
     ! $DOWNLOAD_FUNFAM    || echo "  --protein_db_dir ${DB_DIR}/protein_dbs   (CATH-FunFam)"
+    ! $DOWNLOAD_METACYC_REFS || echo "  --metacyc_refs ${DB_DIR}/metacyc_refs"
+    [ -z "$METACYC_SRC" ]   || echo "  --metacyc_db ${DB_DIR}/metacyc   (licensed; keep private)"
 fi

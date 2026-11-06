@@ -1,0 +1,36 @@
+# Hand-made test fixture in the Pathway Tools attribute-value format; no MetaCyc content.
+UNIQUE-ID - TAX-131567
+TYPES - TAX-1
+//
+UNIQUE-ID - TAX-2
+TYPES - TAX-131567
+COMMON-NAME - Bacteria
+//
+UNIQUE-ID - TAX-2759
+TYPES - TAX-131567
+COMMON-NAME - Eukaryota
+//
+UNIQUE-ID - TAX-1224
+TYPES - TAX-2
+COMMON-NAME - Pseudomonadota
+//
+UNIQUE-ID - Pathways
+//
+UNIQUE-ID - Biosynthesis
+TYPES - Pathways
+//
+UNIQUE-ID - Amino-Acid-Biosynthesis
+TYPES - Biosynthesis
+//
+UNIQUE-ID - Degradation
+TYPES - Pathways
+//
+UNIQUE-ID - Energy-Metabolism
+TYPES - Pathways
+//
+UNIQUE-ID - Electron-Transfer
+TYPES - Energy-Metabolism
+//
+UNIQUE-ID - Super-Pathways
+TYPES - Pathways
+//

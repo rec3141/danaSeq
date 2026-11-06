@@ -4,7 +4,7 @@ Preprocess MAG pipeline TSV outputs into JSON for the web dashboard.
 
 Generates JSON files from Nextflow pipeline results:
   overview.json, mags.json, checkm2_all.json, taxonomy_sunburst.json,
-  kegg_heatmap.json, coverage.json, mge_summary.json, mge_per_bin.json,
+  kegg_heatmap.json, metacyc_pathways.json, coverage.json, mge_summary.json, mge_per_bin.json,
   eukaryotic.json, contig_lengths.json, ...
 
 Per-contig data (contig explorer with t-SNE/UMAP, per-sample depths, gene
@@ -1079,6 +1079,37 @@ def build_kegg_heatmap(results_dir):
         'row_order': list(range(n_rows)),
         'col_order': list(range(n_cols)),
     }
+
+
+def build_metacyc(results_dir):
+    """Build metacyc_pathways.json: MetaCyc pathway calls per MAG with their confidence.
+
+    Only called pathways are kept (bins other than _community), with the columns the KEGG
+    view's MetaCyc table shows; the full table, including pathways not called and the
+    supporting hits, stays in metabolism/metacyc/metacyc_pathways.tsv.
+    """
+    print("Building metacyc_pathways.json ...")
+    path = resolve_path(results_dir, 'metabolism', 'metacyc', 'metacyc_pathways.tsv')
+    if not os.path.exists(path):
+        return None
+    keep = ['pathway', 'name', 'klass', 'confidence', 'confidence_tier', 'frac', 'n_rxn',
+            'n_seq', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only', 'seq_id_median', 'key_seq', 'reason']
+    df = pd.read_csv(path, sep='\t', dtype=str, keep_default_na=False)
+    release = df['metacyc_release'].iloc[0] if len(df) else ''
+    df = df[(df['call'] == '1') & (df['super'] == '0')]
+    bins = {}
+    for b, g in df.groupby('bin'):
+        rows = []
+        for r in g[keep].itertuples(index=False):
+            d = dict(zip(keep, r))
+            for k in ('confidence', 'frac', 'seq_id_median'):
+                d[k] = float(d[k]) if d[k] else None
+            for k in ('n_rxn', 'n_seq', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only'):
+                d[k] = int(d[k]) if d[k] else 0
+            rows.append(d)
+        rows.sort(key=lambda d: -(d['confidence'] or 0))
+        bins[b] = rows
+    return {'release': release, 'bins': bins}
 
 
 def build_scg_heatmap(results_dir):
@@ -2537,6 +2568,13 @@ def main():
     kegg = build_kegg_heatmap(results_dir)
     write_json_gz(os.path.join(output_dir, 'kegg_heatmap.json'), kegg)
     print(f"  Wrote kegg_heatmap.json ({len(kegg['mag_ids'])} MAGs × {len(kegg['module_ids'])} modules)")
+
+    # 6a. metacyc_pathways.json (only when the MetaCyc step ran)
+    metacyc = build_metacyc(results_dir)
+    if metacyc:
+        write_json_gz(os.path.join(output_dir, 'metacyc_pathways.json'), metacyc)
+        n = sum(len(v) for b, v in metacyc['bins'].items() if b != '_community')
+        print(f"  Wrote metacyc_pathways.json ({n} MAG pathway calls, MetaCyc {metacyc['release']})")
 
     # 6b. scg_heatmap.json
     scg = build_scg_heatmap(results_dir)

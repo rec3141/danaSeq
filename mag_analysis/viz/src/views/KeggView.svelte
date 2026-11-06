@@ -2,10 +2,11 @@
   import D3Heatmap from '../components/charts/D3Heatmap.svelte';
   import DataTable from '../components/ui/DataTable.svelte';
   import { onMount } from 'svelte';
-  import { keggHeatmap, binQuality, loadBinQuality } from '../stores/data.js';
+  import { keggHeatmap, binQuality, loadBinQuality, metacycPathways } from '../stores/data.js';
   import { selectedMag } from '../stores/selection.js';
 
   let keggData = $derived($keggHeatmap);
+  let metacyc = $derived($metacycPathways);
   let allBins = $derived($binQuality);
   let selected = $derived($selectedMag);
 
@@ -201,6 +202,48 @@
     { key: 'group', label: 'Group' },
     { key: 'category', label: 'Category' },
   ];
+
+  // MetaCyc pathway calls for the selected MAG (PathoLogic rules, confidence from evidence)
+  let activeTiers = $state(new Set(['high', 'medium', 'low']));
+  function toggleTier(t) {
+    const next = new Set(activeTiers);
+    if (next.has(t)) { if (next.size > 1) next.delete(t); } else { next.add(t); }
+    activeTiers = next;
+  }
+  let selectedMetacycAll = $derived(selected && metacyc?.bins?.[selected] ? metacyc.bins[selected] : []);
+  let selectedMetacyc = $derived(selectedMetacycAll.filter(p => activeTiers.has(p.confidence_tier)));
+  let metacycTierCounts = $derived.by(() => {
+    const c = { high: 0, medium: 0, low: 0 };
+    for (const p of selectedMetacycAll) c[p.confidence_tier] = (c[p.confidence_tier] || 0) + 1;
+    return c;
+  });
+  const tierClass = { high: 'text-emerald-400', medium: 'text-amber-400', low: 'text-slate-400' };
+  const metacycColumns = [
+    { key: 'name', label: 'Pathway' },
+    { key: 'confidence', label: 'Conf.', render: (v, row) =>
+      `<span class="${tierClass[row.confidence_tier] || ''}" title="${row.confidence_tier}">${v == null ? '' : v.toFixed(2)}</span>` },
+    { key: 'confidence_tier', label: 'Tier' },
+    { key: 'frac', label: 'Rxns', render: (v, row) => `${Math.round((v || 0) * row.n_rxn)}/${row.n_rxn}` },
+    { key: 'n_seq', label: 'Seq', render: (v, row) =>
+      `${v}${row.seq_id_median != null ? ` <span class="text-slate-500">(${row.seq_id_median.toFixed(0)}%)</span>` : ''}` },
+    { key: 'n_ec_only', label: 'EC/KO only', render: (v, row) => `${v + row.n_ko_only + row.n_ec_direct_only}` },
+    { key: 'key_seq', label: 'Key seq' },
+    { key: 'klass', label: 'Class' },
+  ];
+
+  function exportMetacycTsv() {
+    if (!selectedMetacyc.length) return;
+    const cols = ['pathway', 'name', 'klass', 'confidence', 'confidence_tier', 'frac', 'n_rxn',
+                  'n_seq', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only', 'seq_id_median', 'key_seq', 'reason'];
+    const body = selectedMetacyc.map(p => cols.map(c => p[c] ?? '').join('\t')).join('\n');
+    const blob = new Blob([cols.join('\t') + '\n' + body], { type: 'text/tab-separated-values' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${selected}_metacyc_pathways.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   // Snapshot: serialize SVG to downloadable file
   let heatmapEl;
@@ -402,6 +445,42 @@
   <div class="mt-4 text-xs text-slate-500">
     Ward hierarchical clustering on both axes. Color: dark = 0%, bright = 100% completeness.
   </div>
+
+  {#if metacyc}
+    <div class="mt-6 bg-slate-800 rounded-lg p-4 border border-slate-700">
+      <div class="flex items-center gap-3 flex-wrap mb-2">
+        <h3 class="text-sm font-medium text-slate-400">
+          MetaCyc pathways{#if selected} in <span class="text-cyan-400">{selected}</span> ({selectedMetacycAll.length} called){/if}
+          <span class="text-slate-500">· MetaCyc {metacyc.release}</span>
+        </h3>
+        {#if selected && selectedMetacycAll.length}
+          {#each ['high', 'medium', 'low'] as t}
+            <button
+              class="px-2 py-0.5 text-xs rounded-md border transition-colors
+                {activeTiers.has(t) ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400' : 'border-slate-600 text-slate-400 hover:border-slate-500'}"
+              onclick={() => toggleTier(t)}
+            >{t} <span class="text-slate-500">({metacycTierCounts[t]})</span></button>
+          {/each}
+          <button
+            class="ml-auto px-2 py-1 text-xs rounded border border-slate-600 text-slate-400 hover:border-slate-500 hover:text-slate-300 transition-colors"
+            onclick={exportMetacycTsv}
+          >TSV</button>
+        {/if}
+      </div>
+      {#if selected && selectedMetacyc.length}
+        <DataTable columns={metacycColumns} rows={selectedMetacyc} maxHeight="420px" hideExport={true} />
+      {:else if selected}
+        <p class="text-slate-500 text-sm py-6 text-center">No MetaCyc pathway calls for this bin (only DAS Tool MAGs are scored)</p>
+      {:else}
+        <p class="text-slate-500 text-sm py-6 text-center">Click a bin row to view its MetaCyc pathways</p>
+      {/if}
+      <p class="mt-2 text-xs text-slate-500">
+        Calls follow PathoLogic's published rules, which are permissive; confidence (0–1) weights each
+        reaction by its evidence: DIAMOND identity to a Rhea-annotated protein (Seq), else EC/KO-only.
+        High tier: confidence ≥ 0.6, mostly sequence-supported, key reactions sequence-supported.
+      </p>
+    </div>
+  {/if}
   {:else}
   <div class="flex flex-col items-center justify-center py-24 text-center">
     <p class="text-slate-400 text-lg mb-2">No bins match the current filters</p>
