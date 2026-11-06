@@ -1,18 +1,23 @@
 name: Tests
 
 # Small local regressions only (tests/): compile fastq_filter from source and
-# run it on synthetic reads. No pipeline datasets are involved.
+# run it on synthetic reads; run the MetaCyc scorer on its hand-made fixture.
+# No pipeline datasets are involved.
 
 on:
   push:
     branches: [main]
     paths:
       - 'nanopore_assembly/bin/fastq_filter.cpp'
+      - 'mag_analysis/bin/metacyc_scorer.py'
+      - 'mag_analysis/bin/metacyc_scorer/**'
       - 'tests/**'
       - '.github/workflows/tests.yml'
   pull_request:
     paths:
       - 'nanopore_assembly/bin/fastq_filter.cpp'
+      - 'mag_analysis/bin/metacyc_scorer.py'
+      - 'mag_analysis/bin/metacyc_scorer/**'
       - 'tests/**'
       - '.github/workflows/tests.yml'
   workflow_dispatch:
@@ -33,3 +38,16 @@ jobs:
 
       - name: Run fastq_filter regressions
         run: python3 tests/test_fastq_filter.py -v
+
+  metacyc-scorer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run MetaCyc scorer tests
+        run: python3 tests/test_metacyc_scorer.py -v
