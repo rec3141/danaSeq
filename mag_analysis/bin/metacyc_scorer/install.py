@@ -162,8 +162,10 @@ def _runtime_from_sif(sif, work):
     /opt/metapathways/ptools-base. Apptainer cannot start a container nested in another one
     without privileges, so the rootfs is copied out as the user and run as a sandbox."""
     sandbox = os.path.join(work, 'ptools-base')
-    r = _exec(sif, [work], f'test -d {PT_BASE} && cp -a {PT_BASE} {sandbox}', work)
-    if r.returncode or not os.path.isdir(os.path.join(sandbox, 'usr')):
+    # A few root-only files in the image (dpkg locks, btmp, apt logs) can't be read as a user
+    # and aren't needed, so copy errors are tolerated; the runtime's own dirs are checked instead.
+    r = _exec(sif, [work], f'test -d {PT_BASE} && {{ cp -a {PT_BASE} {sandbox} 2>/dev/null; true; }}', work)
+    if r.returncode or not all(os.path.isdir(os.path.join(sandbox, d)) for d in ('usr', 'lib', 'etc')):
         die(f'{sif} has no {PT_BASE}; pass a MetaPathways image or a Pathway Tools runtime sandbox\n{r.stdout}')
     return sandbox
 
@@ -176,14 +178,14 @@ def from_installer(installer, db_dir, work, runtime=None):
     with open(stub, 'w') as fh:
         fh.write('#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = "-e" ] && { shift; exec "$@"; }; shift; done\n')
     os.chmod(stub, 0o755)
-    inst = os.path.abspath(installer)
+    inst = os.path.realpath(installer)
     apptainer_host = bool(shutil.which('apptainer') or shutil.which('singularity'))
     if runtime is None and apptainer_host:
         die('--installer on an Apptainer host needs --runtime: the MetaPathways image '
             f'(apptainer pull mp.sif docker://{MP_IMAGE}) or a sandbox of its {PT_BASE}')
     container = runtime or PT_BASE
     if runtime and runtime.endswith('.sif'):
-        container = _runtime_from_sif(os.path.abspath(runtime), work)
+        container = _runtime_from_sif(os.path.realpath(runtime), work)
     binds = [work, f'{os.path.dirname(inst)}']
     script = (f'unset DISPLAY; export PATH={work}/bin:$PATH; '
               f'{inst} --mode unattended --InstallDir {work}/pt --PTOOLS_LOCAL_PATH {work}/ptl '
@@ -212,18 +214,21 @@ def main(argv=None):
     ap.add_argument('--work-dir', help='scratch dir for the install/export (default: <db-dir>/.metacyc_setup)')
     ap.add_argument('--keep-install', action='store_true')
     a = ap.parse_args(argv)
-    db = os.path.abspath(a.db_dir)
+    # Real paths throughout: a bind through a symlink (e.g. Grex's ~/scratch -> /project/...)
+    # leaves the target missing inside the container.
+    db = os.path.realpath(a.db_dir)
     os.makedirs(db, exist_ok=True)
-    work = os.path.abspath(a.work_dir or os.path.join(db, '.metacyc_setup'))
+    work = os.path.realpath(a.work_dir or os.path.join(db, '.metacyc_setup'))
     os.makedirs(work, exist_ok=True)
     try:
         if a.flatfiles:
             with tempfile.TemporaryDirectory(dir=work) as tmp:
                 from_flatfiles(a.flatfiles, db, tmp)
         elif a.sif:
-            from_sif(os.path.abspath(a.sif), db, work)
+            from_sif(os.path.realpath(a.sif), db, work)
         else:
-            from_installer(a.installer, db, work, a.runtime)
+            from_installer(os.path.realpath(a.installer), db, work,
+                           os.path.realpath(a.runtime) if a.runtime else None)
     finally:
         if not a.keep_install:
             shutil.rmtree(work, ignore_errors=True)
