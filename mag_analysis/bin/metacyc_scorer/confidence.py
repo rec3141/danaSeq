@@ -12,11 +12,25 @@ evidence among the bin's proteins sets a weight w:
 
   confidence = mean of w over the pathway's scored reactions (0..1; equals frac when every
                present reaction has >= 80% identity sequence support)
-  tier high   : confidence >= 0.6, at least half of the present enzymatic reactions have SEQ
-                evidence, and every key reaction (if the pathway names any) is SEQ-supported
+  tier high   : confidence >= 0.7, at least half of the present enzymatic reactions have SEQ
+                evidence, every key reaction (if the pathway names any) is SEQ-supported, and
+                the organism is not outside the pathway's taxonomic range
   tier medium : confidence >= 0.35
   tier low    : otherwise
-The weights and cut-offs are first estimates, not fitted to a reference set.
+
+Calibration (tools/metacyc_benchmark.py, MetaCyc 30.0, curated EcoCyc 30.0 as truth for E. coli
+K-12 MG1655 annotated by mag_analysis): only the two high-tier cut-offs were fitted, everything
+else is unchanged from the first estimates.
+  high_conf 0.6 -> 0.7   Calls with confidence 0.6-0.7 were only 40-55% curated pathways, most
+                         of them missing a reaction; above 0.7 the tier holds ~79%.
+  high_in_range          A pathway outside its MetaCyc taxonomic range is called by PathoLogic
+                         only when every reaction is present; in E. coli none of these complete
+                         out-of-range calls (16-18) was a curated pathway.
+The precision of the high tier stayed at 0.75-0.79 on genomes with 20-60% of genes removed and
+with all reference proteins from the organism's genus, family or order left out, which the fit
+did not see; recall falls with completeness. The weights were left alone: varying the EC/KO
+weight between 0.3 and 0.6 or the SEQ-share cut-off between 0 and 0.5 changed precision by
+less than 0.01.
 """
 import math
 import statistics
@@ -24,8 +38,9 @@ import statistics
 PARAMS = dict(
     w_ec=0.45, w_ko=0.45, w_ec_direct=0.30,     # fixed weights of the non-sequence classes
     seq_id_lo=35.0, seq_id_hi=80.0,             # SEQ weight rises 0.5 -> 1.0 between these identities
-    high_conf=0.6, high_seq_share=0.5,          # tier high: confidence and SEQ share of present reactions
+    high_conf=0.7, high_seq_share=0.5,          # tier high: confidence and SEQ share of present reactions
     high_key_seq=True,                          # tier high: every key reaction SEQ-supported
+    high_in_range=True,                         # tier high: not outside the taxonomic range
     medium_conf=0.35)
 CLASS_ORDER = ('SEQ', 'EC', 'KO', 'EC_DIRECT')
 
@@ -107,7 +122,8 @@ def annotate(mc, row, ev, max_hits=12, params=None):
     key_seq = sum(1 for r in key if r in seq)
     seq_share = len(seq) / len(enz) if enz else 0.0
     if conf >= p['high_conf'] and seq_share >= p['high_seq_share'] and \
-            (key_seq == len(key) or not p['high_key_seq']):
+            (key_seq == len(key) or not p['high_key_seq']) and \
+            not (p['high_in_range'] and row.get('in_tax_range') == 0):
         tier = 'high'
     elif conf >= p['medium_conf']:
         tier = 'medium'
@@ -123,3 +139,4 @@ def annotate(mc, row, ev, max_hits=12, params=None):
                n_unique_seq=sum(1 for r in s['unique_present'] if r in seq),
                supporting_hits=';'.join(f'{r}={ev[r][1]}' for r in ranked[:max_hits]))
     return row
+

@@ -149,11 +149,28 @@ permissive, so every call carries a confidence value built from its evidence:
   identity rising to 1.0 at 80%; EC-only and KO-only evidence score 0.45; an EC mapped
   straight to a MetaCyc reaction without a Rhea link scores 0.30
 - `confidence` is the mean weight over the pathway's reactions (0-1)
-- tier **high** means confidence >= 0.6, at least half of the present reactions backed by a
-  sequence hit, and every key reaction sequence-backed; **medium** means confidence >= 0.35;
-  everything else is **low**
+- tier **high** means confidence >= 0.7, at least half of the present reactions backed by a
+  sequence hit, every key reaction sequence-backed, and the MAG not outside the pathway's
+  MetaCyc taxonomic range; **medium** means confidence >= 0.35; everything else is **low**
 
-The weights are first estimates. Treat low-tier calls as possibilities rather than findings.
+**How reliable the tiers are.** The high-tier cut-offs (confidence 0.7 and the taxonomic-range
+condition) were fitted against EcoCyc, the hand-curated *E. coli* K-12 database, with
+*E. coli* MG1655 run through mag_analysis; the weights are the original estimates. For base
+(non-super) pathways that exist in MetaCyc:
+
+| Tier | Share of calls that are curated EcoCyc pathways | Share of curated pathways called in this tier |
+|---|---|---|
+| high | 0.79 | 0.54-0.68 |
+| medium | 0.29-0.38 | 0.18-0.29 |
+| low | 0.04-0.07 | 0.02-0.03 |
+
+Ranges span runs with the full reference and with every *Escherichia*, Enterobacteriaceae or
+Enterobacterales protein removed from it, which is closer to a MAG from a novel genus. With
+20-60% of the genes removed (an incomplete MAG) the high tier stayed at 0.75-0.79 precision
+and its recall fell to 0.18-0.53. Super-pathways are less reliable (high tier ~0.64), because
+they are called whenever all their components are. Treat low-tier calls as possibilities
+rather than findings. `tools/metacyc_benchmark.py` reruns the comparison for any curated PGDB
+you have (`export`, `compare`, `degrade`); see its `--help`.
 The step needs Bakta annotation (`--annotator bakta`). It is skipped, with one log line, when
 `--metacyc_db` is not given.
 
