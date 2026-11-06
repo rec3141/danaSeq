@@ -199,6 +199,7 @@ usage() {
 # ============================================================================
 
 ASSEMBLY_HOST=""
+EXTRA_INPUTS=()   # --tnf / --assembly_info files, each mounted read-only in container mode
 DEPTHS_HOST=""
 BAM_DIR_HOST=""
 OUTDIR_HOST=""
@@ -303,6 +304,7 @@ while (( $# )); do
             # path inside the container where it isn't bound.
             [[ -z "${2:-}" ]] && die "$1 requires a file path"
             NF_ARGS+=("$1" "$(realpath "$2" 2>/dev/null || echo "$2")")
+            EXTRA_INPUTS+=("${NF_ARGS[-1]}")
             shift 2 ;;
         --all)
             NF_ARGS+=(
@@ -510,6 +512,16 @@ if [[ "$USE_CONTAINER" == true ]]; then
         NF_ARGS[$i]="${NF_ARGS[$i]//${DEPTHS_HOST}/\/data\/depths\/$(basename "$DEPTHS_HOST")}"
     done
     NF_ARGS=("--outdir" "/data/output" "${NF_ARGS[@]}")
+
+    # --tnf and --assembly_info can live anywhere; mount each file's folder.
+    n=0
+    for f in "${EXTRA_INPUTS[@]}"; do
+        n=$((n + 1))
+        BINDS+=("$(dirname "$f"):/data/input${n}:ro")
+        for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+            [[ "${NF_ARGS[$i]}" == "$f" ]] && NF_ARGS[$i]="/data/input${n}/$(basename "$f")"
+        done
+    done
 
     if [[ -n "${BAM_DIR_HOST:-}" ]]; then
         BINDS+=("${BAM_DIR_HOST}:/data/bams:ro")
