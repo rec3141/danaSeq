@@ -86,6 +86,11 @@ def helpMessage() {
       --protein_db_opts STR  Default DIAMOND cutoffs [default: id=50,qcov=50,scov=50,evalue=1e-5]
       --protein_db_chunk N   Proteins per parallel hmmsearch job; 0 = one search [default: 50000]
       --protein_db_cpus N    CPUs for each protein DB search [default: --medium_cpus]
+      --metacyc_db DIR     Licensed MetaCyc flat files (download-databases.sh --metacyc);
+                           MetaCyc pathways per MAG are skipped without it (Bakta only)
+      --metacyc_refs DIR   Open references for MetaCyc pathways (download-databases.sh --metacyc-refs)
+      --metacyc_taxonomy S Taxonomic ranges from gtdbtk | sendsketch | none [default: gtdbtk]
+      --metacyc_cpus N     CPUs for its DIAMOND search [default: --medium_cpus]
 
     Eukaryotic:
       --run_eukaryotic, --run_metaeuk, --run_marferret
@@ -147,6 +152,30 @@ def proteinDbEntries(String ext, String default_opts) {
         entries << [ sub.name, f, annot.exists() ? annot.toString() : 'NONE', opts ]
     }
     return entries
+}
+
+// MetaCyc pathways need both reference dirs and Bakta's annotation TSV. Returns whether the
+// step runs, logging one line saying why when it does not.
+def metacycEnabled(String annotator) {
+    if (!params.run_metabolism || annotator == 'none') return false
+    if (!params.metacyc_db) {
+        log.info "MetaCyc pathways skipped: no --metacyc_db (licensed MetaCyc; see download-databases.sh --metacyc)."
+        return false
+    }
+    def missing = ['pathways.dat', 'reactions.dat', 'classes.dat'].findAll { !file("${params.metacyc_db}/${it}").exists() }
+    if (missing) {
+        log.warn "MetaCyc pathways skipped: ${params.metacyc_db} lacks ${missing.join(', ')} (install with download-databases.sh --metacyc)."
+        return false
+    }
+    if (!params.metacyc_refs || !file("${params.metacyc_refs}/seqref/seqref.dmnd").exists()) {
+        log.warn "MetaCyc pathways skipped: no open references at --metacyc_refs ${params.metacyc_refs ?: '(unset)'} (download-databases.sh --metacyc-refs)."
+        return false
+    }
+    if (annotator != 'bakta') {
+        log.warn "MetaCyc pathways skipped: they read Bakta's annotation TSV (--annotator bakta)."
+        return false
+    }
+    return true
 }
 
 def gpuVisible() {
@@ -231,6 +260,8 @@ include { EMAPPER }             from './modules/metabolism'
 include { DBCAN }               from './modules/metabolism'
 include { PROTEIN_DB_HMM }      from './modules/metabolism'
 include { PROTEIN_DB_DIAMOND }  from './modules/metabolism'
+include { METACYC_SEARCH }      from './modules/metabolism'
+include { METACYC_PATHWAYS }    from './modules/metabolism'
 include { MERGE_ANNOTATIONS }   from './modules/metabolism'
 include { MAP_TO_BINS }         from './modules/metabolism'
 include { KEGG_MODULES }        from './modules/metabolism'
@@ -300,6 +331,7 @@ workflow {
     validateParams()
     def effective_annotator = resolveAnnotator()
     def comebin_enabled = runComebin()
+    def metacyc_enabled = metacycEnabled(effective_annotator)
 
     // 1. Create channels from file-based inputs
     ch_assembly = Channel.fromPath(params.assembly, checkIfExists: true)
@@ -478,6 +510,11 @@ workflow {
         if (params.protein_db_dir && !hmm_entries && !dmnd_entries) {
             log.warn "--protein_db_dir ${params.protein_db_dir} holds no <name>/<name>.hmm or .dmnd; no protein DB searched."
         }
+    }
+
+    // MetaCyc reference search starts as soon as the proteins exist; pathways follow in step 6b.
+    if (metacyc_enabled) {
+        METACYC_SEARCH(ch_proteins, file(params.metacyc_refs))
     }
 
     // 2f. Per-gene depths (requires annotation GFF + BAMs)
@@ -722,6 +759,34 @@ workflow {
         GTDBTK_CLASSIFY(ch_gtdbtk_bins)
     }
 
+    // 6b. MetaCyc pathways per DAS Tool MAG and for the community
+    if (metacyc_enabled) {
+        def no_file = file("${projectDir}/assets/NO_FILE")
+        def gtdbtk_on = params.run_gtdbtk && params.gtdbtk_db
+        def sketch_on = params.run_sendsketch && params.sendsketch_address
+        if (params.metacyc_taxonomy == 'gtdbtk' && gtdbtk_on) {
+            ch_mc_tax = GTDBTK_CLASSIFY.out.taxonomy.map { ['gtdbtk', it] }
+        } else if (params.metacyc_taxonomy == 'sendsketch' && sketch_on) {
+            ch_mc_tax = SENDSKETCH_CLASSIFY.out.contig_taxonomy.map { ['sendsketch', it] }
+        } else {
+            if (params.metacyc_taxonomy != 'none') {
+                log.info "MetaCyc taxonomic-range rules off: --metacyc_taxonomy ${params.metacyc_taxonomy} has no results in this run."
+            }
+            ch_mc_tax = Channel.value(['none', no_file])
+        }
+        METACYC_PATHWAYS(
+            METACYC_SEARCH.out.hits,
+            ch_annotation_tsv,
+            MERGE_ANNOTATIONS.out.merged,
+            DASTOOL_CONSENSUS.out.contig2bin,
+            ch_gff,
+            params.kofam_db ? file("${params.kofam_db}/ko_list") : no_file,
+            ch_mc_tax,
+            file(params.metacyc_db),
+            file(params.metacyc_refs)
+        )
+    }
+
     // 7. Viz dashboard
     if (params.run_viz) {
         // Stage 1: TNF done (or assembly-only snapshot). Trigger off STAGE_INPUTS so
@@ -798,6 +863,9 @@ workflow {
             if (params.run_ecossdb) {
                 ch_viz_stage4 = ch_viz_stage4.mix(ECOSSDB_VIZ.out.json.collect())
             }
+        }
+        if (metacyc_enabled) {
+            ch_viz_stage4 = ch_viz_stage4.mix(METACYC_PATHWAYS.out.pathways.collect())
         }
         if (params.run_antismash) {
             ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.summary.collect())
