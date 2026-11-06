@@ -73,6 +73,8 @@ def helpMessage() {
     MGE detection:
       --run_genomad, --run_checkv, --run_integronfinder, --run_islandpath,
       --run_macsyfinder, --run_defensefinder
+      --run_mge_annotate (needs --run_genomad; annotates consensus bins, never changes them)
+      --mge_alt_export --mge_export_min_plasmid_score X --mge_export_min_virus_score Y [--mge_rescue_unbinned]
 
     Metabolic profiling:
       --run_metabolism, --run_antismash, --run_ecossdb
@@ -247,6 +249,7 @@ include { SENDSKETCH_CLASSIFY } from './modules/taxonomy'
 include { RNA_CLASSIFY }       from './modules/rrna'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
+include { MGE_BIN_ANNOTATE }    from './modules/mge'
 include { INTEGRONFINDER }      from './modules/mge'
 include { ISLANDPATH_DIMOB }    from './modules/mge'
 include { MACSYFINDER }         from './modules/mge'
@@ -589,6 +592,30 @@ workflow {
         ch_bin_files,
         ch_bin_labels
     )
+
+    // 4a'. Mobile-element annotation of the consensus bins (opt-in; reads geNomad/CheckV outputs)
+    if (params.run_mge_annotate) {
+        if (!(params.run_genomad && params.genomad_db)) {
+            error "--run_mge_annotate needs --run_genomad and --genomad_db"
+        }
+        if (params.mge_alt_export && (params.mge_export_min_plasmid_score == null || params.mge_export_min_virus_score == null)) {
+            error "--mge_alt_export needs explicit --mge_export_min_plasmid_score and --mge_export_min_virus_score (uncalibrated; no defaults)"
+        }
+        def no_file_mge = file("${projectDir}/assets/NO_FILE")
+        def ch_checkv_status  = (params.run_checkv && params.checkv_db) ? CHECKV_QUALITY.out.status  : Channel.value(no_file_mge)
+        def ch_checkv_quality = (params.run_checkv && params.checkv_db) ? CHECKV_QUALITY.out.quality : Channel.value(no_file_mge)
+        MGE_BIN_ANNOTATE(
+            ch_assembly,
+            DASTOOL_CONSENSUS.out.contig2bin,
+            GENOMAD_CLASSIFY.out.status,
+            GENOMAD_CLASSIFY.out.summary,
+            GENOMAD_CLASSIFY.out.virus_summary,
+            GENOMAD_CLASSIFY.out.plasmid_summary,
+            GENOMAD_CLASSIFY.out.provirus_coords,
+            ch_checkv_status,
+            ch_checkv_quality
+        )
+    }
 
     // 4a. Binette consensus refinement
     if (params.run_binette && params.checkm2_db) {

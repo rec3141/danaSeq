@@ -38,6 +38,7 @@ process GENOMAD_CLASSIFY {
     path("provirus.fna"),          emit: provirus_fasta
     path("taxonomy.tsv"),          emit: taxonomy
     path("genomad_summary.tsv"),   emit: summary
+    path("status.tsv"),            emit: status
 
     script:
     def db_path = params.genomad_db
@@ -55,13 +56,33 @@ process GENOMAD_CLASSIFY {
     set -e
 
     # geNomad names output files based on the input filename
-    input_base=\$(basename "${assembly}" | sed 's/\\.[^.]*\$//')
+    # geNomad strips a .gz suffix as well as the FASTA extension, so strip both here;
+    # otherwise a .fa.gz assembly leaves ".fa" in the name and every output looks missing.
+    input_base=\$(basename "${assembly}" | sed -E 's/\\.gz\$//; s/\\.[^.]*\$//')
+    case "${assembly}" in *.gz) n_input=\$(zcat "${assembly}" | grep -c '^>' || true) ;; *) n_input=\$(grep -c '^>' "${assembly}" || true) ;; esac
+    genomad_version=\$(genomad --version 2>/dev/null | awk '{print \$NF}')
+    # status.tsv tells MGE_BIN_ANNOTATE whether empty outputs mean "no hits" or "failed".
+    write_status() {
+        printf 'tool\\tversion\\texit_code\\tn_input\\tn_output\\tstatus\\n' > status.tsv
+        printf 'genomad\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "\$genomad_version" "\$genomad_exit" "\$n_input" "\$1" "\$2" >> status.tsv
+    }
 
     if [ \$genomad_exit -ne 0 ]; then
         echo "[WARNING] geNomad exited with code \$genomad_exit" >&2
         touch virus_summary.tsv plasmid_summary.tsv virus.fna plasmid.fna \\
               virus_proteins.faa plasmid_proteins.faa virus_genes.tsv plasmid_genes.tsv \\
               provirus.tsv provirus.fna taxonomy.tsv genomad_summary.tsv
+        write_status 0 failed
+        exit 0
+    fi
+
+    # A zero exit without the aggregated classification is a failure, not "no hits".
+    if [ ! -d "genomad_out/\${input_base}_aggregated_classification" ]; then
+        echo "[WARNING] geNomad exited 0 but genomad_out/\${input_base}_aggregated_classification is missing" >&2
+        touch virus_summary.tsv plasmid_summary.tsv virus.fna plasmid.fna \\
+              virus_proteins.faa plasmid_proteins.faa virus_genes.tsv plasmid_genes.tsv \\
+              provirus.tsv provirus.fna taxonomy.tsv genomad_summary.tsv
+        write_status 0 failed
         exit 0
     fi
 
@@ -89,6 +110,9 @@ process GENOMAD_CLASSIFY {
 
     # Aggregated classification scores (all contigs)
     copy_or_touch "genomad_out/\${input_base}_aggregated_classification/\${input_base}_aggregated_classification.tsv" genomad_summary.tsv
+
+    n_hits=\$(( \$(tail -n +2 virus_summary.tsv 2>/dev/null | wc -l) + \$(tail -n +2 plasmid_summary.tsv 2>/dev/null | wc -l) ))
+    if [ "\$n_hits" -gt 0 ]; then write_status "\$n_hits" ok; else write_status 0 no_hits; fi
     """
 }
 
@@ -106,10 +130,18 @@ process CHECKV_QUALITY {
     path("quality_summary.tsv"), emit: quality
     path("viruses.fna"),         emit: viruses
     path("proviruses.fna"),      emit: proviruses
+    path("status.tsv"),          emit: status
 
     script:
     def db_path = params.checkv_db
     """
+    checkv_version=\$(checkv -h 2>/dev/null | grep -oE 'v[0-9.]+' | head -1)
+    n_input=\$(grep -c '^>' "${virus_fasta}" 2>/dev/null || true)
+    checkv_exit=NA
+    write_status() {
+        printf 'tool\\tversion\\texit_code\\tn_input\\tn_output\\tstatus\\n' > status.tsv
+        printf 'checkv\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "\$checkv_version" "\$checkv_exit" "\$n_input" "\$1" "\$2" >> status.tsv
+    }
     # CheckV: assess viral genome completeness and contamination
     # Trims host contamination from proviruses, estimates completeness via
     # AAI comparison to reference genomes or HMM-based gene density models
@@ -118,6 +150,7 @@ process CHECKV_QUALITY {
         echo "[WARNING] No viral contigs to assess — skipping CheckV" >&2
         printf 'contig_id\\tcontig_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tcompleteness\\tcontamination\\n' > quality_summary.tsv
         touch viruses.fna proviruses.fna
+        write_status 0 no_hits
         exit 0
     fi
 
@@ -134,14 +167,17 @@ process CHECKV_QUALITY {
         echo "[WARNING] CheckV exited with code \$checkv_exit" >&2
         printf 'contig_id\\tcontig_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tcompleteness\\tcontamination\\n' > quality_summary.tsv
         touch viruses.fna proviruses.fna
+        write_status 0 failed
         exit 0
     fi
 
     # Copy outputs
     if [ -f checkv_out/quality_summary.tsv ]; then
         cp checkv_out/quality_summary.tsv .
+        write_status "\$(tail -n +2 quality_summary.tsv | wc -l)" ok
     else
         printf 'contig_id\\tcontig_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tcompleteness\\tcontamination\\n' > quality_summary.tsv
+        write_status 0 failed
     fi
 
     if [ -f checkv_out/viruses.fna ]; then
@@ -492,5 +528,57 @@ process DEFENSEFINDER {
     cp df_out/systems.tsv .
     cp df_out/genes.tsv .
     cp df_out/hmmer.tsv .
+    """
+}
+
+// MGE_BIN_ANNOTATE: annotate binned contigs with the geNomad/CheckV evidence above, keeping
+// classification, grouping and host attribution apart. It reads those processes' outputs and
+// status files plus the consensus contig-to-bin table and never changes the bins; the optional
+// alternative binning (--mge_alt_export) is a separate file for benchmarks. Logic and tests:
+// bin/mge_bin_annotate.py, bin/test_mge_bin_annotate.py.
+process MGE_BIN_ANNOTATE {
+    tag "mge_annotate"
+    label 'process_low'
+    conda "${projectDir}/conda-envs/dana-mag-quality"
+    publishDir "${params.outdir}/mge/annotate", mode: 'copy', enabled: !params.store_dir
+    storeDir params.store_dir ? "${params.store_dir}/mge/annotate" : null
+
+    input:
+    path(assembly)
+    path(contig2bin,      stageAs: 'contig2bin.tsv')
+    path(genomad_status,  stageAs: 'genomad_status.tsv')
+    path(genomad_scores,  stageAs: 'genomad_scores.tsv')
+    path(virus_summary,   stageAs: 'genomad_virus_summary.tsv')
+    path(plasmid_summary, stageAs: 'genomad_plasmid_summary.tsv')
+    path(provirus,        stageAs: 'genomad_provirus.tsv')
+    path(checkv_status,   stageAs: 'checkv_status.tsv')
+    path(checkv_quality,  stageAs: 'checkv_quality.tsv')
+
+    output:
+    path("contig_class.tsv"),            emit: contig_class
+    path("mge_regions.tsv"),             emit: regions
+    path("mge_groups.tsv"),              emit: groups
+    path("host_links.tsv"),              emit: host_links
+    path("bins_with_mge_separate.tsv"),  emit: alt_bins, optional: true
+
+    script:
+    def alt = params.mge_alt_export
+        ? "--alt-export --min-plasmid-score ${params.mge_export_min_plasmid_score} --min-virus-score ${params.mge_export_min_virus_score}" +
+          (params.mge_rescue_unbinned ? " --rescue-unbinned" : "")
+        : ""
+    """
+    # An empty checkv_status.tsv (the NO_FILE placeholder) reads as CheckV not_run.
+    mge_bin_annotate.py \\
+        --assembly "${assembly}" \\
+        --contig2bin contig2bin.tsv \\
+        --binner "${params.mge_binner_label}" \\
+        --genomad-status genomad_status.tsv \\
+        --genomad-scores genomad_scores.tsv \\
+        --virus-summary genomad_virus_summary.tsv \\
+        --plasmid-summary genomad_plasmid_summary.tsv \\
+        --provirus genomad_provirus.tsv \\
+        --checkv-status checkv_status.tsv \\
+        --checkv-quality checkv_quality.tsv \\
+        ${alt}
     """
 }
