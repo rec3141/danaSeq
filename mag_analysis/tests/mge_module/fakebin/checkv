@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Fake CheckV for module tests. FAKE_CHECKV_MODE: ok | fail
+if [ "$1" = "-h" ]; then echo "CheckV v0.0.0-fake"; exit 0; fi
+[ "${FAKE_CHECKV_MODE:-ok}" = fail ] && exit 1
+out="$3"; mkdir -p "$out"
+printf 'contig_id\tcontig_length\tgene_count\tviral_genes\thost_genes\tcheckv_quality\tcompleteness\tcompleteness_method\tcontamination\nhost1|provirus_101_2100\t2000\t3\t2\t0\tHigh-quality\t91.0\tAAI-based\t0\n' > "$out/quality_summary.tsv"
+touch "$out/viruses.fna" "$out/proviruses.fna"

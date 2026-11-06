@@ -26,6 +26,7 @@ successful run is "not_scored". Neither is ever reported as chromosome. Design a
 import argparse
 import csv
 import gzip
+import math
 import sys
 from pathlib import Path
 
@@ -70,6 +71,42 @@ def read_tsv(path):
         return list(csv.DictReader(f, delimiter="\t"))
 
 
+def read_required(path, columns, what):
+    """Read a geNomad/CheckV table that must exist with a header when the tool reported ok/no_hits.
+
+    A missing or headerless file means the evidence is unavailable, which is an error here: treating it
+    as "no rows" would turn missing provirus coordinates into "zero regions" (and let a host contig move).
+    """
+    if path is None or not Path(path).is_file() or Path(path).stat().st_size == 0:
+        raise InputError(f"{what}: required file missing or empty ({path})")
+    with open(path) as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        missing = [c for c in columns if c not in (reader.fieldnames or [])]
+        if missing:
+            raise InputError(f"{what}: missing columns {missing} in {path}")
+        return list(reader)
+
+
+def unit_score(value, what):
+    """A score or threshold must be a finite number in [0, 1]."""
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        raise InputError(f"{what}: not a number: {value!r}")
+    if not math.isfinite(x) or not 0.0 <= x <= 1.0:
+        raise InputError(f"{what}: must be a finite number in [0, 1], got {value!r}")
+    return x
+
+
+def index_unique(rows, key, what):
+    out = {}
+    for r in rows:
+        if r[key] in out:
+            raise InputError(f"{what}: duplicate id {r[key]}")
+        out[r[key]] = r
+    return out
+
+
 def read_contig2bin(path):
     c2b = {}
     with open(path) as f:
@@ -98,20 +135,23 @@ def annotate(a):
 
     scores, virus, plasmid, regions = {}, {}, {}, []
     if g_ok:
-        for r in read_tsv(a.genomad_scores):
-            scores[r["seq_name"]] = r
-        for r in read_tsv(a.virus_summary):
-            if "|provirus_" not in r["seq_name"]:
-                virus[r["seq_name"]] = r
-        for r in read_tsv(a.plasmid_summary):
-            plasmid[r["seq_name"]] = r
-        seen = set()
-        for r in read_tsv(a.provirus):
-            rid, parent = r["seq_name"], r["source_seq"]
-            start, end = int(r["start"]), int(r["end"])
-            if rid in seen:
-                raise InputError(f"duplicate provirus region id {rid}")
-            seen.add(rid)
+        score_cols = ["seq_name", "chromosome_score", "plasmid_score", "virus_score"]
+        scores = index_unique(read_required(a.genomad_scores, score_cols, "geNomad scores"),
+                              "seq_name", "geNomad scores")
+        for name, r in scores.items():
+            for k in score_cols[1:]:
+                unit_score(r[k], f"geNomad {k} for {name}")
+        v_rows = read_required(a.virus_summary, ["seq_name", "topology", "virus_score"], "geNomad virus summary")
+        virus_all = index_unique(v_rows, "seq_name", "geNomad virus summary")
+        plasmid = index_unique(read_required(a.plasmid_summary, ["seq_name", "topology", "plasmid_score"],
+                                             "geNomad plasmid summary"), "seq_name", "geNomad plasmid summary")
+        pv_rows = read_required(a.provirus, ["seq_name", "source_seq", "start", "end"], "geNomad provirus table")
+        for rid, r in index_unique(pv_rows, "seq_name", "geNomad provirus table").items():
+            parent = r["source_seq"]
+            try:
+                start, end = int(r["start"]), int(r["end"])
+            except ValueError:
+                raise InputError(f"provirus region {rid} has non-integer coordinates")
             if parent not in lengths:
                 raise InputError(f"provirus region {rid} on unknown contig {parent}")
             if not (1 <= start <= end <= lengths[parent]):
@@ -119,14 +159,29 @@ def annotate(a):
                                  f"on {parent} (length {lengths[parent]})")
             regions.append({"region_id": rid, "parent_contig": parent, "start": start, "end": end,
                             "source": "genomad_provirus", "score": r.get("v_vs_c_score", "")})
-        for name in list(scores) + list(virus) + list(plasmid):
-            if name.split("|")[0] not in lengths:
-                raise InputError(f"geNomad reports {name}, which is not in the assembly")
+        region_ids = {reg["region_id"] for reg in regions}
+        for name, r in virus_all.items():
+            if name in lengths:
+                virus[name] = r                      # whole-contig virus call (exact assembly id)
+            elif name in region_ids:
+                pass                                 # provirus call, already a region record
+            else:
+                raise InputError(f"geNomad virus summary lists {name}, which is neither an assembly "
+                                 f"contig nor a provirus region in the coordinates table")
+        for name, r in list(virus.items()):
+            unit_score(r["virus_score"], f"geNomad virus_score for {name}")
+        for name, r in plasmid.items():
+            if name not in lengths:
+                raise InputError(f"geNomad plasmid summary lists {name}, which is not in the assembly")
+            unit_score(r["plasmid_score"], f"geNomad plasmid_score for {name}")
+        for name in scores:
+            if name not in lengths:
+                raise InputError(f"geNomad scores list {name}, which is not in the assembly")
 
     checkv = {}
     if c_status in OK_STATES:
-        for r in read_tsv(a.checkv_quality):
-            checkv[r["contig_id"]] = r
+        checkv = index_unique(read_required(a.checkv_quality, ["contig_id", "completeness", "checkv_quality"],
+                                            "CheckV quality summary"), "contig_id", "CheckV quality summary")
 
     n_regions = {}
     for reg in regions:
@@ -220,17 +275,30 @@ def alt_export(a, out, lengths, c2b, calls, n_regions, plasmid, virus, g_status)
         raise InputError(f"--alt-export refused: geNomad status is {g_status}")
     if a.min_plasmid_score is None or a.min_virus_score is None:
         raise InputError("--alt-export needs explicit --min-plasmid-score and --min-virus-score")
+    min_p = unit_score(a.min_plasmid_score, "--min-plasmid-score")
+    min_v = unit_score(a.min_virus_score, "--min-virus-score")
     bin_size = {}
     for c, b in c2b.items():
         bin_size[b] = bin_size.get(b, 0) + 1
+    # New group bins must not collide with any existing bin name or with each other.
+    taken = set(bin_size)
+
+    def new_bin(c):
+        base = f"mge_{c}"
+        name, k = base, 1
+        while name in taken:
+            k += 1
+            name = f"{base}_{k}"
+        taken.add(name)
+        return name
 
     def qualifies(c):
         if n_regions.get(c, 0) > 0:
             return False
         if calls[c] == "plasmid":
-            return float(plasmid[c]["plasmid_score"]) >= a.min_plasmid_score
+            return float(plasmid[c]["plasmid_score"]) >= min_p
         if calls[c] == "virus":
-            return float(virus[c]["virus_score"]) >= a.min_virus_score
+            return float(virus[c]["virus_score"]) >= min_v
         return False
 
     with open(out / "bins_with_mge_separate.tsv", "w", newline="") as f:
@@ -242,11 +310,11 @@ def alt_export(a, out, lengths, c2b, calls, n_regions, plasmid, virus, g_status)
             b = c2b.get(c)
             q = qualifies(c)
             if b is not None and q and bin_size[b] > 1:
-                w.writerow([c, f"mge_{c}", "peel"])
+                w.writerow([c, new_bin(c), "peel"])
             elif b is not None:
                 w.writerow([c, b, "kept_sole_contig" if q else "kept"])
             elif q and a.rescue_unbinned:
-                w.writerow([c, f"mge_{c}", "rescue"])
+                w.writerow([c, new_bin(c), "rescue"])
 
 
 def main(argv=None):

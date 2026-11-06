@@ -93,8 +93,11 @@ def test_genomad_missing_status_is_not_run(toy):
 
 def test_no_hits(toy):
     tmp, f = toy
-    f.update(genomad_status=status(tmp / "gn.status", "no_hits"), genomad_scores=None, virus_summary=None,
-             plasmid_summary=None, provirus=None)
+    f.update(genomad_status=status(tmp / "gn.status", "no_hits"),
+             genomad_scores=tsv(tmp / "ns.tsv", ["seq_name", "chromosome_score", "plasmid_score", "virus_score"], []),
+             virus_summary=tsv(tmp / "nv.tsv", ["seq_name", "length", "topology", "virus_score"], []),
+             plasmid_summary=tsv(tmp / "np.tsv", ["seq_name", "length", "topology", "plasmid_score"], []),
+             provirus=tsv(tmp / "npv.tsv", ["seq_name", "source_seq", "start", "end", "v_vs_c_score"], []))
     run(f, alt_export=True, min_plasmid_score=.9, min_virus_score=.9)
     assert {r["genomad_call"] for r in rows(f["outdir"], "contig_class.tsv")} == {"not_scored"}
     assert rows(f["outdir"], "mge_groups.tsv") == []
@@ -180,5 +183,78 @@ def test_sole_contig_bin_not_duplicated(toy):
 def test_binned_contig_missing_from_assembly(toy):
     tmp, f = toy
     f["contig2bin"] = write(tmp / "c2b3.tsv", "ghost\tbinZ\n")
+    with pytest.raises(mba.InputError):
+        run(f)
+
+
+def test_checkv_join_success(toy):
+    tmp, f = toy
+    f["checkv_status"] = status(tmp / "cok.status", "ok")
+    f["checkv_quality"] = tsv(tmp / "cq.tsv", ["contig_id", "completeness", "completeness_method", "checkv_quality"],
+                              [["host1|provirus_101_2100", 87.5, "AAI-based", "High-quality"]])
+    run(f)
+    prov = [g for g in rows(f["outdir"], "mge_groups.tsv") if g["kind"] == "provirus"][0]
+    assert prov["checkv_completeness"] == "87.5" and prov["checkv_method"] == "AAI-based"
+
+
+@pytest.mark.parametrize("key", ["genomad_scores", "virus_summary", "plasmid_summary", "provirus"])
+def test_missing_required_genomad_file_is_error(toy, key):
+    tmp, f = toy
+    f[key] = write(tmp / f"empty_{key}.tsv", "")
+    with pytest.raises(mba.InputError):
+        run(f)
+
+
+def test_provirus_summary_without_region_record_is_error(toy):
+    # Kite's reproduction: whole-host virus call plus a provirus summary row, coordinates file emptied.
+    tmp, f = toy
+    f["virus_summary"] = tsv(tmp / "v3.tsv", ["seq_name", "length", "topology", "virus_score"],
+                             [["host1", 10000, "No terminal repeats", .95],
+                              ["host1|provirus_101_2100", 2000, "Provirus", .95]])
+    f["provirus"] = tsv(tmp / "pv3.tsv", ["seq_name", "source_seq", "start", "end", "v_vs_c_score"], [])
+    with pytest.raises(mba.InputError):
+        run(f, alt_export=True, min_plasmid_score=.5, min_virus_score=.5)
+
+
+def test_new_bin_ids_avoid_existing_bins(toy):
+    tmp, f = toy
+    f["contig2bin"] = write(tmp / "c2b4.tsv", "host1\tmge_plas1\nhost2\tmge_plas1\nplas1\tmge_plas1\n")
+    run(f, alt_export=True, min_plasmid_score=.9, min_virus_score=.9)
+    alt = {r["contig_id"]: r for r in rows(f["outdir"], "bins_with_mge_separate.tsv")}
+    assert alt["plas1"]["mge_operation"] == "peel"
+    assert alt["plas1"]["bin"] != "mge_plas1" and alt["host1"]["bin"] == "mge_plas1"
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5, float("nan"), float("inf")])
+def test_threshold_must_be_unit_interval(toy, bad):
+    _, f = toy
+    with pytest.raises(mba.InputError):
+        run(f, alt_export=True, min_plasmid_score=bad, min_virus_score=.9)
+
+
+@pytest.mark.parametrize("bad", ["nan", "-1", "2", "x"])
+def test_scores_must_be_unit_interval(toy, bad):
+    tmp, f = toy
+    f["genomad_scores"] = tsv(tmp / "bs.tsv", ["seq_name", "chromosome_score", "plasmid_score", "virus_score"],
+                              [["host1", bad, .05, .05]])
+    with pytest.raises(mba.InputError):
+        run(f)
+
+
+@pytest.mark.parametrize("key,header,row", [
+    ("genomad_scores", ["seq_name", "chromosome_score", "plasmid_score", "virus_score"], ["host1", .9, .05, .05]),
+    ("plasmid_summary", ["seq_name", "length", "topology", "plasmid_score"], ["plas1", 3000, "DTR", .97]),
+])
+def test_duplicate_evidence_ids_are_error(toy, key, header, row):
+    tmp, f = toy
+    f[key] = tsv(tmp / f"dup_{key}.tsv", header, [row, row])
+    with pytest.raises(mba.InputError):
+        run(f)
+
+
+def test_exact_ids_not_prefix_split(toy):
+    tmp, f = toy
+    f["plasmid_summary"] = tsv(tmp / "p4.tsv", ["seq_name", "length", "topology", "plasmid_score"],
+                               [["plas1|extra", 3000, "DTR", .97]])
     with pytest.raises(mba.InputError):
         run(f)

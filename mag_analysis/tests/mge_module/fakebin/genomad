@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Fake geNomad for module tests. FAKE_GENOMAD_MODE: ok | nohits | fail | missing_provirus
+if [ "$1" = "--version" ]; then echo "geNomad, version 0.0.0-fake"; exit 0; fi
+mode="${FAKE_GENOMAD_MODE:-ok}"
+[ "$mode" = fail ] && { echo "fake failure" >&2; exit 1; }
+# args: end-to-end [opts] INPUT OUTDIR DB
+args=(); for a in "$@"; do args+=("$a"); done
+n=${#args[@]}; input="${args[$((n-3))]}"; out="${args[$((n-2))]}"
+base=$(basename "$input"); base=${base%.gz}; base=${base%.*}
+mkdir -p "$out/${base}_summary" "$out/${base}_find_proviruses" "$out/${base}_aggregated_classification" "$out/${base}_annotate"
+printf 'seq_name\tchromosome_score\tplasmid_score\tvirus_score\n' > "$out/${base}_aggregated_classification/${base}_aggregated_classification.tsv"
+printf 'seq_name\tlength\ttopology\tcoordinates\tn_genes\tgenetic_code\tvirus_score\tfdr\tn_hallmarks\tmarker_enrichment\ttaxonomy\n' > "$out/${base}_summary/${base}_virus_summary.tsv"
+printf 'seq_name\tlength\ttopology\tn_genes\tgenetic_code\tplasmid_score\tfdr\tn_hallmarks\tmarker_enrichment\tconjugation_genes\tamr_genes\n' > "$out/${base}_summary/${base}_plasmid_summary.tsv"
+printf 'seq_name\tsource_seq\tstart\tend\tlength\tn_genes\tv_vs_c_score\tin_seq_edge\tintegrases\n' > "$out/${base}_find_proviruses/${base}_provirus.tsv"
+touch "$out/${base}_summary/${base}_virus.fna" "$out/${base}_summary/${base}_plasmid.fna" "$out/${base}_annotate/${base}_taxonomy.tsv"
+if [ "$mode" = ok ] || [ "$mode" = missing_provirus ]; then
+  printf 'host1\t0.9\t0.05\t0.05\nhost2\t0.95\t0.03\t0.02\nplas1\t0.02\t0.97\t0.01\n' >> "$out/${base}_aggregated_classification/${base}_aggregated_classification.tsv"
+  printf 'plas1\t3000\tDTR\t3\t11\t0.97\tNA\t0\t5.0\tNA\tNA\n' >> "$out/${base}_summary/${base}_plasmid_summary.tsv"
+  printf 'host1|provirus_101_2100\t2000\tProvirus\t101-2100\t3\t11\t0.95\tNA\t2\t9.0\tViruses\n' >> "$out/${base}_summary/${base}_virus_summary.tsv"
+  printf 'host1|provirus_101_2100\thost1\t101\t2100\t2000\t3\t40.0\tFalse\tNA\n' >> "$out/${base}_find_proviruses/${base}_provirus.tsv"
+  printf '>host1|provirus_101_2100\nACGT\n' > "$out/${base}_summary/${base}_virus.fna"
+fi
+[ "$mode" = missing_provirus ] && rm "$out/${base}_find_proviruses/${base}_provirus.tsv"
+exit 0

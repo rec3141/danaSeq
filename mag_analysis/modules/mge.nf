@@ -90,10 +90,16 @@ process GENOMAD_CLASSIFY {
     copy_or_touch() {
         if [ -f "\$1" ]; then cp "\$1" "\$2"; else touch "\$2"; fi
     }
+    # Files MGE_BIN_ANNOTATE relies on: if geNomad exited 0 but one is missing, the run is
+    # reported as failed, because an empty placeholder would read as "no hits".
+    missing_required=0
+    copy_required() {
+        if [ -f "\$1" ]; then cp "\$1" "\$2"; else touch "\$2"; missing_required=\$((missing_required + 1)); echo "[WARNING] geNomad output missing: \$1" >&2; fi
+    }
 
     # Summary outputs (virus/plasmid summaries, sequences, proteins, gene annotations)
-    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_virus_summary.tsv"     virus_summary.tsv
-    copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_plasmid_summary.tsv"   plasmid_summary.tsv
+    copy_required "genomad_out/\${input_base}_summary/\${input_base}_virus_summary.tsv"     virus_summary.tsv
+    copy_required "genomad_out/\${input_base}_summary/\${input_base}_plasmid_summary.tsv"   plasmid_summary.tsv
     copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_virus.fna"             virus.fna
     copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_plasmid.fna"           plasmid.fna
     copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_virus_proteins.faa"    virus_proteins.faa
@@ -102,17 +108,19 @@ process GENOMAD_CLASSIFY {
     copy_or_touch "genomad_out/\${input_base}_summary/\${input_base}_plasmid_genes.tsv"     plasmid_genes.tsv
 
     # Provirus detection results
-    copy_or_touch "genomad_out/\${input_base}_find_proviruses/\${input_base}_provirus.tsv"  provirus.tsv
+    copy_required "genomad_out/\${input_base}_find_proviruses/\${input_base}_provirus.tsv"  provirus.tsv
     copy_or_touch "genomad_out/\${input_base}_find_proviruses/\${input_base}_provirus.fna"  provirus.fna
 
     # Per-contig taxonomy from annotation step
     copy_or_touch "genomad_out/\${input_base}_annotate/\${input_base}_taxonomy.tsv"         taxonomy.tsv
 
     # Aggregated classification scores (all contigs)
-    copy_or_touch "genomad_out/\${input_base}_aggregated_classification/\${input_base}_aggregated_classification.tsv" genomad_summary.tsv
+    copy_required "genomad_out/\${input_base}_aggregated_classification/\${input_base}_aggregated_classification.tsv" genomad_summary.tsv
 
     n_hits=\$(( \$(tail -n +2 virus_summary.tsv 2>/dev/null | wc -l) + \$(tail -n +2 plasmid_summary.tsv 2>/dev/null | wc -l) ))
-    if [ "\$n_hits" -gt 0 ]; then write_status "\$n_hits" ok; else write_status 0 no_hits; fi
+    if [ "\$missing_required" -gt 0 ]; then write_status 0 failed
+    elif [ "\$n_hits" -gt 0 ]; then write_status "\$n_hits" ok
+    else write_status 0 no_hits; fi
     """
 }
 
@@ -540,8 +548,11 @@ process MGE_BIN_ANNOTATE {
     tag "mge_annotate"
     label 'process_low'
     conda "${projectDir}/conda-envs/dana-mag-quality"
-    publishDir "${params.outdir}/mge/annotate", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/mge/annotate" : null
+    // Cheap, derived from its inputs and the export settings: always recompute (no storeDir, which would
+    // reuse old outputs whatever the thresholds), and stop the workflow on a validation error rather
+    // than inheriting the default retry-then-ignore.
+    errorStrategy 'terminate'
+    publishDir "${params.outdir}/mge/annotate", mode: 'copy'
 
     input:
     path(assembly)
