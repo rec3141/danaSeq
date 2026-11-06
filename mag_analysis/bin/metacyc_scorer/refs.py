@@ -48,7 +48,7 @@ def _gunzip_cmd(threads=2):
 
 
 def _stream(cmd):
-    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, text=True, bufsize=1 << 20)
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, universal_newlines=True, bufsize=1 << 20)
     yield from p.stdout
     if p.wait() != 0:
         raise RuntimeError(f'failed: {cmd}')

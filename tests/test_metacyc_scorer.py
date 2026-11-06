@@ -260,7 +260,7 @@ class TestRun(unittest.TestCase):
                '--bakta-tsv', os.path.join(d, 'bakta.tsv'), '--merged', os.path.join(d, 'merged.tsv'),
                '--hits', os.path.join(d, 'hits.tsv'), '--contig2bin', os.path.join(d, 'c2b.tsv'),
                '--metacyc', FX, '--refs', os.path.join(d, 'refs'), '--chunk', str(chunk), '--outdir', out]
-        return subprocess.run(cmd, capture_output=True, text=True)
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
 
     def test_end_to_end_and_chunking(self):
         with tempfile.TemporaryDirectory() as d:
@@ -292,7 +292,7 @@ class TestRun(unittest.TestCase):
                    '--bakta-tsv', os.path.join(d, 'bakta.tsv'), '--hits', os.path.join(d, 'hits.tsv'),
                    '--contig2bin', os.path.join(d, 'c2b.tsv'), '--metacyc', os.path.join(d, 'none'),
                    '--refs', os.path.join(d, 'refs'), '--outdir', os.path.join(d, 'o')]
-            r = subprocess.run(cmd, capture_output=True, text=True)
+            r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
             self.assertEqual(r.returncode, 3)
             self.assertIn('download-databases.sh --metacyc', r.stderr)
 
