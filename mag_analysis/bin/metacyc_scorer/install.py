@@ -36,7 +36,8 @@ NEEDED = ('pathways.dat', 'reactions.dat', 'classes.dat')
 OPTIONAL = ('compounds.dat', 'enzrxns.dat', 'proteins.dat')
 MP_IMAGE = 'quay.io/hallamlab/metapathways:4.0.3'
 PT_BASE = '/opt/metapathways/ptools-base'
-EXPORT_LISP = ('(progn (so (quote meta)) (format t "~%MC-KB ~a~%" (current-kb)) '
+# {org} is a PGDB org ID: meta for MetaCyc, ecoli for EcoCyc (tools/metacyc_benchmark.py)
+EXPORT_LISP = ('(progn (so (quote {org})) (format t "~%MC-KB ~a~%" (current-kb)) '
                '(create-flat-files-for-current-kb :biopax? nil :sbml? nil :dump-fasta? nil) '
                '(format t "~%MC-EXPORT-DONE~%") (exit))')
 
@@ -82,6 +83,7 @@ def install_files(src_dir, db_dir, source, log=sys.stderr):
                  files=sorted(found), licensed=True)
     with open(os.path.join(out, 'VERSION.json'), 'w') as fh:
         json.dump(stamp, fh, indent=1)
+    os.chmod(os.path.join(out, 'VERSION.json'), 0o600)
     print(f'[metacyc setup] MetaCyc {stamp["release"]} -> {out} ({len(found)} files)', file=log)
     return out
 
@@ -126,13 +128,15 @@ def _exec(container, binds, script, workdir):
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
 
 
-def _export(container, binds, pt_exe, ptlocal, workdir, logpath, extra_env=''):
+def _export(container, binds, pt_exe, ptlocal, workdir, logpath, extra_env='', org='meta'):
+    lisp = EXPORT_LISP.format(org=org)
     script = (f'unset DISPLAY; export HOME={workdir}/home; {extra_env} '
-              f'xvfb-run -a {pt_exe} -no-patch-download -lisp -eval \'{EXPORT_LISP}\'')
+              f'xvfb-run -a {pt_exe} -no-patch-download -lisp -eval \'{lisp}\'')
     r = _exec(container, binds, script, workdir)
     with open(logpath, 'w') as fh:
         fh.write(r.stdout)
-    if 'MC-EXPORT-DONE' not in r.stdout:
+    # Pathway Tools echoes the command, so the marker counts only as a line of its own
+    if 'MC-EXPORT-DONE' not in r.stdout.splitlines():
         die(f'Pathway Tools export did not finish; see {logpath}')
 
 
