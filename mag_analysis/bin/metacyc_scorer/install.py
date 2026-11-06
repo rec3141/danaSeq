@@ -123,7 +123,7 @@ def _exec(container, binds, script, workdir):
     else:
         die('neither apptainer nor docker is available to run Pathway Tools')
     print('[metacyc setup] ' + ' '.join(cmd[:6]) + ' ...', file=sys.stderr)
-    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
 
 
 def _export(container, binds, pt_exe, ptlocal, workdir, logpath, extra_env=''):

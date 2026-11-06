@@ -164,7 +164,9 @@ def main():
         install.main(sys.argv[2:])
         return
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest='cmd', required=True)
+    # Python 3.6 (e.g. Grex's host python3) has no add_subparsers(required=...).
+    sub = ap.add_subparsers(dest='cmd')
+    sub.required = True
     r = sub.add_parser('run', help='reactions and pathways per bin')
     r.add_argument('--bakta-tsv', required=True, help='Bakta annotation.tsv (extra run, basic locus tags)')
     r.add_argument('--merged', help='merged_annotations.tsv (KofamScan/eggNOG KO and EC)')
