@@ -176,6 +176,18 @@ class TestConfidence(unittest.TestCase):
         r = confidence.annotate(mc, rows['PWY-A'], ev)
         self.assertEqual((r['call'], r['confidence_tier'], r['key_seq']), (1, 'low', '0/1'))
 
+    def test_outside_range_never_high(self):
+        mc = model()
+        ev = ev_for(mc, [dict(protein='p', metacyc_rxn=r, classes={'SEQ': dict(identity=95, hit='H')})
+                         for r in ('RXN-B1', 'RXN-SHARED')])
+        bact = {'TAX-2', 'TAX-131567', 'TAX-1'}
+        rows = pathways.score_pathways(mc, {r: 1 for r in ev}, bact)
+        r = confidence.annotate(mc, rows['PWY-B'], ev)
+        self.assertEqual((r['call'], r['in_tax_range'], r['confidence']), (1, 0, 1.0))   # complete, so called
+        self.assertEqual(r['confidence_tier'], 'medium')
+        r = confidence.annotate(mc, rows['PWY-B'], ev, params=dict(high_in_range=False))
+        self.assertEqual(r['confidence_tier'], 'high')
+
     def test_order_independent(self):
         a = dict(protein='p1', metacyc_rxn='R', classes={'KO': dict(ko=['K1'])})
         b = dict(protein='p2', metacyc_rxn='R', classes={'EC': dict(ec=['1.1.1.1'])})

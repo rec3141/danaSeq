@@ -12,26 +12,54 @@ evidence among the bin's proteins sets a weight w:
 
   confidence = mean of w over the pathway's scored reactions (0..1; equals frac when every
                present reaction has >= 80% identity sequence support)
-  tier high   : confidence >= 0.6, at least half of the present enzymatic reactions have SEQ
-                evidence, and every key reaction (if the pathway names any) is SEQ-supported
+  tier high   : confidence >= 0.7, at least half of the present enzymatic reactions have SEQ
+                evidence, every key reaction (if the pathway names any) is SEQ-supported, and
+                the organism is not outside the pathway's taxonomic range
   tier medium : confidence >= 0.35
   tier low    : otherwise
-The weights and cut-offs are first estimates, not fitted to a reference set.
+
+Calibration (tools/metacyc_benchmark.py, MetaCyc 30.0, curated EcoCyc 30.0 as truth for E. coli
+K-12 MG1655 annotated by mag_analysis): only the two high-tier cut-offs were fitted, everything
+else is unchanged from the first estimates.
+  high_conf 0.6 -> 0.7   Calls with confidence 0.6-0.7 were only 40-55% curated pathways, most
+                         of them missing a reaction; above 0.7 the tier holds ~79%.
+  high_in_range          A pathway outside its MetaCyc taxonomic range is called by PathoLogic
+                         only when every reaction is present; in E. coli none of these complete
+                         out-of-range calls (16-18) was a curated pathway.
+The precision of the high tier stayed at 0.75-0.79 on genomes with 20-60% of genes removed and
+with all reference proteins from the organism's genus, family or order left out, which the fit
+did not see; recall falls with completeness. The weights were left alone: varying the EC/KO
+weight between 0.3 and 0.6 or the SEQ-share cut-off between 0 and 0.5 changed precision by
+less than 0.01.
 """
 import math
 import statistics
 
-W_FIXED = {'EC': 0.45, 'KO': 0.45, 'EC_DIRECT': 0.3}
+PARAMS = dict(
+    w_ec=0.45, w_ko=0.45, w_ec_direct=0.30,     # fixed weights of the non-sequence classes
+    seq_id_lo=35.0, seq_id_hi=80.0,             # SEQ weight rises 0.5 -> 1.0 between these identities
+    high_conf=0.7, high_seq_share=0.5,          # tier high: confidence and SEQ share of present reactions
+    high_key_seq=True,                          # tier high: every key reaction SEQ-supported
+    high_in_range=True,                         # tier high: not outside the taxonomic range
+    medium_conf=0.35)
 CLASS_ORDER = ('SEQ', 'EC', 'KO', 'EC_DIRECT')
 
 
-def w_seq(identity):
-    return 0.5 + 0.5 * min(1.0, max(0.0, (identity - 35.0) / 45.0))
+def w_seq(identity, p=PARAMS):
+    span = p['seq_id_hi'] - p['seq_id_lo']
+    return 0.5 + 0.5 * min(1.0, max(0.0, (identity - p['seq_id_lo']) / span))
+
+
+def class_weight(c, identity, p=PARAMS):
+    if c == 'SEQ':
+        return w_seq(identity, p)
+    return p[{'EC': 'w_ec', 'KO': 'w_ko', 'EC_DIRECT': 'w_ec_direct'}[c]]
 
 
 class BinEvidence:
-    """Best evidence per (bin, MetaCyc reaction), accumulated chunk by chunk:
-    rec = [weight, class, best SEQ identity, 'protein:hit:identity' of that hit]."""
+    """Evidence per (bin, MetaCyc reaction), accumulated chunk by chunk:
+    rec = [best SEQ identity or None, 'protein:hit:identity' of that hit, set of evidence classes].
+    Weights are applied in annotate(), so one evidence table can be scored under any PARAMS."""
 
     def __init__(self):
         self.bins = {}
@@ -42,54 +70,66 @@ class BinEvidence:
             return
         rec = self.bins.setdefault(b, {}).get(r)
         if rec is None:
-            rec = self.bins[b][r] = [0.0, None, None, '']
+            rec = self.bins[b][r] = [None, '', set()]
         for c, det in t['classes'].items():
-            w = w_seq(det['identity']) if c == 'SEQ' else W_FIXED[c]
-            # ties go to the stronger class and the smaller hit label, so results do not
-            # depend on the order proteins arrive in
-            if w > rec[0] or (w == rec[0] and rec[1] and CLASS_ORDER.index(c) < CLASS_ORDER.index(rec[1])):
-                rec[0], rec[1] = w, c
+            rec[2].add(c)
             if c == 'SEQ':
+                # ties go to the smaller hit label, so results do not depend on protein order
                 hit = f"{t['protein']}:{det['hit']}:{det['identity']}"
-                if rec[2] is None or det['identity'] > rec[2] or (det['identity'] == rec[2] and hit < rec[3]):
-                    rec[2], rec[3] = det['identity'], hit
+                if rec[0] is None or det['identity'] > rec[0] or (det['identity'] == rec[0] and hit < rec[1]):
+                    rec[0], rec[1] = det['identity'], hit
 
 
-def _weight(mc, r, ev, present):
+def best(rec, p=PARAMS):
+    """(weight, class) of the strongest evidence in rec; ties go to the stronger class."""
+    out = (0.0, None)
+    for c in CLASS_ORDER:
+        if c in rec[2]:
+            w = class_weight(c, rec[0], p)
+            if w > out[0]:
+                out = (w, c)
+    return out
+
+
+def _weight(mc, r, ev, present, p):
     if r in ev:
-        return ev[r][0], ev[r][1]
+        return best(ev[r], p)
     if r in mc.spontaneous:
         return 1.0, 'SPONT'
     parts = mc.composite.get(r)
     if parts and r in present:
-        ws = [ev[x][0] for x in parts if x in ev] + [1.0 for x in parts if x in mc.spontaneous]
-        best = [ev[x][1] for x in parts if x in ev]
-        return (min(ws) if ws else 0.0), (max(best, key=CLASS_ORDER.index) if best else 'COMPOSITE')
+        bs = [best(ev[x], p) for x in parts if x in ev]
+        ws = [w for w, _ in bs] + [1.0 for x in parts if x in mc.spontaneous]
+        cl = [c for _, c in bs]
+        return (min(ws) if ws else 0.0), (max(cl, key=CLASS_ORDER.index) if cl else 'COMPOSITE')
     return 0.0, None
 
 
-def annotate(mc, row, ev, max_hits=12):
+def annotate(mc, row, ev, max_hits=12, params=None):
     """Add the confidence columns to one pathway row; ev = BinEvidence.bins[bin]."""
+    p = dict(PARAMS, **(params or {}))
     s = row['_sets']
     scored, present = s['scored'], s['present']
     ws, cls = {}, {}
     for r in scored:
-        ws[r], cls[r] = _weight(mc, r, ev, present)
+        ws[r], cls[r] = _weight(mc, r, ev, present, p)
     conf = math.fsum(ws.values()) / (len(scored) or 1)     # fsum: independent of set order
     enz = [r for r in scored if cls[r] not in (None, 'SPONT')]
-    seq = [r for r in enz if cls[r] == 'SEQ' or (r in ev and ev[r][2] is not None)]
-    ids = [ev[r][2] for r in seq if r in ev and ev[r][2] is not None]
+    seq = [r for r in enz if cls[r] == 'SEQ' or (r in ev and ev[r][0] is not None)]
+    ids = [ev[r][0] for r in seq if r in ev and ev[r][0] is not None]
     only = {c: sum(1 for r in enz if cls[r] == c) for c in ('EC', 'KO', 'EC_DIRECT')}
     key = s['key']
     key_seq = sum(1 for r in key if r in seq)
     seq_share = len(seq) / len(enz) if enz else 0.0
-    if conf >= 0.6 and seq_share >= 0.5 and key_seq == len(key):
+    if conf >= p['high_conf'] and seq_share >= p['high_seq_share'] and \
+            (key_seq == len(key) or not p['high_key_seq']) and \
+            not (p['high_in_range'] and row.get('in_tax_range') == 0):
         tier = 'high'
-    elif conf >= 0.35:
+    elif conf >= p['medium_conf']:
         tier = 'medium'
     else:
         tier = 'low'
-    ranked = sorted((r for r in seq if r in ev and ev[r][3]), key=lambda r: (-ev[r][2], r))
+    ranked = sorted((r for r in seq if r in ev and ev[r][1]), key=lambda r: (-ev[r][0], r))
     row.update(confidence=round(conf, 3), confidence_tier=tier, n_seq=len(seq),
                n_seq_id60=sum(1 for i in ids if i >= 60), n_ec_only=only['EC'], n_ko_only=only['KO'],
                n_ec_direct_only=only['EC_DIRECT'],
@@ -97,5 +137,6 @@ def annotate(mc, row, ev, max_hits=12):
                seq_id_min=min(ids) if ids else '',
                key_seq=f'{key_seq}/{len(key)}' if key else '',
                n_unique_seq=sum(1 for r in s['unique_present'] if r in seq),
-               supporting_hits=';'.join(f'{r}={ev[r][3]}' for r in ranked[:max_hits]))
+               supporting_hits=';'.join(f'{r}={ev[r][1]}' for r in ranked[:max_hits]))
     return row
+

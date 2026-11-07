@@ -39,6 +39,7 @@ set -euo pipefail
 #   ./download-databases.sh --funfam --funfam-superfamilies 3.40.50.300,1.10.10
 #                                             # Only these CATH superfamilies (or code prefixes)
 #   ./download-databases.sh --metacyc-refs   # Open references for MetaCyc pathways (Rhea, UniProt DIAMOND, GTDB; ~5.5 GB kept)
+#   ./download-databases.sh --metacyc-refs --threads 8   # ... with 8 threads (default: all cores, at most 16)
 #   ./download-databases.sh --metacyc SRC    # Install licensed MetaCyc from SRC: BioCyc flat-file tarball or dir,
 #                                             # Pathway Tools installer, or Pathway Tools .sif (not in --all)
 #   ./download-databases.sh --metacyc SRC --metacyc-runtime RT
@@ -175,6 +176,7 @@ FUNFAM_SUPERFAMILIES=""
 DOWNLOAD_METACYC_REFS=false
 METACYC_SRC=""
 METACYC_RUNTIME=""
+METACYC_THREADS=""
 DOWNLOAD_ALL=false
 LIST_ONLY=false
 INTERACTIVE=true
@@ -218,6 +220,7 @@ while (( $# )); do
         --metacyc-refs) DOWNLOAD_METACYC_REFS=true; INTERACTIVE=false; shift ;;
         --metacyc)   METACYC_SRC="$2"; INTERACTIVE=false; shift 2 ;;
         --metacyc-runtime) METACYC_RUNTIME="$2"; shift 2 ;;
+        --threads)   METACYC_THREADS="$2"; shift 2 ;;
         --list)      LIST_ONLY=true; INTERACTIVE=false; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# ====/p' "$0" | head -n -1 | sed 's/^# //'
@@ -1048,6 +1051,7 @@ download_metacyc_refs() {
     echo "[INFO] Building MetaCyc open references (~1 h, ~5.5 GB kept)..."
     echo "  Destination: ${db_path}"
     local threads; threads=$(nproc 2>/dev/null || echo 4); [ "$threads" -gt 16 ] && threads=16
+    [ -n "$METACYC_THREADS" ] && threads=$METACYC_THREADS
     if $USE_CONTAINER; then
         container_run sh -c "export PATH=/opt/conda/envs/dana-mag-annotate/bin:\$PATH; \
             python3 /pipeline/bin/metacyc_scorer.py build-refs --refs /data/db/metacyc_refs --threads ${threads}" || return 1

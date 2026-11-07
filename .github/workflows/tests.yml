@@ -52,6 +52,9 @@ jobs:
       - name: Run MetaCyc scorer tests
         run: python3 tests/test_metacyc_scorer.py -v
 
+      - name: Run MetaCyc benchmark tool tests
+        run: python3 tests/test_metacyc_benchmark.py -v
+
       # setup_metacyc and the scorer run on the host python3, which is 3.6 on
       # Grex (RHEL 8), so keep them working there.
       - name: Run MetaCyc scorer tests on Python 3.6
