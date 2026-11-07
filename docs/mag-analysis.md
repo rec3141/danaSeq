@@ -209,9 +209,11 @@ repositories or shared or public locations. The pipeline outputs carry MetaCyc p
 reaction identifiers and names, so share them under the same terms as MetaCyc itself.
 
 `--db_dir` finds `<db_dir>/metacyc` and `<db_dir>/metacyc_refs` automatically. Taxonomic-range
-rules use GTDB-Tk's classification (`--run_gtdbtk`). Without GTDB-Tk,
-`--metacyc_taxonomy sendsketch` uses SendSketch contig calls instead, which are less reliable;
-`none` turns the range rules off.
+rules use GTDB-Tk's classification (`--run_gtdbtk`). Without GTDB-Tk they use SendSketch
+contig calls (`--run_sendsketch`), which are less reliable, and the log says so; with neither,
+the range rules are off. Without them the high tier is less precise (0.73 instead of 0.79 on
+the EcoCyc benchmark). `--metacyc_taxonomy sendsketch` forces the SendSketch calls; `none` turns
+the range rules off.
 
 Outputs in `metabolism/metacyc/`:
 
@@ -361,7 +363,7 @@ breaks included). `--derep_min_size_bp` counts sequence bases.
 | `--run_ecossdb` | `true` | Enable ecosystem services mapping |
 | `--metacyc_db` | `null` | Licensed MetaCyc flat files (see MetaCyc pathways); step skipped without it |
 | `--metacyc_refs` | `null` | Open references for MetaCyc pathways (`download-databases.sh --metacyc-refs`) |
-| `--metacyc_taxonomy` | `gtdbtk` | Taxonomic ranges from `gtdbtk`, `sendsketch` (contig calls) or `none` |
+| `--metacyc_taxonomy` | `gtdbtk` | Taxonomic ranges from `gtdbtk` (SendSketch when GTDB-Tk is off), `sendsketch` (contig calls) or `none` |
 | `--metacyc_sensitivity` | `sensitive` | DIAMOND mode (`fast`, `sensitive`, `more-sensitive`) |
 | `--metacyc_block_size` | `2.0` | DIAMOND `-b`; memory grows with it |
 | `--metacyc_chunk` | `500000` | Proteins per scorer chunk (~1.7 GB of `METACYC_PATHWAYS` memory each) |
