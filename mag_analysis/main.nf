@@ -91,7 +91,8 @@ def helpMessage() {
       --metacyc_db DIR     Licensed MetaCyc flat files (download-databases.sh --metacyc);
                            MetaCyc pathways per MAG are skipped without it (Bakta only)
       --metacyc_refs DIR   Open references for MetaCyc pathways (download-databases.sh --metacyc-refs)
-      --metacyc_taxonomy S Taxonomic ranges from gtdbtk | sendsketch | none [default: gtdbtk]
+      --metacyc_taxonomy S Taxonomic ranges from gtdbtk | sendsketch | none [default: gtdbtk;
+                           sendsketch is used when GTDB-Tk is off]
       --metacyc_cpus N     CPUs for its DIAMOND search [default: --medium_cpus]
 
     Eukaryotic:
@@ -791,9 +792,14 @@ workflow {
         def no_file = file("${projectDir}/assets/NO_FILE")
         def gtdbtk_on = params.run_gtdbtk && params.gtdbtk_db
         def sketch_on = params.run_sendsketch && params.sendsketch_address
+        // The high tier needs taxonomic ranges (EcoCyc benchmark: precision 0.79 with them,
+        // 0.73 without), so without GTDB-Tk the sendsketch contig calls stand in.
         if (params.metacyc_taxonomy == 'gtdbtk' && gtdbtk_on) {
             ch_mc_tax = GTDBTK_CLASSIFY.out.taxonomy.map { ['gtdbtk', it] }
-        } else if (params.metacyc_taxonomy == 'sendsketch' && sketch_on) {
+        } else if (sketch_on && (params.metacyc_taxonomy == 'sendsketch' || params.metacyc_taxonomy == 'gtdbtk')) {
+            if (params.metacyc_taxonomy == 'gtdbtk') {
+                log.warn "MetaCyc taxonomic ranges from sendsketch: GTDB-Tk is not running (--run_gtdbtk / --gtdbtk_db)."
+            }
             ch_mc_tax = SENDSKETCH_CLASSIFY.out.contig_taxonomy.map { ['sendsketch', it] }
         } else {
             if (params.metacyc_taxonomy != 'none') {
