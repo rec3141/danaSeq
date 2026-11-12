@@ -68,6 +68,11 @@ class TestScoring(unittest.TestCase):
         # all key reactions present -> inferred even though 3 of 4 reactions are missing
         self.assertEqual(self.call(['RXN-A1'], 'PWY-A'), (1, 'all_key_reactions_present'))
 
+    def test_key_reaction_outside_pathway_ignored(self):
+        # MetaCyc lists some key reactions that are not in the pathway's REACTION-LIST
+        self.mc.key['PWY-A'] = {'RXN-A1', 'RXN-NOT-IN-PWY-A'}
+        self.assertEqual(self.call(['RXN-A1'], 'PWY-A'), (1, 'all_key_reactions_present'))
+
     def test_spontaneous_counts_but_is_not_evidence(self):
         rows = pathways.score_pathways(self.mc, {})
         self.assertEqual(rows['PWY-B']['frac'], round(1 / 3, 4))
