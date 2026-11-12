@@ -8,6 +8,8 @@ evidence among the bin's proteins sets a weight w:
   EC          0.45   (Bakta/eggNOG EC -> Rhea)
   KO          0.45   (KofamScan/eggNOG KO -> Rhea)
   EC_DIRECT   0.30   (EC -> MetaCyc reaction without a Rhea link; broad ECs reach many reactions)
+  LINKED      0.30   (no evidence of its own; linked to a SEQ-supported reaction of the bin, see
+                      reaction_links)
   spontaneous 1.0; composite reaction: weakest of its parts (weight and class); missing 0.
 
   confidence = mean of w over the pathway's scored reactions (0..1; equals frac when every
@@ -31,18 +33,25 @@ with all reference proteins from the organism's genus, family or order left out,
 did not see; recall falls with completeness. The weights were left alone: varying the EC/KO
 weight between 0.3 and 0.6 or the SEQ-share cut-off between 0 and 0.5 changed precision by
 less than 0.01.
+LINKED (weight not fitted, set to EC_DIRECT's) left the high tier unchanged in E. coli (Enterobacterales
+held out: 242 calls, precision 0.78) and B. subtilis, and raised all-tier recall of curated pathways
+0.87 -> 0.90 and 0.86 -> 0.90; the added calls land in the medium and low tiers.
 """
 import math
+import re
+from collections import defaultdict
 import statistics
 
 PARAMS = dict(
     w_ec=0.45, w_ko=0.45, w_ec_direct=0.30,     # fixed weights of the non-sequence classes
+    w_linked=0.30,
     seq_id_lo=35.0, seq_id_hi=80.0,             # SEQ weight rises 0.5 -> 1.0 between these identities
     high_conf=0.7, high_seq_share=0.5,          # tier high: confidence and SEQ share of present reactions
     high_key_seq=True,                          # tier high: every key reaction SEQ-supported
     high_in_range=True,                         # tier high: not outside the taxonomic range
     medium_conf=0.35)
-CLASS_ORDER = ('SEQ', 'EC', 'KO', 'EC_DIRECT')
+CLASS_ORDER = ('SEQ', 'EC', 'KO', 'EC_DIRECT', 'LINKED')
+EC_FULL = re.compile(r'^\d+\.\d+\.\d+\.\d+$')
 
 
 def w_seq(identity, p=PARAMS):
@@ -53,7 +62,47 @@ def w_seq(identity, p=PARAMS):
 def class_weight(c, identity, p=PARAMS):
     if c == 'SEQ':
         return w_seq(identity, p)
-    return p[{'EC': 'w_ec', 'KO': 'w_ko', 'EC_DIRECT': 'w_ec_direct'}[c]]
+    return p[{'EC': 'w_ec', 'KO': 'w_ko', 'EC_DIRECT': 'w_ec_direct', 'LINKED': 'w_linked'}[c]]
+
+
+def reaction_links(mc, enzrxns=None, max_fan=10):
+    """{reaction: linked reactions}. MetaCyc often splits one activity into substrate-specific
+    reactions (e.g. nitrate reductase with menaquinol vs ubiquinol) while UniProt/Rhea annotate only
+    the generic one, so pathways that use the specific reaction look incomplete. Two reactions are
+    linked when they share a complete EC number, or when one MetaCyc enzyme catalyses both
+    (enzrxns: parsed enzrxns.dat records). EC numbers and enzymes that reach more than max_fan
+    reactions are skipped: broad ones link unrelated chemistry."""
+    groups = defaultdict(set)
+    for r, es in mc.ec.items():
+        for e in es:
+            if EC_FULL.match(e):
+                groups['EC:' + e].add(r)
+    for rec in (enzrxns or {}).values():
+        for e in rec.get('ENZYME', []):
+            for r in rec.get('REACTION', []):
+                groups['ENZ:' + e].add(r)
+    links = defaultdict(set)
+    for rs in groups.values():
+        if 1 < len(rs) <= max_fan:
+            for r in rs:
+                links[r] |= rs - {r}
+    return links
+
+
+def add_linked(bev, links):
+    """Give reactions linked to a SEQ-supported reaction of the bin the LINKED class, unless they
+    have sequence evidence of their own. bev = BinEvidence.bins[bin], changed in place."""
+    seq = sorted(r for r, rec in bev.items() if rec[0] is not None)
+    n = 0
+    for a in seq:
+        for b in links.get(a, ()):
+            rec = bev.get(b)
+            if rec is None:
+                rec = bev[b] = [None, '', set()]
+                n += 1
+            if rec[0] is None:
+                rec[2].add('LINKED')
+    return n
 
 
 class BinEvidence:
@@ -117,7 +166,7 @@ def annotate(mc, row, ev, max_hits=12, params=None):
     enz = [r for r in scored if cls[r] not in (None, 'SPONT')]
     seq = [r for r in enz if cls[r] == 'SEQ' or (r in ev and ev[r][0] is not None)]
     ids = [ev[r][0] for r in seq if r in ev and ev[r][0] is not None]
-    only = {c: sum(1 for r in enz if cls[r] == c) for c in ('EC', 'KO', 'EC_DIRECT')}
+    only = {c: sum(1 for r in enz if cls[r] == c) for c in ('EC', 'KO', 'EC_DIRECT', 'LINKED')}
     key = s['key']
     key_seq = sum(1 for r in key if r in seq)
     seq_share = len(seq) / len(enz) if enz else 0.0
@@ -132,7 +181,7 @@ def annotate(mc, row, ev, max_hits=12, params=None):
     ranked = sorted((r for r in seq if r in ev and ev[r][1]), key=lambda r: (-ev[r][0], r))
     row.update(confidence=round(conf, 3), confidence_tier=tier, n_seq=len(seq),
                n_seq_id60=sum(1 for i in ids if i >= 60), n_ec_only=only['EC'], n_ko_only=only['KO'],
-               n_ec_direct_only=only['EC_DIRECT'],
+               n_ec_direct_only=only['EC_DIRECT'], n_linked_only=only['LINKED'],
                seq_id_median=round(statistics.median(ids), 1) if ids else '',
                seq_id_min=min(ids) if ids else '',
                key_seq=f'{key_seq}/{len(key)}' if key else '',

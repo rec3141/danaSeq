@@ -74,7 +74,9 @@ def score_pathways(mc, present_counts, lineage=None, opts=None):
         missing = scored - present
         uniq_global = {r for r in scored if len(mc.rxn2pw.get(r, ())) <= 1}
         uniq_present = {r for r in pres if used_in.get(r) == {p}}
-        key = mc.key.get(p, set())
+        # some MetaCyc key reactions are not in the pathway's own reaction list; they can never
+        # be found in it, so only key reactions that are part of the scored pathway count
+        key = mc.key.get(p, set()) & scored
         tr = mc.taxrange.get(p, set())
         in_range = _tax_compat(mc, tr, lineage) if (lineage and tr) else None
         classes = mc.pathway_classes(p)

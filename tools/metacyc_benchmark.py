@@ -172,7 +172,7 @@ def write_detail(out, pathways_tsv, bin_name, ts):
         rd = csv.DictReader(fh, delimiter='\t')
         cols = ['pathway', 'super', 'in_truth', 'reachable', 'call', 'confidence_tier', 'confidence',
                 'reason', 'n_rxn', 'n_present', 'frac', 'n_seq', 'n_enzymatic', 'key_seq', 'seq_id_median',
-                'n_ec_only', 'n_ko_only', 'n_ec_direct_only']
+                'n_ec_only', 'n_ko_only', 'n_ec_direct_only', 'n_linked_only']
         o.write('\t'.join(cols) + '\n')
         for r in rd:
             if r['bin'] != bin_name:
