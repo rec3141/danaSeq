@@ -219,7 +219,9 @@ Outputs in `metabolism/metacyc/`:
 
 - `metacyc_pathways.tsv`: one row per bin (plus `_community`) and pathway with any
   evidence: the call and the rule that decided it, `confidence` and `confidence_tier`,
-  reaction counts by evidence (`n_seq`, `n_ec_only`, `n_ko_only`, `n_ec_direct_only`),
+  reaction counts by evidence (`n_seq`, `n_ec_only`, `n_ko_only`, `n_ec_direct_only`,
+  `n_linked_only`: reactions credited only through a link to a sequence-supported reaction
+  that shares a complete EC number or a MetaCyc enzyme),
   sequence identity, key and unique reaction support, up to 12 supporting hits
   (`reaction=protein:UniProt:identity`), and a MinPath-style parsimony flag (`minpath`)
 - `metacyc_reactions.tsv.gz`: one row per protein and MetaCyc reaction, with its evidence

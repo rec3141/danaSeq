@@ -193,6 +193,34 @@ class TestConfidence(unittest.TestCase):
         r = confidence.annotate(mc, rows['PWY-B'], ev, params=dict(high_in_range=False))
         self.assertEqual(r['confidence_tier'], 'high')
 
+    def test_reaction_links(self):
+        class M:
+            ec = {'R1': ['1.7.5.1'], 'R2': ['1.7.5.1'], 'R3': ['1.7.5'], 'R4': ['1.7.5'],
+                  'R5': [], 'R6': ['2.2.2.2'], **{f'B{i}': ['9.9.9.9'] for i in range(12)}}
+        enz = {'E1': dict(ENZYME=['CPLX-1'], REACTION=['R3']), 'E2': dict(ENZYME=['CPLX-1'], REACTION=['R5'])}
+        links = confidence.reaction_links(M, enz)
+        self.assertEqual(links['R1'], {'R2'})                         # shared complete EC
+        self.assertEqual(links['R3'], {'R5'})                         # same enzyme; partial EC 1.7.5 ignored
+        self.assertNotIn('R6', links)
+        self.assertNotIn('B0', links)                                 # EC reaching > max_fan reactions
+        self.assertEqual(confidence.reaction_links(M)['R3'], set())   # no enzrxns.dat
+
+    def test_linked_evidence(self):
+        mc = model()
+        seq = dict(protein='p', metacyc_rxn='RXN-A1', classes={'SEQ': dict(identity=90, hit='H')})
+        ec = dict(protein='q', metacyc_rxn='RXN-A3', classes={'EC': dict(ec=['1.1.1.1'])})
+        ev = ev_for(mc, [seq, ec])
+        n = confidence.add_linked(ev, {'RXN-A1': {'RXN-A2', 'RXN-A3'}, 'RXN-A3': {'RXN-SHARED'}})
+        self.assertEqual(n, 1)
+        self.assertEqual(ev['RXN-A2'][2], {'LINKED'})
+        self.assertEqual(ev['RXN-A3'][2], {'EC', 'LINKED'})            # EC still the stronger class
+        self.assertNotIn('RXN-SHARED', ev)                             # only SEQ-supported reactions link
+        self.assertEqual(ev['RXN-A1'][2], {'SEQ'})
+        rows = pathways.score_pathways(mc, {r: 1 for r in ev})
+        r = confidence.annotate(mc, rows['PWY-A'], ev)
+        self.assertEqual((r['n_seq'], r['n_ec_only'], r['n_linked_only']), (1, 1, 1))
+        self.assertEqual(r['confidence'], round((1 + 0.45 + 0.30) / 4, 3))
+
     def test_order_independent(self):
         a = dict(protein='p1', metacyc_rxn='R', classes={'KO': dict(ko=['K1'])})
         b = dict(protein='p2', metacyc_rxn='R', classes={'EC': dict(ec=['1.1.1.1'])})

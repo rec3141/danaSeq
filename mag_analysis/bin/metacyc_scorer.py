@@ -44,7 +44,7 @@ and pass --metacyc_db <db_dir>/metacyc (found automatically under --db_dir).
 """
 PATHWAY_COLS = ['pathway', 'name', 'super', 'klass', 'call', 'reason', 'confidence', 'confidence_tier',
                 'n_rxn', 'n_present', 'frac', 'n_enzymatic', 'n_spontaneous', 'n_missing',
-                'n_seq', 'n_seq_id60', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only',
+                'n_seq', 'n_seq_id60', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only', 'n_linked_only',
                 'seq_id_median', 'seq_id_min', 'n_key', 'n_key_present', 'key_seq', 'n_unique',
                 'n_unique_present', 'n_unique_seq', 'tax_range', 'in_tax_range',
                 'supporting_hits', 'present_rxns', 'missing_rxns']
@@ -107,6 +107,10 @@ def cmd_run(a):
                        ptdat.load(os.path.join(mcdir, 'reactions.dat')),
                        ptdat.load(os.path.join(mcdir, 'classes.dat')))
     refs = evidence.References(a.refs, mc, a.ko_list)
+    enzrxns = os.path.join(mcdir, 'enzrxns.dat')
+    links = confidence.reaction_links(mc, ptdat.load(enzrxns) if os.path.exists(enzrxns) else None)
+    if not os.path.exists(enzrxns):
+        log(f'no {enzrxns}; LINKED evidence from shared EC numbers only')
     c2b = read_contig2bin(a.contig2bin)
     with open(a.bakta_tsv) as fh:
         n_est = sum(1 for line in fh if not line.startswith('#'))
@@ -143,6 +147,7 @@ def cmd_run(a):
         fh.write('\t'.join(['bin'] + PATHWAY_COLS + ['minpath', 'metacyc_release']) + '\n')
         for b in sorted(ev.bins, key=lambda x: (x != COMMUNITY, x)):
             bev = ev.bins[b]
+            confidence.add_linked(bev, links)
             present = {r: 1 for r in bev}
             sc = pathways.score_pathways(mc, present, lin.get(b) if b != COMMUNITY else None)
             sel, _ = pathways.minpath(mc, present)

@@ -226,7 +226,7 @@
     { key: 'frac', label: 'Rxns', render: (v, row) => `${Math.round((v || 0) * row.n_rxn)}/${row.n_rxn}` },
     { key: 'n_seq', label: 'Seq', render: (v, row) =>
       `${v}${row.seq_id_median != null ? ` <span class="text-slate-500">(${row.seq_id_median.toFixed(0)}%)</span>` : ''}` },
-    { key: 'n_ec_only', label: 'EC/KO only', render: (v, row) => `${v + row.n_ko_only + row.n_ec_direct_only}` },
+    { key: 'n_ec_only', label: 'EC/KO/linked only', render: (v, row) => `${v + row.n_ko_only + row.n_ec_direct_only + (row.n_linked_only || 0)}` },
     { key: 'key_seq', label: 'Key seq' },
     { key: 'klass', label: 'Class' },
   ];
@@ -234,7 +234,7 @@
   function exportMetacycTsv() {
     if (!selectedMetacyc.length) return;
     const cols = ['pathway', 'name', 'klass', 'confidence', 'confidence_tier', 'frac', 'n_rxn',
-                  'n_seq', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only', 'seq_id_median', 'key_seq', 'reason'];
+                  'n_seq', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only', 'n_linked_only', 'seq_id_median', 'key_seq', 'reason'];
     const body = selectedMetacyc.map(p => cols.map(c => p[c] ?? '').join('\t')).join('\n');
     const blob = new Blob([cols.join('\t') + '\n' + body], { type: 'text/tab-separated-values' });
     const url = URL.createObjectURL(blob);

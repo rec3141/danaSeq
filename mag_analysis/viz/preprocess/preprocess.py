@@ -1093,8 +1093,10 @@ def build_metacyc(results_dir):
     if not os.path.exists(path):
         return None
     keep = ['pathway', 'name', 'klass', 'confidence', 'confidence_tier', 'frac', 'n_rxn',
-            'n_seq', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only', 'seq_id_median', 'key_seq', 'reason']
+            'n_seq', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only', 'n_linked_only', 'seq_id_median', 'key_seq', 'reason']
     df = pd.read_csv(path, sep='\t', dtype=str, keep_default_na=False)
+    if 'n_linked_only' not in df.columns:          # scorer outputs before the LINKED class
+        df['n_linked_only'] = '0'
     release = df['metacyc_release'].iloc[0] if len(df) else ''
     df = df[(df['call'] == '1') & (df['super'] == '0')]
     bins = {}
@@ -1104,7 +1106,7 @@ def build_metacyc(results_dir):
             d = dict(zip(keep, r))
             for k in ('confidence', 'frac', 'seq_id_median'):
                 d[k] = float(d[k]) if d[k] else None
-            for k in ('n_rxn', 'n_seq', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only'):
+            for k in ('n_rxn', 'n_seq', 'n_ec_only', 'n_ko_only', 'n_ec_direct_only', 'n_linked_only'):
                 d[k] = int(d[k]) if d[k] else 0
             rows.append(d)
         rows.sort(key=lambda d: -(d['confidence'] or 0))
