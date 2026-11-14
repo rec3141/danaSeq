@@ -19,6 +19,13 @@ process TIARA_CLASSIFY {
     script:
     def min_len = params.tiara_min_len ?: 3000
     """
+    n_eligible=\$(awk -v m=${min_len} '/^>/{if(l>=m)c++; l=0; next}{l+=length(\$0)} END{if(l>=m)c++; print c+0}' "${contigs}")
+    if [ "\$n_eligible" -eq 0 ]; then
+        echo "[WARNING] No contigs >= ${min_len} bp — skipping Tiara" >&2
+        printf 'sequence_id\\tclass_fst_stage\\tclass_snd_stage\\n' > tiara_output.tsv
+        exit 0
+    fi
+
     set +e
     tiara \\
         -i "${contigs}" \\
@@ -30,8 +37,9 @@ process TIARA_CLASSIFY {
     set -e
 
     if [ \$tiara_exit -ne 0 ]; then
-        echo "[WARNING] Tiara exited with code \$tiara_exit" >&2
-        printf 'sequence_id\\tclass_fst_stage\\tclass_snd_stage\\n' > tiara_output.tsv
+        echo "[ERROR] Tiara exited with code \$tiara_exit; no results stored" >&2
+        rm -f tiara_output.tsv tiara_output.tsv.prob probabilities.tsv tiara_probabilities.tsv
+        exit \$tiara_exit
     fi
 
     # Tiara writes probabilities to a file named after the output with .prob suffix
@@ -69,6 +77,13 @@ process WHOKARYOTE_CLASSIFY {
     def min_len = params.whokaryote_min_len ?: 5000
     def gff_arg = gff.name != 'NO_GFF' ? "--gff ${gff}" : ''
     """
+    n_eligible=\$(awk -v m=${min_len} '/^>/{if(l>=m)c++; l=0; next}{l+=length(\$0)} END{if(l>=m)c++; print c+0}' "${contigs}")
+    if [ "\$n_eligible" -eq 0 ]; then
+        echo "[WARNING] No contigs >= ${min_len} bp — skipping Whokaryote" >&2
+        printf 'contig\\tprediction\\n' > whokaryote_classifications.tsv
+        exit 0
+    fi
+
     # --model S: stand-alone gene-structure RF (no internal tiara call); tiara runs as
     # its own process (TIARA_CLASSIFY), so the dedicated env stays minimal (no PyTorch,
     # no numpy conflict with the pinned sklearn 1.0.2).
@@ -86,8 +101,8 @@ process WHOKARYOTE_CLASSIFY {
     # whokaryote writes featuretable_predictions_<model>.tsv (S or T); match either.
     pred_tsv=\$(ls whokaryote_out/featuretable_predictions_*.tsv 2>/dev/null | head -1)
     if [ \$whokaryote_exit -ne 0 ]; then
-        echo "[WARNING] Whokaryote exited with code \$whokaryote_exit" >&2
-        printf 'contig\\tprediction\\n' > whokaryote_classifications.tsv
+        echo "[ERROR] Whokaryote exited with code \$whokaryote_exit; no results stored" >&2
+        exit \$whokaryote_exit
     elif [ -n "\$pred_tsv" ] && [ -f "\$pred_tsv" ]; then
         cp "\$pred_tsv" whokaryote_classifications.tsv
     else
@@ -165,8 +180,8 @@ process METAEUK_PREDICT {
         set -e
 
         if [ \$metaeuk_exit -ne 0 ]; then
-            echo "[WARNING] MetaEuk exited with code \$metaeuk_exit" >&2
-            touch metaeuk_proteins.fas metaeuk_codon.fas metaeuk.gff metaeuk_headers.tsv
+            echo "[ERROR] MetaEuk exited with code \$metaeuk_exit; no results stored" >&2
+            exit \$metaeuk_exit
         else
             # MetaEuk outputs: prefix.fas, prefix.codon.fas, prefix.gff, prefix.headersMap.tsv
             mv metaeuk_out.fas          metaeuk_proteins.fas
@@ -176,7 +191,7 @@ process METAEUK_PREDICT {
         fi
     fi
 
-    n_proteins=\$(grep -c '^>' metaeuk_proteins.fas 2>/dev/null || echo 0)
+    n_proteins=\$(grep -c '^>' metaeuk_proteins.fas 2>/dev/null || true)
     echo "[INFO] MetaEuk: \${n_proteins} eukaryotic proteins predicted" >&2
     """
 }
@@ -204,15 +219,13 @@ process MARFERRET_CLASSIFY {
     PFAM=\$(ls "${marferret_db}"/*.best_pfam_annotations.csv.gz 2>/dev/null | head -1)
 
     if [ -z "\$DMND" ]; then
-        echo "[ERROR] No .dmnd file found in ${marferret_db}" >&2
-        printf 'protein_id\\tcontig_id\\tbest_hit\\tpident\\taln_length\\tevalue\\tbitscore\\tstitle\\ttaxon_id\\ttaxonomy\\tpfam\\n' > marferret_proteins.tsv
-        printf 'contig_id\\tn_proteins\\tn_classified\\ttop_taxonomy\\tpfam_domains\\n' > marferret_contigs.tsv
-        exit 0
+        echo "[ERROR] No .dmnd file found in ${marferret_db}; no results stored" >&2
+        exit 1
     fi
 
     # Check for empty protein input
-    n_input=\$(grep -c '^>' "${proteins}" 2>/dev/null || echo 0)
-    if [ "\$n_input" -eq 0 ]; then
+    n_input=\$(grep -c '^>' "${proteins}" 2>/dev/null || true)
+    if [ "\${n_input:-0}" -eq 0 ]; then
         echo "[WARNING] MarFERReT: no input proteins — producing empty output" >&2
         printf 'protein_id\\tcontig_id\\tbest_hit\\tpident\\taln_length\\tevalue\\tbitscore\\tstitle\\ttaxon_id\\ttaxonomy\\tpfam\\n' > marferret_proteins.tsv
         printf 'contig_id\\tn_proteins\\tn_classified\\ttop_taxonomy\\tpfam_domains\\n' > marferret_contigs.tsv
@@ -235,8 +248,9 @@ process MARFERRET_CLASSIFY {
     set -e
 
     if [ \$diamond_exit -ne 0 ]; then
-        echo "[WARNING] DIAMOND exited with code \$diamond_exit" >&2
-        touch diamond_hits.tsv
+        echo "[ERROR] DIAMOND exited with code \$diamond_exit; no results stored" >&2
+        rm -f diamond_hits.tsv
+        exit \$diamond_exit
     fi
 
     # Parse results: join with taxonomy + Pfam, aggregate per-contig

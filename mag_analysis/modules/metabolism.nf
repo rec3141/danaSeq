@@ -43,10 +43,14 @@ process KOFAMSCAN {
     kofam_exit=\$?
     set -e
 
-    if [ \$kofam_exit -ne 0 ] || [ ! -f kofamscan_results.tsv ]; then
-        echo "[WARNING] KofamScan exited with code \$kofam_exit" >&2
-        printf '# gene name\\tKO\\tthrshld\\tscore\\tE-value\\tKO definition\\n' > kofamscan_results.tsv
-        exit 0
+    if [ \$kofam_exit -ne 0 ]; then
+        echo "[ERROR] KofamScan exited with code \$kofam_exit; no results stored" >&2
+        rm -f kofamscan_results.tsv
+        exit \$kofam_exit
+    fi
+    if [ ! -f kofamscan_results.tsv ]; then
+        echo "[ERROR] KofamScan produced no kofamscan_results.tsv; no results stored" >&2
+        exit 1
     fi
     """
 }
@@ -81,14 +85,14 @@ process EMAPPER {
 
     HEADER='## eggNOG-mapper\\n#query\\tseed_ortholog\\tevalue\\tscore\\teggNOG_OGs\\tmax_annot_lvl\\tCOG_category\\tDescription\\tPreferred_name\\tGOs\\tEC\\tKEGG_ko\\tKEGG_Pathway\\tKEGG_Module\\tKEGG_Reaction\\tKEGG_rclass\\tBRITE\\tKEGG_TC\\tCAZy\\tBiGG_Reaction\\tPFAMs'
 
-    if [ ! -s "${proteins}" ]; then
+    N_SEQS=\$(grep -c '^>' "${proteins}" 2>/dev/null || true)
+    if [ ! -s "${proteins}" ] || [ "\${N_SEQS:-0}" -eq 0 ]; then
         echo "[WARNING] No protein sequences — skipping eggNOG-mapper" >&2
         printf "\$HEADER\\n" > emapper_results.emapper.annotations
         exit 0
     fi
 
-    # Count proteins and split into chunks (same pattern as SENDSKETCH_CLASSIFY)
-    N_SEQS=\$(grep -c '^>' "${proteins}")
+    # Split into chunks (same pattern as SENDSKETCH_CLASSIFY)
     BATCH_SIZE=${batch_size}
     echo "[INFO] EMAPPER: \$N_SEQS proteins, batch size \$BATCH_SIZE" >&2
 
@@ -110,6 +114,7 @@ process EMAPPER {
     # Each chunk's temp files are cleaned before the next starts.
     > merged.seed_orthologs
     search_ok=true
+    failed_chunk_exit=1
     chunk_i=0
     for chunk in chunks/chunk_*.faa; do
         chunk_i=\$((chunk_i + 1))
@@ -131,8 +136,9 @@ process EMAPPER {
         set -e
 
         if [ \$chunk_exit -ne 0 ]; then
-            echo "[WARNING] DIAMOND search failed for \$name (exit \$chunk_exit)" >&2
+            echo "[ERROR] DIAMOND search failed for \$name (exit \$chunk_exit)" >&2
             search_ok=false
+            failed_chunk_exit=\$chunk_exit
             break
         fi
 
@@ -144,8 +150,14 @@ process EMAPPER {
         rm -f "\${name}".emapper.* 2>/dev/null || true
     done
 
-    if [ "\$search_ok" != "true" ] || [ ! -s merged.seed_orthologs ]; then
-        echo "[WARNING] eggNOG-mapper search stage failed or produced no hits" >&2
+    if [ "\$search_ok" != "true" ]; then
+        echo "[ERROR] eggNOG-mapper search stage failed (exit \$failed_chunk_exit); no results stored" >&2
+        rm -f emapper_results.emapper.annotations
+        exit \$failed_chunk_exit
+    fi
+
+    if [ ! -s merged.seed_orthologs ]; then
+        echo "[INFO] eggNOG-mapper search completed with 0 seed ortholog hits" >&2
         printf "\$HEADER\\n" > emapper_results.emapper.annotations
         exit 0
     fi
@@ -166,10 +178,14 @@ process EMAPPER {
     annot_exit=\$?
     set -e
 
-    if [ \$annot_exit -ne 0 ] || [ ! -f emapper_results.emapper.annotations ]; then
-        echo "[WARNING] eggNOG-mapper annotation stage exited with code \$annot_exit" >&2
-        printf "\$HEADER\\n" > emapper_results.emapper.annotations
-        exit 0
+    if [ \$annot_exit -ne 0 ]; then
+        echo "[ERROR] eggNOG-mapper annotation stage exited with code \$annot_exit; no results stored" >&2
+        rm -f emapper_results.emapper.annotations
+        exit \$annot_exit
+    fi
+    if [ ! -f emapper_results.emapper.annotations ]; then
+        echo "[ERROR] eggNOG-mapper annotation stage produced no annotations file; no results stored" >&2
+        exit 1
     fi
     """
 }
@@ -215,10 +231,13 @@ process DBCAN {
     dbcan_exit=\$?
     set -e
 
-    if [ \$dbcan_exit -ne 0 ] || [ ! -d dbcan_out ]; then
-        echo "[WARNING] dbCAN exited with code \$dbcan_exit" >&2
-        printf 'Gene ID\\tEC#\\tdbCAN_hmm\\tdbCAN_sub\\tDIAMOND\\t#ofTools\\tRecommend Results\\tSubstrate\\n' > overview.tsv
-        exit 0
+    if [ \$dbcan_exit -ne 0 ]; then
+        echo "[ERROR] dbCAN exited with code \$dbcan_exit; no results stored" >&2
+        exit \$dbcan_exit
+    fi
+    if [ ! -d dbcan_out ]; then
+        echo "[ERROR] dbCAN produced no dbcan_out directory; no results stored" >&2
+        exit 1
     fi
 
     # Copy overview (run_dbcan v4+ outputs .tsv, older versions output .txt)
