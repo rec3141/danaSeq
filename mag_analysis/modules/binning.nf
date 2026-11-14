@@ -458,27 +458,32 @@ process BIN_VAMB_TAX {
 
     # Convert sendsketch per-contig GTDB taxonomy to VAMB format
     # sendsketch: contig_id\tstatus\tANI\tref_name\td__X;p__Y;...
-    # VAMB wants: contigname\tDomain;Phylum;Class;... (no GTDB prefixes, no empty ranks)
-    # VAMB requires ALL contigs ≥ -m length to be in the taxonomy file
+    # VAMB expects: contigname\tDomain;Phylum;Class;... (canonical prefix truncated at
+    # first empty rank; empty prediction column maps unclassified contigs to root).
     python3 -c "
 import sys
 
-# 1. Read sendsketch taxonomy
+# 1. Read sendsketch taxonomy (classified rows only; truncate at first missing rank)
 tax = {}
 with open('${sendsketch_contigs}') as f:
     f.readline()  # skip header
     for line in f:
-        parts = line.strip().split('\\t')
+        parts = line.rstrip('\\r\\n').split('\\t')
         if len(parts) < 5:
             continue
         contig = parts[0]
-        lineage = parts[4]
+        status = parts[1]
+        lineage = parts[4].strip()
+        if status != 'C' or not lineage or lineage == 'Unclassified':
+            continue
         ranks = []
         for rank in lineage.split(';'):
+            rank = rank.strip()
             if '__' in rank:
-                rank = rank.split('__', 1)[1]
-            if rank:
-                ranks.append(rank)
+                rank = rank.split('__', 1)[1].strip()
+            if not rank:
+                break
+            ranks.append(rank)
         if ranks:
             tax[contig] = ';'.join(ranks)
 
@@ -489,7 +494,7 @@ with open('${assembly}') as f:
         if line.startswith('>'):
             all_contigs.append(line[1:].strip().split()[0])
 
-# 3. Write taxonomy for all contigs (unclassified get 'Bacteria' placeholder)
+# 3. Write taxonomy for all contigs (unclassified get empty prediction -> VAMB root)
 n_mapped = 0
 with open('vamb_taxonomy.tsv', 'w') as out:
     out.write('contigs\\tpredictions\\n')
@@ -498,9 +503,9 @@ with open('vamb_taxonomy.tsv', 'w') as out:
             out.write(contig + '\\t' + tax[contig] + '\\n')
             n_mapped += 1
         else:
-            out.write(contig + '\\tBacteria\\n')
+            out.write(contig + '\\t\\n')
 
-print('[INFO] VAMB taxonomy: %d/%d contigs classified (%d unclassified → Bacteria)' % (n_mapped, len(all_contigs), len(all_contigs) - n_mapped), file=sys.stderr)
+print('[INFO] VAMB taxonomy: %d/%d contigs classified (%d unclassified -> root)' % (n_mapped, len(all_contigs), len(all_contigs) - n_mapped), file=sys.stderr)
 "
 
     # Reuse same depth conversion as BIN_VAMB
@@ -539,7 +544,7 @@ with open('vamb_abundance.tsv', 'w') as out:
         out.write(row[0] + '\\t' + '\\t'.join(row[ci] for ci in keep) + '\\n')
 "
 
-    n_tax=\$(tail -n +2 vamb_taxonomy.tsv | wc -l)
+    n_tax=\$(awk -F'\\t' 'NR>1 && \$2 != "" {c++} END{print c+0}' vamb_taxonomy.tsv)
     n_samples=\$(head -1 vamb_abundance.tsv | awk -F'\\t' '{print NF-1}')
     if [ "\$n_tax" -lt 1 ] || [ "\$n_samples" -lt 1 ]; then
         echo "[WARNING] Insufficient data for taxvamb (tax=\$n_tax, samples=\$n_samples)" >&2
