@@ -82,16 +82,17 @@ def resolve_path(results_dir, *parts):
     return os.path.join(results_dir, rel)
 
 
-def load_annotation_tsv(results_dir):
-    """Load best available annotation TSV: BAKTA_EXTRA > BAKTA_BASIC > PROKKA.
+def select_annotation_tsv(results_dir, warn_unreconciled=False):
+    """Return best available annotation TSV path: reconciled BAKTA_EXTRA > BAKTA_BASIC > PROKKA.
 
-    The extra run is used only once BAKTA_EXTRA_IDS has given it the basic
-    run's locus tags (marked by locus_tag_map.tsv); before that its tags do not
-    match the basic-keyed KofamScan/eggNOG/dbCAN annotations.
+    The extra run is selected only once BAKTA_EXTRA_IDS has written locus_tag_map.tsv;
+    without that marker its locus tags do not match basic-keyed downstream annotations.
     """
     extra = resolve_path(results_dir, 'annotation', 'bakta', 'extra', 'annotation.tsv')
-    extra_ok = os.path.exists(os.path.join(os.path.dirname(extra), 'locus_tag_map.tsv'))
-    if os.path.exists(extra) and not extra_ok:
+    extra_ok = os.path.exists(extra) and os.path.exists(
+        os.path.join(os.path.dirname(extra), 'locus_tag_map.tsv')
+    )
+    if warn_unreconciled and os.path.exists(extra) and not extra_ok:
         print(f"  [WARNING] {extra} has its own locus tags (no locus_tag_map.tsv); "
               "using the basic Bakta TSV", file=sys.stderr)
     candidates = [
@@ -99,17 +100,82 @@ def load_annotation_tsv(results_dir):
         resolve_path(results_dir, 'annotation', 'bakta', 'basic', 'annotation.tsv'),
         resolve_path(results_dir, 'annotation', 'prokka', 'annotation.tsv'),
     ]
-    for path in candidates:
-        if os.path.exists(path):
-            print(f"  Loading annotation from: {path}")
-            return pd.read_csv(path, sep='\t', comment='#', header=None,
-                               names=['contig', 'type', 'start', 'stop', 'strand',
-                                      'locus_tag', 'gene', 'product', 'dbxrefs'])
+    return next((p for p in candidates if os.path.exists(p)), None)
+
+
+def _load_prokka_annotation_df(path):
+    """Parse Prokka 7-column annotation.tsv (joining sibling GFF coordinates when available)."""
+    from genes_to_json import load_gff_locus_coords
+    gff_coords = load_gff_locus_coords(path)
+    rows = []
+    with open(path) as fh:
+        header_seen = False
+        for line in fh:
+            if line.startswith('#'):
+                continue
+            stripped = line.rstrip('\r\n')
+            if not stripped:
+                continue
+            parts = stripped.split('\t')
+            if not header_seen and parts[0] == 'locus_tag':
+                header_seen = True
+                continue
+            header_seen = True
+            locus_tag = parts[0] if len(parts) > 0 else ''
+            ftype = parts[1] if len(parts) > 1 else ''
+            gene = parts[3] if len(parts) > 3 else ''
+            ec_num = parts[4] if len(parts) > 4 else ''
+            cog = parts[5] if len(parts) > 5 else ''
+            product = parts[6] if len(parts) > 6 else ''
+            contig, start, stop, strand = gff_coords.get(locus_tag, ('', np.nan, np.nan, ''))
+            dbxrefs = ','.join(x for x in (ec_num, cog) if x)
+            rows.append({
+                'contig': contig,
+                'type': ftype,
+                'start': start,
+                'stop': stop,
+                'strand': strand,
+                'locus_tag': locus_tag,
+                'gene': gene,
+                'product': product,
+                'dbxrefs': dbxrefs,
+            })
+    return pd.DataFrame(
+        rows,
+        columns=['contig', 'type', 'start', 'stop', 'strand', 'locus_tag', 'gene', 'product', 'dbxrefs'],
+    )
+
+
+def load_annotation_tsv(results_dir):
+    """Load best available annotation TSV: BAKTA_EXTRA > BAKTA_BASIC > PROKKA."""
+    path = select_annotation_tsv(results_dir, warn_unreconciled=True)
+    if path is not None:
+        print(f"  Loading annotation from: {path}")
+        with open(path) as fh:
+            for line in fh:
+                if line.startswith('#') or not line.strip():
+                    continue
+                if line.rstrip('\r\n').split('\t', 1)[0] == 'locus_tag':
+                    return _load_prokka_annotation_df(path)
+                break
+        return pd.read_csv(path, sep='\t', comment='#', header=None,
+                           names=['contig', 'type', 'start', 'stop', 'strand',
+                                  'locus_tag', 'gene', 'product', 'dbxrefs'])
     print("  [WARNING] No annotation TSV found (BAKTA_EXTRA/BAKTA_BASIC/PROKKA)", file=sys.stderr)
     return None
 
 
 RANKS = ['domain', 'phylum', 'class', 'order', 'family', 'genus']
+PREFIX_TO_RANK = {
+    'd': 'domain', 'domain': 'domain', 'superkingdom': 'domain',
+    'p': 'phylum', 'phylum': 'phylum',
+    'c': 'class', 'class': 'class',
+    'o': 'order', 'order': 'order',
+    'f': 'family', 'family': 'family',
+    'g': 'genus', 'genus': 'genus',
+    's': 'species', 'species': 'species',
+    'k': None, 'kingdom': None,
+}
 
 
 def strip_gtdb_prefix(s):
@@ -120,12 +186,77 @@ def strip_gtdb_prefix(s):
 
 
 def parse_lineage(lineage):
-    """Extract taxonomy dict from semicolon-delimited lineage string."""
-    parts = [p.strip() for p in lineage.split(';')]
+    """Extract taxonomy dict from semicolon-delimited lineage string.
+
+    Aligns rank-prefixed tokens (d__/domain__, p__/phylum__, ...) to their canonical
+    rank slots, falling back to positional mapping for unprefixed lineages.
+    """
+    parts = [p.strip() for p in str(lineage).split(';')]
+    has_prefixes = any('__' in p and p.split('__', 1)[0] in PREFIX_TO_RANK for p in parts if p)
+    if has_prefixes:
+        tax = {r: '' for r in RANKS}
+        for p in parts:
+            if not p or '__' not in p:
+                continue
+            prefix, val = p.split('__', 1)
+            val = val.strip()
+            mapped = PREFIX_TO_RANK.get(prefix)
+            if mapped in tax:
+                if mapped == 'domain' and val.lower().replace('_', ' ') == 'cellular organisms':
+                    continue
+                if val or not tax[mapped]:
+                    tax[mapped] = val
+        return tax
+
     tax = {}
     for i, rank in enumerate(RANKS):
         tax[rank] = parts[i] if i < len(parts) and parts[i] else ''
     return tax
+
+
+def genomad_host_contig(seq_name):
+    """Return host assembly contig ID from a geNomad virus or provirus seq_name."""
+    return str(seq_name).split('|provirus_', 1)[0]
+
+
+def resolve_defense_contig(row, known_contigs=None):
+    """Resolve assembly contig ID from a DefenseFinder systems.tsv row."""
+    if 'replicon' in row and pd.notna(row['replicon']):
+        rep = str(row['replicon']).strip()
+        if rep:
+            return rep
+
+    sid = str(row.get('sys_id', '')).strip()
+    if not sid:
+        return ''
+
+    stem = re.sub(r'_\d+$', '', sid)
+    stripped_candidates = []
+    for col in ('subtype', 'type'):
+        val = row.get(col)
+        if pd.notna(val) and str(val).strip():
+            raw_lbl = str(val).strip()
+            for lbl in (raw_lbl, re.sub(r'[^A-Za-z0-9_]+', '_', raw_lbl)):
+                suffix = f'_{lbl}'
+                if stem.endswith(suffix) and len(stem) > len(suffix):
+                    cand = stem[:-len(suffix)]
+                    if cand not in stripped_candidates:
+                        stripped_candidates.append(cand)
+
+    if known_contigs:
+        for cand in stripped_candidates:
+            if cand in known_contigs:
+                return cand
+        parts = stem.split('_')
+        for end in range(len(parts) - 1, 0, -1):
+            cand = '_'.join(parts[:end])
+            if cand in known_contigs:
+                return cand
+
+    if stripped_candidates:
+        return stripped_candidates[0]
+    parts = sid.split('_')
+    return '_'.join(parts[:2]) if len(parts) >= 2 else sid
 
 
 def build_taxonomy_maps(results_dir, kaiju_df, sendsketch_df=None):
@@ -532,19 +663,18 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
         depth_cols = []
     sample_names = [re.sub(r'\.sorted\.bam$', '', c) for c in depth_cols]
 
-    # Build virus/plasmid/defense/integron sets by contig
-    virus_contigs = set(virus_df['seq_name'].values) if virus_df is not None else set()
+    # Build virus/plasmid/defense/integron counts by host contig
+    virus_contig_counts = (
+        Counter(genomad_host_contig(s) for s in virus_df['seq_name'].values)
+        if virus_df is not None else Counter()
+    )
     plasmid_contigs = set(plasmid_df['seq_name'].values) if plasmid_df is not None else set()
 
+    known_mag_contigs = set(c2b.keys())
     defense_contig_map = defaultdict(list)
     if defense_df is not None:
         for _, row in defense_df.iterrows():
-            # sys_id format: contig_NNNNN_TYPE_N
-            sid = row['sys_id']
-            parts = sid.split('_')
-            # Reconstruct contig name: everything before the type/number suffix
-            # Pattern: contig_12345_RM_Type_I_1 → contig_12345
-            contig = '_'.join(parts[:2])  # contig_NNNNN
+            contig = resolve_defense_contig(row, known_mag_contigs)
             defense_contig_map[contig].append(row['type'])
 
     integron_contigs = set()
@@ -579,7 +709,7 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
                     contig_genes[contig]['n_hypo'] += 1
             elif gene_type == 'trna':
                 contig_genes[contig]['n_trna'] += 1
-            elif gene_type in ('ncrna', 'tmrna', 'crispr'):
+            elif gene_type in ('ncrna', 'misc_rna', 'tmrna', 'crispr'):
                 contig_genes[contig]['n_ncrna'] += 1
         for mag_name_key, contigs_list in mag_contigs.items():
             n_cds = sum(contig_genes[c]['n_cds'] for c in contigs_list)
@@ -633,7 +763,7 @@ def build_mags(dastool_summary, checkm2_df, contig2bin, kaiju_df, depths_df,
                 coverage[sname] = round(float(contig_depths[col].mean()), 4) if len(contig_depths) > 0 else 0
 
         # MGE counts
-        n_virus = sum(1 for c in contigs if c in virus_contigs)
+        n_virus = sum(virus_contig_counts.get(c, 0) for c in contigs)
         n_plasmid = sum(1 for c in contigs if c in plasmid_contigs)
         n_defense = sum(len(defense_contig_map.get(c, [])) for c in contigs)
         n_integron = sum(1 for c in contigs if c in integron_contigs)
@@ -720,15 +850,21 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
                 binner_bin_contigs.setdefault(row['bin'], []).append(row['contig'])
 
     # MGE contig sets
-    virus_contigs = set(virus_df['seq_name'].values) if virus_df is not None else set()
+    virus_contig_counts = (
+        Counter(genomad_host_contig(s) for s in virus_df['seq_name'].values)
+        if virus_df is not None else Counter()
+    )
     plasmid_contigs = set(plasmid_df['seq_name'].values) if plasmid_df is not None else set()
 
+    known_bin_contigs = (
+        (set(assembly_info['#seq_name'].values) if assembly_info is not None else set())
+        | {c for cs in dastool_bin_contigs.values() for c in cs}
+        | {c for cs in binner_bin_contigs.values() for c in cs}
+    )
     defense_contig_map = defaultdict(list)
     if defense_df is not None:
         for _, row in defense_df.iterrows():
-            sid = row['sys_id']
-            parts = sid.split('_')
-            contig = '_'.join(parts[:2])
+            contig = resolve_defense_contig(row, known_bin_contigs)
             defense_contig_map[contig].append(row['type'])
 
     integron_contigs = set()
@@ -842,7 +978,7 @@ def build_checkm2_all(results_dir, checkm2_df, dastool_summary, contig2bin,
             if src_comp:
                 composition[source] = src_comp
 
-        n_virus = sum(1 for c in contigs if c in virus_contigs)
+        n_virus = sum(virus_contig_counts.get(c, 0) for c in contigs)
         n_plasmid = sum(1 for c in contigs if c in plasmid_contigs)
         n_defense = sum(len(defense_contig_map.get(c, [])) for c in contigs)
         n_integron = sum(1 for c in contigs if c in integron_contigs)
@@ -1551,15 +1687,19 @@ def build_mge_per_bin(contig2bin, virus_df, plasmid_df, defense_df, integron_df)
 
     if virus_df is not None:
         for _, row in virus_df.iterrows():
-            contig = row['seq_name']
-            mag = c2b.get(contig, '_unbinned')
-            per_bin[mag]['viruses'].append({
+            seq_name = str(row['seq_name'])
+            contig = genomad_host_contig(seq_name)
+            mag = c2b.get(contig, c2b.get(seq_name, '_unbinned'))
+            entry = {
                 'contig': contig,
                 'length': int(row['length']),
                 'score': round(float(row['virus_score']), 4),
                 'taxonomy': str(row.get('taxonomy', '')),
                 'n_hallmarks': int(row.get('n_hallmarks', 0)),
-            })
+            }
+            if seq_name != contig:
+                entry['seq_name'] = seq_name
+            per_bin[mag]['viruses'].append(entry)
 
     if plasmid_df is not None:
         for _, row in plasmid_df.iterrows():
@@ -1571,11 +1711,11 @@ def build_mge_per_bin(contig2bin, virus_df, plasmid_df, defense_df, integron_df)
                 'score': round(float(row['plasmid_score']), 4),
             })
 
+    known_contigs = set(c2b.keys())
     if defense_df is not None:
         for _, row in defense_df.iterrows():
             sid = row['sys_id']
-            parts = sid.split('_')
-            contig = '_'.join(parts[:2])
+            contig = resolve_defense_contig(row, known_contigs)
             mag = c2b.get(contig, '_unbinned')
             per_bin[mag]['defense'].append({
                 'sys_id': sid,
@@ -1633,6 +1773,18 @@ def build_biosynthetic(results_dir, contig2bin):
     type_counts = Counter()
     per_bin = defaultdict(list)
 
+    def _expand_location_intervals(spans):
+        intervals = []
+        for raw_a, raw_b in spans:
+            a, b = int(raw_a), int(raw_b)
+            if a <= b:
+                intervals.append((a, b))
+            else:
+                intervals.append((a, float('inf')))
+                if b > 0:
+                    intervals.append((0, b))
+        return intervals
+
     # Try full antiSMASH JSON first (richer data)
     json_path = resolve_path(results_dir, 'metabolism', 'antismash', 'antismash_json', 'antismash.json')
     if os.path.isfile(json_path):
@@ -1642,12 +1794,28 @@ def build_biosynthetic(results_dir, contig2bin):
 
         for rec in as_data.get('records', []):
             contig_id = rec.get('id', 'unknown')
+            seq_obj = rec.get('seq', {})
+            contig_len = len(seq_obj.get('data', '')) if isinstance(seq_obj, dict) else 0
+            if not contig_len:
+                contig_len = max(
+                    (
+                        int(b)
+                        for ft in rec.get('features', [])
+                        for _, b in re.findall(r'<?(\d+):>?(\d+)', str(ft.get('location', '')))
+                    ),
+                    default=0,
+                )
 
             # Regions are in areas (antiSMASH 8.x)
             for area_idx, area in enumerate(rec.get('areas', [])):
                 products = area.get('products', [])
-                start = area.get('start', 0)
-                end = area.get('end', 0)
+                start = int(area.get('start', 0))
+                end = int(area.get('end', 0))
+                reg_intervals = _expand_location_intervals([(start, end)])
+                if start <= end:
+                    reg_length = end - start
+                else:
+                    reg_length = ((contig_len - start) + end) if contig_len >= start else end
 
                 # Protoclusters within this region (dict with string keys or list)
                 protoclusters = []
@@ -1692,13 +1860,22 @@ def build_biosynthetic(results_dir, contig2bin):
                                 'similarity': score.get('similarity', 0),
                             })
 
-                # Gene function annotations from CDS qualifiers
+                # Gene function annotations from CDS qualifiers overlapping this region
                 gene_kinds = Counter()
                 for feat in rec.get('features', []):
                     if feat.get('type') != 'CDS':
                         continue
-                    loc = feat.get('location', '')
-                    # Check if feature overlaps this region
+                    loc = str(feat.get('location', ''))
+                    spans = re.findall(r'<?(\d+):>?(\d+)', loc)
+                    if not spans:
+                        continue
+                    cds_intervals = _expand_location_intervals(spans)
+                    if not any(
+                        fa < rb and fb > ra
+                        for fa, fb in cds_intervals
+                        for ra, rb in reg_intervals
+                    ):
+                        continue
                     quals = feat.get('qualifiers', {})
                     gk = quals.get('gene_kind', [None])
                     gk_val = gk[0] if isinstance(gk, list) else gk
@@ -1714,7 +1891,7 @@ def build_biosynthetic(results_dir, contig2bin):
                     'contig': contig_id,
                     'start': start,
                     'end': end,
-                    'length': end - start,
+                    'length': reg_length,
                     'products': products,
                     'n_protoclusters': len(protoclusters),
                     'protoclusters': protoclusters,
@@ -2031,13 +2208,20 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
     virus_sum_df = load_tsv(virus_summary_path)
     if virus_sum_df is not None:
         for cid in virus_sum_df['seq_name'].values:
-            replicon_map[cid] = 'virus'
+            cid_str = str(cid)
+            host_cid = genomad_host_contig(cid_str)
+            if cid_str != host_cid:
+                if host_cid in replicon_map:
+                    replicon_map[host_cid] = 'provirus'
+            elif cid_str in replicon_map:
+                replicon_map[cid_str] = 'virus'
 
     plasmid_summary_path = resolve_path(results_dir, 'mge', 'genomad', 'plasmid_summary.tsv')
     plasmid_sum_df = load_tsv(plasmid_summary_path)
     if plasmid_sum_df is not None:
         for cid in plasmid_sum_df['seq_name'].values:
-            replicon_map[cid] = 'plasmid'
+            if cid in replicon_map:
+                replicon_map[cid] = 'plasmid'
 
     # Proviruses: contigs hosting integrated phage (overrides chromosome)
     provirus_path = resolve_path(results_dir, 'mge', 'genomad', 'provirus.tsv')
@@ -2060,7 +2244,10 @@ def build_contig_explorer(results_dir, assembly_info, depths_df, contig2bin, kai
             if pd.notna(lineage) and lineage:
                 tax = parse_lineage(lineage)
                 if any(tax.values()):
-                    genomad_tax[row['seq_name']] = tax
+                    seq_name = str(row['seq_name'])
+                    host_cid = genomad_host_contig(seq_name)
+                    if seq_name == host_cid or host_cid not in genomad_tax:
+                        genomad_tax[host_cid] = tax
         print(f"  geNomad taxonomy: {len(genomad_tax)} contigs")
 
     # Tiara eukaryotic classification
@@ -2471,6 +2658,13 @@ def main():
     virus_df = load_tsv(resolve_path(results_dir, 'mge', 'genomad', 'virus_summary.tsv'))
     plasmid_df = load_tsv(resolve_path(results_dir, 'mge', 'genomad', 'plasmid_summary.tsv'))
     defense_df = load_tsv(resolve_path(results_dir, 'mge', 'defensefinder', 'systems.tsv'))
+    if defense_df is not None and 'replicon' not in defense_df.columns:
+        defense_genes_df = load_tsv(resolve_path(results_dir, 'mge', 'defensefinder', 'genes.tsv'))
+        if (defense_genes_df is not None
+                and 'sys_id' in defense_genes_df.columns
+                and 'replicon' in defense_genes_df.columns):
+            sys_to_rep = dict(zip(defense_genes_df['sys_id'], defense_genes_df['replicon']))
+            defense_df['replicon'] = defense_df['sys_id'].map(sys_to_rep)
     integron_df = load_tsv(resolve_path(results_dir, 'mge', 'integrons', 'integrons.tsv'),
                            comment='#')
 
@@ -2509,12 +2703,7 @@ def main():
     print("Building gene shards ...")
     len_map = dict(zip(assembly_info['#seq_name'], assembly_info['length']))
     from genes_to_json import load_bakta, load_rrna, load_trna, load_gene_depths, merge_depths, load_assembly, compute_gene_gc
-    annot_candidates = [
-        resolve_path(results_dir, 'annotation', 'bakta', 'extra', 'annotation.tsv'),
-        resolve_path(results_dir, 'annotation', 'bakta', 'basic', 'annotation.tsv'),
-        resolve_path(results_dir, 'annotation', 'prokka', 'annotation.tsv'),
-    ]
-    annot_tsv = next((p for p in annot_candidates if os.path.exists(p)), None)
+    annot_tsv = select_annotation_tsv(results_dir)
     rrna_tsv = resolve_path(results_dir, 'taxonomy', 'rrna', 'rrna_genes.tsv')
     trna_tsv = resolve_path(results_dir, 'taxonomy', 'rrna', 'trna_genes.tsv')
     if annot_tsv:

@@ -24,13 +24,17 @@ process KAIJU_CONTIG_CLASSIFY {
     names="${db_dir}/names.dmp"
 
     if [ -z "\$fmi" ] || [ ! -f "\$fmi" ]; then
-        echo "[ERROR] No .fmi file found in ${db_dir}" >&2
-        printf 'contig_id\\tstatus\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
-        exit 0
+        echo "[ERROR] No .fmi file found in ${db_dir}; no results stored" >&2
+        exit 1
     fi
 
     if [ ! -f "\$nodes" ] || [ ! -f "\$names" ]; then
-        echo "[ERROR] nodes.dmp or names.dmp not found in ${db_dir}" >&2
+        echo "[ERROR] nodes.dmp or names.dmp not found in ${db_dir}; no results stored" >&2
+        exit 1
+    fi
+
+    if [ ! -s "${contigs}" ]; then
+        echo "[WARNING] No contig sequences — skipping Kaiju" >&2
         printf 'contig_id\\tstatus\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
         exit 0
     fi
@@ -52,9 +56,8 @@ process KAIJU_CONTIG_CLASSIFY {
     set -e
 
     if [ \$kaiju_exit -ne 0 ]; then
-        echo "[WARNING] Kaiju exited with code \$kaiju_exit" >&2
-        printf 'contig_id\\tstatus\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
-        exit 0
+        echo "[ERROR] Kaiju exited with code \$kaiju_exit; no results stored" >&2
+        exit \$kaiju_exit
     fi
 
     # Add full taxonomic lineage names
@@ -69,9 +72,8 @@ process KAIJU_CONTIG_CLASSIFY {
     set -e
 
     if [ \$names_exit -ne 0 ]; then
-        echo "[WARNING] kaiju-addTaxonNames exited with code \$names_exit" >&2
-        printf 'contig_id\\tstatus\\ttaxon_id\\tlineage\\n' > kaiju_contigs.tsv
-        exit 0
+        echo "[ERROR] kaiju-addTaxonNames exited with code \$names_exit; no results stored" >&2
+        exit \$names_exit
     fi
 
     # Build per-contig TSV: contig_id, status, taxon_id, lineage
@@ -127,14 +129,17 @@ process KAIJU_CLASSIFY {
     names="${db_dir}/names.dmp"
 
     if [ -z "\$fmi" ] || [ ! -f "\$fmi" ]; then
-        echo "[ERROR] No .fmi file found in ${db_dir}" >&2
-        printf 'classified\\tgene_id\\ttaxon_id\\tlineage\\n' > kaiju_genes.tsv
-        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_protein_contigs.tsv
-        exit 0
+        echo "[ERROR] No .fmi file found in ${db_dir}; no results stored" >&2
+        exit 1
     fi
 
     if [ ! -f "\$nodes" ] || [ ! -f "\$names" ]; then
-        echo "[ERROR] nodes.dmp or names.dmp not found in ${db_dir}" >&2
+        echo "[ERROR] nodes.dmp or names.dmp not found in ${db_dir}; no results stored" >&2
+        exit 1
+    fi
+
+    if [ ! -s "${proteins}" ]; then
+        echo "[WARNING] No protein sequences — skipping Kaiju protein classification" >&2
         printf 'classified\\tgene_id\\ttaxon_id\\tlineage\\n' > kaiju_genes.tsv
         printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_protein_contigs.tsv
         exit 0
@@ -157,10 +162,8 @@ process KAIJU_CLASSIFY {
     set -e
 
     if [ \$kaiju_exit -ne 0 ]; then
-        echo "[WARNING] Kaiju exited with code \$kaiju_exit" >&2
-        printf 'classified\\tgene_id\\ttaxon_id\\tlineage\\n' > kaiju_genes.tsv
-        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_protein_contigs.tsv
-        exit 0
+        echo "[ERROR] Kaiju exited with code \$kaiju_exit; no results stored" >&2
+        exit \$kaiju_exit
     fi
 
     # Add full taxonomic lineage names
@@ -175,10 +178,8 @@ process KAIJU_CLASSIFY {
     set -e
 
     if [ \$names_exit -ne 0 ]; then
-        echo "[WARNING] kaiju-addTaxonNames exited with code \$names_exit" >&2
-        printf 'classified\\tgene_id\\ttaxon_id\\tlineage\\n' > kaiju_genes.tsv
-        printf 'contig_id\\tclassified_genes\\ttotal_genes\\tfraction_classified\\ttaxon_id\\tlineage\\n' > kaiju_protein_contigs.tsv
-        exit 0
+        echo "[ERROR] kaiju-addTaxonNames exited with code \$names_exit; no results stored" >&2
+        exit \$names_exit
     fi
 
     # Per-gene output with header
@@ -283,10 +284,8 @@ process KRAKEN2_CLASSIFY {
     names="${db_dir}/names.dmp"
 
     if [ ! -f "${db_dir}/hash.k2d" ]; then
-        echo "[ERROR] Kraken2 database not found at ${db_dir} (missing hash.k2d)" >&2
-        printf 'contig_id\\tstatus\\ttaxon_id\\tname\\tlineage\\n' > kraken2_contigs.tsv
-        printf '' > kraken2_report.txt
-        exit 0
+        echo "[ERROR] Kraken2 database not found at ${db_dir} (missing hash.k2d); no results stored" >&2
+        exit 1
     fi
 
     # Taxonomy for lineage strings: NCBI nodes.dmp + names.dmp, or the
@@ -298,7 +297,12 @@ process KRAKEN2_CLASSIFY {
         nodes="${db_dir}/ktaxonomy.tsv"
         names="${db_dir}/ktaxonomy.tsv"
     else
-        echo "[ERROR] no taxonomy in ${db_dir}: need nodes.dmp + names.dmp or ktaxonomy.tsv" >&2
+        echo "[ERROR] no taxonomy in ${db_dir}: need nodes.dmp + names.dmp or ktaxonomy.tsv; no results stored" >&2
+        exit 1
+    fi
+
+    if [ ! -s "${contigs}" ]; then
+        echo "[WARNING] No contig sequences — skipping Kraken2" >&2
         printf 'contig_id\\tstatus\\ttaxon_id\\tname\\tlineage\\n' > kraken2_contigs.tsv
         printf '' > kraken2_report.txt
         exit 0
@@ -319,10 +323,9 @@ process KRAKEN2_CLASSIFY {
     set -e
 
     if [ \$kraken2_exit -ne 0 ]; then
-        echo "[WARNING] Kraken2 exited with code \$kraken2_exit" >&2
-        printf 'contig_id\\tstatus\\ttaxon_id\\tname\\tlineage\\n' > kraken2_contigs.tsv
-        printf '' > kraken2_report.txt
-        exit 0
+        echo "[ERROR] Kraken2 exited with code \$kraken2_exit; no results stored" >&2
+        rm -f kraken2_contigs.tsv kraken2_report.txt
+        exit \$kraken2_exit
     fi
 
     # Post-process: build full GTDB-style lineage strings from nodes.dmp + names.dmp
@@ -365,30 +368,36 @@ else:
             if parts[3].strip() == 'scientific name':
                 sci_name[int(parts[0].strip())] = parts[1].strip()
 
-# NCBI rank -> GTDB prefix
-rank_prefix = {
-    'superkingdom': 'd', 'domain': 'd', 'phylum': 'p', 'class': 'c',
-    'order': 'o', 'family': 'f', 'genus': 'g', 'species': 's'
-}
-rank_order = ['superkingdom', 'domain', 'phylum', 'class', 'order', 'family', 'genus', 'species']
+# NCBI rank -> standard 7-slot GTDB-style lineage (d__;p__;c__;o__;f__;g__;s__)
+tracked_ranks = {'superkingdom', 'domain', 'phylum', 'class', 'order', 'family', 'genus', 'species'}
+all_ranks = ['d', 'p', 'c', 'o', 'f', 'g', 's']
 
 def build_lineage(taxid):
-    # Walk up the taxonomy tree and build d__X;p__Y;...;s__Z lineage.
-    lineage_parts = {}
+    # Walk up the taxonomy tree and emit fixed-slot d__..s__ lineage.
+    by_rank = {}
     tid = taxid
     visited = set()
     while tid != 1 and tid in parent and tid not in visited:
         visited.add(tid)
         r = rank.get(tid, '')
-        if r in rank_prefix:
-            lineage_parts[r] = f"{rank_prefix[r]}__{sci_name.get(tid, 'unknown')}"
+        if r in tracked_ranks:
+            by_rank[r] = sci_name.get(tid, 'unknown')
         tid = parent[tid]
-    # Build ordered lineage string
-    parts = []
-    for r in rank_order:
-        if r in lineage_parts:
-            parts.append(lineage_parts[r])
-    return ';'.join(parts) if parts else 'Unclassified'
+    d_val = by_rank.get('domain') or by_rank.get('superkingdom', '')
+    if d_val.lower().replace('_', ' ') == 'cellular organisms':
+        d_val = ''
+    slot_vals = {
+        'd': d_val,
+        'p': by_rank.get('phylum', ''),
+        'c': by_rank.get('class', ''),
+        'o': by_rank.get('order', ''),
+        'f': by_rank.get('family', ''),
+        'g': by_rank.get('genus', ''),
+        's': by_rank.get('species', ''),
+    }
+    if not any(slot_vals.values()):
+        return 'Unclassified'
+    return ';'.join(f"{r}__{slot_vals[r]}" for r in all_ranks)
 
 # Parse Kraken2 output: status(C/U) \t contig_id \t taxon_id \t length \t LCA_mapping
 n_classified = 0
@@ -440,7 +449,12 @@ process SENDSKETCH_CLASSIFY {
     # SendSketch has a hard limit of 100k sequences per request.
     # Split assembly into chunks of 90k contigs, send each batch, concatenate.
     BATCH_SIZE=90000
-    N_SEQS=\$(grep -c '^>' "${contigs}")
+    N_SEQS=\$(grep -c '^>' "${contigs}" 2>/dev/null || true)
+    if [ ! -s "${contigs}" ] || [ "\${N_SEQS:-0}" -eq 0 ]; then
+        echo "[WARNING] No contig sequences — skipping SendSketch" >&2
+        printf 'contig_id\\tstatus\\tANI\\tref_name\\tlineage\\n' > sendsketch_contigs.tsv
+        exit 0
+    fi
     echo "[INFO] Assembly has \$N_SEQS contigs (batch size: \$BATCH_SIZE)" >&2
 
     mkdir -p chunks
@@ -457,6 +471,7 @@ process SENDSKETCH_CLASSIFY {
     # Run sendsketch on each chunk
     > sendsketch_raw.txt
     sketch_ok=true
+    failed_chunk_exit=1
     for chunk in chunks/chunk_*.fa; do
         echo "[INFO] Processing \$(basename \$chunk) ..." >&2
         set +e
@@ -476,17 +491,18 @@ process SENDSKETCH_CLASSIFY {
         set -e
 
         if [ \$chunk_exit -ne 0 ]; then
-            echo "[WARNING] sendsketch.sh exited with code \$chunk_exit for \$(basename \$chunk)" >&2
+            echo "[ERROR] sendsketch.sh exited with code \$chunk_exit for \$(basename \$chunk)" >&2
             cat sendsketch_stderr.txt >&2
             sketch_ok=false
+            failed_chunk_exit=\$chunk_exit
             break
         fi
         cat sendsketch_chunk.txt >> sendsketch_raw.txt
     done
 
     if [ "\$sketch_ok" != "true" ]; then
-        printf 'contig_id\\tstatus\\tANI\\tref_name\\tlineage\\n' > sendsketch_contigs.tsv
-        exit 0
+        echo "[ERROR] SendSketch failed (exit \$failed_chunk_exit); no results stored" >&2
+        exit \$failed_chunk_exit
     fi
 
     # Parse format=2 output into clean TSV

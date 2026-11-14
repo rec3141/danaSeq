@@ -101,7 +101,7 @@ AUTO_SESSION=true
 
 # Flags whose value is a host path: resolved to absolute, and bound in
 # container mode.
-PATH_FLAGS=" --input --samplesheet --references --from_mag --from_assembly --human_ref --rrna_refs --store_dir --contig_explorer "
+PATH_FLAGS=" --input --samplesheet --references --from_mag --from_assembly --human_ref --rrna_refs --store_dir --contig_explorer --metadata "
 
 while (( $# )); do
     case "$1" in
@@ -127,12 +127,18 @@ while (( $# )); do
         --bind)
             [[ -z "${2:-}" ]] && die "--bind requires a path"
             BIND_PATHS+=("$(realpath -m "$2")"); shift 2 ;;
+        --bind=*)
+            BIND_PATHS+=("$(realpath -m "${1#--bind=}")"); shift ;;
         --outdir)
             [[ -z "${2:-}" ]] && die "--outdir requires a directory path"
             OUTDIR_HOST="$(realpath -m "$2")"; shift 2 ;;
+        --outdir=*)
+            OUTDIR_HOST="$(realpath -m "${1#--outdir=}")"; shift ;;
         --workdir)
             [[ -z "${2:-}" ]] && die "--workdir requires a directory path"
             WORKDIR_HOST="$(realpath -m "$2")"; shift 2 ;;
+        --workdir=*)
+            WORKDIR_HOST="$(realpath -m "${1#--workdir=}")"; shift ;;
         --session)
             [[ -z "${2:-}" ]] && die "--session requires a session ID"
             RESUME_SESSION="$2"; AUTO_SESSION=false; shift 2 ;;
@@ -141,6 +147,19 @@ while (( $# )); do
             flag="$1"; mem_val="$2"; shift 2
             if [[ "${1:-}" =~ ^[KMGT]B?$ ]]; then mem_val="${mem_val} ${1}"; shift; fi
             NF_ARGS+=("$flag" "${mem_val}") ;;
+        --*=*)
+            flag="${1%%=*}"
+            val="${1#*=}"
+            if [[ "$PATH_FLAGS" == *" ${flag} "* ]]; then
+                [[ -n "$val" ]] || die "${flag} requires a path"
+                p="$(realpath -m "$val")"
+                [[ -e "$p" ]] || [[ "$flag" == "--store_dir" ]] || die "${flag}: path does not exist: $val"
+                NF_ARGS+=("$flag" "$p")
+                BIND_PATHS+=("$p")
+            else
+                NF_ARGS+=("$1")
+            fi
+            shift ;;
         *)
             if [[ "$PATH_FLAGS" == *" $1 "* ]]; then
                 [[ -z "${2:-}" ]] && die "$1 requires a path"
@@ -209,6 +228,38 @@ if [[ "$USE_CONTAINER" == true ]]; then
     # The pipeline code itself runs from this checkout (bound read-only), not
     # the copy baked into the image, so a branch can be run with a released image.
     BIND_PATHS+=("$SCRIPT_DIR" "$OUTDIR_HOST" "$WORKDIR_HOST")
+    # Bind read directories referenced inside --samplesheet CSV when present.
+    for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+        if [[ "${NF_ARGS[$i]}" == "--samplesheet" && $((i+1)) -lt ${#NF_ARGS[@]} && -f "${NF_ARGS[$((i+1))]}" ]]; then
+            for pycand in "$(command -v python3 2>/dev/null || true)" /usr/bin/python3 /opt/miniforge3/bin/python3; do
+                if [[ -n "$pycand" && -x "$pycand" ]]; then
+                    mapfile -t RNA_SHEET_DIRS < <(
+                        "$pycand" - "${NF_ARGS[$((i+1))]}" <<'PYEOF'
+import csv, os, sys
+
+sheet = sys.argv[1]
+sheet_dir = os.path.dirname(os.path.abspath(sheet))
+with open(sheet, newline="") as fh:
+    lines = [ln for ln in fh if ln.strip() and not ln.lstrip().startswith("#")]
+    if lines:
+        for row in csv.reader(lines[1:]):
+            for val in row[1:3]:
+                val = val.strip()
+                if not val:
+                    continue
+                for cand in (val, os.path.join(sheet_dir, val)):
+                    if os.path.lexists(cand):
+                        print(os.path.dirname(os.path.abspath(cand)))
+                        print(os.path.dirname(os.path.realpath(cand)))
+                        break
+PYEOF
+                    )
+                    for d in "${RNA_SHEET_DIRS[@]}"; do [[ -n "$d" ]] && BIND_PATHS+=("$d"); done
+                    break
+                fi
+            done
+        fi
+    done
     # The host TMPDIR is inherited by the container (Java dies without it).
     [[ -n "${TMPDIR:-}" && -d "${TMPDIR}" ]] && BIND_PATHS+=("$(realpath "$TMPDIR")")
     # Bind resolved targets too: inputs are often symlinks into other trees.

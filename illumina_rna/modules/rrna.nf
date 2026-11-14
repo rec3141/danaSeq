@@ -20,7 +20,7 @@ process PREPARE_RRNA_REF {
     script:
     """
     if [ -d "${refs}" ]; then
-        find -L "${refs}/" -maxdepth 1 -type f \\( -name '*.fa' -o -name '*.fasta' -o -name '*.fna' -o -name '*.fa.gz' -o -name '*.fasta.gz' \\) | sort > ref_list.txt
+        find -L "${refs}/" -maxdepth 1 -type f \\( -name '*.fa' -o -name '*.fasta' -o -name '*.fna' -o -name '*.fa.gz' -o -name '*.fasta.gz' -o -name '*.fna.gz' \\) | sort > ref_list.txt
     else
         echo "${refs}" > ref_list.txt
     fi
@@ -51,6 +51,7 @@ process REMOVE_RRNA_SORTMERNA {
 
     input:
     tuple val(meta), path(reads)
+    path(refs)
 
     output:
     tuple val(meta), path("${meta.id}.norrna.fq.gz"),       emit: reads
@@ -59,21 +60,48 @@ process REMOVE_RRNA_SORTMERNA {
 
     script:
     """
+    set -o pipefail
+
     # SortMeRNA paired mode wants separate mates
     reformat.sh in="${reads}" interleaved=t out1=r1.fq.gz out2=r2.fq.gz ow=t
 
-    ref_args=""
-    if [ -d "${params.rrna_refs}" ]; then
-        for fa in "${params.rrna_refs}"/*.fa "${params.rrna_refs}"/*.fasta; do
-            [ -e "\$fa" ] || continue
-            ref_args="\$ref_args --ref \$fa"
-        done
+    if [ -d "${refs}" ]; then
+        find -L "${refs}/" -maxdepth 1 -type f \\( -name '*.fa' -o -name '*.fasta' -o -name '*.fna' -o -name '*.fa.gz' -o -name '*.fasta.gz' -o -name '*.fna.gz' \\) | sort > ref_list.txt
+    elif [ -e "${refs}" ]; then
+        echo "${refs}" > ref_list.txt
     else
-        ref_args="--ref ${params.rrna_refs}"
+        : > ref_list.txt
+    fi
+    if [ ! -s ref_list.txt ]; then
+        echo "[ERROR] no rRNA FASTAs found in ${refs}" >&2
+        exit 1
     fi
 
+    mkdir -p staged_refs
+    ref_args=()
+    ref_idx=0
+    while read -r fa; do
+        ref_idx=\$((ref_idx + 1))
+        base=\$(basename "\$fa")
+        case "\$base" in
+            *.gz)
+                out_fa="staged_refs/\${ref_idx}_\${base%.gz}"
+                gzip -dc "\$fa" | awk '/^>/ { print; next } { gsub(/[Uu]/, "T"); print toupper(\$0) }' > "\$out_fa"
+                ;;
+            *)
+                out_fa="staged_refs/\${ref_idx}_\${base}"
+                awk '/^>/ { print; next } { gsub(/[Uu]/, "T"); print toupper(\$0) }' "\$fa" > "\$out_fa"
+                ;;
+        esac
+        if [ ! -s "\$out_fa" ]; then
+            echo "[ERROR] empty rRNA reference file: \$fa" >&2
+            exit 1
+        fi
+        ref_args+=("--ref" "\$out_fa")
+    done < ref_list.txt
+
     mkdir -p workdir
-    sortmerna \$ref_args \\
+    sortmerna "\${ref_args[@]}" \\
         --reads r1.fq.gz --reads r2.fq.gz \\
         --workdir workdir \\
         --paired_in \\
@@ -112,7 +140,7 @@ process PREPARE_RRNA_TAXDB {
     script:
     """
     if [ -d "${refs}" ]; then
-        find -L "${refs}/" -maxdepth 1 -type f \\( -name '*.fa' -o -name '*.fasta' -o -name '*.fna' -o -name '*.fa.gz' -o -name '*.fasta.gz' \\) | sort > ref_list.txt
+        find -L "${refs}/" -maxdepth 1 -type f \\( -name '*.fa' -o -name '*.fasta' -o -name '*.fna' -o -name '*.fa.gz' -o -name '*.fasta.gz' -o -name '*.fna.gz' \\) | sort > ref_list.txt
     else
         echo "${refs}" > ref_list.txt
     fi

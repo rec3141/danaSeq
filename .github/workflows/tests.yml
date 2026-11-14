@@ -10,31 +10,73 @@ on:
     branches: [main]
     paths:
       - 'nanopore_assembly/bin/fastq_filter.cpp'
+      - 'nanopore_assembly/bin/normalize_assembly.py'
+      - 'nanopore_assembly/bin/tetramer_freqs.c'
+      - 'nanopore_assembly/main.nf'
+      - 'nanopore_assembly/modules/assembly.nf'
       - 'nanopore_assembly/modules/preprocess.nf'
+      - 'nanopore_assembly/modules/mapping.nf'
+      - 'nanopore_assembly/run-nanopore-assembly.sh'
       - 'mag_analysis/bin/metacyc_scorer.py'
       - 'mag_analysis/bin/metacyc_scorer/**'
       - 'mag_analysis/bin/magscot.py'
+      - 'mag_analysis/bin/mge_bin_annotate.py'
       - 'mag_analysis/bin/parse_marferret_results.py'
-      - 'nanopore_live/bin/watch_for_completion.sh'
-      - 'nanopore_assembly/modules/mapping.nf'
-      - 'nanopore_assembly/run-nanopore-assembly.sh'
+      - 'mag_analysis/main.nf'
+      - 'mag_analysis/modules/binning.nf'
+      - 'mag_analysis/modules/eukaryotic.nf'
+      - 'mag_analysis/modules/metabolism.nf'
+      - 'mag_analysis/modules/mge.nf'
+      - 'mag_analysis/modules/taxonomy.nf'
       - 'mag_analysis/run-mag-analysis.sh'
+      - 'mag_analysis/tests/mge_module/**'
+      - 'mag_analysis/viz/preprocess/**'
+      - 'nanopore_live/bin/watch_for_completion.sh'
+      - 'nanopore_live/run-realtime.sh'
+      - 'illumina_amplicon/run-illumina-amplicon.sh'
+      - 'illumina_assembly/main.nf'
       - 'illumina_assembly/run-illumina-assembly.sh'
+      - 'illumina_rna/bin/augment_viz_functions.py'
+      - 'illumina_rna/bin/summarize_expression.py'
+      - 'illumina_rna/main.nf'
+      - 'illumina_rna/modules/rrna.nf'
+      - 'illumina_rna/run-illumina-rna.sh'
       - 'tests/**'
       - '.github/workflows/tests.yml'
   pull_request:
     paths:
       - 'nanopore_assembly/bin/fastq_filter.cpp'
+      - 'nanopore_assembly/bin/normalize_assembly.py'
+      - 'nanopore_assembly/bin/tetramer_freqs.c'
+      - 'nanopore_assembly/main.nf'
+      - 'nanopore_assembly/modules/assembly.nf'
       - 'nanopore_assembly/modules/preprocess.nf'
+      - 'nanopore_assembly/modules/mapping.nf'
+      - 'nanopore_assembly/run-nanopore-assembly.sh'
       - 'mag_analysis/bin/metacyc_scorer.py'
       - 'mag_analysis/bin/metacyc_scorer/**'
       - 'mag_analysis/bin/magscot.py'
+      - 'mag_analysis/bin/mge_bin_annotate.py'
       - 'mag_analysis/bin/parse_marferret_results.py'
-      - 'nanopore_live/bin/watch_for_completion.sh'
-      - 'nanopore_assembly/modules/mapping.nf'
-      - 'nanopore_assembly/run-nanopore-assembly.sh'
+      - 'mag_analysis/main.nf'
+      - 'mag_analysis/modules/binning.nf'
+      - 'mag_analysis/modules/eukaryotic.nf'
+      - 'mag_analysis/modules/metabolism.nf'
+      - 'mag_analysis/modules/mge.nf'
+      - 'mag_analysis/modules/taxonomy.nf'
       - 'mag_analysis/run-mag-analysis.sh'
+      - 'mag_analysis/tests/mge_module/**'
+      - 'mag_analysis/viz/preprocess/**'
+      - 'nanopore_live/bin/watch_for_completion.sh'
+      - 'nanopore_live/run-realtime.sh'
+      - 'illumina_amplicon/run-illumina-amplicon.sh'
+      - 'illumina_assembly/main.nf'
       - 'illumina_assembly/run-illumina-assembly.sh'
+      - 'illumina_rna/bin/augment_viz_functions.py'
+      - 'illumina_rna/bin/summarize_expression.py'
+      - 'illumina_rna/main.nf'
+      - 'illumina_rna/modules/rrna.nf'
+      - 'illumina_rna/run-illumina-rna.sh'
       - 'tests/**'
       - '.github/workflows/tests.yml'
   workflow_dispatch:
@@ -131,3 +173,71 @@ jobs:
       # Grex (RHEL 8), so keep them working there.
       - name: Run MetaCyc scorer tests on Python 3.6
         run: docker run --rm -v "$PWD":/src -w /src python:3.6-slim python tests/test_metacyc_scorer.py -v
+
+  mag-viz-preprocess:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install numpy and pandas
+        run: python3 -m pip install numpy pandas
+
+      - name: Run MAG visualization preprocess regressions
+        run: python3 tests/test_mag_viz_preprocess.py -v
+
+  nextflow-and-launcher-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install build and Python dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc
+          python3 -m pip install numpy pandas scikit-learn
+
+      # Tests run Nextflow with NXF_OFFLINE=true against isolated per-test NXF_HOME
+      # directories, so pre-populate NXF_DIST at a shared path outside NXF_HOME.
+      - name: Install Nextflow
+        run: |
+          sudo mkdir -p /opt/nextflow/framework
+          sudo chown -R "$USER:$USER" /opt/nextflow
+          export NXF_HOME=/opt/nextflow
+          export NXF_DIST=/opt/nextflow/framework
+          export NXF_VER=25.10.4
+          curl -fsSL https://get.nextflow.io | bash
+          sudo mv nextflow /usr/local/bin/nextflow
+          sudo chmod +x /usr/local/bin/nextflow
+          nextflow -version
+          NXF_HOME="$(mktemp -d)" NXF_OFFLINE=true nextflow -version
+          echo "NXF_DIST=/opt/nextflow/framework" >> "$GITHUB_ENV"
+          echo "NXF_VER=25.10.4" >> "$GITHUB_ENV"
+
+      - name: Run nanopore_assembly regressions
+        run: python3 tests/test_nanopore_assembly_highs.py -v
+
+      - name: Run MAG taxVAMB and GTDB-Tk gate regressions
+        run: python3 tests/test_mag_vamb_tax_and_gtdbtk_gate.py -v
+
+      - name: Run MAG storeDir failure-propagation regressions
+        run: python3 tests/test_mag_storedir_failures.py -v
+
+      - name: Run nanopore_live and Illumina regressions
+        run: python3 tests/test_live_and_illumina_highs.py -v
+
+      - name: Run MGE module tests
+        run: bash mag_analysis/tests/mge_module/run_tests.sh
