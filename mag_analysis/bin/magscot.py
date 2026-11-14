@@ -440,12 +440,17 @@ def main():
         if len(scoreframe) == 0:
             break
 
-        # Winner streak: consecutive bins from same binner don't affect each other
+        # Winner streak: consecutive bins from same binner don't affect each
+        # other, so they are accepted without rescoring, but each must still
+        # reach the score cutoff (upstream MAGScoT refine_bins(), R/refine.R).
+        # If none does, nothing is picked this round and the loop ends on the
+        # cutoff check above.
         winnerset = scoreframe.iloc[0]["bintool"]
         row_idx = 0
 
         while (row_idx < len(scoreframe) and
-               scoreframe.iloc[row_idx]["bintool"] == winnerset):
+               scoreframe.iloc[row_idx]["bintool"] == winnerset and
+               scoreframe.iloc[row_idx]["score"] >= args.threshold):
             winnerbin = scoreframe.iloc[row_idx]["bin"]
             scoreframe_out.append(scoreframe.iloc[row_idx].to_dict())
             print(f"The highest scoring bin is: {winnerbin}", file=sys.stderr)

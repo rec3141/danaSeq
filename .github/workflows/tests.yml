@@ -11,6 +11,7 @@ on:
       - 'nanopore_assembly/bin/fastq_filter.cpp'
       - 'mag_analysis/bin/metacyc_scorer.py'
       - 'mag_analysis/bin/metacyc_scorer/**'
+      - 'mag_analysis/bin/magscot.py'
       - 'tests/**'
       - '.github/workflows/tests.yml'
   pull_request:
@@ -18,11 +19,28 @@ on:
       - 'nanopore_assembly/bin/fastq_filter.cpp'
       - 'mag_analysis/bin/metacyc_scorer.py'
       - 'mag_analysis/bin/metacyc_scorer/**'
+      - 'mag_analysis/bin/magscot.py'
       - 'tests/**'
       - '.github/workflows/tests.yml'
   workflow_dispatch:
 
 jobs:
+  magscot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pandas
+        run: python3 -m pip install pandas
+
+      - name: Run MAGScoT refinement regression
+        run: python3 tests/test_magscot_refine.py -v
+
   fastq-filter:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
