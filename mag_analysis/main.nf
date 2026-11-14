@@ -755,7 +755,7 @@ workflow {
     }
 
     // 6. GTDB-Tk phylogenetic classification
-    if (params.run_gtdbtk && params.gtdbtk_db) {
+    if (params.run_gtdbtk && params.gtdbtk_db && !params.binners_only) {
         ch_gtdbtk_bins = BIN_METABAT2.out.fastas
         if (params.run_semibin && params.bam_dir) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_SEMIBIN2.out.fastas)
@@ -790,7 +790,7 @@ workflow {
     // 6b. MetaCyc pathways per DAS Tool MAG and for the community
     if (metacyc_enabled) {
         def no_file = file("${projectDir}/assets/NO_FILE")
-        def gtdbtk_on = params.run_gtdbtk && params.gtdbtk_db
+        def gtdbtk_on = params.run_gtdbtk && params.gtdbtk_db && !params.binners_only
         def sketch_on = params.run_sendsketch && params.sendsketch_address
         // The high tier needs taxonomic ranges (EcoCyc benchmark: precision 0.79 with them,
         // 0.73 without), so without GTDB-Tk the sendsketch contig calls stand in.
@@ -904,7 +904,7 @@ workflow {
             ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.summary.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.json.collect())
         }
-        if (params.run_gtdbtk && params.gtdbtk_db) {
+        if (params.run_gtdbtk && params.gtdbtk_db && !params.binners_only) {
             ch_viz_stage4 = ch_viz_stage4.mix(GTDBTK_CLASSIFY.out.taxonomy.collect())
         }
         VIZ_STAGE4(ch_viz_stage4.mix(VIZ_STAGE3.out.done).collect(), true, true)
