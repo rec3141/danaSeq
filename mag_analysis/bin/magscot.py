@@ -332,12 +332,19 @@ def main():
                 f"MAGScoT_{it}_{j + 1}" for j in range(len(bisco_out))
             ]
 
-            # Build contig-to-bin for merged bins
+            # Build contig-to-bin for merged bins: the seed's contigs (a merged
+            # bin from the previous iteration when it > 1) plus the partner's
+            # contigs from the original bins, as in upstream MAGScoT's
+            # merge_bins() (R/merge.R).
             merged_rows = []
             for _, row in bisco_out.iterrows():
-                pair_contigs = contig_to_bin[
-                    contig_to_bin["bin"].isin([row["bin_a"], row["bin_b"]])
-                ][["contig"]].drop_duplicates()
+                seed = row["seed"]
+                partner = row["bin_b"] if row["bin_a"] == seed else row["bin_a"]
+                pair_contigs = pd.concat([
+                    contig_to_bin_bisco_it.loc[
+                        contig_to_bin_bisco_it["bin"] == seed, ["contig"]],
+                    contig_to_bin.loc[contig_to_bin["bin"] == partner, ["contig"]],
+                ]).drop_duplicates()
                 for contig in pair_contigs["contig"]:
                     merged_rows.append({
                         "bin": row["bin"],
