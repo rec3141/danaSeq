@@ -39,11 +39,13 @@ class MarferretContigIds(unittest.TestCase):
             subprocess.run([sys.executable, str(SCRIPT), '--diamond', str(diamond),
                             '--out-proteins', str(prot), '--out-contigs', str(contig)],
                            check=True, capture_output=True)
-            rows = {r['protein_id']: r['contig_id']
-                    for r in csv.DictReader(open(prot), delimiter='\t')}
+            with open(prot) as f:
+                rows = {r['protein_id']: r['contig_id']
+                        for r in csv.DictReader(f, delimiter='\t')}
             self.assertEqual(rows, {q: c for q, c in HITS})
-            contigs = {r['contig_id']: int(r['n_proteins'])
-                       for r in csv.DictReader(open(contig), delimiter='\t')}
+            with open(contig) as f:
+                contigs = {r['contig_id']: int(r['n_proteins'])
+                           for r in csv.DictReader(f, delimiter='\t')}
             self.assertEqual(contigs, {'my_contig_42': 2, 'odd|name': 1, 'contigB_7': 1})
 
 
