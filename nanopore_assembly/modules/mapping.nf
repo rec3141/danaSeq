@@ -56,6 +56,9 @@ process MAP_READS {
     # SAM output ("For a multi-part index, no \\@SQ lines will be outputted"),
     # samtools view then errors with "no SQ lines present", and the resulting
     # BAM has 0 references / 0 reads while exiting 0. Always pass it.
+    # pipefail: a minimap2 that dies mid-stream must fail the task; otherwise
+    # samtools sort writes a valid but truncated BAM and the checks below pass.
+    set -o pipefail
     minimap2 -a -x map-ont --secondary=no -t ${task.cpus} \\
         --split-prefix "${meta.id}_split" \\
         "${assembly}" "${fastq}" \\

@@ -26,6 +26,18 @@ ORIGINAL_ARGS=("$@")
 die() { echo "[ERROR] $1" >&2; exit 1; }
 
 # Build a re-runnable self-invocation with the correct --session ID
+# nf_run_succeeded HISTORY SINCE_EPOCH: true when the last run in a Nextflow
+# history file (tab-separated: start time, duration, run name, status,
+# revision, session, command) started at or after SINCE_EPOCH and has status OK.
+nf_run_succeeded() {
+    local hist="$1" since="$2" line start status started
+    [[ -f "$hist" ]] || return 1
+    line=$(tail -n 1 "$hist") || return 1
+    IFS=$'\t' read -r start _ _ status _ <<< "$line" || return 1
+    started=$(date -d "$start" +%s 2>/dev/null) || return 1
+    [[ "$status" == "OK" && "$started" -ge "$since" ]]
+}
+
 save_run_command() {
     local outdir="$1" session="$2"
     local save_args=()
@@ -239,7 +251,7 @@ if [[ "$DO_RESUME" == true && -z "$RESUME_SESSION" ]]; then
                  "${OUTDIR_HOST}/.nextflow-cache/dotdir/history" \
                  "${OUTDIR_HOST}/.nextflow/history"; do
         if [[ -f "$_hist" ]]; then
-            RESUME_SESSION=$(awk '{print $6}' "$_hist" | tail -1)
+            RESUME_SESSION=$(awk -F'\t' '{print $6}' "$_hist" | tail -1)
             break
         fi
     done
@@ -389,18 +401,20 @@ if [[ "$USE_CONTAINER" == true ]]; then
     # directory rotate each other out and the one that failed is gone.
     mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
+    NF_LAUNCH_EPOCH=$(date +%s)
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
-    if [[ $NF_EXIT -ne 0 ]]; then
-        _trace="${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/trace.txt"
-        if [[ -f "$_trace" ]] && ! grep -q 'FAILED' "$_trace" 2>/dev/null; then
-            echo "[WARN] Container exited $NF_EXIT but Nextflow trace shows no failures"
-            NF_EXIT=0
-        fi
+    # Apptainer's squashfuse_ll cleanup can time out and exit non-zero after
+    # Nextflow itself succeeded (apptainer/apptainer#2216). Accept that only
+    # when Nextflow's own history records THIS run as OK; a trace without
+    # FAILED rows also fits a run that aborted before or between tasks.
+    if [[ $NF_EXIT -ne 0 ]] && nf_run_succeeded "${NF_CACHE}/dotdir/history" "$NF_LAUNCH_EPOCH"; then
+        echo "[WARN] Container exited $NF_EXIT but Nextflow recorded the run as OK (Apptainer cleanup quirk)"
+        NF_EXIT=0
     fi
 
     # Bookkeeping only: must not change the exit status under set -euo pipefail.
-    NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1) || true
+    NF_SESSION=$(awk -F'\t' '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1) || true
     [[ -z "$NF_SESSION" ]] && { NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1) || true; }
     save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION" || echo "[WARN] Could not record run_command.txt"
 
@@ -446,7 +460,7 @@ mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 "${LOCAL_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
 # Capture session ID
-NF_SESSION=$(awk '{print $6}' .nextflow/history 2>/dev/null | tail -1) || true
+NF_SESSION=$(awk -F'\t' '{print $6}' .nextflow/history 2>/dev/null | tail -1) || true
 [[ -z "$NF_SESSION" ]] && { NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1) || true; }
 save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION" || echo "[WARN] Could not record run_command.txt"
 
