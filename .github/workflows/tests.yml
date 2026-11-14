@@ -13,6 +13,7 @@ on:
       - 'nanopore_assembly/modules/preprocess.nf'
       - 'mag_analysis/bin/metacyc_scorer.py'
       - 'mag_analysis/bin/metacyc_scorer/**'
+      - 'mag_analysis/bin/magscot.py'
       - 'mag_analysis/bin/parse_marferret_results.py'
       - 'nanopore_live/bin/watch_for_completion.sh'
       - 'nanopore_assembly/modules/mapping.nf'
@@ -27,6 +28,7 @@ on:
       - 'nanopore_assembly/modules/preprocess.nf'
       - 'mag_analysis/bin/metacyc_scorer.py'
       - 'mag_analysis/bin/metacyc_scorer/**'
+      - 'mag_analysis/bin/magscot.py'
       - 'mag_analysis/bin/parse_marferret_results.py'
       - 'nanopore_live/bin/watch_for_completion.sh'
       - 'nanopore_assembly/modules/mapping.nf'
@@ -38,6 +40,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  magscot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pandas
+        run: python3 -m pip install pandas
+
+      - name: Run test_magscot_merge
+        run: python3 tests/test_magscot_merge.py -v
+
   nanopore-live-watcher:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
