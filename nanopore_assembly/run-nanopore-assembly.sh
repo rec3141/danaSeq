@@ -25,19 +25,17 @@ ORIGINAL_ARGS=("$@")
 
 die() { echo "[ERROR] $1" >&2; exit 1; }
 
-# Build a re-runnable self-invocation with the correct --session ID
-# nf_run_succeeded HISTORY SINCE_EPOCH: true when the last run in a Nextflow
-# history file (tab-separated: start time, duration, run name, status,
-# revision, session, command) started at or after SINCE_EPOCH and has status OK.
-nf_run_succeeded() {
-    local hist="$1" since="$2" line start status started
-    [[ -f "$hist" ]] || return 1
-    line=$(tail -n 1 "$hist") || return 1
-    IFS=$'\t' read -r start _ _ status _ <<< "$line" || return 1
-    started=$(date -d "$start" +%s 2>/dev/null) || return 1
-    [[ "$status" == "OK" && "$started" -ge "$since" ]]
+# nf_run_receipt_ok MANIFEST RUN_NAME: true when the run manifest that
+# main.nf writes on completion (workflow.onComplete -> run_manifest.json)
+# names RUN_NAME, the unique -name given to this launch, and records success.
+nf_run_receipt_ok() {
+    local manifest="$1" run_name="$2"
+    [[ -n "$run_name" && -f "$manifest" ]] || return 1
+    grep -Fq "\"run_name\": \"${run_name}\"" "$manifest" &&
+        grep -Eq '^    "success": true,?$' "$manifest"
 }
 
+# Build a re-runnable self-invocation with the correct --session ID
 save_run_command() {
     local outdir="$1" session="$2"
     local save_args=()
@@ -385,7 +383,9 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=("$SIF_PATH" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
     esac
-    CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}")
+    # A unique run name ties the completion receipt to this launch.
+    NF_RUN_NAME="danaseq-asm-$(date +%s)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+    CONTAINER_CMD+=(-name "$NF_RUN_NAME" -w /data/work "${NF_ARGS[@]}")
     if [[ "$DO_RESUME" == true ]]; then
         CONTAINER_CMD+=(-resume ${RESUME_SESSION})
     fi
@@ -401,15 +401,14 @@ if [[ "$USE_CONTAINER" == true ]]; then
     # directory rotate each other out and the one that failed is gone.
     mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 
-    NF_LAUNCH_EPOCH=$(date +%s)
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
     # Apptainer's squashfuse_ll cleanup can time out and exit non-zero after
     # Nextflow itself succeeded (apptainer/apptainer#2216). Accept that only
-    # when Nextflow's own history records THIS run as OK; a trace without
+    # when this launch's completion receipt records success; a trace without
     # FAILED rows also fits a run that aborted before or between tasks.
-    if [[ $NF_EXIT -ne 0 ]] && nf_run_succeeded "${NF_CACHE}/dotdir/history" "$NF_LAUNCH_EPOCH"; then
-        echo "[WARN] Container exited $NF_EXIT but Nextflow recorded the run as OK (Apptainer cleanup quirk)"
+    if [[ $NF_EXIT -ne 0 ]] && nf_run_receipt_ok "${OUTDIR_HOST}/run_manifest.json" "$NF_RUN_NAME"; then
+        echo "[WARN] Container exited $NF_EXIT but run $NF_RUN_NAME completed successfully (Apptainer cleanup quirk)"
         NF_EXIT=0
     fi
 

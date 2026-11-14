@@ -8,9 +8,12 @@
   SAM. Skipped when minimap2 or samtools is not installed.
 - run-nanopore-assembly.sh: Nextflow history files are tab-separated (start
   time, duration, run name, status, revision, session, command) and the
-  duration can contain a space ("5m 13s"). The session is field 6 by tab, and
-  nf_run_succeeded() accepts a non-zero container exit only when the last run
-  started after launch and is recorded as OK.
+  duration can contain a space ("5m 13s"). The session is field 6 by tab.
+- run-nanopore-assembly.sh, container mode: a non-zero container exit
+  (Apptainer cleanup, apptainer/apptainer#2216) is accepted only when the run
+  manifest written on completion names this launch's unique -name and records
+  success. The real script runs with a fake `apptainer` that writes a receipt
+  through the script's own /data/output bind and exits 255.
 """
 import os
 import random
@@ -18,7 +21,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -109,23 +111,60 @@ class NextflowHistoryParsing(unittest.TestCase):
                 self.assertEqual(out, SESSION_B, script.name)
             self.assertNotRegex(script.read_text(), r"awk '\{print \$6\}'", script.name)
 
-    def nf_run_succeeded(self, since):
-        text = RUN_SCRIPTS[0].read_text()
-        fn = re.search(r'^nf_run_succeeded\(\) \{\n.*?^\}\n', text, re.S | re.M).group(0)
-        res = subprocess.run(['bash', '-c', fn + 'nf_run_succeeded "$1" "$2"', '_',
-                              str(self.hist), str(since)], capture_output=True, text=True)
-        return res.returncode == 0
 
-    def test_nf_run_succeeded(self):
-        now = int(time.time())
-        stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))
-        self.assertFalse(self.nf_run_succeeded(now - 5), 'missing history')
-        self.hist.write_text(history_line(stamp, '5m 13s', 'OK', SESSION_A))
-        self.assertTrue(self.nf_run_succeeded(now - 5))
-        self.hist.write_text(history_line(stamp, '1h 2m 3s', 'ERR', SESSION_A))
-        self.assertFalse(self.nf_run_succeeded(now - 5), 'failed run')
-        self.hist.write_text(history_line('2026-10-20 05:39:32', '5m 13s', 'OK', SESSION_A))
-        self.assertFalse(self.nf_run_succeeded(now - 5), 'earlier successful run')
+
+FAKE_APPTAINER = r"""#!/bin/bash
+out=""; name=""; prev=""
+for a in "$@"; do
+  [[ "$prev" == --bind && "$a" == *:/data/output ]] && out="${a%%:/data/output}"
+  [[ "$prev" == -name ]] && name="$a"
+  prev="$a"
+done
+case "$FAKE_MODE" in
+  ok)     printf '{\n    "run_name": "%s",\n    "success": true\n}' "$name" > "$out/run_manifest.json" ;;
+  failed) printf '{\n    "run_name": "%s",\n    "success": false\n}' "$name" > "$out/run_manifest.json" ;;
+  other)  printf '{\n    "run_name": "danaseq-asm-1-deadbeef",\n    "success": true\n}' > "$out/run_manifest.json" ;;
+  nested) printf '{\n    "run_name": "%s",\n    "success": false,\n    "parameters": {\n        "success": true\n    }\n}' "$name" > "$out/run_manifest.json" ;;
+esac
+exit 255
+"""
+
+
+class ContainerExitOverride(unittest.TestCase):
+    def run_script(self, mode, stale_trace=False):
+        with tempfile.TemporaryDirectory(prefix='asm-exit-test-') as tmp:
+            d = Path(tmp)
+            for sub in ('bin', 'in', 'out', 'work'):
+                (d / sub).mkdir()
+            if stale_trace:
+                # A trace from an earlier run with no FAILED rows.
+                (d / 'out/pipeline_info').mkdir()
+                (d / 'out/pipeline_info/trace.txt').write_text(
+                    'task_id\thash\tname\tstatus\n1\tab/cdef12\tMAP_READS (s1)\tCOMPLETED\n')
+            (d / 'in/reads.fastq').write_text('@r\nACGT\n+\nIIII\n')
+            (d / 'fake.sif').touch()
+            (d / 'bin/apptainer').write_text(FAKE_APPTAINER)
+            (d / 'bin/apptainer').chmod(0o755)
+            env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", FAKE_MODE=mode)
+            return subprocess.run(
+                ['bash', str(RUN_SCRIPTS[0]), '--apptainer', '--sif', str(d / 'fake.sif'),
+                 '--input', str(d / 'in'), '--outdir', str(d / 'out'),
+                 '--workdir', str(d / 'work')],
+                env=env, capture_output=True, text=True, timeout=120)
+
+    def test_receipt_for_this_run_accepts_cleanup_exit(self):
+        res = self.run_script('ok')
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn('Apptainer cleanup quirk', res.stdout)
+
+    def test_failure_preserved_without_matching_success_receipt(self):
+        for mode in ('none', 'failed', 'other', 'nested'):
+            res = self.run_script(mode)
+            self.assertEqual(res.returncode, 255, f'{mode}: {res.stdout}{res.stderr}')
+
+    def test_stale_trace_without_receipt_keeps_failure(self):
+        res = self.run_script('none', stale_trace=True)
+        self.assertEqual(res.returncode, 255, res.stdout + res.stderr)
 
 
 if __name__ == '__main__':
