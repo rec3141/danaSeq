@@ -1773,6 +1773,18 @@ def build_biosynthetic(results_dir, contig2bin):
     type_counts = Counter()
     per_bin = defaultdict(list)
 
+    def _expand_location_intervals(spans):
+        intervals = []
+        for raw_a, raw_b in spans:
+            a, b = int(raw_a), int(raw_b)
+            if a <= b:
+                intervals.append((a, b))
+            else:
+                intervals.append((a, float('inf')))
+                if b > 0:
+                    intervals.append((0, b))
+        return intervals
+
     # Try full antiSMASH JSON first (richer data)
     json_path = resolve_path(results_dir, 'metabolism', 'antismash', 'antismash_json', 'antismash.json')
     if os.path.isfile(json_path):
@@ -1782,12 +1794,28 @@ def build_biosynthetic(results_dir, contig2bin):
 
         for rec in as_data.get('records', []):
             contig_id = rec.get('id', 'unknown')
+            seq_obj = rec.get('seq', {})
+            contig_len = len(seq_obj.get('data', '')) if isinstance(seq_obj, dict) else 0
+            if not contig_len:
+                contig_len = max(
+                    (
+                        int(b)
+                        for ft in rec.get('features', [])
+                        for _, b in re.findall(r'<?(\d+):>?(\d+)', str(ft.get('location', '')))
+                    ),
+                    default=0,
+                )
 
             # Regions are in areas (antiSMASH 8.x)
             for area_idx, area in enumerate(rec.get('areas', [])):
                 products = area.get('products', [])
-                start = area.get('start', 0)
-                end = area.get('end', 0)
+                start = int(area.get('start', 0))
+                end = int(area.get('end', 0))
+                reg_intervals = _expand_location_intervals([(start, end)])
+                if start <= end:
+                    reg_length = end - start
+                else:
+                    reg_length = ((contig_len - start) + end) if contig_len >= start else end
 
                 # Protoclusters within this region (dict with string keys or list)
                 protoclusters = []
@@ -1841,9 +1869,12 @@ def build_biosynthetic(results_dir, contig2bin):
                     spans = re.findall(r'<?(\d+):>?(\d+)', loc)
                     if not spans:
                         continue
-                    f_start = min(int(a) for a, _ in spans)
-                    f_end = max(int(b) for _, b in spans)
-                    if not (f_end > start and f_start < end):
+                    cds_intervals = _expand_location_intervals(spans)
+                    if not any(
+                        fa < rb and fb > ra
+                        for fa, fb in cds_intervals
+                        for ra, rb in reg_intervals
+                    ):
                         continue
                     quals = feat.get('qualifiers', {})
                     gk = quals.get('gene_kind', [None])
@@ -1860,7 +1891,7 @@ def build_biosynthetic(results_dir, contig2bin):
                     'contig': contig_id,
                     'start': start,
                     'end': end,
-                    'length': end - start,
+                    'length': reg_length,
                     'products': products,
                     'n_protoclusters': len(protoclusters),
                     'protoclusters': protoclusters,

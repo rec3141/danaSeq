@@ -518,6 +518,58 @@ class MagVizPreprocessTests(unittest.TestCase):
             self.assertEqual(bio["regions"][0]["gene_kinds"], {"biosynthetic": 1})
             self.assertEqual(bio["regions"][1]["gene_kinds"], {"transport": 2})
 
+    def test_f5_compound_origin_wrapping_cds_and_region_checked_per_part(self):
+        """Compound join{...} CDS parts are tested individually rather than by bounding box; origin-crossing regions work."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            as_dir = tmp_path / "metabolism" / "antismash" / "antismash_json"
+            as_dir.mkdir(parents=True)
+
+            payload = {
+                "records": [
+                    {
+                        "id": "circular_contig_1",
+                        "areas": [
+                            {"start": 1000, "end": 5000, "products": ["NRPS"]},
+                            {"start": 9000, "end": 800, "products": ["bacteriocin"]},
+                        ],
+                        "features": [
+                            {
+                                "type": "CDS",
+                                "location": "join{[9900:10000](+), [0:100](+)}",
+                                "qualifiers": {"gene_kind": ["biosynthetic"]},
+                            },
+                            {
+                                "type": "CDS",
+                                "location": "[9500:9800](+)",
+                                "qualifiers": {"gene_kind": ["transport"]},
+                            },
+                            {
+                                "type": "CDS",
+                                "location": "[200:600](-)",
+                                "qualifiers": {"gene_kind": ["regulatory"]},
+                            },
+                        ],
+                    }
+                ]
+            }
+            (as_dir / "antismash.json").write_text(json.dumps(payload), encoding="utf-8")
+            contig2bin = pd.DataFrame({"contig": ["circular_contig_1"], "bin": ["dastool-semibin_001"]})
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                bio = PREPROCESS_MOD.build_biosynthetic(str(tmp_path), contig2bin)
+
+            self.assertEqual(bio["n_regions"], 2)
+            # Linear region [1000, 5000) does not overlap [9900, 10000) or [0, 100)
+            self.assertEqual(bio["regions"][0]["gene_kinds"], {})
+            self.assertEqual(bio["regions"][0]["length"], 4000)
+            # Origin-crossing region [9000, 10000) U [0, 800) overlaps all 3 features once each
+            self.assertEqual(
+                bio["regions"][1]["gene_kinds"],
+                {"biosynthetic": 1, "transport": 1, "regulatory": 1},
+            )
+            self.assertEqual(bio["regions"][1]["length"], 1800)
+
     def test_f5_control_single_region_spanning_all_cds_unchanged(self):
         """A single region spanning all CDS features counts every gene_kind on that contig."""
         with tempfile.TemporaryDirectory() as tmp:
