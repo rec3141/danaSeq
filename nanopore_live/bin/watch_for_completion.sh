@@ -204,13 +204,31 @@ now > "$MARKER"
 
 # ---------- Phase 4: signal nextflow targeting this outdir
 log "phase 4: signalling nextflow for --outdir $OUTDIR"
-# Match the nextflow java process by its --outdir argument.
-nf_pids=$(pgrep -f -- "--outdir $OUTDIR( |$)" || true)
-if [[ -z "$nf_pids" ]]; then
+# Targets are processes whose command line names nextflow and this exact
+# --outdir (the `mamba run ... nextflow run` wrapper and the nextflow JVM).
+# This watcher, its subshells and its ancestors must never be signalled:
+# run-realtime.sh is launched with the same --outdir, and a SIGTERM to it or
+# to this watcher stops the archive step and leaves nextflow running.
+ancestors=" "
+p=$$
+while [[ -n "$p" && "$p" -gt 1 ]]; do
+    ancestors+="$p "
+    p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ' || true)
+done
+# Capture first, filter after: the command substitution's own subshell carries
+# this script's argv and has exited by the time the list is filtered.
+candidates=$(pgrep -f -- "nextflow.* --outdir $OUTDIR( |$)" || true)
+nf_pids=()
+for pid in $candidates; do
+    [[ "$ancestors" == *" $pid "* ]] && continue
+    kill -0 "$pid" 2>/dev/null || continue
+    nf_pids+=("$pid")
+done
+if [[ ${#nf_pids[@]} -eq 0 ]]; then
     log "WARN: no nextflow process found for outdir $OUTDIR — exiting OK"
     exit 0
 fi
-for pid in $nf_pids; do
+for pid in "${nf_pids[@]}"; do
     if kill -TERM "$pid" 2>/dev/null; then
         log "SIGTERM sent to PID $pid"
     else
