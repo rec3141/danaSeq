@@ -13,6 +13,7 @@ on:
       - 'nanopore_assembly/modules/preprocess.nf'
       - 'mag_analysis/bin/metacyc_scorer.py'
       - 'mag_analysis/bin/metacyc_scorer/**'
+      - 'mag_analysis/bin/parse_marferret_results.py'
       - 'nanopore_live/bin/watch_for_completion.sh'
       - 'tests/**'
       - '.github/workflows/tests.yml'
@@ -22,6 +23,7 @@ on:
       - 'nanopore_assembly/modules/preprocess.nf'
       - 'mag_analysis/bin/metacyc_scorer.py'
       - 'mag_analysis/bin/metacyc_scorer/**'
+      - 'mag_analysis/bin/parse_marferret_results.py'
       - 'nanopore_live/bin/watch_for_completion.sh'
       - 'tests/**'
       - '.github/workflows/tests.yml'
@@ -36,6 +38,15 @@ jobs:
 
       - name: Run completion-watcher regression
         run: python3 tests/test_watch_for_completion.py -v
+
+  marferret-parser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run MarFERReT result parser regression
+        run: python3 tests/test_parse_marferret_results.py -v
 
   fastq-filter:
     runs-on: ubuntu-24.04

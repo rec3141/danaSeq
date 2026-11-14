@@ -97,12 +97,19 @@ def load_pfam(path):
 
 
 def extract_contig_id(protein_id):
-    """Extract contig ID from MetaEuk protein header.
+    """Extract the contig ID from a MetaEuk protein header.
 
-    MetaEuk headers follow the pattern: contig_name|... (pipe-delimited),
-    where the first field is the source contig.
+    MetaEuk easy-predict headers are T_acc|C_acc|strand|bitscore|evalue|...:
+    the first field is the reference target the gene was predicted from, and
+    the contig is the field(s) between it and the strand token (+ or -). A
+    contig name containing '|' is kept whole. An ID without a strand token is
+    not a MetaEuk header and is returned up to its first '|'.
     """
-    return protein_id.split('|')[0]
+    fields = protein_id.split('|')
+    for i in range(2, len(fields)):
+        if fields[i] in ('+', '-'):
+            return '|'.join(fields[1:i])
+    return fields[0]
 
 
 def main():
