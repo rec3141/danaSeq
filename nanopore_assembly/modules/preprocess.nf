@@ -204,6 +204,7 @@ process PREPARE_READS {
             case "\$f" in
                 *.fa|*.fasta|*.fa.gz|*.fasta.gz)
                     zcat -f "\$f" | awk '
+                        { sub(/\\r\$/, "") }
                         /^>/ { if (s) { print "@"n; print s; print "+"; q=s; gsub(/./,"I",q); print q } n=substr(\$0,2); s=""; next }
                         { s=s\$0 }
                         END { if (s) { print "@"n; print s; print "+"; q=s; gsub(/./,"I",q); print q } }' | gzip ;;
