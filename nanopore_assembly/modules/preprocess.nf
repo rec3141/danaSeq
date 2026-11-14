@@ -64,17 +64,18 @@ process CONCAT_READS {
 
     if [ "${params.dedupe}" = "true" ]; then
         # Check if there are actually duplicate read IDs before doing the
-        # expensive decompress-dedup-recompress cycle. Single-pass awk: count
-        # total headers and unique IDs; exits early on first duplicate found.
+        # expensive decompress-dedup-recompress cycle; exits on the first
+        # duplicate. A read ID is the header up to the first space or tab (as in
+        # fastq_filter): samtools fastq -T writes SAM tags after a tab.
         has_dupes=\$(zcat ${meta.id}_raw.fastq.gz \\
-            | awk 'NR%4==1 {sub(/^@/,""); sub(/ .*/,""); if (seen[\$0]++) {print "yes"; exit}}')
+            | awk 'NR%4==1 {id=\$0; sub(/^@/,"",id); sub(/[ \\t].*/,"",id); if (seen[id]++) {print "yes"; exit}}')
 
         if [ "\$has_dupes" = "yes" ]; then
             echo "[INFO] ${meta.id}: duplicate read IDs found, deduplicating" >&2
+            # Keep the first record per read ID, four lines at a time; header
+            # text (tabs included) is passed through unchanged.
             zcat ${meta.id}_raw.fastq.gz \\
-                | paste - - - - \\
-                | awk -F'\\t' '{id=\$1; sub(/^@/,"",id); sub(/ .*/,"",id); if (!seen[id]++) print}' \\
-                | tr '\\t' '\\n' \\
+                | awk 'NR%4==1 {id=\$0; sub(/^@/,"",id); sub(/[ \\t].*/,"",id); keep=!seen[id]++} keep' \\
                 | pigz -p ${task.cpus} > ${meta.id}.fastq.gz
             rm -f ${meta.id}_raw.fastq.gz
         else
