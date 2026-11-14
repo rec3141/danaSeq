@@ -217,7 +217,10 @@ while [[ -n "$p" && "$p" -gt 1 ]]; do
 done
 # Capture first, filter after: the command substitution's own subshell carries
 # this script's argv and has exited by the time the list is filtered.
-candidates=$(pgrep -f -- "nextflow.* --outdir $OUTDIR( |$)" || true)
+# OUTDIR is matched literally: ERE metacharacters in the path are escaped, so
+# --outdir run.1 does not also select a run in runX1.
+outdir_re=$(printf '%s' "$OUTDIR" | sed -e 's/[][\\.*^$+?(){}|]/\\&/g')
+candidates=$(pgrep -f -- "nextflow.* --outdir ${outdir_re}( |$)" || true)
 nf_pids=()
 for pid in $candidates; do
     [[ "$ancestors" == *" $pid "* ]] && continue

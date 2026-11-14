@@ -61,6 +61,7 @@ class WatcherSignalsOnlyNextflow(unittest.TestCase):
         root = Path(self.tmp.name)
         self.inp = root / "input"
         self.out = root / "output"
+        self.root = root
         fc = self.inp / "20261114_0000_X1_FAK00000_deadbeef"
         fc.mkdir(parents=True)
         (fc / "final_summary_FAK00000_deadbeef.txt").write_text("done\n")
@@ -80,11 +81,11 @@ class WatcherSignalsOnlyNextflow(unittest.TestCase):
             os.killpg(self.proc.pid, signal.SIGKILL)
         except (AttributeError, ProcessLookupError, PermissionError):
             pass
-        subprocess.run(["pkill", "-KILL", "-f", str(self.out)],
+        subprocess.run(["pkill", "-KILL", "-f", str(self.root)],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.tmp.cleanup()
 
-    def test_phase4_signals_nextflow_not_watcher_or_launcher(self):
+    def run_driver(self):
         env = dict(os.environ, WATCHER=str(WATCHER), FAKEBIN=str(self.fakebin))
         self.proc = subprocess.Popen(
             ["bash", str(self.driver), "--input", str(self.inp),
@@ -95,7 +96,9 @@ class WatcherSignalsOnlyNextflow(unittest.TestCase):
         while time.monotonic() < deadline and self.proc.poll() is None:
             time.sleep(0.2)
         log = self.out / "pipeline_info" / "watch_for_completion.log"
-        log_text = log.read_text() if log.exists() else "<no log>"
+        return log.read_text() if log.exists() else "<no log>"
+
+    def assert_clean_completion(self, log_text):
 
         self.assertTrue((self.out / "nextflow_got_term").exists(),
                         "nextflow was never signalled\n" + log_text)
@@ -105,6 +108,32 @@ class WatcherSignalsOnlyNextflow(unittest.TestCase):
                          "the watcher did not exit 0\n" + log_text)
         self.assertTrue(
             (self.out / "pipeline_info" / "final_summary_seen.txt").exists())
+
+    def test_phase4_signals_nextflow_not_watcher_or_launcher(self):
+        self.assert_clean_completion(self.run_driver())
+
+    def test_phase4_matches_outdir_literally(self):
+        # The outdir contains ERE metacharacters; read as a regex, "run.1[a]"
+        # also matches "runX1a". A nextflow for runX1a must be left alone.
+        self.out = self.root / "run.1[a]"
+        self.out.mkdir()
+        decoy_out = self.root / "runX1a"
+        decoy_out.mkdir()
+        decoy = subprocess.Popen(
+            ["bash", str(self.fakebin / "nextflow"), "run", "main.nf",
+             "--input", str(self.inp), "--outdir", str(decoy_out)],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            time.sleep(0.3)
+            log_text = self.run_driver()
+            self.assert_clean_completion(log_text)
+            self.assertIsNone(decoy.poll(), "decoy nextflow exited\n" + log_text)
+            self.assertFalse((decoy_out / "nextflow_got_term").exists(),
+                             "decoy nextflow was signalled\n" + log_text)
+        finally:
+            decoy.kill()
+            decoy.wait()
 
 
 if __name__ == "__main__":
