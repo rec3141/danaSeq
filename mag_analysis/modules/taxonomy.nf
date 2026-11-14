@@ -365,30 +365,36 @@ else:
             if parts[3].strip() == 'scientific name':
                 sci_name[int(parts[0].strip())] = parts[1].strip()
 
-# NCBI rank -> GTDB prefix
-rank_prefix = {
-    'superkingdom': 'd', 'domain': 'd', 'phylum': 'p', 'class': 'c',
-    'order': 'o', 'family': 'f', 'genus': 'g', 'species': 's'
-}
-rank_order = ['superkingdom', 'domain', 'phylum', 'class', 'order', 'family', 'genus', 'species']
+# NCBI rank -> standard 7-slot GTDB-style lineage (d__;p__;c__;o__;f__;g__;s__)
+tracked_ranks = {'superkingdom', 'domain', 'phylum', 'class', 'order', 'family', 'genus', 'species'}
+all_ranks = ['d', 'p', 'c', 'o', 'f', 'g', 's']
 
 def build_lineage(taxid):
-    # Walk up the taxonomy tree and build d__X;p__Y;...;s__Z lineage.
-    lineage_parts = {}
+    # Walk up the taxonomy tree and emit fixed-slot d__..s__ lineage.
+    by_rank = {}
     tid = taxid
     visited = set()
     while tid != 1 and tid in parent and tid not in visited:
         visited.add(tid)
         r = rank.get(tid, '')
-        if r in rank_prefix:
-            lineage_parts[r] = f"{rank_prefix[r]}__{sci_name.get(tid, 'unknown')}"
+        if r in tracked_ranks:
+            by_rank[r] = sci_name.get(tid, 'unknown')
         tid = parent[tid]
-    # Build ordered lineage string
-    parts = []
-    for r in rank_order:
-        if r in lineage_parts:
-            parts.append(lineage_parts[r])
-    return ';'.join(parts) if parts else 'Unclassified'
+    d_val = by_rank.get('domain') or by_rank.get('superkingdom', '')
+    if d_val.lower().replace('_', ' ') == 'cellular organisms':
+        d_val = ''
+    slot_vals = {
+        'd': d_val,
+        'p': by_rank.get('phylum', ''),
+        'c': by_rank.get('class', ''),
+        'o': by_rank.get('order', ''),
+        'f': by_rank.get('family', ''),
+        'g': by_rank.get('genus', ''),
+        's': by_rank.get('species', ''),
+    }
+    if not any(slot_vals.values()):
+        return 'Unclassified'
+    return ';'.join(f"{r}__{slot_vals[r]}" for r in all_ranks)
 
 # Parse Kraken2 output: status(C/U) \t contig_id \t taxon_id \t length \t LCA_mapping
 n_classified = 0
