@@ -93,7 +93,8 @@ def parse_contig2bin(path):
 
 def load_gene_counts(path):
     """Return (samples, gene_ids, matrix_int)."""
-    with open(path) as f:
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as f:
         reader = csv.reader(f, delimiter="\t")
         header = next(reader)
         samples = header[1:]
@@ -165,7 +166,9 @@ def main():
 
     for ref in refs:
         name = ref["name"]
-        counts_path = os.path.join(args.expression_dir, name, f"{name}.gene_counts.tsv")
+        counts_gz = os.path.join(args.expression_dir, name, f"{name}.gene_counts.tsv.gz")
+        counts_tsv = os.path.join(args.expression_dir, name, f"{name}.gene_counts.tsv")
+        counts_path = counts_gz if os.path.exists(counts_gz) else counts_tsv
         if not os.path.exists(counts_path):
             continue
         samples, gene_ids, mat = load_gene_counts(counts_path)

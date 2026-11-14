@@ -137,6 +137,16 @@ def validateParams() {
 // Read discovery
 // ----------------------------------------------------------------------------
 
+// Strip Illumina/BGI mate and lane suffixes (e.g. _S1_L001_R1_001.fastq.gz,
+// _R1.fastq.gz, _1.fq.gz) while preserving underscores inside the sample name.
+def deriveSampleId(String filename) {
+    def stem = filename.replaceFirst(/\.f(?:ast)?q(?:\.gz)?$/, '')
+    if (stem =~ /_R1(?:_|$)/) {
+        return stem.replaceFirst(/(?:_S\d+)?(?:_L\d+)?_R1(?:_(?!.*_R1(?:_|$)).*)?$/, '')
+    }
+    return stem.replaceFirst(/(?:_S\d+)?(?:_L\d+)?_1$/, '')
+}
+
 // Returns a sorted list of [sample_id, r1, r2]. Sorting makes --chunk stable
 // across separate runs over the same input.
 def discoverReads() {
@@ -157,22 +167,26 @@ def discoverReads() {
         if (!input_dir.isDirectory()) {
             error "ERROR: --input directory does not exist: ${params.input}"
         }
-        def r1_files = file("${params.input}/**_R1_*.fastq.gz") +
-                       file("${params.input}/**_1.fq.gz") +
-                       file("${params.input}/**_1.fastq.gz")
+        def r1_files = (file("${params.input}/**_R1_*.fastq.gz") +
+                        file("${params.input}/**_R1.fastq.gz") +
+                        file("${params.input}/**_R1.fq.gz") +
+                        file("${params.input}/**_1.fq.gz") +
+                        file("${params.input}/**_1.fastq.gz")).unique().findAll { r1 ->
+            def n = r1.name.toString()
+            !(n =~ /_R2(?:_(?!.*_R[12](?:_|\.|$))[^\/]*)?\.f(?:ast)?q(?:\.gz)?$/ || n =~ /_2\.f(?:ast)?q(?:\.gz)?$/)
+        }
         r1_files.each { r1 ->
             def name = r1.name.toString()
-            def sample_id
+            def sample_id = deriveSampleId(name)
             def r2_name
             if (name =~ /_R1_/) {
-                sample_id = name.split('_')[0]
-                r2_name   = name.replaceFirst('_R1_', '_R2_')
+                r2_name = name.replaceFirst(/(.*)_R1_/, '$1_R2_')
+            } else if (name =~ /_R1\.f(?:ast)?q\.gz$/) {
+                r2_name = name.replaceFirst(/_R1(\.f(?:ast)?q\.gz)$/, '_R2$1')
             } else if (name =~ /_1\.fq\.gz$/) {
-                sample_id = name.replaceFirst(/_1\.fq\.gz$/, '')
-                r2_name   = name.replaceFirst(/_1\.fq\.gz$/, '_2.fq.gz')
+                r2_name = name.replaceFirst(/_1\.fq\.gz$/, '_2.fq.gz')
             } else {
-                sample_id = name.replaceFirst(/_1\.fastq\.gz$/, '')
-                r2_name   = name.replaceFirst(/_1\.fastq\.gz$/, '_2.fastq.gz')
+                r2_name = name.replaceFirst(/_1\.fastq\.gz$/, '_2.fastq.gz')
             }
             def r2 = r1.resolveSibling(r2_name)
             if (!r2.exists()) {
@@ -398,7 +412,8 @@ workflow {
     }
 
     if (params.rrna_method == 'sortmerna') {
-        REMOVE_RRNA_SORTMERNA(ch_reads)
+        ch_sortmerna_refs = Channel.value(file(params.rrna_refs, checkIfExists: true))
+        REMOVE_RRNA_SORTMERNA(ch_reads, ch_sortmerna_refs)
         ch_reads = REMOVE_RRNA_SORTMERNA.out.reads
         ch_readcounts = ch_readcounts.mix(REMOVE_RRNA_SORTMERNA.out.counts)
     }

@@ -101,7 +101,7 @@ AUTO_SESSION=true
 
 # Flags whose value is a host path: resolved to absolute, and bound in
 # container mode.
-PATH_FLAGS=" --input --samplesheet --references --from_mag --from_assembly --human_ref --rrna_refs --store_dir --contig_explorer "
+PATH_FLAGS=" --input --samplesheet --references --from_mag --from_assembly --human_ref --rrna_refs --store_dir --contig_explorer --metadata "
 
 while (( $# )); do
     case "$1" in
@@ -127,12 +127,18 @@ while (( $# )); do
         --bind)
             [[ -z "${2:-}" ]] && die "--bind requires a path"
             BIND_PATHS+=("$(realpath -m "$2")"); shift 2 ;;
+        --bind=*)
+            BIND_PATHS+=("$(realpath -m "${1#--bind=}")"); shift ;;
         --outdir)
             [[ -z "${2:-}" ]] && die "--outdir requires a directory path"
             OUTDIR_HOST="$(realpath -m "$2")"; shift 2 ;;
+        --outdir=*)
+            OUTDIR_HOST="$(realpath -m "${1#--outdir=}")"; shift ;;
         --workdir)
             [[ -z "${2:-}" ]] && die "--workdir requires a directory path"
             WORKDIR_HOST="$(realpath -m "$2")"; shift 2 ;;
+        --workdir=*)
+            WORKDIR_HOST="$(realpath -m "${1#--workdir=}")"; shift ;;
         --session)
             [[ -z "${2:-}" ]] && die "--session requires a session ID"
             RESUME_SESSION="$2"; AUTO_SESSION=false; shift 2 ;;
@@ -141,6 +147,19 @@ while (( $# )); do
             flag="$1"; mem_val="$2"; shift 2
             if [[ "${1:-}" =~ ^[KMGT]B?$ ]]; then mem_val="${mem_val} ${1}"; shift; fi
             NF_ARGS+=("$flag" "${mem_val}") ;;
+        --*=*)
+            flag="${1%%=*}"
+            val="${1#*=}"
+            if [[ "$PATH_FLAGS" == *" ${flag} "* ]]; then
+                [[ -n "$val" ]] || die "${flag} requires a path"
+                p="$(realpath -m "$val")"
+                [[ -e "$p" ]] || [[ "$flag" == "--store_dir" ]] || die "${flag}: path does not exist: $val"
+                NF_ARGS+=("$flag" "$p")
+                BIND_PATHS+=("$p")
+            else
+                NF_ARGS+=("$1")
+            fi
+            shift ;;
         *)
             if [[ "$PATH_FLAGS" == *" $1 "* ]]; then
                 [[ -z "${2:-}" ]] && die "$1 requires a path"
