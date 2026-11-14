@@ -167,11 +167,16 @@ def main():
               f"got {contig_to_bin.shape[1]}", file=sys.stderr)
         sys.exit(1)
 
-    n_bins = contig_to_bin["bin"].nunique()
-    n_contigs = contig_to_bin["contig"].nunique()
-    if n_bins > n_contigs:
-        print("ERROR: More unique bins than contigs. "
-              "Expected format: bin, contig, set (no header)", file=sys.stderr)
+    # Within one binning tool there cannot be more bins than contigs unless the
+    # bin and contig columns are swapped. Across tools there can: k tools that
+    # each keep a one-contig bin give k bins for that contig.
+    per_set = contig_to_bin.groupby("set").agg(n_bins=("bin", "nunique"),
+                                               n_contigs=("contig", "nunique"))
+    bad = per_set[per_set["n_bins"] > per_set["n_contigs"]]
+    if len(bad):
+        print(f"ERROR: More unique bins than contigs for binning tool "
+              f"'{bad.index[0]}'. Expected format: bin, contig, set (no header)",
+              file=sys.stderr)
         sys.exit(1)
 
     # Build contig index map (sorted unique contigs → integer index)
@@ -388,7 +393,7 @@ def main():
     recalc = set(contig_to_bin_remain["bin"].unique())
     iteration = 1
 
-    while len(contig_to_bin_remain) > 1:
+    while len(contig_to_bin_remain) > 0:
         print(f"Refining bins, iteration: {iteration}", file=sys.stderr)
         print("Extracting SCG information for bins...", file=sys.stderr)
 
