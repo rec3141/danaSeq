@@ -109,20 +109,23 @@ static void buf_free(Buffer *b) { free(b->data); }
 
 /* Mask short regions between ambiguous bases with N */
 static void mask_ambiguous(char *seq, size_t len, int min_region) {
+    if (len == 0 || min_region <= 0)
+        return;
+
     /* Find positions of ambiguous bases */
-    size_t *ambig = malloc((len + 2) * sizeof(size_t));
-    int n_ambig = 0;
-    ambig[n_ambig++] = 0;
-    for (size_t i = 1; i < len; i++) {
+    size_t *ambig = malloc(len * sizeof(size_t));
+    if (!ambig)
+        return;
+    size_t n_ambig = 0;
+    for (size_t i = 0; i < len; i++) {
         if (base_encode(seq[i]) < 0)
             ambig[n_ambig++] = i;
     }
-    ambig[n_ambig++] = len;
 
-    for (int i = 1; i < n_ambig; i++) {
+    for (size_t i = 1; i < n_ambig; i++) {
         size_t span = ambig[i] - ambig[i - 1] + 1;
-        if ((int)span < min_region) {
-            for (size_t j = ambig[i - 1]; j < ambig[i]; j++)
+        if (span < (size_t)min_region) {
+            for (size_t j = ambig[i - 1] + 1; j < ambig[i]; j++)
                 seq[j] = 'N';
         }
     }
