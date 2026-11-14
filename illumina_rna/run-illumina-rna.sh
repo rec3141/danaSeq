@@ -228,6 +228,38 @@ if [[ "$USE_CONTAINER" == true ]]; then
     # The pipeline code itself runs from this checkout (bound read-only), not
     # the copy baked into the image, so a branch can be run with a released image.
     BIND_PATHS+=("$SCRIPT_DIR" "$OUTDIR_HOST" "$WORKDIR_HOST")
+    # Bind read directories referenced inside --samplesheet CSV when present.
+    for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+        if [[ "${NF_ARGS[$i]}" == "--samplesheet" && $((i+1)) -lt ${#NF_ARGS[@]} && -f "${NF_ARGS[$((i+1))]}" ]]; then
+            for pycand in "$(command -v python3 2>/dev/null || true)" /usr/bin/python3 /opt/miniforge3/bin/python3; do
+                if [[ -n "$pycand" && -x "$pycand" ]]; then
+                    mapfile -t RNA_SHEET_DIRS < <(
+                        "$pycand" - "${NF_ARGS[$((i+1))]}" <<'PYEOF'
+import csv, os, sys
+
+sheet = sys.argv[1]
+sheet_dir = os.path.dirname(os.path.abspath(sheet))
+with open(sheet, newline="") as fh:
+    lines = [ln for ln in fh if ln.strip() and not ln.lstrip().startswith("#")]
+    if lines:
+        for row in csv.reader(lines[1:]):
+            for val in row[1:3]:
+                val = val.strip()
+                if not val:
+                    continue
+                for cand in (val, os.path.join(sheet_dir, val)):
+                    if os.path.lexists(cand):
+                        print(os.path.dirname(os.path.abspath(cand)))
+                        print(os.path.dirname(os.path.realpath(cand)))
+                        break
+PYEOF
+                    )
+                    for d in "${RNA_SHEET_DIRS[@]}"; do [[ -n "$d" ]] && BIND_PATHS+=("$d"); done
+                    break
+                fi
+            done
+        fi
+    done
     # The host TMPDIR is inherited by the container (Java dies without it).
     [[ -n "${TMPDIR:-}" && -d "${TMPDIR}" ]] && BIND_PATHS+=("$(realpath "$TMPDIR")")
     # Bind resolved targets too: inputs are often symlinks into other trees.

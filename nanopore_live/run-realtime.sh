@@ -373,6 +373,38 @@ if [[ -n "$STORE_DIR_HOST" ]]; then
     [[ -w "$STORE_DIR_HOST" ]] || die "Store directory is not writable: $STORE_DIR_HOST"
 fi
 
+trim_ws() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
+# Resolve comma-separated HMM and DIAMOND database lists before changing cwd to OUTDIR_HOST
+RESOLVED_HMM_DBS=()
+if [[ -n "$HMM_HOST" ]]; then
+    IFS=',' read -ra HMM_FILES <<< "$HMM_HOST"
+    for hmm_file in "${HMM_FILES[@]}"; do
+        hmm_file="$(trim_ws "$hmm_file")"
+        [[ -n "$hmm_file" ]] || continue
+        hmm_resolved="$(realpath "$hmm_file" 2>/dev/null || echo "$hmm_file")"
+        [[ -f "$hmm_resolved" ]] || die "HMM file does not exist: $hmm_file"
+        RESOLVED_HMM_DBS+=("$hmm_resolved")
+    done
+fi
+
+RESOLVED_PROTEIN_DBS=()
+if [[ -n "$PROTEIN_DBS_HOST" ]]; then
+    IFS=',' read -ra DMND_FILES <<< "$PROTEIN_DBS_HOST"
+    for dmnd_file in "${DMND_FILES[@]}"; do
+        dmnd_file="$(trim_ws "$dmnd_file")"
+        [[ -n "$dmnd_file" ]] || continue
+        dmnd_resolved="$(realpath "$dmnd_file" 2>/dev/null || echo "$dmnd_file")"
+        [[ -f "$dmnd_resolved" ]] || die "DIAMOND database file does not exist: $dmnd_file"
+        RESOLVED_PROTEIN_DBS+=("$dmnd_resolved")
+    done
+fi
+
 # ============================================================================
 # microscape.app deploy hook — DB_SYNC invokes <sync dir>/deploy.sh each tick,
 # where the sync dir is --store_dir when set (main.nf hands DB_SYNC the store
@@ -513,43 +545,35 @@ if [[ "$USE_DOCKER" == true ]]; then
         NF_ARGS+=("--metadata" "$METADATA_HOST")
     fi
 
-    if [[ -n "$STORE_DIR_HOST" && "$STORE_DIR_HOST" != "$OUTDIR_HOST" ]]; then
+    # Outdir is mounted at /data/output, while --store_dir passes STORE_DIR_HOST;
+    # always bind STORE_DIR_HOST at its host path even when equal to OUTDIR_HOST.
+    if [[ -n "$STORE_DIR_HOST" ]]; then
         MOUNTS+=("-v" "${STORE_DIR_HOST}:${STORE_DIR_HOST}")
     fi
 
-    if [[ -n "$PROTEIN_DBS_HOST" ]]; then
-        container_dmnd_paths=()
-        IFS=',' read -ra DMND_FILES <<< "$PROTEIN_DBS_HOST"
-        for dmnd_file in "${DMND_FILES[@]}"; do
-            dmnd_file="$(echo "$dmnd_file" | xargs)"
-            dmnd_resolved="$(realpath "$dmnd_file" 2>/dev/null || echo "$dmnd_file")"
-            [[ -f "$dmnd_resolved" ]] || die "DIAMOND database file does not exist: $dmnd_file"
+    if [[ ${#RESOLVED_PROTEIN_DBS[@]} -gt 0 ]]; then
+        for dmnd_resolved in "${RESOLVED_PROTEIN_DBS[@]}"; do
             MOUNTS+=("-v" "${dmnd_resolved}:${dmnd_resolved}:ro")
             dmnd_base="${dmnd_resolved%.*}"
             [[ -f "${dmnd_base}.genes.tsv" ]] && MOUNTS+=("-v" "${dmnd_base}.genes.tsv:${dmnd_base}.genes.tsv:ro")
             [[ -f "${dmnd_base}.opts" ]] && MOUNTS+=("-v" "${dmnd_base}.opts:${dmnd_base}.opts:ro")
-            container_dmnd_paths+=("$dmnd_resolved")
         done
-        dmnd_joined="$(IFS=','; echo "${container_dmnd_paths[*]}")"
+        dmnd_joined="$(IFS=','; printf '%s' "${RESOLVED_PROTEIN_DBS[*]}")"
         NF_ARGS+=("--protein_dbs" "$dmnd_joined")
     fi
 
     # HMM databases
-    if [[ -n "$HMM_HOST" ]]; then
+    if [[ ${#RESOLVED_HMM_DBS[@]} -gt 0 ]]; then
         container_hmm_paths=()
         hmm_counter=0
-        IFS=',' read -ra HMM_FILES <<< "$HMM_HOST"
-        for hmm_file in "${HMM_FILES[@]}"; do
-            hmm_file="$(echo "$hmm_file" | xargs)"  # trim whitespace
-            hmm_resolved="$(realpath "$hmm_file" 2>/dev/null || echo "$hmm_file")"
-            [[ -f "$hmm_resolved" ]] || die "HMM file does not exist: $hmm_file"
+        for hmm_resolved in "${RESOLVED_HMM_DBS[@]}"; do
             hmm_name="$(basename "$hmm_resolved")"
             container_path="/hmm/${hmm_name}"
             MOUNTS+=("-v" "${hmm_resolved}:${container_path}:ro")
             container_hmm_paths+=("$container_path")
             hmm_counter=$((hmm_counter + 1))
         done
-        hmm_joined="$(IFS=','; echo "${container_hmm_paths[*]}")"
+        hmm_joined="$(IFS=','; printf '%s' "${container_hmm_paths[*]}")"
         NF_ARGS+=("--hmm_databases" "$hmm_joined")
         echo "[INFO] Mounting $hmm_counter HMM database(s)"
     fi
@@ -617,29 +641,19 @@ if [[ -n "$KRAKEN_DB_HOST" ]]; then
     NF_ARGS+=("--kraken_db" "$KRAKEN_DB_HOST")
 fi
 
-# HMM databases — validate paths exist
-if [[ -n "$HMM_HOST" ]]; then
-    IFS=',' read -ra HMM_FILES <<< "$HMM_HOST"
-    for hmm_file in "${HMM_FILES[@]}"; do
-        hmm_file="$(echo "$hmm_file" | xargs)"
-        hmm_resolved="$(realpath "$hmm_file" 2>/dev/null || echo "$hmm_file")"
-        [[ -f "$hmm_resolved" ]] || die "HMM file does not exist: $hmm_file"
-    done
-    NF_ARGS+=("--hmm_databases" "$HMM_HOST")
+# HMM databases — pass pre-resolved paths
+if [[ ${#RESOLVED_HMM_DBS[@]} -gt 0 ]]; then
+    hmm_joined="$(IFS=','; printf '%s' "${RESOLVED_HMM_DBS[*]}")"
+    NF_ARGS+=("--hmm_databases" "$hmm_joined")
 fi
 
 [[ -n "$POLLUTANT_DBS_HOST" ]] && NF_ARGS+=("--pollutant_dbs" "$POLLUTANT_DBS_HOST")
 [[ -n "$BAKTA_DB_HOST" ]] && NF_ARGS+=("--bakta_db" "$BAKTA_DB_HOST")
 [[ -n "$MAPPING_REFS_HOST" ]] && NF_ARGS+=("--mapping_refs" "$MAPPING_REFS_HOST")
 [[ -n "$METADATA_HOST" ]] && NF_ARGS+=("--metadata" "$METADATA_HOST")
-if [[ -n "$PROTEIN_DBS_HOST" ]]; then
-    IFS=',' read -ra DMND_FILES <<< "$PROTEIN_DBS_HOST"
-    for dmnd_file in "${DMND_FILES[@]}"; do
-        dmnd_file="$(echo "$dmnd_file" | xargs)"
-        dmnd_resolved="$(realpath "$dmnd_file" 2>/dev/null || echo "$dmnd_file")"
-        [[ -f "$dmnd_resolved" ]] || die "DIAMOND database file does not exist: $dmnd_file"
-    done
-    NF_ARGS+=("--protein_dbs" "$PROTEIN_DBS_HOST")
+if [[ ${#RESOLVED_PROTEIN_DBS[@]} -gt 0 ]]; then
+    dmnd_joined="$(IFS=','; printf '%s' "${RESOLVED_PROTEIN_DBS[*]}")"
+    NF_ARGS+=("--protein_dbs" "$dmnd_joined")
 fi
 
 LOCAL_CMD=(

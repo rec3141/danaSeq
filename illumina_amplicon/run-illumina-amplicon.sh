@@ -114,13 +114,39 @@ if [[ ${#RESOLVED_RW[@]} -gt 0 ]]; then
     mapfile -t RESOLVED_RW < <(printf '%s\n' "${RESOLVED_RW[@]}" | awk 'NF' | sort -u)
 fi
 
-# Include read parent directories referenced inside --samplesheet when present
+# Include read parent directories referenced inside --samplesheet (RFC-4180 CSV by column name)
 if [[ -n "$SAMPLESHEET_PATH" && -f "$SAMPLESHEET_PATH" ]]; then
-    while IFS=, read -r _sid _run _plate r1p r2p _rest; do
-        [[ "$_sid" == "sample_id" || "$_sid" == "#"* ]] && continue
-        [[ -n "$r1p" && -e "$r1p" ]] && RO_PATHS+=("$(dirname "$(realpath -m "$r1p")")")
-        [[ -n "$r2p" && -e "$r2p" ]] && RO_PATHS+=("$(dirname "$(realpath -m "$r2p")")")
-    done < "$SAMPLESHEET_PATH"
+    PY_CSV=""
+    for pycand in "$(command -v python3 2>/dev/null || true)" /usr/bin/python3 /opt/miniforge3/bin/python3; do
+        if [[ -n "$pycand" && -x "$pycand" ]]; then PY_CSV="$pycand"; break; fi
+    done
+    if [[ -n "$PY_CSV" ]]; then
+        mapfile -t SHEET_READ_DIRS < <(
+            "$PY_CSV" - "$SAMPLESHEET_PATH" <<'PYEOF'
+import csv, os, sys
+
+sheet = sys.argv[1]
+sheet_dir = os.path.dirname(os.path.abspath(sheet))
+with open(sheet, newline="") as fh:
+    lines = [ln for ln in fh if ln.strip() and not ln.lstrip().startswith("#")]
+for row in csv.DictReader(lines):
+    if not row:
+        continue
+    for key in ("r1_path", "r2_path", "r1", "r2"):
+        val = (row.get(key) or "").strip()
+        if not val:
+            continue
+        for cand in (val, os.path.join(sheet_dir, val)):
+            if os.path.lexists(cand):
+                print(os.path.dirname(os.path.abspath(cand)))
+                print(os.path.dirname(os.path.realpath(cand)))
+                break
+PYEOF
+        )
+        for d in "${SHEET_READ_DIRS[@]}"; do
+            [[ -n "$d" ]] && RO_PATHS+=("$d")
+        done
+    fi
 fi
 
 # Expand symlinks and file parent directories, deduplicate, and drop paths covered by a bound parent

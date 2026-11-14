@@ -299,6 +299,132 @@ class LiveAndIlluminaHighsTest(unittest.TestCase):
             self.assertIn(f"{inp}:/data/input:ro", live_mounts)
             self.assertIn(f"{kdb}:/kraken_db:ro", live_mounts)
 
+    def test_f4_equal_store_dir_relative_spaced_protein_dbs_and_quoted_csv_sheet(self):
+        """Equal --outdir/--store_dir binds store path; relative/spaced DBs resolve pre-cd; quoted/reordered CSV mounts reads."""
+        amp_sh = REPO_ROOT / "illumina_amplicon" / "run-illumina-amplicon.sh"
+        live_sh = REPO_ROOT / "nanopore_live" / "run-realtime.sh"
+
+        with tempfile.TemporaryDirectory(prefix="f4-abc-") as tmp:
+            root = Path(tmp)
+            fakebin = root / "fakebin"
+            captured = root / "captured.json"
+            mamba_captured = root / "mamba_captured.json"
+            _install_container_shims(fakebin, captured)
+
+            mamba_shim = fakebin / "mamba"
+            mamba_shim.write_text(
+                f"#!{PYTHON_BIN}\n"
+                "import json, os, sys\n"
+                f"open({str(mamba_captured)!r}, 'w').write(json.dumps(sys.argv[1:]))\n"
+                "if os.access('.', os.W_OK):\n"
+                "    open('.nextflow.log', 'w').write('Session UUID: 00000000-0000-0000-0000-000000000000\\n')\n"
+                "sys.exit(0)\n"
+            )
+            mamba_shim.chmod(0o755)
+            env = dict(os.environ, PATH=f"{fakebin}:/usr/bin:/bin")
+
+            inp = root / "reads_in"
+            inp.mkdir()
+            same_out = root / "same_out_and_store"
+
+            rel_db_dir = root / "rel db dir"
+            rel_db_dir.mkdir()
+            dmnd_abs = rel_db_dir / "my spaced.dmnd"
+            dmnd_genes_abs = rel_db_dir / "my spaced.genes.tsv"
+            hmm_abs = rel_db_dir / "my spaced.hmm"
+            dmnd_abs.write_bytes(b"dmnd")
+            dmnd_genes_abs.write_text("target\tgene\nt1\tg1\n")
+            hmm_abs.write_text("HMMER3/f\n")
+
+            # A + B (Docker mode): --outdir == --store_dir + relative spaced --protein_dbs / --hmm_databases
+            res_live_docker = subprocess.run(
+                [
+                    "bash", str(live_sh),
+                    "--docker",
+                    "--input", str(inp),
+                    "--outdir", str(same_out),
+                    "--store_dir", str(same_out),
+                    "--protein_dbs", "rel db dir/my spaced.dmnd",
+                    "--hmm_databases", "rel db dir/my spaced.hmm",
+                ],
+                cwd=str(root),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(res_live_docker.returncode, 0, res_live_docker.stderr)
+            live_argv = json.loads(captured.read_text())["argv"]
+            live_mounts = [live_argv[i + 1] for i, a in enumerate(live_argv[:-1]) if a == "-v"]
+            self.assertIn(f"{same_out}:/data/output", live_mounts)
+            self.assertIn(f"{same_out}:{same_out}", live_mounts, "Equal --store_dir must still bind host path")
+            self.assertIn(f"{dmnd_abs}:{dmnd_abs}:ro", live_mounts)
+            self.assertIn(f"{dmnd_genes_abs}:{dmnd_genes_abs}:ro", live_mounts)
+            self.assertIn(f"{hmm_abs}:/hmm/my spaced.hmm:ro", live_mounts)
+            self.assertIn(str(dmnd_abs), live_argv)
+
+            # B (Local mode): relative spaced --protein_dbs and --hmm_databases resolved before cd OUTDIR_HOST
+            res_live_local = subprocess.run(
+                [
+                    "bash", str(live_sh),
+                    "--input", str(inp),
+                    "--outdir", str(root / "local_out"),
+                    "--protein_dbs", "rel db dir/my spaced.dmnd",
+                    "--hmm_databases", "rel db dir/my spaced.hmm",
+                ],
+                cwd=str(root),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(res_live_local.returncode, 0, res_live_local.stderr)
+            local_argv = json.loads(mamba_captured.read_text())
+            p_idx = local_argv.index("--protein_dbs")
+            h_idx = local_argv.index("--hmm_databases")
+            self.assertEqual(local_argv[p_idx + 1], str(dmnd_abs))
+            self.assertEqual(local_argv[h_idx + 1], str(hmm_abs))
+
+            # C: Quoted CSV fields with commas/spaces + reordered columns + relative path in --samplesheet
+            quoted_dir = root / "quoted, reads dir"
+            rel_reads_dir = root / "rel_sheet_reads"
+            sheet_dir = root / "sheet_holder"
+            for d in (quoted_dir, rel_reads_dir, sheet_dir):
+                d.mkdir()
+            q_r1 = quoted_dir / "S1_R1.fastq.gz"
+            q_r2 = quoted_dir / "S1_R2.fastq.gz"
+            rel_r1 = rel_reads_dir / "S2_R1.fastq.gz"
+            rel_r2 = rel_reads_dir / "S2_R2.fastq.gz"
+            for fq in (q_r1, q_r2, rel_r1, rel_r2):
+                fq.write_bytes(b"fq")
+
+            sheet_csv = sheet_dir / "reordered_quoted.csv"
+            sheet_csv.write_text(
+                "# comment header\n"
+                "r2_path,sample_id,primer_pair,plate_id,run,r1_path\n"
+                f'"{q_r2}",S1,EMP-16S,P1,run1,"{q_r1}"\n'
+                '"rel_sheet_reads/S2_R2.fastq.gz",S2,EMP-16S,P1,run1,"rel_sheet_reads/S2_R1.fastq.gz"\n'
+            )
+
+            res_amp = subprocess.run(
+                [
+                    "bash", str(amp_sh),
+                    "--runtime", "docker",
+                    "--samplesheet", str(sheet_csv),
+                    "--outdir", str(root / "amp_csv_out"),
+                ],
+                cwd=str(root),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(res_amp.returncode, 0, res_amp.stderr)
+            amp_argv = json.loads(captured.read_text())["argv"]
+            amp_mounts = [amp_argv[i + 1] for i, a in enumerate(amp_argv[:-1]) if a == "-v"]
+            self.assertIn(f"{quoted_dir}:{quoted_dir}:ro", amp_mounts)
+            self.assertIn(f"{rel_reads_dir}:{rel_reads_dir}:ro", amp_mounts)
+
     def _setup_sortmerna_stubs(self, fakebin: Path, capture_file: Path) -> None:
         fakebin.mkdir(parents=True, exist_ok=True)
         reformat = fakebin / "reformat.sh"
