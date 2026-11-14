@@ -56,6 +56,9 @@ jobs:
       - name: Run test_magscot_merge
         run: python3 tests/test_magscot_merge.py -v
 
+      - name: Run test_magscot_refine
+        run: python3 tests/test_magscot_refine.py -v
+
   nanopore-live-watcher:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
