@@ -15,6 +15,10 @@ on:
       - 'mag_analysis/bin/metacyc_scorer/**'
       - 'mag_analysis/bin/parse_marferret_results.py'
       - 'nanopore_live/bin/watch_for_completion.sh'
+      - 'nanopore_assembly/modules/mapping.nf'
+      - 'nanopore_assembly/run-nanopore-assembly.sh'
+      - 'mag_analysis/run-mag-analysis.sh'
+      - 'illumina_assembly/run-illumina-assembly.sh'
       - 'tests/**'
       - '.github/workflows/tests.yml'
   pull_request:
@@ -25,6 +29,10 @@ on:
       - 'mag_analysis/bin/metacyc_scorer/**'
       - 'mag_analysis/bin/parse_marferret_results.py'
       - 'nanopore_live/bin/watch_for_completion.sh'
+      - 'nanopore_assembly/modules/mapping.nf'
+      - 'nanopore_assembly/run-nanopore-assembly.sh'
+      - 'mag_analysis/run-mag-analysis.sh'
+      - 'illumina_assembly/run-illumina-assembly.sh'
       - 'tests/**'
       - '.github/workflows/tests.yml'
   workflow_dispatch:
@@ -47,6 +55,18 @@ jobs:
 
       - name: Run MarFERReT result parser regression
         run: python3 tests/test_parse_marferret_results.py -v
+
+  assembly-run-failures:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install minimap2 and samtools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends minimap2 samtools
+
+      - name: Run assembly failure-reporting regressions
+        run: python3 tests/test_assembly_run_failures.py -v
 
   fastq-filter:
     runs-on: ubuntu-24.04

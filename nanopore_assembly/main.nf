@@ -406,6 +406,7 @@ workflow {
                     // MD5 of main.nf — pins the source even with no git and no build arg.
                     script_id       : workflow.scriptId,
                     nextflow_version: "${nextflow.version}",
+                    run_name        : workflow.runName,
                     command_line    : workflow.commandLine,
                     started         : "${workflow.start}",
                     completed       : "${workflow.complete}",

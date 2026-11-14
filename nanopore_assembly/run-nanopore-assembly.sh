@@ -25,6 +25,16 @@ ORIGINAL_ARGS=("$@")
 
 die() { echo "[ERROR] $1" >&2; exit 1; }
 
+# nf_run_receipt_ok MANIFEST RUN_NAME: true when the run manifest that
+# main.nf writes on completion (workflow.onComplete -> run_manifest.json)
+# names RUN_NAME, the unique -name given to this launch, and records success.
+nf_run_receipt_ok() {
+    local manifest="$1" run_name="$2"
+    [[ -n "$run_name" && -f "$manifest" ]] || return 1
+    grep -Fq "\"run_name\": \"${run_name}\"" "$manifest" &&
+        grep -Eq '^    "success": true,?$' "$manifest"
+}
+
 # Build a re-runnable self-invocation with the correct --session ID
 save_run_command() {
     local outdir="$1" session="$2"
@@ -239,7 +249,7 @@ if [[ "$DO_RESUME" == true && -z "$RESUME_SESSION" ]]; then
                  "${OUTDIR_HOST}/.nextflow-cache/dotdir/history" \
                  "${OUTDIR_HOST}/.nextflow/history"; do
         if [[ -f "$_hist" ]]; then
-            RESUME_SESSION=$(awk '{print $6}' "$_hist" | tail -1)
+            RESUME_SESSION=$(awk -F'\t' '{print $6}' "$_hist" | tail -1)
             break
         fi
     done
@@ -373,7 +383,9 @@ if [[ "$USE_CONTAINER" == true ]]; then
             CONTAINER_CMD+=("$SIF_PATH" -log /data/output/pipeline_info/nextflow.log run /pipeline/main.nf)
             ;;
     esac
-    CONTAINER_CMD+=(-w /data/work "${NF_ARGS[@]}")
+    # A unique run name ties the completion receipt to this launch.
+    NF_RUN_NAME="danaseq-asm-$(date +%s)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+    CONTAINER_CMD+=(-name "$NF_RUN_NAME" -w /data/work "${NF_ARGS[@]}")
     if [[ "$DO_RESUME" == true ]]; then
         CONTAINER_CMD+=(-resume ${RESUME_SESSION})
     fi
@@ -391,16 +403,17 @@ if [[ "$USE_CONTAINER" == true ]]; then
 
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
-    if [[ $NF_EXIT -ne 0 ]]; then
-        _trace="${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/trace.txt"
-        if [[ -f "$_trace" ]] && ! grep -q 'FAILED' "$_trace" 2>/dev/null; then
-            echo "[WARN] Container exited $NF_EXIT but Nextflow trace shows no failures"
-            NF_EXIT=0
-        fi
+    # Apptainer's squashfuse_ll cleanup can time out and exit non-zero after
+    # Nextflow itself succeeded (apptainer/apptainer#2216). Accept that only
+    # when this launch's completion receipt records success; a trace without
+    # FAILED rows also fits a run that aborted before or between tasks.
+    if [[ $NF_EXIT -ne 0 ]] && nf_run_receipt_ok "${OUTDIR_HOST}/run_manifest.json" "$NF_RUN_NAME"; then
+        echo "[WARN] Container exited $NF_EXIT but run $NF_RUN_NAME completed successfully (Apptainer cleanup quirk)"
+        NF_EXIT=0
     fi
 
     # Bookkeeping only: must not change the exit status under set -euo pipefail.
-    NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1) || true
+    NF_SESSION=$(awk -F'\t' '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1) || true
     [[ -z "$NF_SESSION" ]] && { NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1) || true; }
     save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION" || echo "[WARN] Could not record run_command.txt"
 
@@ -446,7 +459,7 @@ mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 "${LOCAL_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
 # Capture session ID
-NF_SESSION=$(awk '{print $6}' .nextflow/history 2>/dev/null | tail -1) || true
+NF_SESSION=$(awk -F'\t' '{print $6}' .nextflow/history 2>/dev/null | tail -1) || true
 [[ -z "$NF_SESSION" ]] && { NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1) || true; }
 save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION" || echo "[WARN] Could not record run_command.txt"
 
