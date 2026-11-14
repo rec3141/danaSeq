@@ -42,6 +42,7 @@ process GENOMAD_CLASSIFY {
 
     script:
     def db_path = params.genomad_db
+    def emit_failed_status = (!params.store_dir && (!params.containsKey('run_mge_annotate') || params.run_mge_annotate)) ? 'true' : 'false'
     """
     # geNomad end-to-end: marker gene annotation → neural network classification
     # Detects viruses, plasmids, and proviruses in a single pass
@@ -69,6 +70,9 @@ process GENOMAD_CLASSIFY {
 
     if [ \$genomad_exit -ne 0 ]; then
         echo "[WARNING] geNomad exited with code \$genomad_exit" >&2
+        if [ "${emit_failed_status}" != "true" ]; then
+            exit \$genomad_exit
+        fi
         touch virus_summary.tsv plasmid_summary.tsv virus.fna plasmid.fna \\
               virus_proteins.faa plasmid_proteins.faa virus_genes.tsv plasmid_genes.tsv \\
               provirus.tsv provirus.fna taxonomy.tsv genomad_summary.tsv
@@ -79,6 +83,9 @@ process GENOMAD_CLASSIFY {
     # A zero exit without the aggregated classification is a failure, not "no hits".
     if [ ! -d "genomad_out/\${input_base}_aggregated_classification" ]; then
         echo "[WARNING] geNomad exited 0 but genomad_out/\${input_base}_aggregated_classification is missing" >&2
+        if [ "${emit_failed_status}" != "true" ]; then
+            exit 1
+        fi
         touch virus_summary.tsv plasmid_summary.tsv virus.fna plasmid.fna \\
               virus_proteins.faa plasmid_proteins.faa virus_genes.tsv plasmid_genes.tsv \\
               provirus.tsv provirus.fna taxonomy.tsv genomad_summary.tsv
@@ -118,7 +125,14 @@ process GENOMAD_CLASSIFY {
     copy_required "genomad_out/\${input_base}_aggregated_classification/\${input_base}_aggregated_classification.tsv" genomad_summary.tsv
 
     n_hits=\$(( \$(tail -n +2 virus_summary.tsv 2>/dev/null | wc -l) + \$(tail -n +2 plasmid_summary.tsv 2>/dev/null | wc -l) ))
-    if [ "\$missing_required" -gt 0 ]; then write_status 0 failed
+    if [ "\$missing_required" -gt 0 ]; then
+        if [ "${emit_failed_status}" != "true" ]; then
+            rm -f virus_summary.tsv plasmid_summary.tsv virus.fna plasmid.fna \\
+                  virus_proteins.faa plasmid_proteins.faa virus_genes.tsv plasmid_genes.tsv \\
+                  provirus.tsv provirus.fna taxonomy.tsv genomad_summary.tsv status.tsv
+            exit 1
+        fi
+        write_status 0 failed
     elif [ "\$n_hits" -gt 0 ]; then write_status "\$n_hits" ok
     else write_status 0 no_hits; fi
     """
@@ -142,6 +156,7 @@ process CHECKV_QUALITY {
 
     script:
     def db_path = params.checkv_db
+    def emit_failed_status = (!params.store_dir && (!params.containsKey('run_mge_annotate') || params.run_mge_annotate)) ? 'true' : 'false'
     """
     checkv_version=\$(checkv -h 2>/dev/null | grep -oE 'v[0-9.]+' | head -1)
     n_input=\$(grep -c '^>' "${virus_fasta}" 2>/dev/null || true)
@@ -173,6 +188,9 @@ process CHECKV_QUALITY {
 
     if [ \$checkv_exit -ne 0 ]; then
         echo "[WARNING] CheckV exited with code \$checkv_exit" >&2
+        if [ "${emit_failed_status}" != "true" ]; then
+            exit \$checkv_exit
+        fi
         printf 'contig_id\\tcontig_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tcompleteness\\tcontamination\\n' > quality_summary.tsv
         touch viruses.fna proviruses.fna
         write_status 0 failed
@@ -184,6 +202,10 @@ process CHECKV_QUALITY {
         cp checkv_out/quality_summary.tsv .
         write_status "\$(tail -n +2 quality_summary.tsv | wc -l)" ok
     else
+        if [ "${emit_failed_status}" != "true" ]; then
+            echo "[WARNING] CheckV exited 0 without quality_summary.tsv" >&2
+            exit 1
+        fi
         printf 'contig_id\\tcontig_length\\tgene_count\\tviral_genes\\thost_genes\\tcheckv_quality\\tcompleteness\\tcontamination\\n' > quality_summary.tsv
         write_status 0 failed
     fi
@@ -391,6 +413,12 @@ process ISLANDPATH_DIMOB {
     # Reference-free method — HMM profiles for mobility genes (Pfam-A, 2015)
     # hmmscan benefits from multiple CPUs
 
+    if [ ! -s "${faa}" ]; then
+        echo "[WARNING] No protein sequences — skipping IslandPath-DIMOB" >&2
+        printf 'island_id\\tcontig\\tstart\\tend\\n' > genomic_islands.tsv
+        exit 0
+    fi
+
     set +e
     islandpath_dimob.py \\
         --gff "${gff}" \\
@@ -402,10 +430,14 @@ process ISLANDPATH_DIMOB {
     dimob_exit=\$?
     set -e
 
-    if [ \$dimob_exit -ne 0 ] || [ ! -f genomic_islands.tsv ]; then
-        echo "[WARNING] IslandPath-DIMOB exited with code \$dimob_exit" >&2
-        printf 'island_id\\tcontig\\tstart\\tend\\n' > genomic_islands.tsv
-        exit 0
+    if [ \$dimob_exit -ne 0 ]; then
+        echo "[ERROR] IslandPath-DIMOB exited with code \$dimob_exit; no results stored" >&2
+        rm -f genomic_islands.tsv
+        exit \$dimob_exit
+    fi
+    if [ ! -f genomic_islands.tsv ]; then
+        echo "[ERROR] IslandPath-DIMOB produced no genomic_islands.tsv; no results stored" >&2
+        exit 1
     fi
     """
 }
@@ -455,11 +487,13 @@ process MACSYFINDER {
     msf_exit=\$?
     set -e
 
-    if [ \$msf_exit -ne 0 ] || [ ! -d msf_out ]; then
-        echo "[WARNING] MacSyFinder exited with code \$msf_exit" >&2
-        printf 'replicon\\thit_id\\tgene_name\\thit_pos\\tmodel_fqn\\tsys_id\\tsys_loci\\tlocus_num\\tsys_wholeness\\tsys_score\\tsys_occ\\thit_gene_ref\\thit_status\\thit_seq_len\\thit_i_eval\\thit_score\\thit_profile_cov\\thit_seq_cov\\thit_begin_match\\thit_end_match\\n' > all_systems.tsv
-        echo "# MacSyFinder failed" > all_systems.txt
-        exit 0
+    if [ \$msf_exit -ne 0 ]; then
+        echo "[ERROR] MacSyFinder exited with code \$msf_exit; no results stored" >&2
+        exit \$msf_exit
+    fi
+    if [ ! -d msf_out ]; then
+        echo "[ERROR] MacSyFinder produced no msf_out directory; no results stored" >&2
+        exit 1
     fi
 
     # Copy outputs (unordered mode produces all_systems.tsv and all_systems.txt)
@@ -524,12 +558,13 @@ process DEFENSEFINDER {
     df_exit=\$?
     set -e
 
-    if [ \$df_exit -ne 0 ] || [ ! -d df_out ]; then
-        echo "[WARNING] parallel_defensefinder.py exited with code \$df_exit" >&2
-        printf 'sys_id\\ttype\\tsubtype\\tprotein_in_syst\\tgenes_count\\tspec\\n' > systems.tsv
-        printf 'replicon\\thit_id\\tgene_name\\n' > genes.tsv
-        printf 'hit_id\\treplicon\\tposition_hit\\thit_sequence_length\\n' > hmmer.tsv
-        exit 0
+    if [ \$df_exit -ne 0 ]; then
+        echo "[ERROR] parallel_defensefinder.py exited with code \$df_exit; no results stored" >&2
+        exit \$df_exit
+    fi
+    if [ ! -d df_out ]; then
+        echo "[ERROR] parallel_defensefinder.py produced no df_out directory; no results stored" >&2
+        exit 1
     fi
 
     # Copy merged outputs from wrapper
