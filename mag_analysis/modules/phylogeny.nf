@@ -21,7 +21,16 @@ process GTDBTK_CLASSIFY {
     path("gtdbtk_markers/"),     emit: markers
 
     script:
+    // nextflow.config caps the request at the job's memory; below what GTDB-Tk needs,
+    // fail at once instead of after hours of placement
+    def need = new nextflow.util.MemoryUnit(params.gtdbtk_min_memory.toString())
+    def too_small = task.memory && task.memory < need
     """
+    if ${too_small}; then
+        echo "[ERROR] GTDB-Tk needs ${need} of memory (--gtdbtk_min_memory); this run allows ${task.memory}. Skipped: give the job more memory." >&2
+        exit 1
+    fi
+
     # Merge all bin directories into one flat directory
     mkdir -p all_bins gtdbtk_trees gtdbtk_markers
     for d in bins_*; do

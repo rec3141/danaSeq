@@ -21,6 +21,9 @@ on:
       - 'mag_analysis/bin/metacyc_scorer/**'
       - 'mag_analysis/bin/magscot.py'
       - 'mag_analysis/bin/mge_bin_annotate.py'
+      - 'mag_analysis/bin/test_mge_bin_annotate.py'
+      - 'mag_analysis/modules/phylogeny.nf'
+      - 'mag_analysis/nextflow.config'
       - 'mag_analysis/bin/parse_marferret_results.py'
       - 'mag_analysis/main.nf'
       - 'mag_analysis/modules/binning.nf'
@@ -57,6 +60,9 @@ on:
       - 'mag_analysis/bin/metacyc_scorer/**'
       - 'mag_analysis/bin/magscot.py'
       - 'mag_analysis/bin/mge_bin_annotate.py'
+      - 'mag_analysis/bin/test_mge_bin_annotate.py'
+      - 'mag_analysis/modules/phylogeny.nf'
+      - 'mag_analysis/nextflow.config'
       - 'mag_analysis/bin/parse_marferret_results.py'
       - 'mag_analysis/main.nf'
       - 'mag_analysis/modules/binning.nf'
@@ -153,6 +159,22 @@ jobs:
       - name: Run CONCAT_READS dedupe regressions
         run: python3 tests/test_concat_reads_dedupe.py -v
 
+  mge-bin-annotate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: python3 -m pip install pytest
+
+      - name: Run mge_bin_annotate unit tests
+        run: python3 -m pytest -q mag_analysis/bin/test_mge_bin_annotate.py
+
   metacyc-scorer:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -184,8 +206,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install numpy and pandas
-        run: python3 -m pip install numpy pandas
+      # preprocess.py imports scipy (bin clustering) and scikit-learn (embeddings)
+      - name: Install numpy, pandas, scipy and scikit-learn
+        run: python3 -m pip install numpy pandas scipy scikit-learn
 
       - name: Run MAG visualization preprocess regressions
         run: python3 tests/test_mag_viz_preprocess.py -v
