@@ -261,6 +261,7 @@ process BIN_COMEBIN {
     output:
     path("comebin_bins.tsv"), emit: bins
     path("bins/"),            emit: fastas
+    path("status.tsv"),       emit: status, optional: true
 
     script:
     """
@@ -304,12 +305,15 @@ process BIN_COMEBIN {
             done >> comebin_bins.tsv
         done
     else
-        echo "[WARNING] COMEBin produced no comebin_res_bins directory" >&2
-        touch comebin_bins.tsv
+        echo "[ERROR] COMEBin exited successfully without its comebin_res_bins directory" >&2
+        exit 1
     fi
 
     if [ ! -s comebin_bins.tsv ]; then
         echo "[WARNING] COMEBin produced no bins" >&2
+        printf 'status\\nno_bins\\n' > status.tsv
+    else
+        printf 'status\\nok\\n' > status.tsv
     fi
     """
 }
@@ -451,6 +455,7 @@ process BIN_VAMB_TAX {
     output:
     path("vamb_tax_bins.tsv"), emit: bins
     path("bins/"),             emit: fastas
+    path("status.tsv"),        emit: status
 
     script:
     """
@@ -546,9 +551,11 @@ with open('vamb_abundance.tsv', 'w') as out:
 
     n_tax=\$(awk -F'\\t' 'NR>1 && \$2 != "" {c++} END{print c+0}' vamb_taxonomy.tsv)
     n_samples=\$(head -1 vamb_abundance.tsv | awk -F'\\t' '{print NF-1}')
+    status=ok
     if [ "\$n_tax" -lt 1 ] || [ "\$n_samples" -lt 1 ]; then
         echo "[WARNING] Insufficient data for taxvamb (tax=\$n_tax, samples=\$n_samples)" >&2
         touch vamb_tax_bins.tsv
+        status=insufficient_data
     else
 
     CUDA_FLAG=""
@@ -585,20 +592,29 @@ with open('vamb_abundance.tsv', 'w') as out:
             done >> vamb_tax_bins.tsv
         done
         echo "[INFO] VAMB taxvamb produced \$bin_num bins" >&2
-    elif [ -f vamb_out/vae_clusters_unsplit.tsv ]; then
-        tail -n +2 vamb_out/vae_clusters_unsplit.tsv | \
-            awk -F'\\t' '{print \$2 "\\t" \$1}' > vamb_tax_bins.tsv
+    elif [ -f vamb_out/vaevae_clusters_unsplit.tsv ]; then
+        # taxvamb writes VAEVAE assignments even when every bin falls below --minfasta.
+        if ! awk -F'\\t' '
+            NR == 1 {if (\$0 != "clustername\\tcontigname") exit 1; next}
+            NF != 2 || \$1 == "" || \$2 == "" {exit 1}
+            {print \$2 "\\tvamb_tax_" \$1}
+            END {if (!NR) exit 1}
+        ' vamb_out/vaevae_clusters_unsplit.tsv > vamb_tax_bins.tsv; then
+            echo "[ERROR] VAMB taxvamb produced an invalid cluster table" >&2
+            exit 1
+        fi
         echo "[INFO] VAMB taxvamb produced clusters but no FASTA bins above size threshold" >&2
     else
-        echo "[WARNING] VAMB taxvamb produced no output" >&2
-        touch vamb_tax_bins.tsv
+        echo "[ERROR] VAMB taxvamb exited successfully without bins or a cluster table" >&2
+        exit 1
     fi
 
     if [ ! -s vamb_tax_bins.tsv ]; then
         echo "[WARNING] VAMB taxvamb produced no bins" >&2
+        status=no_bins
     fi
-
     fi  # end: data check
+    printf 'status\\tn_classified\\tn_depth_samples\\n%s\\t%s\\t%s\\n' "\$status" "\$n_tax" "\$n_samples" > status.tsv
     """
 }
 
@@ -606,12 +622,16 @@ process BINETTE_CONSENSUS {
     tag "binette"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binette"
-    publishDir "${params.outdir}/binning/binette", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/binning/binette" : null
+    // No storeDir: a stored consensus is not checked against its inputs. -resume with deep
+    // (content) hashing reruns it whenever an assignment table, the assembly or a declared
+    // database changes, and also when this script or the container changes.
+    cache 'deep'
+    publishDir "${params.outdir}/binning/binette", mode: 'copy'
 
     input:
     path(assembly)
-    path(bin_dirs, stageAs: 'binner_?')
+    tuple path(bin_dirs, stageAs: 'binner_?'), val(bins_digest)
+    path(checkm2_dmnd)
 
     output:
     path("binette_bins.tsv"), emit: bins
@@ -624,12 +644,8 @@ process BINETTE_CONSENSUS {
     mkdir -p bins
 
     # Binette consensus refinement — set operations + internal CheckM2 evaluation
-    # Resolve the DIAMOND .dmnd file from the CheckM2 database directory
-    CHECKM2_DMND=\$(find ${params.checkm2_db} -name '*.dmnd' -type f | head -1)
-    if [ -z "\$CHECKM2_DMND" ]; then
-        echo "[ERROR] No .dmnd file found in ${params.checkm2_db}" >&2
-        exit 1
-    fi
+    # The CheckM2 DIAMOND database, declared as an input so its content keys the cache
+    CHECKM2_DMND=${checkm2_dmnd}
     echo "[INFO] Using CheckM2 DIAMOND db: \$CHECKM2_DMND" >&2
 
     # Binette builds its union/difference/intersection graph from every input
@@ -662,8 +678,7 @@ process BINETTE_CONSENSUS {
     binette_exit=\$?
     set -e
 
-    # A failed run must not leave outputs: storeDir would keep an empty result
-    # and skip Binette on every resume (errorStrategy carries on).
+    # A failed run exits non-zero and publishes nothing; -resume reruns it.
     if [ \$binette_exit -ne 0 ]; then
         echo "[WARNING] Binette exited with code \$binette_exit; no results stored, it reruns on resume" >&2
         exit \$binette_exit
@@ -694,17 +709,26 @@ process MAGSCOT_CONSENSUS {
     tag "magscot"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/magscot", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/binning/magscot" : null
+    // No storeDir: a stored consensus is not checked against its inputs. -resume with deep
+    // (content) hashing reruns it whenever an assignment table, the assembly or a declared
+    // database changes, and also when this script or the container changes.
+    cache 'deep'
+    publishDir "${params.outdir}/binning/magscot", mode: 'copy'
 
     input:
     path(assembly)
     path(bin_files)
     val(bin_labels)
+    // Each database file MAGScoT reads, declared so its content keys the cache (a declared
+    // directory is hashed without its files' content).
+    path(tigrfam_hmm, stageAs: 'magscot_db/gtdbtk_rel207_tigrfam.hmm')
+    path(pfam_hmm,    stageAs: 'magscot_db/gtdbtk_rel207_Pfam-A.hmm')
+    path(markers_tsv, stageAs: 'magscot_db/profiles/gtdb_rel207_default_markers.tsv')
 
     output:
     path("magscot_bins.tsv"), emit: bins
     path("bins/"),            emit: fastas
+    path("status.tsv"),        emit: status
 
     script:
     // Build comma-separated file and label lists from collected inputs
@@ -713,9 +737,31 @@ process MAGSCOT_CONSENSUS {
     """
     mkdir -p bins
 
+    # Build combined contig-to-bin TSV: bin \\t contig \\t binner
+    > contig2bin.tsv
+    IFS=',' read -ra F_ARR <<< "${files_csv}"
+    IFS=',' read -ra L_ARR <<< "${labels_csv}"
+    for i in "\${!F_ARR[@]}"; do
+        if [ -s "\${F_ARR[\$i]}" ]; then
+            # Input TSVs are contig\\tbin; MAGScoT expects bin\\tcontig\\tbinner
+            awk -v lbl="\${L_ARR[\$i]}" '{print \$2 "\\t" \$1 "\\t" lbl}' "\${F_ARR[\$i]}" >> contig2bin.tsv
+        fi
+    done
+
+    n_binners=\$(awk -F'\\t' '{seen[\$3]=1} END{print length(seen)}' contig2bin.tsv)
+    if [ "\$n_binners" -eq 0 ]; then
+        echo "[WARNING] All binners produced empty output -- skipping MAGScoT" >&2
+        touch magscot_bins.tsv
+        printf 'status\\nno_input_bins\\n' > status.tsv
+        exit 0
+    elif [ "\$n_binners" -lt 2 ]; then
+        echo "[ERROR] MAGScoT consensus requires at least two nonempty binners" >&2
+        exit 1
+    fi
+
     # MAGScoT's HMMs and marker profiles both come from download-databases.sh
     # --magscot; check them before the hours of Prodigal and hmmsearch.
-    MAGSCOT_HMM="${params.magscot_hmm_dir}"
+    MAGSCOT_HMM=magscot_db
     for f in gtdbtk_rel207_tigrfam.hmm gtdbtk_rel207_Pfam-A.hmm profiles/gtdb_rel207_default_markers.tsv; do
         if [ ! -s "\$MAGSCOT_HMM/\$f" ]; then
             echo "[ERROR] MAGScoT: \$MAGSCOT_HMM/\$f is missing; fetch it with download-databases.sh --magscot" >&2
@@ -750,77 +796,68 @@ process MAGSCOT_CONSENSUS {
     # 3. Parse HMM results: gene_id, marker_name, e-value
     #    TIGRFAM: target=\$1, query=\$3, evalue=\$5
     #    Pfam:    target=\$1, query=\$4, evalue=\$5
-    grep -v '^#' tigr.tblout | awk '{print \$1 "\\t" \$3 "\\t" \$5}' > markers.tsv
-    grep -v '^#' pfam.tblout | awk '{print \$1 "\\t" \$4 "\\t" \$5}' >> markers.tsv
+    awk '!/^#/ && NF {print \$1 "\\t" \$3 "\\t" \$5}' tigr.tblout > markers.tsv
+    awk '!/^#/ && NF {print \$1 "\\t" \$4 "\\t" \$5}' pfam.tblout >> markers.tsv
     echo "[INFO] Found \$(wc -l < markers.tsv) marker gene hits" >&2
 
-    # 4. Build combined contig-to-bin TSV: bin \\t contig \\t binner
-    > contig2bin.tsv
-    IFS=',' read -ra F_ARR <<< "${files_csv}"
-    IFS=',' read -ra L_ARR <<< "${labels_csv}"
-    for i in "\${!F_ARR[@]}"; do
-        if [ -s "\${F_ARR[\$i]}" ]; then
-            # Input TSVs are contig\\tbin; MAGScoT expects bin\\tcontig\\tbinner
-            awk -v lbl="\${L_ARR[\$i]}" '{print \$2 "\\t" \$1 "\\t" lbl}' "\${F_ARR[\$i]}" >> contig2bin.tsv
-        fi
-    done
-
-    if [ ! -s contig2bin.tsv ]; then
-        echo "[WARNING] All binners produced empty output -- skipping MAGScoT" >&2
-        touch magscot_bins.tsv
-    else
-        # 5. Run MAGScoT (Python port — no R dependency)
-        # The container ignores the conda directive, and its python3 is another
-        # env's; use the binning env's interpreter, which has pandas.
-        PY=python3
-        if [ -z "\${CONDA_PREFIX:-}" ] && [ -x /opt/conda/envs/dana-mag-binning/bin/python ]; then
-            PY=/opt/conda/envs/dana-mag-binning/bin/python
-        fi
-        set +e
-        "\$PY" ${projectDir}/bin/magscot.py \
-            -i contig2bin.tsv --hmm markers.tsv \
-            --profile_dir "\$MAGSCOT_HMM/profiles" \
-            -o magscot_out
-        magscot_exit=\$?
-        set -e
-
-        # A failed run must not leave outputs: storeDir would keep an empty
-        # result and skip MAGScoT on every resume (errorStrategy carries on).
-        if [ \$magscot_exit -ne 0 ]; then
-            echo "[WARNING] MAGScoT exited with code \$magscot_exit; no results stored, it reruns on resume" >&2
-            exit \$magscot_exit
-        elif [ -f magscot_out.refined.contig_to_bin.out ]; then
-            # MAGScoT output: header + bin\\tcontig
-            # Skip header, extract bin\\tcontig pairs
-            tail -n +2 magscot_out.refined.contig_to_bin.out > magscot_raw.tsv
-
-            # Get unique bin names (column 1) and renumber sequentially
-            > magscot_bins.tsv
-            cut -f1 magscot_raw.tsv | sort -u > magscot_bin_list.txt
-            bin_num=0
-            for old_bin in \$(cat magscot_bin_list.txt); do
-                bin_num=\$((bin_num + 1))
-                bin_name=\$(printf 'magscot_%03d' \$bin_num)
-                # Extract contigs for this bin (column 2 where column 1 matches)
-                awk -v b="\$old_bin" '\$1 == b {print \$2}' magscot_raw.tsv > tmp_contigs.txt
-                while read -r contig; do
-                    printf '%s\\t%s\\n' "\$contig" "\$bin_name"
-                done < tmp_contigs.txt >> magscot_bins.tsv
-                # Extract bin FASTA from assembly
-                awk 'BEGIN{while((getline<"tmp_contigs.txt")>0) keep[\$1]=1}
-                     /^>/{p=keep[substr(\$1,2)]}p' ${assembly} > "bins/\${bin_name}.fa"
-                rm -f tmp_contigs.txt
-            done
-            echo "[INFO] MAGScoT produced \$bin_num bins" >&2
-            rm -f magscot_bin_list.txt
-        else
-            echo "[WARNING] MAGScoT produced no output" >&2
-            touch magscot_bins.tsv
-        fi
+    # Run MAGScoT (Python port — no R dependency)
+    # The container ignores the conda directive, and its python3 is another
+    # env's; use the binning env's interpreter, which has pandas.
+    PY=python3
+    if [ -z "\${CONDA_PREFIX:-}" ] && [ -x /opt/conda/envs/dana-mag-binning/bin/python ]; then
+        PY=/opt/conda/envs/dana-mag-binning/bin/python
     fi
+    set +e
+    "\$PY" ${projectDir}/bin/magscot.py \
+        -i contig2bin.tsv --hmm markers.tsv \
+        --profile_dir "\$MAGSCOT_HMM/profiles" \
+        -o magscot_out
+    magscot_exit=\$?
+    set -e
+
+    # A failed run exits non-zero and publishes nothing; -resume reruns it.
+    if [ \$magscot_exit -ne 0 ]; then
+        echo "[WARNING] MAGScoT exited with code \$magscot_exit; no results stored, it reruns on resume" >&2
+        exit \$magscot_exit
+    elif [ ! -s magscot_out.refined.contig_to_bin.out ]; then
+        echo "[ERROR] MAGScoT exited successfully with missing refined mapping" >&2
+        exit 1
+    fi
+    # MAGScoT output: header + bin\\tcontig
+    if ! awk -F'\\t' '
+        NR == 1 {if (NF != 2 || \$1 != "binnew" || \$2 != "contig") exit 1; next}
+        NF != 2 || \$1 == "" || \$2 == "" {exit 1}
+        {print}
+    ' magscot_out.refined.contig_to_bin.out > magscot_raw.tsv; then
+        echo "[ERROR] MAGScoT produced an invalid refined mapping" >&2
+        exit 1
+    fi
+
+    # Get unique bin names (column 1) and renumber sequentially
+    > magscot_bins.tsv
+    cut -f1 magscot_raw.tsv | sort -u > magscot_bin_list.txt
+    bin_num=0
+    for old_bin in \$(cat magscot_bin_list.txt); do
+        bin_num=\$((bin_num + 1))
+        bin_name=\$(printf 'magscot_%03d' \$bin_num)
+        # Extract contigs for this bin (column 2 where column 1 matches)
+        awk -v b="\$old_bin" '\$1 == b {print \$2}' magscot_raw.tsv > tmp_contigs.txt
+        while read -r contig; do
+            printf '%s\\t%s\\n' "\$contig" "\$bin_name"
+        done < tmp_contigs.txt >> magscot_bins.tsv
+        # Extract bin FASTA from assembly
+        awk 'BEGIN{while((getline<"tmp_contigs.txt")>0) keep[\$1]=1}
+             /^>/{p=keep[substr(\$1,2)]}p' ${assembly} > "bins/\${bin_name}.fa"
+        rm -f tmp_contigs.txt
+    done
+    echo "[INFO] MAGScoT produced \$bin_num bins" >&2
+    rm -f magscot_bin_list.txt
 
     if [ ! -s magscot_bins.tsv ]; then
         echo "[WARNING] MAGScoT produced no bins" >&2
+        printf 'status\\nno_qualifying_bins\\n' > status.tsv
+    else
+        printf 'status\\nok\\n' > status.tsv
     fi
     """
 }
@@ -829,8 +866,11 @@ process DASTOOL_CONSENSUS {
     tag "dastool"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/dastool", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/binning/dastool" : null
+    // No storeDir: a stored consensus is not checked against its inputs. -resume with deep
+    // (content) hashing reruns it whenever an assignment table, the assembly or a declared
+    // database changes, and also when this script or the container changes.
+    cache 'deep'
+    publishDir "${params.outdir}/binning/dastool", mode: 'copy'
 
     input:
     path(assembly)
@@ -901,8 +941,7 @@ process DASTOOL_CONSENSUS {
         if grep -q 'No bins with bin-score' dastool_out/dastool_DASTool.log 2>/dev/null; then
             echo "[WARNING] DAS_Tool exited with code \$dastool_exit: no bins above the score threshold" >&2
         else
-            # Any other failure must not leave outputs: storeDir would keep an
-            # empty consensus and skip DAS Tool on every resume.
+            # Any other failure exits non-zero and publishes nothing; -resume reruns it.
             echo "[WARNING] DAS_Tool exited with code \$dastool_exit; no results stored, it reruns on resume. End of its log:" >&2
             tail -n 20 dastool_out/dastool_DASTool.log >&2 2>/dev/null || true
             exit \$dastool_exit

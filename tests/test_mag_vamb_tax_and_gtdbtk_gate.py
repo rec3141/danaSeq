@@ -198,6 +198,7 @@ class BinVambTaxConversionTests(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertTrue((d / "vamb_tax_bins.tsv").is_file())
             self.assertEqual((d / "vamb_tax_bins.tsv").read_text(encoding="utf-8"), "")
+            self.assertEqual((d / "status.tsv").read_text().splitlines()[1], "insufficient_data\t0\t1")
 
     def test_control_complete_seven_rank_lineage_preserved(self):
         with tempfile.TemporaryDirectory(prefix="danaseq_c02_f6_ctrl_") as tmp:
@@ -306,6 +307,7 @@ class BinnersOnlyGtdbtkGateTests(unittest.TestCase):
             "    withLabel: 'process_low' { cpus = 1; memory = 512.MB }\n"
             "    withLabel: 'process_medium' { cpus = 1; memory = 512.MB }\n"
             "    withLabel: 'process_high' { cpus = 1; memory = 512.MB }\n"
+            "    withLabel: 'process_gpu' { cpus = 1; memory = 512.MB }\n"
             "    withName: 'GTDBTK_CLASSIFY' { cpus = 1; memory = 512.MB }\n"
             "}\n",
             encoding="utf-8",
@@ -314,7 +316,7 @@ class BinnersOnlyGtdbtkGateTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def _run_mag(self, name: str, binners_only: bool, store_dir: Path, extra=()) -> subprocess.CompletedProcess:
+    def _run_mag(self, name: str, binners_only: bool, store_dir: Path, *extra_args: str, extra=()) -> subprocess.CompletedProcess:
         rcwd = self.d / name
         rcwd.mkdir()
         env = dict(
@@ -343,6 +345,7 @@ class BinnersOnlyGtdbtkGateTests(unittest.TestCase):
                 "--binners_only", "true" if binners_only else "false",
                 "--run_gtdbtk", "true",
                 "--gtdbtk_db", str(self.gtdb_db),
+                *extra_args,
                 *extra,
             ],
             cwd=rcwd,
@@ -351,6 +354,78 @@ class BinnersOnlyGtdbtkGateTests(unittest.TestCase):
             text=True,
             timeout=120,
         )
+
+    def test_requested_binners_report_missing_prerequisites(self):
+        requested = ("--run_comebin", "true", "--run_vamb_tax", "true", "--run_sendsketch", "true")
+        cases = [("no_bam_dir", (), "--bam_dir is required")]
+        bams = self.d / "bams"
+        bams.mkdir()
+        (bams / "orphan.sorted.bam.bai").touch()
+        cases.append(("no_bams", ("--bam_dir", str(bams)), "no *.sorted.bam files"))
+        for name, args, reason in cases:
+            with self.subTest(name=name):
+                store = self.d / f"store_{name}"
+                res = self._run_mag(name, True, store, *requested, *args)
+                log = res.stdout + res.stderr
+                self.assertEqual(res.returncode, 0, log)
+                self.assertIn("COMEBin skipped: " + reason, log)
+                self.assertIn("VAMB-tax skipped: --run_sendsketch true and --sendsketch_address", log)
+                self.assertFalse((store / "binning/comebin").exists())
+                self.assertFalse((store / "binning/vamb_tax").exists())
+
+    def test_taxvamb_reports_failed_sendsketch_dependency(self):
+        store = self.d / "failed_sketch_store"
+        write_executable(self.bin_dir / "sendsketch.sh", "#!/bin/sh\nexit 19\n")
+        res = self._run_mag("failed_sketch", True, store, "--run_vamb_tax", "true",
+                            "--run_sendsketch", "true", "--sendsketch_address", "unused.invalid")
+        self.assertIn("VAMB-tax skipped: SendSketch produced no taxonomy table", res.stdout + res.stderr)
+        self.assertFalse((store / "binning/vamb_tax").exists())
+
+    def test_comebin_reuses_only_complete_cache_without_device(self):
+        bams = self.d / "bams"
+        bams.mkdir()
+        (bams / "s.sorted.bam").touch()
+        write_executable(self.bin_dir / "run_comebin.sh", "#!/bin/sh\nexit 91\n")
+        for complete in [False, True]:
+            with self.subTest(complete=complete):
+                store = self.d / f"cache_{complete}"
+                cached = store / "binning/comebin"
+                cached.mkdir(parents=True)
+                (cached / "comebin_bins.tsv").write_text("c1\tcomebin_001\n")
+                if complete:
+                    (cached / "bins").mkdir()
+                    (cached / "bins/comebin_001.fa").write_text(">c1\nACGT\n")
+                res = self._run_mag(f"cache_{complete}_run", True, store, "--run_comebin", "true",
+                                    "--bam_dir", str(bams))
+                log = res.stdout + res.stderr
+                self.assertEqual(res.returncode, 0, log)
+                self.assertIn("Stored process > BIN_COMEBIN" if complete else "COMEBin skipped: no GPU visible", log)
+                self.assertNotIn("Submitted process > BIN_COMEBIN", log)
+
+    def test_requested_binners_publish_scorable_assignments(self):
+        store = self.d / "requested_store"
+        write_executable(self.bin_dir / "sendsketch.sh", "#!/bin/sh\nexit 91\n")
+        tax = store / "taxonomy/sendsketch/sendsketch_contigs.tsv"
+        tax.parent.mkdir(parents=True)
+        tax.write_text("contig_id\tstatus\tANI\tref_name\tlineage\nc1\tC\t99\tRef\td__Bacteria\n")
+        bams = self.d / "bams"
+        bams.mkdir()
+        (bams / "s.sorted.bam").touch()
+        (bams / "s.sorted.bam.bai").touch()
+        write_executable(self.bin_dir / "run_comebin.sh",
+                         '#!/bin/sh\nmkdir -p comebin_out/comebin_res/comebin_res_bins\n'
+                         'printf ">c1\\nACGT\\n" > comebin_out/comebin_res/comebin_res_bins/19.fa\n')
+        write_executable(self.bin_dir / "vamb",
+                         '#!/bin/sh\n[ "$1 $2" = "bin taxvamb" ] || exit 42\nmkdir -p vamb_out\n'
+                         'printf "clustername\\tcontigname\\n7\\tc2\\n" > vamb_out/vaevae_clusters_unsplit.tsv\n')
+        args = ("--run_comebin", "true", "--bam_dir", str(bams), "--comebin_on_cpu", "true",
+                "--run_vamb_tax", "true", "--run_sendsketch", "true", "--sendsketch_address", "unused.invalid")
+        res = self._run_mag("requested", True, store, *args)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        for name, mapping in [("comebin", "c1\tcomebin_001\n"), ("vamb_tax", "c2\tvamb_tax_7\n")]:
+            result = store / "binning" / name
+            self.assertEqual((result / f"{name}_bins.tsv").read_text(), mapping)
+            self.assertEqual((result / "status.tsv").read_text().splitlines()[1].split("\t")[0], "ok")
 
     def test_binners_only_skips_gtdbtk_so_consensus_run_classifies_dastool_bins(self):
         store_dir = self.d / "shared_store"

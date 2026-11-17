@@ -85,9 +85,10 @@ class MagStoreDirFailurePropagationTests(unittest.TestCase):
         subs: dict[str, str],
         files: dict[str, str],
         stubs: dict[str, str],
+        cache_contract: str = "storeDir params.store_dir",
     ) -> tuple[subprocess.CompletedProcess[str], Path]:
         block = extract_nf_process_block(nf_path, proc_name)
-        self.assertIn("storeDir params.store_dir", block)
+        self.assertIn(cache_contract, block)
         script_body = extract_nf_bash_body(block)
         for key, val in subs.items():
             script_body = script_body.replace(key, val)
@@ -117,6 +118,113 @@ class MagStoreDirFailurePropagationTests(unittest.TestCase):
             text=True,
         )
         return res, work_dir
+
+    def test_comebin_and_taxvamb_require_tool_outputs(self):
+        files = {"asm.fa": ">c1\nACGT\n",
+                 "depths.tsv": "contigName\tcontigLen\ttotalAvgDepth\ts1.bam\nc1\t4\t1\t1\n",
+                 "tax.tsv": "contig_id\tstatus\tANI\tref_name\tlineage\nc1\tC\t99\tref\td__Bacteria\n"}
+        subs = {"${assembly}": "asm.fa", "${depths}": "depths.tsv", "${sendsketch_contigs}": "tax.tsv",
+                "${params.gpu}": "false", "${task.cpus}": "1"}
+        for proc, binary, make_empty, reason in [
+            ("BIN_COMEBIN", "run_comebin.sh", "mkdir -p comebin_out/comebin_res/comebin_res_bins",
+             "without its comebin_res_bins directory"),
+            ("BIN_VAMB_TAX", "vamb", 'mkdir vamb_out; printf "clustername\\tcontigname\\n" > vamb_out/vaevae_clusters_unsplit.tsv',
+             "without bins or a cluster table"),
+        ]:
+            for tool_command, code in [("exit 0", 1), (make_empty, 0), ("exit 19", 19)]:
+                with self.subTest(proc=proc, command=tool_command):
+                    stubs = {binary: "#!/bin/sh\n" + tool_command + "\n",
+                             "torch_device.sh": "#!/bin/sh\necho cpu\n",
+                             "exit_reason.sh": "#!/bin/sh\necho failed\n"}
+                    res, work = self._run_process_script(MODULES_DIR / "binning.nf", proc, subs, files, stubs)
+                    self.assertEqual(res.returncode, code, res.stderr)
+                    if code == 0:
+                        self.assertEqual((work / "status.tsv").read_text().splitlines()[1].split("\t")[0], "no_bins")
+                    else:
+                        self.assertFalse((work / "status.tsv").exists())
+                        if code == 1:
+                            self.assertIn(reason, res.stderr)
+
+    def _magscot(self, inputs, marker="M1", scorer=None, hmmsearch=None):
+        files = {
+            "asm.fa": ">c1\nACGT\n>c2\nTGCA\n",
+            # The process stages its declared database files under magscot_db/.
+            "magscot_db/gtdbtk_rel207_tigrfam.hmm": "stub\n",
+            "magscot_db/gtdbtk_rel207_Pfam-A.hmm": "stub\n",
+            "magscot_db/profiles/gtdb_rel207_default_markers.tsv": "marker\tset\nM1\tA\n",
+            **inputs,
+        }
+        project = MAG_DIR
+        if scorer is not None:
+            files["project/bin/magscot.py"] = scorer
+            project = "project"
+        return self._run_process_script(
+            MODULES_DIR / "binning.nf", "MAGSCOT_CONSENSUS",
+            {"${task.cpus}": "1",
+             "${assembly}": "asm.fa", "${files_csv}": ",".join(inputs),
+             "${labels_csv}": ",".join(inputs), "${projectDir}": str(project)},
+            files,
+            {"prodigal": '#!/bin/bash\nwhile [[ $1 != -a ]]; do shift; done\nprintf ">c1_1\\nMA\\n" > "$2"\n',
+             "hmmsearch": hmmsearch or f'#!/bin/bash\nprintf "c1_1 - {marker} {marker} 1e-10\\n" > "$2"\n'},
+            cache_contract="cache 'deep'",
+        )
+
+    def test_magscot_single_nonempty_binner_cannot_supply_consensus(self):
+        res, work = self._magscot({"one.tsv": "c1\tb1\n", "two.tsv": ""})
+        self.assertNotEqual(res.returncode, 0, res.stderr)
+        self.assertIn("requires at least two nonempty binners", res.stderr)
+        self.assertFalse((work / "magscot_bins.tsv").exists())
+
+    def test_magscot_missing_mapping_after_zero_exit_is_a_failure(self):
+        res, work = self._magscot({"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}, scorer="pass\n")
+        self.assertNotEqual(res.returncode, 0, res.stderr)
+        self.assertIn("missing refined mapping", res.stderr)
+        self.assertFalse((work / "magscot_bins.tsv").exists())
+
+    def test_magscot_rejects_invalid_mapping(self):
+        inputs = {"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}
+        for content in ["unexpected header\n", "binnew\tcontig\nb1\n"]:
+            with self.subTest(content=content):
+                scorer = f'open("magscot_out.refined.contig_to_bin.out", "w").write({content!r})'
+                res, work = self._magscot(inputs, scorer=scorer)
+                self.assertNotEqual(res.returncode, 0, res.stderr)
+                self.assertIn("invalid refined mapping", res.stderr)
+                self.assertFalse((work / "status.tsv").exists())
+
+    def test_magscot_requires_hmmsearch_outputs(self):
+        inputs = {"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}
+        res, work = self._magscot(inputs, hmmsearch="#!/bin/bash\nexit 0\n")
+        self.assertNotEqual(res.returncode, 0, res.stderr)
+        self.assertIn("tigr.tblout", res.stderr)
+        self.assertFalse((work / "status.tsv").exists())
+
+    def test_magscot_accepts_completed_searches_without_hits(self):
+        inputs = {"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}
+        res, work = self._magscot(inputs, hmmsearch='#!/bin/bash\necho "# no hits" > "$2"\n')
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual((work / "status.tsv").read_text(), "status\nno_qualifying_bins\n")
+
+    def test_magscot_propagates_scorer_exit(self):
+        inputs = {"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}
+        res, work = self._magscot(inputs, scorer="raise SystemExit(17)\n")
+        self.assertEqual(res.returncode, 17, res.stderr)
+        self.assertFalse((work / "status.tsv").exists())
+        self.assertFalse((work / "magscot_bins.tsv").exists())
+
+    def test_magscot_reports_qualified_and_empty_results(self):
+        for inputs, marker, status in [
+            ({"one.tsv": "", "two.tsv": ""}, "M1", "no_input_bins"),
+            ({"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}, "M9", "no_qualifying_bins"),
+            ({"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}, "M1", "ok"),
+        ]:
+            with self.subTest(status=status):
+                res, work = self._magscot(inputs, marker)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                self.assertEqual((work / "status.tsv").read_text(), f"status\n{status}\n")
+                self.assertEqual((work / "magscot_bins.tsv").read_text(),
+                                 "c1\tmagscot_001\n" if status == "ok" else "")
+                if status == "ok":
+                    self.assertEqual((work / "bins/magscot_001.fa").read_text(), ">c1\nACGT\n")
 
     def test_storedir_processes_propagate_nonzero_tool_exit_without_placeholders(self):
         """Wrapped tool exit 137 propagates non-zero and leaves zero output placeholders."""

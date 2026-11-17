@@ -61,6 +61,7 @@ results/
 ├── assembly/                   Staged inputs (assembly_info, gc.tsv, depths)
 ├── annotation/                 Prokka or Bakta gene annotation
 ├── binning/
+│   ├── binner_status.tsv       One row per binner and consensus step: its end state (see below)
 │   ├── metabat/                MetaBAT2 bins
 │   ├── semibin/                SemiBin2 bins (optional)
 │   ├── maxbin/                 MaxBin2 bins (optional)
@@ -104,6 +105,45 @@ results/
 │   └── site/                   Static Svelte dashboard
 └── pipeline_info/
 ```
+
+### Caching of the consensus steps
+
+DAS Tool, Binette and MAGScoT do not use `--store_dir`. A stored consensus was never checked
+against its inputs, so after a binner that had failed was rerun, `-resume` kept the consensus
+built without it. These three steps use Nextflow's `-resume` with content hashing
+(`cache 'deep'`). They rerun when a binner's assignment table, the assembly, the CheckM2
+DIAMOND database (Binette) or a MAGScoT marker file changes, even if size and modification time
+are unchanged. They also rerun when the process script or container changes. What this costs:
+
+- runs that relied on a store holding these results (including `seed-store-dir.sh`, which no
+  longer links DAS Tool) recompute them once;
+- each `-resume` reads the CheckM2 database and every bin FASTA given to Binette in full, to hash them;
+- on a full run, a requested MAGScoT or Binette whose database is missing now stops the run at the
+  start, naming the path, instead of failing its task later. `--binners_only` never looks them up.
+
+Still unresolved: the binners themselves and CheckM2 keep using `--store_dir`, which is keyed
+on output files only. A stored binner result is reused even if the assembly or depths changed,
+and a stored CheckM2 result is reused even if DAS Tool's bins changed. Only the consensus steps
+are fresh by construction.
+
+### binning/binner_status.tsv
+
+Every binner and consensus step ends the run in one state:
+
+| state | meaning |
+|---|---|
+| `disabled` | not requested |
+| `skipped` | requested but a prerequisite is missing; `detail` says which |
+| `not_run` | consensus step under `--binners_only` |
+| `ok` | finished with bin assignments |
+| `no_bins`, `no_input_bins`, `insufficient_data` | finished and recorded why it has no bins (`status.tsv` of COMEBin, taxVAMB, MAGScoT) |
+| `completed_empty` | finished with no assignments and no recorded reason |
+| `no_result` | launched but emitted nothing although the run finished: its task failed (failed tasks are retried once, then ignored) or its inputs never arrived; the Nextflow log says which |
+| `not_completed` | the run itself stopped before this step finished |
+
+The first line names the run (`run_name`, `session_id`, start time, success). A table left by an earlier run is removed when a run starts. The state comes from what this run's tasks emitted (a cached `--store_dir` or `-resume` result counts), never from files left in the output folder. The table is written when the run ends, under a temporary name, and then moved into place.
+
+MAGScoT and taxVAMB now always write a `status.tsv`. Results stored in a `--store_dir` before that change lack it, so both steps recompute once on the first run that uses the store.
 
 ## Modules
 
