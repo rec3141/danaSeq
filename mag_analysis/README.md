@@ -61,6 +61,7 @@ results/
 ├── assembly/                   Staged inputs (assembly_info, gc.tsv, depths)
 ├── annotation/                 Prokka or Bakta gene annotation
 ├── binning/
+│   ├── binner_status.tsv       One row per binner and consensus step: its end state (see below)
 │   ├── metabat/                MetaBAT2 bins
 │   ├── semibin/                SemiBin2 bins (optional)
 │   ├── maxbin/                 MaxBin2 bins (optional)
@@ -104,6 +105,25 @@ results/
 │   └── site/                   Static Svelte dashboard
 └── pipeline_info/
 ```
+
+### binning/binner_status.tsv
+
+Every binner and consensus step ends the run in one state:
+
+| state | meaning |
+|---|---|
+| `disabled` | not requested |
+| `skipped` | requested but a prerequisite is missing; `detail` says which |
+| `not_run` | consensus step under `--binners_only` |
+| `ok` | finished with bin assignments |
+| `no_bins`, `no_input_bins`, `insufficient_data` | finished and recorded why it has no bins (`status.tsv` of COMEBin, taxVAMB, MAGScoT) |
+| `completed_empty` | finished with no assignments and no recorded reason |
+| `failed` | the task failed; the run continued because failed tasks are retried once and then ignored |
+| `not_completed` | the run itself stopped before this step finished |
+
+The state comes from what this run's tasks emitted (a cached `--store_dir` or `-resume` result counts), never from files left in the output folder. The table is written when the run ends, under a temporary name, and then moved into place.
+
+MAGScoT and taxVAMB now always write a `status.tsv`. Results stored in a `--store_dir` before that change lack it, so both steps recompute once on the first run that uses the store.
 
 ## Modules
 

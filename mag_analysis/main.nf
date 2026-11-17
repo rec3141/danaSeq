@@ -344,6 +344,81 @@ process STAGE_INPUTS {
 // Main workflow
 // ============================================================================
 
+// Binner outcome report. Each requested binner and consensus step ends the run in one
+// state: disabled (not requested), skipped (requested, prerequisite missing; reason
+// given), not_run (consensus under --binners_only), or launched. A launched step is
+// reported from what this run's task emitted, never from files left on disk: its
+// status.tsv value where the process writes one, otherwise ok / completed_empty from the
+// emitted assignments. A launched step that emitted nothing is failed (task error, which
+// the retry-then-ignore errorStrategy lets the run survive) or not_completed (the run
+// itself stopped). Cached (storeDir or -resume) results emit like fresh ones.
+binnerSeen   = new java.util.concurrent.ConcurrentHashMap()
+binnerStatus = new java.util.concurrent.ConcurrentHashMap()
+binnerPlan   = new LinkedHashMap()
+
+def planBinners(boolean comebin_enabled, boolean vamb_tax_enabled) {
+    def p = new LinkedHashMap()
+    def put = { name, requested, launched, reason -> p[name] = requested ? (launched ? ['launched', ''] : ['skipped', reason]) : ['disabled', ''] }
+    put('semibin',  params.run_semibin, params.run_semibin && params.bam_dir, 'needs --bam_dir')
+    put('metabat',  true, true, '')
+    put('maxbin',   params.run_maxbin, params.run_maxbin, '')
+    put('lorbin',   params.run_lorbin, params.run_lorbin && params.bam_dir, 'needs --bam_dir')
+    put('comebin',  params.run_comebin, comebin_enabled, 'needs --bam_dir with *.sorted.bam and a visible GPU (or --comebin_on_cpu, or a stored result); see the COMEBin warning above')
+    put('vamb',     params.run_vamb, params.run_vamb, '')
+    put('vamb_tax', params.run_vamb_tax, vamb_tax_enabled, 'needs --run_sendsketch true and --sendsketch_address')
+    p['dastool'] = params.binners_only ? ['not_run', '--binners_only'] : ['launched', '']
+    if (!params.run_binette)      p['binette'] = ['disabled', '']
+    else if (!params.checkm2_db)  p['binette'] = ['skipped', 'needs --checkm2_db']
+    else if (params.binners_only) p['binette'] = ['not_run', '--binners_only']
+    else                          p['binette'] = ['launched', '']
+    if (!params.run_magscot)      p['magscot'] = ['disabled', '']
+    else if (params.binners_only) p['magscot'] = ['not_run', '--binners_only']
+    else                          p['magscot'] = ['launched', '']
+    return p
+}
+
+def binnerOutcome(String name, boolean runSucceeded) {
+    def (state, reason) = binnerPlan[name]
+    if (state != 'launched') return [state, reason]
+    if (!binnerSeen.containsKey(name)) {
+        return runSucceeded ? ['failed', 'task failed; the run continued under the retry-then-ignore errorStrategy (see the Nextflow log)']
+                            : ['not_completed', 'the run stopped before this step finished']
+    }
+    if (binnerStatus.containsKey(name)) {
+        def lines = java.nio.file.Files.readAllLines(binnerStatus[name] as java.nio.file.Path).findAll { it.trim() }
+        def value = lines.size() >= 2 ? lines[1].split('\t')[0].trim() : ''
+        return value ? [value, ''] : ['completed_status_unreadable', 'status.tsv has no value row']
+    }
+    def out = binnerSeen[name] as java.nio.file.Path
+    def nonEmpty
+    if (java.nio.file.Files.isDirectory(out)) {
+        def entries = java.nio.file.Files.list(out)
+        try { nonEmpty = entries.anyMatch { java.nio.file.Files.isRegularFile(it) && java.nio.file.Files.size(it) > 0 } }
+        finally { entries.close() }
+    } else {
+        nonEmpty = java.nio.file.Files.size(out) > 0
+    }
+    return nonEmpty ? ['ok', ''] : ['completed_empty', 'no assignments and no status recorded']
+}
+
+// Written to a temporary name and moved into place, so a reader never sees a partial table.
+def writeBinnerReport(boolean runSucceeded) {
+    if (binnerPlan.isEmpty()) return
+    def dir = new File("${params.outdir}/binning")
+    dir.mkdirs()
+    def tmp = new File(dir, ".binner_status.tsv.${ProcessHandle.current().pid()}.tmp")
+    def rows = ['binner\tstate\tdetail']
+    binnerPlan.keySet().each { name ->
+        def (state, detail) = binnerOutcome(name, runSucceeded)
+        rows << "${name}\t${state}\t${detail}"
+        if (state in ['failed', 'not_completed', 'skipped', 'completed_empty', 'completed_status_unreadable'])
+            log.warn "Binner ${name}: ${state}${detail ? ' (' + detail + ')' : ''}"
+    }
+    tmp.text = rows.join('\n') + '\n'
+    java.nio.file.Files.move(tmp.toPath(), new File(dir, 'binner_status.tsv').toPath(),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+}
+
 workflow {
 
     main:
@@ -356,6 +431,7 @@ workflow {
         log.warn "VAMB-tax skipped: --run_sendsketch true and --sendsketch_address are required."
     }
     def metacyc_enabled = metacycEnabled(effective_annotator)
+    binnerPlan.putAll(planBinners(comebin_enabled as boolean, vamb_tax_enabled as boolean))
 
     // 1. Create channels from file-based inputs
     ch_assembly = Channel.fromPath(params.assembly, checkIfExists: true)
@@ -604,6 +680,10 @@ workflow {
         )
     }
 
+    ch_binner_results.subscribe { label, f -> binnerSeen[label] = f }
+    if (comebin_enabled)  BIN_COMEBIN.out.status.subscribe  { binnerStatus['comebin']  = it }
+    if (vamb_tax_enabled) BIN_VAMB_TAX.out.status.subscribe { binnerStatus['vamb_tax'] = it }
+
     // 4. DAS Tool consensus. With --binners_only the consensus steps and
     // CheckM2 get no input and do not run, so nothing is stored from a
     // partial set of binners.
@@ -616,6 +696,7 @@ workflow {
         ch_bin_files,
         ch_bin_labels
     )
+    DASTOOL_CONSENSUS.out.contig2bin.subscribe { binnerSeen['dastool'] = it }
 
     // 4a'. Mobile-element annotation of the consensus bins (opt-in; reads geNomad/CheckV outputs)
     if (params.run_mge_annotate) {
@@ -663,11 +744,14 @@ workflow {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB_TAX.out.fastas)
         }
         BINETTE_CONSENSUS(ch_assembly, params.binners_only ? Channel.empty() : ch_binner_fastas.collect())
+        BINETTE_CONSENSUS.out.bins.subscribe { binnerSeen['binette'] = it }
     }
 
     // 4b. MAGScoT consensus refinement
     if (params.run_magscot) {
         MAGSCOT_CONSENSUS(ch_assembly, ch_bin_files, ch_bin_labels)
+        MAGSCOT_CONSENSUS.out.bins.subscribe   { binnerSeen['magscot'] = it }
+        MAGSCOT_CONSENSUS.out.status.subscribe { binnerStatus['magscot'] = it }
     }
 
     // 4c. Metabolic merge + map to bins
@@ -934,6 +1018,11 @@ workflow {
     }
 
     workflow.onComplete = {
+        try {
+            writeBinnerReport(workflow.success as boolean)
+        } catch (Exception e) {
+            log.warn "Could not write binning/binner_status.tsv: ${e.message}"
+        }
         def msg = """\
             Pipeline completed at : ${workflow.complete}
             Duration              : ${workflow.duration}
