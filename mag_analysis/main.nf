@@ -377,6 +377,91 @@ process STAGE_INPUTS {
 // Main workflow
 // ============================================================================
 
+// Binner outcome report. Each requested binner and consensus step ends the run in one
+// state: disabled (not requested), skipped (requested, prerequisite missing; reason
+// given), not_run (consensus under --binners_only), or launched. A launched step is
+// reported from what this run's task emitted, never from files left on disk: its
+// status.tsv value where the process writes one, otherwise ok / completed_empty from the
+// emitted assignments. A launched step that emitted nothing is no_result when the run
+// finished (its task failed and was ignored, or its inputs never arrived; the Nextflow
+// log tells which) or not_completed when the run itself stopped. Cached (storeDir or
+// -resume) results emit like fresh ones. Each table names its run, and the previous
+// table is removed when a run starts, so an older table cannot pass for this run's.
+binnerSeen   = new java.util.concurrent.ConcurrentHashMap()
+binnerStatus = new java.util.concurrent.ConcurrentHashMap()
+binnerPlan   = new LinkedHashMap()
+
+def planBinners(boolean comebin_enabled, boolean vamb_tax_enabled) {
+    def p = new LinkedHashMap()
+    def put = { name, requested, launched, reason -> p[name] = requested ? (launched ? ['launched', ''] : ['skipped', reason]) : ['disabled', ''] }
+    put('semibin',  params.run_semibin, params.run_semibin && params.bam_dir, 'needs --bam_dir')
+    put('metabat',  true, true, '')
+    put('maxbin',   params.run_maxbin, params.run_maxbin, '')
+    put('lorbin',   params.run_lorbin, params.run_lorbin && params.bam_dir, 'needs --bam_dir')
+    put('comebin',  params.run_comebin, comebin_enabled, 'needs --bam_dir with *.sorted.bam and a visible GPU (or --comebin_on_cpu, or a stored result); see the COMEBin warning above')
+    put('vamb',     params.run_vamb, params.run_vamb, '')
+    put('vamb_tax', params.run_vamb_tax, vamb_tax_enabled, 'needs --run_sendsketch true and --sendsketch_address')
+    p['dastool'] = params.binners_only ? ['not_run', '--binners_only'] : ['launched', '']
+    if (!params.run_binette)      p['binette'] = ['disabled', '']
+    else if (!params.checkm2_db)  p['binette'] = ['skipped', 'needs --checkm2_db']
+    else if (params.binners_only) p['binette'] = ['not_run', '--binners_only']
+    else                          p['binette'] = ['launched', '']
+    if (!params.run_magscot)      p['magscot'] = ['disabled', '']
+    else if (params.binners_only) p['magscot'] = ['not_run', '--binners_only']
+    else                          p['magscot'] = ['launched', '']
+    return p
+}
+
+def binnerOutcome(String name, boolean runSucceeded) {
+    def (state, reason) = binnerPlan[name]
+    if (state != 'launched') return [state, reason]
+    if (!binnerSeen.containsKey(name)) {
+        return runSucceeded ? ['no_result', 'no output emitted: the task failed and was ignored, or its inputs never arrived (see the Nextflow log)']
+                            : ['not_completed', 'the run stopped before this step finished']
+    }
+    if (binnerStatus.containsKey(name)) {
+        def lines = java.nio.file.Files.readAllLines(binnerStatus[name] as java.nio.file.Path).findAll { it.trim() }
+        def value = lines.size() >= 2 ? lines[1].split('\t')[0].trim() : ''
+        return value ? [value, ''] : ['completed_status_unreadable', 'status.tsv has no value row']
+    }
+    def out = binnerSeen[name] as java.nio.file.Path
+    def nonEmpty
+    if (java.nio.file.Files.isDirectory(out)) {
+        def entries = java.nio.file.Files.list(out)
+        try { nonEmpty = entries.anyMatch { java.nio.file.Files.isRegularFile(it) && java.nio.file.Files.size(it) > 0 } }
+        finally { entries.close() }
+    } else {
+        nonEmpty = java.nio.file.Files.size(out) > 0
+    }
+    return nonEmpty ? ['ok', ''] : ['completed_empty', 'no assignments and no status recorded']
+}
+
+// A table left by an earlier run must not be read as this run's if this run cannot write one.
+def removePreviousBinnerReport() {
+    def old = new File("${params.outdir}/binning/binner_status.tsv")
+    if (old.exists() && !old.delete())
+        log.warn "Could not remove the previous ${old}; check its run_name line before trusting it"
+}
+
+// Written to a temporary name and moved into place, so a reader never sees a partial table.
+def writeBinnerReport(boolean runSucceeded) {
+    if (binnerPlan.isEmpty()) return
+    def dir = new File("${params.outdir}/binning")
+    dir.mkdirs()
+    def tmp = new File(dir, ".binner_status.tsv.${ProcessHandle.current().pid()}.tmp")
+    def rows = ["# run_name=${workflow.runName}\tsession_id=${workflow.sessionId}\tstarted=${workflow.start}\tsuccess=${runSucceeded}",
+                'binner\tstate\tdetail']
+    binnerPlan.keySet().each { name ->
+        def (state, detail) = binnerOutcome(name, runSucceeded)
+        rows << "${name}\t${state}\t${detail}"
+        if (state in ['no_result', 'not_completed', 'skipped', 'completed_empty', 'completed_status_unreadable'])
+            log.warn "Binner ${name}: ${state}${detail ? ' (' + detail + ')' : ''}"
+    }
+    tmp.text = rows.join('\n') + '\n'
+    java.nio.file.Files.move(tmp.toPath(), new File(dir, 'binner_status.tsv').toPath(),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+}
+
 workflow {
 
     main:
@@ -392,6 +477,8 @@ workflow {
     // The consensus steps (and the database lookups they need) run only on a full run.
     def binette_on = params.run_binette && params.checkm2_db && !params.binners_only
     def magscot_on = params.run_magscot && !params.binners_only
+    binnerPlan.putAll(planBinners(comebin_enabled as boolean, vamb_tax_enabled as boolean))
+    removePreviousBinnerReport()
 
     // 1. Create channels from file-based inputs
     ch_assembly = Channel.fromPath(params.assembly, checkIfExists: true)
@@ -640,6 +727,10 @@ workflow {
         )
     }
 
+    ch_binner_results.subscribe { label, f -> binnerSeen[label] = f }
+    if (comebin_enabled)  BIN_COMEBIN.out.status.subscribe  { binnerStatus['comebin']  = it }
+    if (vamb_tax_enabled) BIN_VAMB_TAX.out.status.subscribe { binnerStatus['vamb_tax'] = it }
+
     // 4. DAS Tool consensus. With --binners_only the consensus steps and
     // CheckM2 get no input and do not run, so nothing is stored from a
     // partial set of binners.
@@ -652,6 +743,7 @@ workflow {
         ch_bin_files,
         ch_bin_labels
     )
+    DASTOOL_CONSENSUS.out.contig2bin.subscribe { binnerSeen['dastool'] = it }
 
     // 4a'. Mobile-element annotation of the consensus bins (opt-in; reads geNomad/CheckV outputs)
     if (params.run_mge_annotate) {
@@ -701,6 +793,7 @@ workflow {
         // Binette reads FASTA files inside these bin directories; a digest of their content
         // goes in with them, because the cache does not hash files inside a directory input.
         BINETTE_CONSENSUS(ch_assembly, ch_binner_fastas.collect().map { dirs -> [dirs, fastaDirsDigest(dirs)] }, checkm2Dmnd())
+        BINETTE_CONSENSUS.out.bins.subscribe { binnerSeen['binette'] = it }
     }
 
     // 4b. MAGScoT consensus refinement
@@ -709,6 +802,8 @@ workflow {
             file("${params.magscot_hmm_dir}/gtdbtk_rel207_tigrfam.hmm", checkIfExists: true),
             file("${params.magscot_hmm_dir}/gtdbtk_rel207_Pfam-A.hmm", checkIfExists: true),
             file("${params.magscot_hmm_dir}/profiles/gtdb_rel207_default_markers.tsv", checkIfExists: true))
+        MAGSCOT_CONSENSUS.out.bins.subscribe   { binnerSeen['magscot'] = it }
+        MAGSCOT_CONSENSUS.out.status.subscribe { binnerStatus['magscot'] = it }
     }
 
     // 4c. Metabolic merge + map to bins
@@ -975,6 +1070,11 @@ workflow {
     }
 
     workflow.onComplete = {
+        try {
+            writeBinnerReport(workflow.success as boolean)
+        } catch (Exception e) {
+            log.warn "Could not write binning/binner_status.tsv: ${e.message}"
+        }
         def msg = """\
             Pipeline completed at : ${workflow.complete}
             Duration              : ${workflow.duration}
