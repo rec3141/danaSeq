@@ -31,5 +31,21 @@ class CoverMDepthTest(unittest.TestCase):
             with self.subTest(table=table):
                 self.assertNotEqual(reshape(table).returncode, 0)
 
+    def test_unmapped_is_a_contig_for_these_three_methods(self):
+        result = reshape(DENSE.replace("ctg\t500", "unmapped\t500"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unmapped\t500\t1.1571", result.stdout)
+
+    def test_header_only_and_invalid_rows(self):
+        header = DENSE.splitlines()[0] + "\n"
+        for row in ["", "unmapped\t0", "\t500\t0\t0\t500\t0\t0",
+                    "   \t500\t0\t0\t500\t0\t0", "c\t0\t0\t0\t0\t0\t0",
+                    "c\t2147483648\t0\t0\t2147483648\t0\t0",
+                    "c\t500\t0\t0\t500.0\t0\t0"]:
+            with self.subTest(row=row):
+                result = reshape(header + (row + "\n" if row else ""))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(result.stderr.strip())
+
 if __name__ == "__main__":
     unittest.main()

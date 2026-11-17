@@ -6,7 +6,7 @@
 # totalAvgDepth is the mean depth across samples, as CoverM computes it.
 # Values are rounded to 4 decimals without trailing zeros, also as CoverM does.
 BEGIN { FS = OFS = "\t" }
-function fail(message) { print "jgi_depth_table.awk: " message > "/dev/stderr"; exit 2 }
+function fail(message) { failed = 1; print "jgi_depth_table.awk: " message > "/dev/stderr"; exit 2 }
 function depth(value) { return value ~ /^[+]?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$/ }
 function r4(x,   v) {
     v = sprintf("%.4f", x)
@@ -30,17 +30,19 @@ NR == 1 {
     print line
     next
 }
-$1 == "unmapped" { next }
 {
     if (NF != 1 + 3 * n) fail("incorrect field count at row " NR)
-    if ($2 !~ /^[0-9]+$/) fail("invalid contig length at row " NR)
+    if ($1 !~ /[^[:space:]]/) fail("missing contig name at row " NR)
     total = 0; vals = ""
     for (i = 0; i < n; i++) {
-        if ($(2 + 3 * i) != $2) fail("inconsistent contig lengths at row " NR)
+        sample_len = $(2 + 3 * i)
+        if (sample_len !~ /^[0-9]+$/ || sample_len + 0 < 1 || sample_len + 0 > 2147483647)
+            fail("invalid contig length at row " NR)
+        if (sample_len != $2) fail("inconsistent contig lengths at row " NR)
         if (!depth($(3 + 3 * i)) || !depth($(4 + 3 * i))) fail("invalid depth at row " NR)
         total += $(3 + 3 * i)
         vals = vals OFS r4($(3 + 3 * i)) OFS r4($(4 + 3 * i))
     }
     print $1, $2, r4(total / n) vals
 }
-END { if (!NR) fail("empty input") }
+END { if (!failed && NR < 2) fail(NR ? "no contig rows in CoverM table" : "empty input") }
