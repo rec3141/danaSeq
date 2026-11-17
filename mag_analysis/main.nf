@@ -197,6 +197,26 @@ def metacycEnabled(String annotator) {
     return true
 }
 
+// SHA-256 over the content of every file in the given bin directories, independent of the
+// order the directories arrive in.
+def fastaDirsDigest(dirs) {
+    def perDir = (dirs instanceof List ? dirs : [dirs]).collect { d ->
+        def md = java.security.MessageDigest.getInstance('SHA-256')
+        def fs = []
+        java.nio.file.Files.walk(d as java.nio.file.Path).withCloseable { st ->
+            st.filter { java.nio.file.Files.isRegularFile(it) }.forEach { fs << it }
+        }
+        fs.sort { (d as java.nio.file.Path).relativize(it).toString() }.each { f ->
+            md.update((d as java.nio.file.Path).relativize(f).toString().getBytes('UTF-8'))
+            md.update((byte) 0)
+            md.update(java.nio.file.Files.readAllBytes(f))
+            md.update((byte) 0)
+        }
+        md.digest().encodeHex().toString()
+    }.sort()
+    return java.security.MessageDigest.getInstance('SHA-256').digest(perDir.join('\n').getBytes('UTF-8')).encodeHex().toString()
+}
+
 // The CheckM2 DIAMOND database file under --checkm2_db (Binette declares it as an input).
 def checkm2Dmnd() {
     def found = files("${params.checkm2_db}/**.dmnd")
@@ -363,6 +383,9 @@ workflow {
         log.warn "VAMB-tax skipped: --run_sendsketch true and --sendsketch_address are required."
     }
     def metacyc_enabled = metacycEnabled(effective_annotator)
+    // The consensus steps (and the database lookups they need) run only on a full run.
+    def binette_on = params.run_binette && params.checkm2_db && !params.binners_only
+    def magscot_on = params.run_magscot && !params.binners_only
 
     // 1. Create channels from file-based inputs
     ch_assembly = Channel.fromPath(params.assembly, checkIfExists: true)
@@ -649,7 +672,7 @@ workflow {
     }
 
     // 4a. Binette consensus refinement
-    if (params.run_binette && params.checkm2_db) {
+    if (binette_on) {
         ch_binner_fastas = BIN_METABAT2.out.fastas
         if (params.run_semibin && params.bam_dir) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_SEMIBIN2.out.fastas)
@@ -669,11 +692,13 @@ workflow {
         if (vamb_tax_enabled) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB_TAX.out.fastas)
         }
-        BINETTE_CONSENSUS(ch_assembly, params.binners_only ? Channel.empty() : ch_binner_fastas.collect(), checkm2Dmnd())
+        // Binette reads FASTA files inside these bin directories; a digest of their content
+        // goes in with them, because the cache does not hash files inside a directory input.
+        BINETTE_CONSENSUS(ch_assembly, ch_binner_fastas.collect().map { dirs -> [dirs, fastaDirsDigest(dirs)] }, checkm2Dmnd())
     }
 
     // 4b. MAGScoT consensus refinement
-    if (params.run_magscot) {
+    if (magscot_on) {
         MAGSCOT_CONSENSUS(ch_assembly, ch_bin_files, ch_bin_labels,
             file("${params.magscot_hmm_dir}/gtdbtk_rel207_tigrfam.hmm", checkIfExists: true),
             file("${params.magscot_hmm_dir}/gtdbtk_rel207_Pfam-A.hmm", checkIfExists: true),
@@ -763,10 +788,10 @@ workflow {
             ch_all_bins = ch_all_bins.mix(BIN_VAMB_TAX.out.fastas)
         }
         ch_all_bins = ch_all_bins.mix(DASTOOL_CONSENSUS.out.bins)
-        if (params.run_binette && params.checkm2_db) {
+        if (binette_on) {
             ch_all_bins = ch_all_bins.mix(BINETTE_CONSENSUS.out.fastas)
         }
-        if (params.run_magscot) {
+        if (magscot_on) {
             ch_all_bins = ch_all_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
         }
         ch_all_bins = params.binners_only ? Channel.empty() : ch_all_bins.collect()
@@ -777,10 +802,10 @@ workflow {
         // best-scoring CheckM2 genome of each cluster
         if (params.run_derep) {
             ch_derep_bins = DASTOOL_CONSENSUS.out.bins
-            if (params.run_binette) {
+            if (binette_on) {
                 ch_derep_bins = ch_derep_bins.mix(BINETTE_CONSENSUS.out.fastas)
             }
-            if (params.run_magscot) {
+            if (magscot_on) {
                 ch_derep_bins = ch_derep_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
             }
             DEREP_GALAH(ch_derep_bins.collect(), CHECKM2.out.report)
@@ -809,10 +834,10 @@ workflow {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB_TAX.out.fastas)
         }
         ch_gtdbtk_bins = ch_gtdbtk_bins.mix(DASTOOL_CONSENSUS.out.bins)
-        if (params.run_binette && params.checkm2_db) {
+        if (binette_on) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BINETTE_CONSENSUS.out.fastas)
         }
-        if (params.run_magscot) {
+        if (magscot_on) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
         }
         ch_gtdbtk_bins = ch_gtdbtk_bins.collect()

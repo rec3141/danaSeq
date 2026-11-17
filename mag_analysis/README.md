@@ -116,7 +116,9 @@ are unchanged. They also rerun when the process script or container changes. Two
 
 - runs that relied on a store holding these results (including `seed-store-dir.sh`, which no
   longer links DAS Tool) recompute them once;
-- each `-resume` reads the CheckM2 database in full to hash it.
+- each `-resume` reads the CheckM2 database and every bin FASTA given to Binette in full, to hash them;
+- on a full run, a requested MAGScoT or Binette whose database is missing now stops the run at the
+  start, naming the path, instead of failing its task later. `--binners_only` never looks them up.
 
 Still unresolved: the binners themselves and CheckM2 keep using `--store_dir`, which is keyed
 on output files only. A stored binner result is reused even if the assembly or depths changed,

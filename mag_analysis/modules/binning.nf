@@ -630,7 +630,7 @@ process BINETTE_CONSENSUS {
 
     input:
     path(assembly)
-    path(bin_dirs, stageAs: 'binner_?')
+    tuple path(bin_dirs, stageAs: 'binner_?'), val(bins_digest)
     path(checkm2_dmnd)
 
     output:
