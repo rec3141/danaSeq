@@ -11,14 +11,18 @@ JGI = ("contigName\tcontigLen\ttotalAvgDepth\tA.sorted\tA.sorted-var\tB.sorted\t
        "ctg\t500\t2.00543\t0.130435\t0.113669\t1.875\t5.87406\n"
        "empty\t500\t0\t0\t0\t0\t0\n")
 
+def run_subset(src, dst, kind, *samples, umask=-1):
+    return subprocess.run(["bash", "-c", 'source "$1"; shift; subset_depth "$@"',
+                           "test", HELPER, dst, *samples], text=True, capture_output=True,
+                          umask=umask, env={**os.environ, "TYPE": kind, "DEP": str(src)})
+
+
 def subset(table, kind, *samples):
     with tempfile.TemporaryDirectory() as folder:
         src, dst = (Path(folder) / name for name in ("input", "output"))
         src.write_text(table)
         dst.write_text("prior output\n")
-        proc = subprocess.run(["bash", "-c", 'source "$1"; shift; subset_depth "$@"',
-                               "test", HELPER, dst, *samples], text=True, capture_output=True,
-                              env={**os.environ, "TYPE": kind, "DEP": str(src)})
+        proc = run_subset(src, dst, kind, *samples)
         return proc, dst.read_text()
 
 class DepthTest(unittest.TestCase):
@@ -78,6 +82,47 @@ class DepthTest(unittest.TestCase):
                 proc, output = subset(JGI.replace("ctg\t500", replacement), "short", "A")
                 self.assertNotEqual(proc.returncode, 0)
                 self.assertEqual(output, "prior output\n")
+
+    def test_directory_destination_preserves_its_contents(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            src = root / "depth.tsv"
+            src.write_text(JGI)
+            dst = root / "existing"
+            dst.mkdir()
+            (dst / "table").write_text("prior output\n")
+            alias = root / "alias"
+            alias.symlink_to(dst, target_is_directory=True)
+            for path in [dst, alias]:
+                with self.subTest(path=path):
+                    proc = run_subset(src, path, "short", "A")
+                    self.assertNotEqual(proc.returncode, 0)
+                    self.assertEqual((dst / "table").read_text(), "prior output\n")
+            self.assertTrue(alias.is_symlink())
+
+    def test_replacement_preserves_permissions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            src, dst = root / "input", root / "output"
+            src.write_text(JGI)
+            dst.write_text("prior output\n")
+            for mode in [0o600, 0o640]:
+                with self.subTest(mode=mode):
+                    dst.chmod(mode)
+                    proc = run_subset(src, dst, "short", "A", umask=0o022)
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertEqual(dst.stat().st_mode & 0o777, mode)
+                    self.assertIn("ctg\t500\t0.130435", dst.read_text())
+
+    def test_selected_overflow_preserves_destination(self):
+        for table in [JGI.replace("0.130435", "1e999"),
+                      JGI.replace("0.113669", "1e999"),
+                      JGI.replace("0.130435", "1e308").replace("1.875", "1e308")]:
+            for kind in ["short", "long"]:
+                with self.subTest(table=table, kind=kind):
+                    proc, output = subset(table, kind, "A", "B")
+                    self.assertNotEqual(proc.returncode, 0)
+                    self.assertEqual(output, "prior output\n")
 
 if __name__ == "__main__":
     unittest.main()

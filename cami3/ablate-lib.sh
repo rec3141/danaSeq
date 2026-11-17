@@ -8,12 +8,19 @@ case "$TYPE" in long) TOTAL=mean ;; short) TOTAL=sum ;; *) echo "type must be lo
 subset_depth() {
     local out=$1; shift
     local tmp
+    if [[ -d "$out" ]]; then
+        echo "[ERROR] depth-table destination is a directory: $out" >&2
+        return 1
+    fi
     tmp=$(mktemp -d -- "${out}.XXXXXX") || return 1
     if awk -F'\t' -v total="$TOTAL" '
         function fail(message) { failed=1; print "[ERROR] " message > "/dev/stderr"; exit 3 }
-        function depth(value) { return value ~ /^[+]?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$/ }
+        function depth(value) {
+            return value ~ /^[+]?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$/ && value+0 <= dbl_max
+        }
         BEGIN {
             OFS="\t"
+            dbl_max=1.7976931348623157e308
             if (ARGC < 3) fail("no samples requested")
             for (i=2; i<ARGC; i++) {
                 s=ARGV[i]
@@ -50,13 +57,16 @@ subset_depth() {
                 if (!depth($i) || !depth($(i+1))) fail("invalid selected depth at row " NR)
                 t+=$i
             }
+            if (t > dbl_max) fail("selected depth sum overflow at row " NR)
             if (total=="mean") t/=m
             printf "%s\t%s\t%s", $1,$2,t
             for (j=1; j<=m; j++) printf "\t%s\t%s", $(cols[j]),$(cols[j]+1)
             print ""
         }
         END { if (!failed && !NR) fail("empty depth table") }
-    ' "$DEP" "$@" > "$tmp/table" && mv -f -- "$tmp/table" "$out"; then
+    ' "$DEP" "$@" > "$tmp/table" &&
+        { [[ ! -f "$out" ]] || chmod --reference="$out" -- "$tmp/table"; } &&
+        mv -fT -- "$tmp/table" "$out"; then
         rmdir -- "$tmp"
         return 0
     else
