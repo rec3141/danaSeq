@@ -1,13 +1,16 @@
 #!/usr/bin/awk -f
 # Reshape `coverm contig --methods length mean variance` (dense, one
-# "<sample> Length/Mean/Variance" column triple per sample) into the MetaBAT
-# depth table that CoverM's own metabat method prints:
+# "<sample> Length/Mean/Variance" column triple per sample) into CoverM's native
+# MetaBAT column layout:
 #   contigName  contigLen  totalAvgDepth  <sample>.bam  <sample>.bam-var ...
 # totalAvgDepth is the mean depth across samples, as CoverM computes it.
-# Values are rounded to 4 decimals without trailing zeros, also as CoverM does.
-BEGIN { FS = OFS = "\t" }
+# AWK formats four decimals and strips trailing zeros. At decimal half-ties,
+# sprintf can round differently from CoverM's native metabat writer.
+BEGIN { FS = OFS = "\t"; dbl_max = 1.7976931348623157e308 }
 function fail(message) { failed = 1; print "jgi_depth_table.awk: " message > "/dev/stderr"; exit 2 }
-function depth(value) { return value ~ /^[+]?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$/ }
+function depth(value) {
+    return value ~ /^[+]?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$/ && value + 0 <= dbl_max
+}
 function r4(x,   v) {
     v = sprintf("%.4f", x)
     if (v ~ /\./) { sub(/0+$/, "", v); sub(/\.$/, "", v) }
@@ -43,6 +46,7 @@ NR == 1 {
         total += $(3 + 3 * i)
         vals = vals OFS r4($(3 + 3 * i)) OFS r4($(4 + 3 * i))
     }
+    if (total > dbl_max) fail("depth sum overflow at row " NR)
     print $1, $2, r4(total / n) vals
 }
 END { if (!failed && NR < 2) fail(NR ? "no contig rows in CoverM table" : "empty input") }

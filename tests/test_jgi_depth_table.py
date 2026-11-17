@@ -47,5 +47,14 @@ class CoverMDepthTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertTrue(result.stderr.strip())
 
+    def test_overflowing_means_variances_and_total(self):
+        for table in [DENSE.replace("0.17142858", "1e999"),
+                      DENSE.replace("0.14244781", "1e999"),
+                      DENSE.replace("0.17142858", "1e308").replace("2.142857", "1e308")]:
+            with self.subTest(table=table):
+                result = reshape(table)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("inf", result.stdout.lower())
+
 if __name__ == "__main__":
     unittest.main()
