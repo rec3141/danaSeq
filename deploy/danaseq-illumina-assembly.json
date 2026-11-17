@@ -1,9 +1,9 @@
 {
   "image": "danaseq-illumina-assembly",
-  "digest": "sha256:fc9692a26dc88e1bdbe2d4452fdf8d3f74d8bcee1894a4a4803db6995c390369",
-  "commit": "8baabe717e94f61b812c8c61c548ee57b3e5c235",
-  "base_digest": "sha256:a3b51bed1f53439061cef38a9ef6e1385cda8e324d02c0fca822275cdb737339",
-  "built": "2026-11-02T04:42:00Z",
-  "sif": "oras://ghcr.io/rec3141/danaseq-illumina-assembly:sif-8baabe717e94f61b812c8c61c548ee57b3e5c235",
-  "sif_sha256": "5cf90fbd3c64fbe82167eae95b90b2c2fc15663c334ffa267185aab52cb0ddc2"
+  "digest": "sha256:e4e1825913806ecbee657ae78a9f9038e60ef957057cf79147d902ceffad3bb6",
+  "commit": "c918630ac703439632576e7b79067565a626ae94",
+  "base_digest": "sha256:3b03dd48e83aea084a683c713243304c0611431dfce99acb26d6a2c07e39f3de",
+  "built": "2026-11-17T18:29:34Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-illumina-assembly:sif-c918630ac703439632576e7b79067565a626ae94",
+  "sif_sha256": "b0a76dcc6c54db7e84d34073f722f6bd83936c4a61b80f97b9bc6a225e14ebb5"
 }

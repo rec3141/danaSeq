@@ -299,6 +299,7 @@ class BinnersOnlyGtdbtkGateTests(unittest.TestCase):
             "report.enabled = false\n"
             "trace.enabled = false\n"
             "dag.enabled = false\n"
+            "params.gtdbtk_min_memory = '0 B'\n"
             "process {\n"
             "    cpus = 1\n"
             "    memory = 512.MB\n"
@@ -315,7 +316,7 @@ class BinnersOnlyGtdbtkGateTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def _run_mag(self, name: str, binners_only: bool, store_dir: Path, *extra_args: str) -> subprocess.CompletedProcess:
+    def _run_mag(self, name: str, binners_only: bool, store_dir: Path, *extra_args: str, extra=()) -> subprocess.CompletedProcess:
         rcwd = self.d / name
         rcwd.mkdir()
         env = dict(
@@ -345,6 +346,7 @@ class BinnersOnlyGtdbtkGateTests(unittest.TestCase):
                 "--run_gtdbtk", "true",
                 "--gtdbtk_db", str(self.gtdb_db),
                 *extra_args,
+                *extra,
             ],
             cwd=rcwd,
             env=env,
@@ -456,6 +458,19 @@ class BinnersOnlyGtdbtkGateTests(unittest.TestCase):
             if ln.strip()
         }
         self.assertEqual(genomes, {"metabat_001", "dastool-metabat_001_sub"})
+
+    def test_too_little_memory_fails_gtdbtk_fast_and_run_completes(self):
+        store_dir = self.d / "lowmem_store"
+        r = self._run_mag("run_lowmem", binners_only=False, store_dir=store_dir,
+                          extra=("--gtdbtk_min_memory", "1 GB"))
+        self.assertEqual(r.returncode, 0, r.stdout + "\n" + r.stderr)
+        self.assertFalse((store_dir / "taxonomy" / "gtdbtk" / "gtdbtk_taxonomy.tsv").exists())
+        self.assertFalse(self.gtdbtk_calls_log.exists())          # gtdbtk never started
+        log = (self.d / "run_lowmem" / "nextflow.log").read_text(encoding="utf-8")
+        self.assertIn("GTDBTK_CLASSIFY (gtdbtk)` terminated with an error exit status (1) -- Error is ignored", log)
+        errs = [p.read_text(encoding="utf-8")
+                for p in (self.d / "run_lowmem" / "work").glob("*/*/.command.err")]
+        self.assertTrue(any("GTDB-Tk needs 1 GB of memory" in e for e in errs), errs)
 
 
 if __name__ == "__main__":
