@@ -261,6 +261,7 @@ process BIN_COMEBIN {
     output:
     path("comebin_bins.tsv"), emit: bins
     path("bins/"),            emit: fastas
+    path("status.tsv"),       emit: status, optional: true
 
     script:
     """
@@ -304,12 +305,15 @@ process BIN_COMEBIN {
             done >> comebin_bins.tsv
         done
     else
-        echo "[WARNING] COMEBin produced no comebin_res_bins directory" >&2
-        touch comebin_bins.tsv
+        echo "[ERROR] COMEBin exited successfully without its comebin_res_bins directory" >&2
+        exit 1
     fi
 
     if [ ! -s comebin_bins.tsv ]; then
         echo "[WARNING] COMEBin produced no bins" >&2
+        printf 'status\\nno_bins\\n' > status.tsv
+    else
+        printf 'status\\nok\\n' > status.tsv
     fi
     """
 }
@@ -451,6 +455,7 @@ process BIN_VAMB_TAX {
     output:
     path("vamb_tax_bins.tsv"), emit: bins
     path("bins/"),             emit: fastas
+    path("status.tsv"),        emit: status
 
     script:
     """
@@ -546,9 +551,11 @@ with open('vamb_abundance.tsv', 'w') as out:
 
     n_tax=\$(awk -F'\\t' 'NR>1 && \$2 != "" {c++} END{print c+0}' vamb_taxonomy.tsv)
     n_samples=\$(head -1 vamb_abundance.tsv | awk -F'\\t' '{print NF-1}')
+    status=ok
     if [ "\$n_tax" -lt 1 ] || [ "\$n_samples" -lt 1 ]; then
         echo "[WARNING] Insufficient data for taxvamb (tax=\$n_tax, samples=\$n_samples)" >&2
         touch vamb_tax_bins.tsv
+        status=insufficient_data
     else
 
     CUDA_FLAG=""
@@ -585,20 +592,29 @@ with open('vamb_abundance.tsv', 'w') as out:
             done >> vamb_tax_bins.tsv
         done
         echo "[INFO] VAMB taxvamb produced \$bin_num bins" >&2
-    elif [ -f vamb_out/vae_clusters_unsplit.tsv ]; then
-        tail -n +2 vamb_out/vae_clusters_unsplit.tsv | \
-            awk -F'\\t' '{print \$2 "\\t" \$1}' > vamb_tax_bins.tsv
+    elif [ -f vamb_out/vaevae_clusters_unsplit.tsv ]; then
+        # taxvamb writes VAEVAE assignments even when every bin falls below --minfasta.
+        if ! awk -F'\\t' '
+            NR == 1 {if (\$0 != "clustername\\tcontigname") exit 1; next}
+            NF != 2 || \$1 == "" || \$2 == "" {exit 1}
+            {print \$2 "\\tvamb_tax_" \$1}
+            END {if (!NR) exit 1}
+        ' vamb_out/vaevae_clusters_unsplit.tsv > vamb_tax_bins.tsv; then
+            echo "[ERROR] VAMB taxvamb produced an invalid cluster table" >&2
+            exit 1
+        fi
         echo "[INFO] VAMB taxvamb produced clusters but no FASTA bins above size threshold" >&2
     else
-        echo "[WARNING] VAMB taxvamb produced no output" >&2
-        touch vamb_tax_bins.tsv
+        echo "[ERROR] VAMB taxvamb exited successfully without bins or a cluster table" >&2
+        exit 1
     fi
 
     if [ ! -s vamb_tax_bins.tsv ]; then
         echo "[WARNING] VAMB taxvamb produced no bins" >&2
+        status=no_bins
     fi
-
     fi  # end: data check
+    printf 'status\\tn_classified\\tn_depth_samples\\n%s\\t%s\\t%s\\n' "\$status" "\$n_tax" "\$n_samples" > status.tsv
     """
 }
 

@@ -58,7 +58,7 @@ def helpMessage() {
                          MAGScoT or CheckM2. For running the binners on a GPU node
                          ahead of a full run that shares --store_dir [default: false]
       --run_vamb         Include VAMB [default: false]
-      --run_vamb_tax     Include taxonomy-guided VAMB [default: false]
+      --run_vamb_tax     Include taxonomy-guided VAMB (needs --run_sendsketch and --sendsketch_address) [default: false]
       --run_binette      Run Binette consensus (needs --checkm2_db) [default: false]
       --run_magscot      Run MAGScoT consensus [default: false]
       --run_derep        Dereplicate consensus bins with galah (needs --checkm2_db)
@@ -120,12 +120,28 @@ def resolveAnnotator() {
 
 // COMEBin on CPU runs for days on a co-assembly (and has failed there), so it
 // runs only where a GPU is visible unless --comebin_on_cpu. A result already
-// in --store_dir (e.g. from a --binners_only run on a GPU node) is always used.
+// in --store_dir can supply the outputs when the BAM inputs are available.
 def runComebin() {
-    if (!params.run_comebin || !params.bam_dir) return false
-    if (params.comebin_on_cpu) return true
-    if (gpuVisible()) return true
-    if (params.store_dir && file("${params.store_dir}/binning/comebin/comebin_bins.tsv").exists()) return true
+    if (!params.run_comebin) return false
+    if (!params.bam_dir) {
+        log.warn "COMEBin skipped: --bam_dir is required."
+        return false
+    }
+    if (!files("${params.bam_dir}/*.sorted.bam")) {
+        log.warn "COMEBin skipped: no *.sorted.bam files in ${params.bam_dir}."
+        return false
+    }
+    if (params.store_dir) {
+        def stored = file("${params.store_dir}/binning/comebin")
+        def assignments = stored.resolve('comebin_bins.tsv')
+        if (assignments.isFile() && stored.resolve('bins').isDirectory()) {
+            if (assignments.size() == 0 && !stored.resolve('status.tsv').isFile()) {
+                log.warn "COMEBin cached no result: empty assignment table without a recorded reason in ${stored}."
+            }
+            return true
+        }
+    }
+    if (params.comebin_on_cpu || gpuVisible()) return true
     log.warn "COMEBin skipped: no GPU visible (--gpu ${params.gpu}). Run it where one is, or pass --comebin_on_cpu true."
     return false
 }
@@ -335,6 +351,10 @@ workflow {
     validateParams()
     def effective_annotator = resolveAnnotator()
     def comebin_enabled = runComebin()
+    def vamb_tax_enabled = params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address
+    if (params.run_vamb_tax && !vamb_tax_enabled) {
+        log.warn "VAMB-tax skipped: --run_sendsketch true and --sendsketch_address are required."
+    }
     def metacyc_enabled = metacycEnabled(effective_annotator)
 
     // 1. Create channels from file-based inputs
@@ -570,11 +590,14 @@ workflow {
         )
     }
 
-    if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
+    if (vamb_tax_enabled) {
         BIN_VAMB_TAX(
             ch_assembly,
             ch_depths,
-            SENDSKETCH_CLASSIFY.out.contig_taxonomy
+            SENDSKETCH_CLASSIFY.out.contig_taxonomy.ifEmpty {
+                log.warn "VAMB-tax skipped: SendSketch produced no taxonomy table. Check the SENDSKETCH_CLASSIFY task."
+                return []
+            }.filter { it }
         )
         ch_binner_results = ch_binner_results.mix(
             BIN_VAMB_TAX.out.bins.map { ['vamb_tax', it] }
@@ -636,7 +659,7 @@ workflow {
         if (params.run_vamb) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB.out.fastas)
         }
-        if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
+        if (vamb_tax_enabled) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB_TAX.out.fastas)
         }
         BINETTE_CONSENSUS(ch_assembly, params.binners_only ? Channel.empty() : ch_binner_fastas.collect())
@@ -726,7 +749,7 @@ workflow {
         if (params.run_vamb) {
             ch_all_bins = ch_all_bins.mix(BIN_VAMB.out.fastas)
         }
-        if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
+        if (vamb_tax_enabled) {
             ch_all_bins = ch_all_bins.mix(BIN_VAMB_TAX.out.fastas)
         }
         ch_all_bins = ch_all_bins.mix(DASTOOL_CONSENSUS.out.bins)
@@ -772,7 +795,7 @@ workflow {
         if (params.run_vamb) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB.out.fastas)
         }
-        if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
+        if (vamb_tax_enabled) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB_TAX.out.fastas)
         }
         ch_gtdbtk_bins = ch_gtdbtk_bins.mix(DASTOOL_CONSENSUS.out.bins)

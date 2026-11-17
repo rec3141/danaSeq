@@ -118,6 +118,32 @@ class MagStoreDirFailurePropagationTests(unittest.TestCase):
         )
         return res, work_dir
 
+    def test_comebin_and_taxvamb_require_tool_outputs(self):
+        files = {"asm.fa": ">c1\nACGT\n",
+                 "depths.tsv": "contigName\tcontigLen\ttotalAvgDepth\ts1.bam\nc1\t4\t1\t1\n",
+                 "tax.tsv": "contig_id\tstatus\tANI\tref_name\tlineage\nc1\tC\t99\tref\td__Bacteria\n"}
+        subs = {"${assembly}": "asm.fa", "${depths}": "depths.tsv", "${sendsketch_contigs}": "tax.tsv",
+                "${params.gpu}": "false", "${task.cpus}": "1"}
+        for proc, binary, make_empty, reason in [
+            ("BIN_COMEBIN", "run_comebin.sh", "mkdir -p comebin_out/comebin_res/comebin_res_bins",
+             "without its comebin_res_bins directory"),
+            ("BIN_VAMB_TAX", "vamb", 'mkdir vamb_out; printf "clustername\\tcontigname\\n" > vamb_out/vaevae_clusters_unsplit.tsv',
+             "without bins or a cluster table"),
+        ]:
+            for tool_command, code in [("exit 0", 1), (make_empty, 0), ("exit 19", 19)]:
+                with self.subTest(proc=proc, command=tool_command):
+                    stubs = {binary: "#!/bin/sh\n" + tool_command + "\n",
+                             "torch_device.sh": "#!/bin/sh\necho cpu\n",
+                             "exit_reason.sh": "#!/bin/sh\necho failed\n"}
+                    res, work = self._run_process_script(MODULES_DIR / "binning.nf", proc, subs, files, stubs)
+                    self.assertEqual(res.returncode, code, res.stderr)
+                    if code == 0:
+                        self.assertEqual((work / "status.tsv").read_text().splitlines()[1].split("\t")[0], "no_bins")
+                    else:
+                        self.assertFalse((work / "status.tsv").exists())
+                        if code == 1:
+                            self.assertIn(reason, res.stderr)
+
     def _magscot(self, inputs, marker="M1", scorer=None, hmmsearch=None):
         files = {
             "asm.fa": ">c1\nACGT\n>c2\nTGCA\n",
