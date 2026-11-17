@@ -201,15 +201,21 @@ def metacycEnabled(String annotator) {
 // order the directories arrive in.
 def fastaDirsDigest(dirs) {
     def perDir = (dirs instanceof List ? dirs : [dirs]).collect { d ->
+        // Resolve the root (a stored bin directory can be a symlink) and follow links inside it.
+        def root = (d as java.nio.file.Path).toRealPath()
         def md = java.security.MessageDigest.getInstance('SHA-256')
         def fs = []
-        java.nio.file.Files.walk(d as java.nio.file.Path).withCloseable { st ->
+        java.nio.file.Files.walk(root, java.nio.file.FileVisitOption.FOLLOW_LINKS).withCloseable { st ->
             st.filter { java.nio.file.Files.isRegularFile(it) }.forEach { fs << it }
         }
-        fs.sort { (d as java.nio.file.Path).relativize(it).toString() }.each { f ->
-            md.update((d as java.nio.file.Path).relativize(f).toString().getBytes('UTF-8'))
+        def buf = new byte[1 << 16]
+        fs.sort { root.relativize(it).toString() }.each { f ->
+            md.update(root.relativize(f).toString().getBytes('UTF-8'))
             md.update((byte) 0)
-            md.update(java.nio.file.Files.readAllBytes(f))
+            java.nio.file.Files.newInputStream(f).withCloseable { ins ->
+                int n
+                while ((n = ins.read(buf)) > 0) md.update(buf, 0, n)
+            }
             md.update((byte) 0)
         }
         md.digest().encodeHex().toString()

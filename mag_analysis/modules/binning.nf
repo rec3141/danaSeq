@@ -678,8 +678,7 @@ process BINETTE_CONSENSUS {
     binette_exit=\$?
     set -e
 
-    # A failed run must not leave outputs: storeDir would keep an empty result
-    # and skip Binette on every resume (errorStrategy carries on).
+    # A failed run exits non-zero and publishes nothing; -resume reruns it.
     if [ \$binette_exit -ne 0 ]; then
         echo "[WARNING] Binette exited with code \$binette_exit; no results stored, it reruns on resume" >&2
         exit \$binette_exit
@@ -816,8 +815,7 @@ process MAGSCOT_CONSENSUS {
     magscot_exit=\$?
     set -e
 
-    # A failed run must not leave outputs: storeDir would keep an empty
-    # result and skip MAGScoT on every resume (errorStrategy carries on).
+    # A failed run exits non-zero and publishes nothing; -resume reruns it.
     if [ \$magscot_exit -ne 0 ]; then
         echo "[WARNING] MAGScoT exited with code \$magscot_exit; no results stored, it reruns on resume" >&2
         exit \$magscot_exit
@@ -943,8 +941,7 @@ process DASTOOL_CONSENSUS {
         if grep -q 'No bins with bin-score' dastool_out/dastool_DASTool.log 2>/dev/null; then
             echo "[WARNING] DAS_Tool exited with code \$dastool_exit: no bins above the score threshold" >&2
         else
-            # Any other failure must not leave outputs: storeDir would keep an
-            # empty consensus and skip DAS Tool on every resume.
+            # Any other failure exits non-zero and publishes nothing; -resume reruns it.
             echo "[WARNING] DAS_Tool exited with code \$dastool_exit; no results stored, it reruns on resume. End of its log:" >&2
             tail -n 20 dastool_out/dastool_DASTool.log >&2 2>/dev/null || true
             exit \$dastool_exit

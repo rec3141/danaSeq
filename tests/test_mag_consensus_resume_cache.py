@@ -217,6 +217,26 @@ workflow {{
         same_size_edit(self.d / "db/checkm2.dmnd", b"dmndA", b"dmndB")
         self.assertFalse(self.run_nf())
 
+    def _symlinked_layout(self):
+        """binA becomes a symlink to a real directory whose FASTA is itself a symlink."""
+        d = self.d
+        real = d / "real"
+        (real / "store_binA").mkdir(parents=True)
+        (real / "fasta").mkdir()
+        (real / "fasta/bin.1.fa").write_text(">c1\nACGT\n")
+        (real / "store_binA/bin.1.fa").symlink_to(real / "fasta/bin.1.fa")
+        shutil.rmtree(d / "binA")
+        (d / "binA").symlink_to(real / "store_binA", target_is_directory=True)
+        return real / "fasta/bin.1.fa"
+
+    def test_changes_through_symlinked_root_and_fasta_rerun(self):
+        target = self._symlinked_layout()
+        self.assertFalse(self.run_nf(resume=False))
+        self.assertTrue(self.run_nf())
+        same_size_edit(target, b"ACGT", b"ACGA")
+        self.assertFalse(self.run_nf())
+        self.assertIn("ACGA", (self.d / "out/binning/binette/bins/binette_001.fa").read_text())
+
 
 class UnusedConsensusDatabasesTest(unittest.TestCase):
     """Full main.nf runs: --binners_only never resolves the consensus databases."""
