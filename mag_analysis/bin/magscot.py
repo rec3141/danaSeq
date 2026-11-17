@@ -531,6 +531,10 @@ def main():
             binning_file, sep="\t", index=False
         )
     else:
+        if not args.score_only:
+            pd.DataFrame(columns=["binnew", "contig"]).to_csv(
+                f"{args.out}.refined.contig_to_bin.out", sep="\t", index=False
+            )
         print(f"No bins with score >= {args.threshold} were found.",
               file=sys.stderr)
 

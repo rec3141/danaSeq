@@ -118,6 +118,85 @@ class MagStoreDirFailurePropagationTests(unittest.TestCase):
         )
         return res, work_dir
 
+    def _magscot(self, inputs, marker="M1", scorer=None, hmmsearch=None):
+        files = {
+            "asm.fa": ">c1\nACGT\n>c2\nTGCA\n",
+            "db/gtdbtk_rel207_tigrfam.hmm": "stub\n",
+            "db/gtdbtk_rel207_Pfam-A.hmm": "stub\n",
+            "db/profiles/gtdb_rel207_default_markers.tsv": "marker\tset\nM1\tA\n",
+            **inputs,
+        }
+        project = MAG_DIR
+        if scorer is not None:
+            files["project/bin/magscot.py"] = scorer
+            project = "project"
+        return self._run_process_script(
+            MODULES_DIR / "binning.nf", "MAGSCOT_CONSENSUS",
+            {"${task.cpus}": "1", "${params.magscot_hmm_dir}": "db",
+             "${assembly}": "asm.fa", "${files_csv}": ",".join(inputs),
+             "${labels_csv}": ",".join(inputs), "${projectDir}": str(project)},
+            files,
+            {"prodigal": '#!/bin/bash\nwhile [[ $1 != -a ]]; do shift; done\nprintf ">c1_1\\nMA\\n" > "$2"\n',
+             "hmmsearch": hmmsearch or f'#!/bin/bash\nprintf "c1_1 - {marker} {marker} 1e-10\\n" > "$2"\n'},
+        )
+
+    def test_magscot_single_nonempty_binner_cannot_supply_consensus(self):
+        res, work = self._magscot({"one.tsv": "c1\tb1\n", "two.tsv": ""})
+        self.assertNotEqual(res.returncode, 0, res.stderr)
+        self.assertIn("requires at least two nonempty binners", res.stderr)
+        self.assertFalse((work / "magscot_bins.tsv").exists())
+
+    def test_magscot_missing_mapping_after_zero_exit_is_a_failure(self):
+        res, work = self._magscot({"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}, scorer="pass\n")
+        self.assertNotEqual(res.returncode, 0, res.stderr)
+        self.assertIn("missing refined mapping", res.stderr)
+        self.assertFalse((work / "magscot_bins.tsv").exists())
+
+    def test_magscot_rejects_invalid_mapping(self):
+        inputs = {"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}
+        for content in ["unexpected header\n", "binnew\tcontig\nb1\n"]:
+            with self.subTest(content=content):
+                scorer = f'open("magscot_out.refined.contig_to_bin.out", "w").write({content!r})'
+                res, work = self._magscot(inputs, scorer=scorer)
+                self.assertNotEqual(res.returncode, 0, res.stderr)
+                self.assertIn("invalid refined mapping", res.stderr)
+                self.assertFalse((work / "status.tsv").exists())
+
+    def test_magscot_requires_hmmsearch_outputs(self):
+        inputs = {"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}
+        res, work = self._magscot(inputs, hmmsearch="#!/bin/bash\nexit 0\n")
+        self.assertNotEqual(res.returncode, 0, res.stderr)
+        self.assertIn("tigr.tblout", res.stderr)
+        self.assertFalse((work / "status.tsv").exists())
+
+    def test_magscot_accepts_completed_searches_without_hits(self):
+        inputs = {"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}
+        res, work = self._magscot(inputs, hmmsearch='#!/bin/bash\necho "# no hits" > "$2"\n')
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual((work / "status.tsv").read_text(), "status\nno_qualifying_bins\n")
+
+    def test_magscot_propagates_scorer_exit(self):
+        inputs = {"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}
+        res, work = self._magscot(inputs, scorer="raise SystemExit(17)\n")
+        self.assertEqual(res.returncode, 17, res.stderr)
+        self.assertFalse((work / "status.tsv").exists())
+        self.assertFalse((work / "magscot_bins.tsv").exists())
+
+    def test_magscot_reports_qualified_and_empty_results(self):
+        for inputs, marker, status in [
+            ({"one.tsv": "", "two.tsv": ""}, "M1", "no_input_bins"),
+            ({"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}, "M9", "no_qualifying_bins"),
+            ({"one.tsv": "c1\tb1\n", "two.tsv": "c2\tb2\n"}, "M1", "ok"),
+        ]:
+            with self.subTest(status=status):
+                res, work = self._magscot(inputs, marker)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                self.assertEqual((work / "status.tsv").read_text(), f"status\n{status}\n")
+                self.assertEqual((work / "magscot_bins.tsv").read_text(),
+                                 "c1\tmagscot_001\n" if status == "ok" else "")
+                if status == "ok":
+                    self.assertEqual((work / "bins/magscot_001.fa").read_text(), ">c1\nACGT\n")
+
     def test_storedir_processes_propagate_nonzero_tool_exit_without_placeholders(self):
         """Wrapped tool exit 137 propagates non-zero and leaves zero output placeholders."""
         cases = [

@@ -705,6 +705,7 @@ process MAGSCOT_CONSENSUS {
     output:
     path("magscot_bins.tsv"), emit: bins
     path("bins/"),            emit: fastas
+    path("status.tsv"),        emit: status
 
     script:
     // Build comma-separated file and label lists from collected inputs
@@ -712,6 +713,28 @@ process MAGSCOT_CONSENSUS {
     def labels_csv = bin_labels instanceof List ? bin_labels.join(',') : bin_labels
     """
     mkdir -p bins
+
+    # Build combined contig-to-bin TSV: bin \\t contig \\t binner
+    > contig2bin.tsv
+    IFS=',' read -ra F_ARR <<< "${files_csv}"
+    IFS=',' read -ra L_ARR <<< "${labels_csv}"
+    for i in "\${!F_ARR[@]}"; do
+        if [ -s "\${F_ARR[\$i]}" ]; then
+            # Input TSVs are contig\\tbin; MAGScoT expects bin\\tcontig\\tbinner
+            awk -v lbl="\${L_ARR[\$i]}" '{print \$2 "\\t" \$1 "\\t" lbl}' "\${F_ARR[\$i]}" >> contig2bin.tsv
+        fi
+    done
+
+    n_binners=\$(awk -F'\\t' '{seen[\$3]=1} END{print length(seen)}' contig2bin.tsv)
+    if [ "\$n_binners" -eq 0 ]; then
+        echo "[WARNING] All binners produced empty output -- skipping MAGScoT" >&2
+        touch magscot_bins.tsv
+        printf 'status\\nno_input_bins\\n' > status.tsv
+        exit 0
+    elif [ "\$n_binners" -lt 2 ]; then
+        echo "[ERROR] MAGScoT consensus requires at least two nonempty binners" >&2
+        exit 1
+    fi
 
     # MAGScoT's HMMs and marker profiles both come from download-databases.sh
     # --magscot; check them before the hours of Prodigal and hmmsearch.
@@ -750,77 +773,69 @@ process MAGSCOT_CONSENSUS {
     # 3. Parse HMM results: gene_id, marker_name, e-value
     #    TIGRFAM: target=\$1, query=\$3, evalue=\$5
     #    Pfam:    target=\$1, query=\$4, evalue=\$5
-    grep -v '^#' tigr.tblout | awk '{print \$1 "\\t" \$3 "\\t" \$5}' > markers.tsv
-    grep -v '^#' pfam.tblout | awk '{print \$1 "\\t" \$4 "\\t" \$5}' >> markers.tsv
+    awk '!/^#/ && NF {print \$1 "\\t" \$3 "\\t" \$5}' tigr.tblout > markers.tsv
+    awk '!/^#/ && NF {print \$1 "\\t" \$4 "\\t" \$5}' pfam.tblout >> markers.tsv
     echo "[INFO] Found \$(wc -l < markers.tsv) marker gene hits" >&2
 
-    # 4. Build combined contig-to-bin TSV: bin \\t contig \\t binner
-    > contig2bin.tsv
-    IFS=',' read -ra F_ARR <<< "${files_csv}"
-    IFS=',' read -ra L_ARR <<< "${labels_csv}"
-    for i in "\${!F_ARR[@]}"; do
-        if [ -s "\${F_ARR[\$i]}" ]; then
-            # Input TSVs are contig\\tbin; MAGScoT expects bin\\tcontig\\tbinner
-            awk -v lbl="\${L_ARR[\$i]}" '{print \$2 "\\t" \$1 "\\t" lbl}' "\${F_ARR[\$i]}" >> contig2bin.tsv
-        fi
-    done
-
-    if [ ! -s contig2bin.tsv ]; then
-        echo "[WARNING] All binners produced empty output -- skipping MAGScoT" >&2
-        touch magscot_bins.tsv
-    else
-        # 5. Run MAGScoT (Python port — no R dependency)
-        # The container ignores the conda directive, and its python3 is another
-        # env's; use the binning env's interpreter, which has pandas.
-        PY=python3
-        if [ -z "\${CONDA_PREFIX:-}" ] && [ -x /opt/conda/envs/dana-mag-binning/bin/python ]; then
-            PY=/opt/conda/envs/dana-mag-binning/bin/python
-        fi
-        set +e
-        "\$PY" ${projectDir}/bin/magscot.py \
-            -i contig2bin.tsv --hmm markers.tsv \
-            --profile_dir "\$MAGSCOT_HMM/profiles" \
-            -o magscot_out
-        magscot_exit=\$?
-        set -e
-
-        # A failed run must not leave outputs: storeDir would keep an empty
-        # result and skip MAGScoT on every resume (errorStrategy carries on).
-        if [ \$magscot_exit -ne 0 ]; then
-            echo "[WARNING] MAGScoT exited with code \$magscot_exit; no results stored, it reruns on resume" >&2
-            exit \$magscot_exit
-        elif [ -f magscot_out.refined.contig_to_bin.out ]; then
-            # MAGScoT output: header + bin\\tcontig
-            # Skip header, extract bin\\tcontig pairs
-            tail -n +2 magscot_out.refined.contig_to_bin.out > magscot_raw.tsv
-
-            # Get unique bin names (column 1) and renumber sequentially
-            > magscot_bins.tsv
-            cut -f1 magscot_raw.tsv | sort -u > magscot_bin_list.txt
-            bin_num=0
-            for old_bin in \$(cat magscot_bin_list.txt); do
-                bin_num=\$((bin_num + 1))
-                bin_name=\$(printf 'magscot_%03d' \$bin_num)
-                # Extract contigs for this bin (column 2 where column 1 matches)
-                awk -v b="\$old_bin" '\$1 == b {print \$2}' magscot_raw.tsv > tmp_contigs.txt
-                while read -r contig; do
-                    printf '%s\\t%s\\n' "\$contig" "\$bin_name"
-                done < tmp_contigs.txt >> magscot_bins.tsv
-                # Extract bin FASTA from assembly
-                awk 'BEGIN{while((getline<"tmp_contigs.txt")>0) keep[\$1]=1}
-                     /^>/{p=keep[substr(\$1,2)]}p' ${assembly} > "bins/\${bin_name}.fa"
-                rm -f tmp_contigs.txt
-            done
-            echo "[INFO] MAGScoT produced \$bin_num bins" >&2
-            rm -f magscot_bin_list.txt
-        else
-            echo "[WARNING] MAGScoT produced no output" >&2
-            touch magscot_bins.tsv
-        fi
+    # Run MAGScoT (Python port — no R dependency)
+    # The container ignores the conda directive, and its python3 is another
+    # env's; use the binning env's interpreter, which has pandas.
+    PY=python3
+    if [ -z "\${CONDA_PREFIX:-}" ] && [ -x /opt/conda/envs/dana-mag-binning/bin/python ]; then
+        PY=/opt/conda/envs/dana-mag-binning/bin/python
     fi
+    set +e
+    "\$PY" ${projectDir}/bin/magscot.py \
+        -i contig2bin.tsv --hmm markers.tsv \
+        --profile_dir "\$MAGSCOT_HMM/profiles" \
+        -o magscot_out
+    magscot_exit=\$?
+    set -e
+
+    # A failed run must not leave outputs: storeDir would keep an empty
+    # result and skip MAGScoT on every resume (errorStrategy carries on).
+    if [ \$magscot_exit -ne 0 ]; then
+        echo "[WARNING] MAGScoT exited with code \$magscot_exit; no results stored, it reruns on resume" >&2
+        exit \$magscot_exit
+    elif [ ! -s magscot_out.refined.contig_to_bin.out ]; then
+        echo "[ERROR] MAGScoT exited successfully with missing refined mapping" >&2
+        exit 1
+    fi
+    # MAGScoT output: header + bin\\tcontig
+    if ! awk -F'\\t' '
+        NR == 1 {if (NF != 2 || \$1 != "binnew" || \$2 != "contig") exit 1; next}
+        NF != 2 || \$1 == "" || \$2 == "" {exit 1}
+        {print}
+    ' magscot_out.refined.contig_to_bin.out > magscot_raw.tsv; then
+        echo "[ERROR] MAGScoT produced an invalid refined mapping" >&2
+        exit 1
+    fi
+
+    # Get unique bin names (column 1) and renumber sequentially
+    > magscot_bins.tsv
+    cut -f1 magscot_raw.tsv | sort -u > magscot_bin_list.txt
+    bin_num=0
+    for old_bin in \$(cat magscot_bin_list.txt); do
+        bin_num=\$((bin_num + 1))
+        bin_name=\$(printf 'magscot_%03d' \$bin_num)
+        # Extract contigs for this bin (column 2 where column 1 matches)
+        awk -v b="\$old_bin" '\$1 == b {print \$2}' magscot_raw.tsv > tmp_contigs.txt
+        while read -r contig; do
+            printf '%s\\t%s\\n' "\$contig" "\$bin_name"
+        done < tmp_contigs.txt >> magscot_bins.tsv
+        # Extract bin FASTA from assembly
+        awk 'BEGIN{while((getline<"tmp_contigs.txt")>0) keep[\$1]=1}
+             /^>/{p=keep[substr(\$1,2)]}p' ${assembly} > "bins/\${bin_name}.fa"
+        rm -f tmp_contigs.txt
+    done
+    echo "[INFO] MAGScoT produced \$bin_num bins" >&2
+    rm -f magscot_bin_list.txt
 
     if [ ! -s magscot_bins.tsv ]; then
         echo "[WARNING] MAGScoT produced no bins" >&2
+        printf 'status\\nno_qualifying_bins\\n' > status.tsv
+    else
+        printf 'status\\nok\\n' > status.tsv
     fi
     """
 }
