@@ -1,8 +1,8 @@
 {
   "image": "danaseq-illumina-amplicon",
-  "digest": "sha256:b30321ac6bd41575590aad8243be1eccdd1ba2f8d129a2fded003f9e2e437be4",
-  "commit": "6432a00a85b7684b53cc8df62991c1e273d38684",
-  "built": "2026-11-04T04:36:37Z",
-  "sif": "oras://ghcr.io/rec3141/danaseq-illumina-amplicon:sif-6432a00a85b7684b53cc8df62991c1e273d38684",
-  "sif_sha256": "255c0d11823be4db1e5db5fdf75acd05bc066142e36db25453585736e22e7222"
+  "digest": "sha256:bd4fbf02f2ef39a19610bcbd7734fe4fed3baf42e325369bf78745c4d3f2bd80",
+  "commit": "c918630ac703439632576e7b79067565a626ae94",
+  "built": "2026-11-17T18:29:26Z",
+  "sif": "oras://ghcr.io/rec3141/danaseq-illumina-amplicon:sif-c918630ac703439632576e7b79067565a626ae94",
+  "sif_sha256": "8a8a74c6ddd22ae70666d459234eebfbe3e4ea00674652a9dd96c8319d5e76fa"
 }
