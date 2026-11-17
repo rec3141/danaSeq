@@ -9,18 +9,19 @@ subset_depth() {
     local out=$1; shift
     local tmp
     tmp=$(mktemp -d -- "${out}.XXXXXX") || return 1
-    if awk -F'\t' -v keep="$*" -v total="$TOTAL" '
-        function fail(message) { print "[ERROR] " message > "/dev/stderr"; exit 3 }
+    if awk -F'\t' -v total="$TOTAL" '
+        function fail(message) { failed=1; print "[ERROR] " message > "/dev/stderr"; exit 3 }
         function depth(value) { return value ~ /^[+]?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$/ }
         BEGIN {
             OFS="\t"
-            n=split(keep, samples, " ")
-            if (!n) fail("no samples requested")
-            for (i=1; i<=n; i++) {
-                s=samples[i]
+            if (ARGC < 3) fail("no samples requested")
+            for (i=2; i<ARGC; i++) {
+                s=ARGV[i]
+                if (!length(s)) fail("empty requested sample")
                 if (s in want) fail("duplicate requested sample " s)
                 want[s]=1
             }
+            ARGC=2  # Only the depth table is an input file.
         }
         NR==1 {
             width=NF
@@ -41,6 +42,8 @@ subset_depth() {
         }
         {
             if (NF != width) fail("incorrect field count at row " NR)
+            if ($1 !~ /[^[:space:]]/) fail("missing contig name at row " NR)
+            if ($2 !~ /^[0-9]+$/ || $2+0 < 1 || $2+0 > 2147483647) fail("invalid contig length at row " NR)
             t=0
             for (j=1; j<=m; j++) {
                 i=cols[j]
@@ -52,8 +55,8 @@ subset_depth() {
             for (j=1; j<=m; j++) printf "\t%s\t%s", $(cols[j]),$(cols[j]+1)
             print ""
         }
-        END { if (!NR) fail("empty depth table") }
-    ' "$DEP" > "$tmp/table" && mv -f -- "$tmp/table" "$out"; then
+        END { if (!failed && !NR) fail("empty depth table") }
+    ' "$DEP" "$@" > "$tmp/table" && mv -f -- "$tmp/table" "$out"; then
         rmdir -- "$tmp"
         return 0
     else

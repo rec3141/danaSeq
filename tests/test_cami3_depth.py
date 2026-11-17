@@ -52,5 +52,32 @@ class DepthTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(text, "prior output\n")
 
+    def test_zero_contig_jgi_table_and_unmapped_reference(self):
+        header = JGI.splitlines(keepends=True)[0]
+        proc, output = subset(header, "short", "A", "B")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(output, header)
+        proc, output = subset(JGI.replace("ctg\t500", "unmapped\t500"), "short", "A")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("unmapped\t500\t", output)
+
+    def test_sample_arguments_keep_their_boundaries(self):
+        proc, output = subset(JGI.replace("A.sorted", "A one.sorted"), "short", "A one")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("A one.sorted-var", output)
+        for names in [("", "A"), ("A", ""), ("A B",)]:
+            with self.subTest(names=names):
+                proc, output = subset(JGI, "short", *names)
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertEqual(output, "prior output\n")
+
+    def test_bad_ids_and_reference_lengths_preserve_destination(self):
+        for replacement in ["\t500", "   \t500", "ctg\tabc", "ctg\t-1", "ctg\t0",
+                            "ctg\t1.5", "ctg\t2147483648"]:
+            with self.subTest(replacement=replacement):
+                proc, output = subset(JGI.replace("ctg\t500", replacement), "short", "A")
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertEqual(output, "prior output\n")
+
 if __name__ == "__main__":
     unittest.main()
