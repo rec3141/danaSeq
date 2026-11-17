@@ -197,6 +197,13 @@ def metacycEnabled(String annotator) {
     return true
 }
 
+// The CheckM2 DIAMOND database file under --checkm2_db (Binette declares it as an input).
+def checkm2Dmnd() {
+    def found = files("${params.checkm2_db}/**.dmnd")
+    if (!found) error "No .dmnd file found under --checkm2_db ${params.checkm2_db}"
+    return found.sort { it.toString() }[0]
+}
+
 def gpuVisible() {
     if (params.gpu.toString() in ['false', 'off', 'cpu']) return false
     try {
@@ -662,12 +669,15 @@ workflow {
         if (vamb_tax_enabled) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB_TAX.out.fastas)
         }
-        BINETTE_CONSENSUS(ch_assembly, params.binners_only ? Channel.empty() : ch_binner_fastas.collect())
+        BINETTE_CONSENSUS(ch_assembly, params.binners_only ? Channel.empty() : ch_binner_fastas.collect(), checkm2Dmnd())
     }
 
     // 4b. MAGScoT consensus refinement
     if (params.run_magscot) {
-        MAGSCOT_CONSENSUS(ch_assembly, ch_bin_files, ch_bin_labels)
+        MAGSCOT_CONSENSUS(ch_assembly, ch_bin_files, ch_bin_labels,
+            file("${params.magscot_hmm_dir}/gtdbtk_rel207_tigrfam.hmm", checkIfExists: true),
+            file("${params.magscot_hmm_dir}/gtdbtk_rel207_Pfam-A.hmm", checkIfExists: true),
+            file("${params.magscot_hmm_dir}/profiles/gtdb_rel207_default_markers.tsv", checkIfExists: true))
     }
 
     // 4c. Metabolic merge + map to bins

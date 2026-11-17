@@ -105,6 +105,24 @@ results/
 └── pipeline_info/
 ```
 
+### Caching of the consensus steps
+
+DAS Tool, Binette and MAGScoT do not use `--store_dir`. A stored consensus was never checked
+against its inputs, so after a binner that had failed was rerun, `-resume` kept the consensus
+built without it. These three steps use Nextflow's `-resume` with content hashing
+(`cache 'deep'`). They rerun when a binner's assignment table, the assembly, the CheckM2
+DIAMOND database (Binette) or a MAGScoT marker file changes, even if size and modification time
+are unchanged. They also rerun when the process script or container changes. Two costs:
+
+- runs that relied on a store holding these results (including `seed-store-dir.sh`, which no
+  longer links DAS Tool) recompute them once;
+- each `-resume` reads the CheckM2 database in full to hash it.
+
+Still unresolved: the binners themselves and CheckM2 keep using `--store_dir`, which is keyed
+on output files only. A stored binner result is reused even if the assembly or depths changed,
+and a stored CheckM2 result is reused even if DAS Tool's bins changed. Only the consensus steps
+are fresh by construction.
+
 ## Modules
 
 All modules are optional and controlled via `--run_*` flags. Use `--all` to enable everything.

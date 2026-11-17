@@ -622,12 +622,16 @@ process BINETTE_CONSENSUS {
     tag "binette"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binette"
-    publishDir "${params.outdir}/binning/binette", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/binning/binette" : null
+    // No storeDir: a stored consensus is not checked against its inputs. -resume with deep
+    // (content) hashing reruns it whenever an assignment table, the assembly or a declared
+    // database changes, and also when this script or the container changes.
+    cache 'deep'
+    publishDir "${params.outdir}/binning/binette", mode: 'copy'
 
     input:
     path(assembly)
     path(bin_dirs, stageAs: 'binner_?')
+    path(checkm2_dmnd)
 
     output:
     path("binette_bins.tsv"), emit: bins
@@ -640,12 +644,8 @@ process BINETTE_CONSENSUS {
     mkdir -p bins
 
     # Binette consensus refinement — set operations + internal CheckM2 evaluation
-    # Resolve the DIAMOND .dmnd file from the CheckM2 database directory
-    CHECKM2_DMND=\$(find ${params.checkm2_db} -name '*.dmnd' -type f | head -1)
-    if [ -z "\$CHECKM2_DMND" ]; then
-        echo "[ERROR] No .dmnd file found in ${params.checkm2_db}" >&2
-        exit 1
-    fi
+    # The CheckM2 DIAMOND database, declared as an input so its content keys the cache
+    CHECKM2_DMND=${checkm2_dmnd}
     echo "[INFO] Using CheckM2 DIAMOND db: \$CHECKM2_DMND" >&2
 
     # Binette builds its union/difference/intersection graph from every input
@@ -710,13 +710,21 @@ process MAGSCOT_CONSENSUS {
     tag "magscot"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/magscot", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/binning/magscot" : null
+    // No storeDir: a stored consensus is not checked against its inputs. -resume with deep
+    // (content) hashing reruns it whenever an assignment table, the assembly or a declared
+    // database changes, and also when this script or the container changes.
+    cache 'deep'
+    publishDir "${params.outdir}/binning/magscot", mode: 'copy'
 
     input:
     path(assembly)
     path(bin_files)
     val(bin_labels)
+    // Each database file MAGScoT reads, declared so its content keys the cache (a declared
+    // directory is hashed without its files' content).
+    path(tigrfam_hmm, stageAs: 'magscot_db/gtdbtk_rel207_tigrfam.hmm')
+    path(pfam_hmm,    stageAs: 'magscot_db/gtdbtk_rel207_Pfam-A.hmm')
+    path(markers_tsv, stageAs: 'magscot_db/profiles/gtdb_rel207_default_markers.tsv')
 
     output:
     path("magscot_bins.tsv"), emit: bins
@@ -754,7 +762,7 @@ process MAGSCOT_CONSENSUS {
 
     # MAGScoT's HMMs and marker profiles both come from download-databases.sh
     # --magscot; check them before the hours of Prodigal and hmmsearch.
-    MAGSCOT_HMM="${params.magscot_hmm_dir}"
+    MAGSCOT_HMM=magscot_db
     for f in gtdbtk_rel207_tigrfam.hmm gtdbtk_rel207_Pfam-A.hmm profiles/gtdb_rel207_default_markers.tsv; do
         if [ ! -s "\$MAGSCOT_HMM/\$f" ]; then
             echo "[ERROR] MAGScoT: \$MAGSCOT_HMM/\$f is missing; fetch it with download-databases.sh --magscot" >&2
@@ -860,8 +868,11 @@ process DASTOOL_CONSENSUS {
     tag "dastool"
     label 'process_medium'
     conda "${projectDir}/conda-envs/dana-mag-binning"
-    publishDir "${params.outdir}/binning/dastool", mode: 'copy', enabled: !params.store_dir
-    storeDir params.store_dir ? "${params.store_dir}/binning/dastool" : null
+    // No storeDir: a stored consensus is not checked against its inputs. -resume with deep
+    // (content) hashing reruns it whenever an assignment table, the assembly or a declared
+    // database changes, and also when this script or the container changes.
+    cache 'deep'
+    publishDir "${params.outdir}/binning/dastool", mode: 'copy'
 
     input:
     path(assembly)

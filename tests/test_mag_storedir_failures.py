@@ -85,9 +85,10 @@ class MagStoreDirFailurePropagationTests(unittest.TestCase):
         subs: dict[str, str],
         files: dict[str, str],
         stubs: dict[str, str],
+        cache_contract: str = "storeDir params.store_dir",
     ) -> tuple[subprocess.CompletedProcess[str], Path]:
         block = extract_nf_process_block(nf_path, proc_name)
-        self.assertIn("storeDir params.store_dir", block)
+        self.assertIn(cache_contract, block)
         script_body = extract_nf_bash_body(block)
         for key, val in subs.items():
             script_body = script_body.replace(key, val)
@@ -147,9 +148,10 @@ class MagStoreDirFailurePropagationTests(unittest.TestCase):
     def _magscot(self, inputs, marker="M1", scorer=None, hmmsearch=None):
         files = {
             "asm.fa": ">c1\nACGT\n>c2\nTGCA\n",
-            "db/gtdbtk_rel207_tigrfam.hmm": "stub\n",
-            "db/gtdbtk_rel207_Pfam-A.hmm": "stub\n",
-            "db/profiles/gtdb_rel207_default_markers.tsv": "marker\tset\nM1\tA\n",
+            # The process stages its declared database files under magscot_db/.
+            "magscot_db/gtdbtk_rel207_tigrfam.hmm": "stub\n",
+            "magscot_db/gtdbtk_rel207_Pfam-A.hmm": "stub\n",
+            "magscot_db/profiles/gtdb_rel207_default_markers.tsv": "marker\tset\nM1\tA\n",
             **inputs,
         }
         project = MAG_DIR
@@ -158,12 +160,13 @@ class MagStoreDirFailurePropagationTests(unittest.TestCase):
             project = "project"
         return self._run_process_script(
             MODULES_DIR / "binning.nf", "MAGSCOT_CONSENSUS",
-            {"${task.cpus}": "1", "${params.magscot_hmm_dir}": "db",
+            {"${task.cpus}": "1",
              "${assembly}": "asm.fa", "${files_csv}": ",".join(inputs),
              "${labels_csv}": ",".join(inputs), "${projectDir}": str(project)},
             files,
             {"prodigal": '#!/bin/bash\nwhile [[ $1 != -a ]]; do shift; done\nprintf ">c1_1\\nMA\\n" > "$2"\n',
              "hmmsearch": hmmsearch or f'#!/bin/bash\nprintf "c1_1 - {marker} {marker} 1e-10\\n" > "$2"\n'},
+            cache_contract="cache 'deep'",
         )
 
     def test_magscot_single_nonempty_binner_cannot_supply_consensus(self):
