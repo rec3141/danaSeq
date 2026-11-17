@@ -255,6 +255,10 @@ class UnusedConsensusDatabasesTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("MAGSCOT_CONSENSUS", r.stdout)
         self.assertNotIn("BINETTE_CONSENSUS", r.stdout)
+        report = self.fx.d / "binners_only_missing_dbs/out/binning/binner_status.tsv"
+        rows = dict(l.split("\t")[:2] for l in report.read_text().splitlines()[2:])
+        self.assertEqual((rows["binette"], rows["magscot"], rows["dastool"]), ("not_run", "not_run", "not_run"))
+        self.assertEqual(rows["metabat"], "ok")
 
     def test_full_run_with_missing_magscot_database_stops_with_its_path(self):
         missing = str(self.fx.d / "no-magscot-db")
