@@ -73,6 +73,11 @@ process LATE_BIN {
     output: path("late.tsv"), emit: bins
     script: "sleep 20; printf 'c\\tb\\n' > late.tsv"
 }
+process CONSUME {
+    input: path(x)
+    output: path("consumed.tsv"), emit: bins
+    script: "cp ${x} consumed.tsv"
+}
 process ABORT {
     errorStrategy 'terminate'
     script: "sleep 2; exit 5"
@@ -82,11 +87,13 @@ process ABORT {
 WORKFLOW = r'''
 workflow {
     binnerPlan.putAll(planBinners(false, false))
-    // planBinners marks dastool launched; this mock does not run it, so it must come out
-    // as failed (launched, nothing emitted) when the run succeeds.
+    removePreviousBinnerReport()
+    // dastool is launched by the plan; here it consumes FAIL_BIN's output, which never
+    // arrives, so it emits nothing although nothing about it failed: no_result.
     OK_BIN();     if (!params.abort) OK_BIN.out.bins.subscribe { binnerSeen['metabat'] = it }
     EMPTY_BIN();  EMPTY_BIN.out.bins.subscribe  { binnerSeen['maxbin'] = it }
     FAIL_BIN();   FAIL_BIN.out.bins.subscribe   { binnerSeen['vamb'] = it }
+    CONSUME(FAIL_BIN.out.bins); CONSUME.out.bins.subscribe { binnerSeen['dastool'] = it }
     STATUS_BIN(); STATUS_BIN.out.bins.subscribe { binnerSeen['magscot'] = it }
                   STATUS_BIN.out.status.subscribe { binnerStatus['magscot'] = it }
     if (params.abort) {
@@ -94,7 +101,11 @@ workflow {
         ABORT()
     }
     workflow.onComplete = {
-        writeBinnerReport(workflow.success as boolean)
+        try {
+            writeBinnerReport(workflow.success as boolean)
+        } catch (Exception e) {
+            log.warn "Could not write binning/binner_status.tsv: ${e.message}"
+        }
     }
 }
 '''
@@ -124,8 +135,13 @@ class BinnerReportTest(unittest.TestCase):
 
     def table(self, d: Path) -> dict:
         lines = (d / "out/binning/binner_status.tsv").read_text().splitlines()
-        self.assertEqual(lines[0], "binner\tstate\tdetail")
-        return {r.split("\t")[0]: r.split("\t")[1] for r in lines[1:]}
+        self.assertTrue(lines[0].startswith("# run_name="), lines[0])
+        self.assertEqual(lines[1], "binner\tstate\tdetail")
+        return {r.split("\t")[0]: r.split("\t")[1] for r in lines[2:]}
+
+    def run_name(self, d: Path) -> str:
+        first = (d / "out/binning/binner_status.tsv").read_text().splitlines()[0]
+        return first.split("\t")[0].split("=", 1)[1]
 
     def assert_no_partial(self, d: Path):
         self.assertEqual([p.name for p in (d / "out/binning").iterdir() if p.name.startswith(".")], [])
@@ -138,9 +154,9 @@ class BinnerReportTest(unittest.TestCase):
             "maxbin": "completed_empty",  # emitted an empty table, no status
             "lorbin": "disabled",
             "comebin": "disabled",
-            "vamb": "failed",           # task failed twice, ignored; run still succeeds
+            "vamb": "no_result",        # task failed twice, ignored; run still succeeds
             "vamb_tax": "skipped",      # requested without SendSketch
-            "dastool": "failed",        # launched by the plan, never emitted here
+            "dastool": "no_result",     # its only input came from the ignored failure
             "binette": "skipped",       # requested without --checkm2_db
             "magscot": "no_input_bins",  # value from the emitted status.tsv
         }
@@ -172,6 +188,27 @@ class BinnerReportTest(unittest.TestCase):
         self.assertEqual(t["metabat"], "not_completed")
         self.assertEqual(t["semibin"], "skipped")
         self.assert_no_partial(d)
+
+    def test_previous_report_is_replaced_and_names_its_run(self):
+        d = self.tmp / "previous"; (d / "out/binning").mkdir(parents=True)
+        (d / "out/binning/binner_status.tsv").write_text("# run_name=old_run\nbinner\tstate\tdetail\nmetabat\tok\t\n")
+        r = self.run_nf(d)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotEqual(self.run_name(d), "old_run")
+        self.assertIn(self.run_name(d), r.stdout)  # the run name Nextflow printed at launch
+
+    def test_write_failure_leaves_no_table_that_passes_for_this_run(self):
+        d = self.tmp / "unwritable"; (d / "out/binning").mkdir(parents=True)
+        (d / "out/binning/binner_status.tsv").write_text("# run_name=old_run\nbinner\tstate\tdetail\n")
+        os.chmod(d / "out/binning", 0o555)
+        self.addCleanup(os.chmod, d / "out/binning", 0o755)
+        r = self.run_nf(d)
+        log = r.stdout + r.stderr
+        self.assertIn("Could not remove the previous", log)
+        self.assertIn("Could not write binning/binner_status.tsv", log)
+        # The only table there is the old one, and it names a different run.
+        self.assertEqual(self.run_name(d), "old_run")
+        self.assertNotIn("[old_run]", r.stdout)
 
     def test_main_nf_compiles(self):
         r = subprocess.run([str(self.nf), "run", str(MAIN), "-preview", "--assembly", "x.fa",

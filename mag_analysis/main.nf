@@ -349,9 +349,11 @@ process STAGE_INPUTS {
 // given), not_run (consensus under --binners_only), or launched. A launched step is
 // reported from what this run's task emitted, never from files left on disk: its
 // status.tsv value where the process writes one, otherwise ok / completed_empty from the
-// emitted assignments. A launched step that emitted nothing is failed (task error, which
-// the retry-then-ignore errorStrategy lets the run survive) or not_completed (the run
-// itself stopped). Cached (storeDir or -resume) results emit like fresh ones.
+// emitted assignments. A launched step that emitted nothing is no_result when the run
+// finished (its task failed and was ignored, or its inputs never arrived; the Nextflow
+// log tells which) or not_completed when the run itself stopped. Cached (storeDir or
+// -resume) results emit like fresh ones. Each table names its run, and the previous
+// table is removed when a run starts, so an older table cannot pass for this run's.
 binnerSeen   = new java.util.concurrent.ConcurrentHashMap()
 binnerStatus = new java.util.concurrent.ConcurrentHashMap()
 binnerPlan   = new LinkedHashMap()
@@ -381,7 +383,7 @@ def binnerOutcome(String name, boolean runSucceeded) {
     def (state, reason) = binnerPlan[name]
     if (state != 'launched') return [state, reason]
     if (!binnerSeen.containsKey(name)) {
-        return runSucceeded ? ['failed', 'task failed; the run continued under the retry-then-ignore errorStrategy (see the Nextflow log)']
+        return runSucceeded ? ['no_result', 'no output emitted: the task failed and was ignored, or its inputs never arrived (see the Nextflow log)']
                             : ['not_completed', 'the run stopped before this step finished']
     }
     if (binnerStatus.containsKey(name)) {
@@ -401,17 +403,25 @@ def binnerOutcome(String name, boolean runSucceeded) {
     return nonEmpty ? ['ok', ''] : ['completed_empty', 'no assignments and no status recorded']
 }
 
+// A table left by an earlier run must not be read as this run's if this run cannot write one.
+def removePreviousBinnerReport() {
+    def old = new File("${params.outdir}/binning/binner_status.tsv")
+    if (old.exists() && !old.delete())
+        log.warn "Could not remove the previous ${old}; check its run_name line before trusting it"
+}
+
 // Written to a temporary name and moved into place, so a reader never sees a partial table.
 def writeBinnerReport(boolean runSucceeded) {
     if (binnerPlan.isEmpty()) return
     def dir = new File("${params.outdir}/binning")
     dir.mkdirs()
     def tmp = new File(dir, ".binner_status.tsv.${ProcessHandle.current().pid()}.tmp")
-    def rows = ['binner\tstate\tdetail']
+    def rows = ["# run_name=${workflow.runName}\tsession_id=${workflow.sessionId}\tstarted=${workflow.start}\tsuccess=${runSucceeded}",
+                'binner\tstate\tdetail']
     binnerPlan.keySet().each { name ->
         def (state, detail) = binnerOutcome(name, runSucceeded)
         rows << "${name}\t${state}\t${detail}"
-        if (state in ['failed', 'not_completed', 'skipped', 'completed_empty', 'completed_status_unreadable'])
+        if (state in ['no_result', 'not_completed', 'skipped', 'completed_empty', 'completed_status_unreadable'])
             log.warn "Binner ${name}: ${state}${detail ? ' (' + detail + ')' : ''}"
     }
     tmp.text = rows.join('\n') + '\n'
@@ -432,6 +442,7 @@ workflow {
     }
     def metacyc_enabled = metacycEnabled(effective_annotator)
     binnerPlan.putAll(planBinners(comebin_enabled as boolean, vamb_tax_enabled as boolean))
+    removePreviousBinnerReport()
 
     // 1. Create channels from file-based inputs
     ch_assembly = Channel.fromPath(params.assembly, checkIfExists: true)

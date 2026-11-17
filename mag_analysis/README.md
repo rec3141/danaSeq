@@ -118,10 +118,10 @@ Every binner and consensus step ends the run in one state:
 | `ok` | finished with bin assignments |
 | `no_bins`, `no_input_bins`, `insufficient_data` | finished and recorded why it has no bins (`status.tsv` of COMEBin, taxVAMB, MAGScoT) |
 | `completed_empty` | finished with no assignments and no recorded reason |
-| `failed` | the task failed; the run continued because failed tasks are retried once and then ignored |
+| `no_result` | launched but emitted nothing although the run finished: its task failed (failed tasks are retried once, then ignored) or its inputs never arrived; the Nextflow log says which |
 | `not_completed` | the run itself stopped before this step finished |
 
-The state comes from what this run's tasks emitted (a cached `--store_dir` or `-resume` result counts), never from files left in the output folder. The table is written when the run ends, under a temporary name, and then moved into place.
+The first line names the run (`run_name`, `session_id`, start time, success). A table left by an earlier run is removed when a run starts. The state comes from what this run's tasks emitted (a cached `--store_dir` or `-resume` result counts), never from files left in the output folder. The table is written when the run ends, under a temporary name, and then moved into place.
 
 MAGScoT and taxVAMB now always write a `status.tsv`. Results stored in a `--store_dir` before that change lack it, so both steps recompute once on the first run that uses the store.
 
