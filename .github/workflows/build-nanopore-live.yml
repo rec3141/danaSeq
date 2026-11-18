@@ -8,6 +8,9 @@ on:
       - '!nanopore_live/conda-envs/**'
       - '.github/workflows/build-nanopore-live.yml'
   workflow_dispatch:
+  # fired by fastsne's release workflow, so each fastsne release rebuilds the image
+  repository_dispatch:
+    types: [fastsne-release]
 
 env:
   REGISTRY: ghcr.io
@@ -64,6 +67,15 @@ jobs:
         id: stamp
         run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve the latest fastsne release
+        id: fastsne
+        # Passed as FASTSNE_VERSION so a new release changes the build arg and misses the
+        # layer cache; the Dockerfile's own default, latest, would stay cached forever.
+        run: |
+          v=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/rec3141/fastsne/releases/latest)
+          echo "version=${v##*/}" >> "$GITHUB_OUTPUT"
+          echo "fastsne ${v##*/}"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -77,6 +89,7 @@ jobs:
           # read it — without these the Dockerfile's ARG defaults win and every
           # run records commit_id "unknown".
           build-args: |
+            FASTSNE_VERSION=${{ steps.fastsne.outputs.version }}
             GIT_SHA=${{ github.sha }}
             GIT_REF=${{ github.ref_name }}
             BUILD_DATE=${{ steps.stamp.outputs.build_date }}
