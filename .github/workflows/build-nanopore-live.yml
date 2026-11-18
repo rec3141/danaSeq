@@ -8,9 +8,6 @@ on:
       - '!nanopore_live/conda-envs/**'
       - '.github/workflows/build-nanopore-live.yml'
   workflow_dispatch:
-  # fired by fastsne's release workflow, so each fastsne release rebuilds the image
-  repository_dispatch:
-    types: [fastsne-release]
 
 env:
   REGISTRY: ghcr.io
@@ -70,7 +67,9 @@ jobs:
       - name: Resolve the latest fastsne release
         id: fastsne
         # Passed as FASTSNE_VERSION so a new release changes the build arg and misses the
-        # layer cache; the Dockerfile's own default, latest, would stay cached forever.
+        # layer cache (the Dockerfile's own default, latest, would stay cached forever).
+        # A fastsne release triggers nothing here: it lands at the next build, or dispatch
+        # this workflow by hand, as for papa2.
         run: |
           v=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/rec3141/fastsne/releases/latest)
           echo "version=${v##*/}" >> "$GITHUB_OUTPUT"
