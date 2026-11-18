@@ -7,12 +7,74 @@
 case "$TYPE" in long) TOTAL=mean ;; short) TOTAL=sum ;; *) echo "type must be long or short" >&2; exit 1 ;; esac
 subset_depth() {
     local out=$1; shift
-    awk -F'\t' -v keep="$*" -v total="$TOTAL" 'BEGIN{OFS="\t"; n=split(keep,k," "); for(i=1;i<=n;i++) want[k[i]]=1}
-        NR==1{ printf "%s\t%s\t%s", $1,$2,$3
-               for(i=4;i<=NF;i+=2){ s=$i; sub(/\.sorted(\.bam)?$/,"",s); if(s in want){cols[++m]=i; printf "\t%s\t%s",$i,$(i+1)} }
-               print ""; if(m!=n){print "[ERROR] matched "m" of "n" samples" > "/dev/stderr"; exit 3}; next }
-        { t=0; for(j=1;j<=m;j++) t+=$(cols[j]); if(total=="mean") t/=m; printf "%s\t%s\t%s", $1,$2,t
-          for(j=1;j<=m;j++) printf "\t%s\t%s", $(cols[j]), $(cols[j]+1); print "" }' "$DEP" > "$out"
+    local tmp
+    if [[ -d "$out" ]]; then
+        echo "[ERROR] depth-table destination is a directory: $out" >&2
+        return 1
+    fi
+    tmp=$(mktemp -d -- "${out}.XXXXXX") || return 1
+    if awk -F'\t' -v total="$TOTAL" '
+        function fail(message) { failed=1; print "[ERROR] " message > "/dev/stderr"; exit 3 }
+        function depth(value) {
+            return value ~ /^[+]?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$/ && value+0 <= dbl_max
+        }
+        BEGIN {
+            OFS="\t"
+            dbl_max=1.7976931348623157e308
+            if (ARGC < 3) fail("no samples requested")
+            for (i=2; i<ARGC; i++) {
+                s=ARGV[i]
+                if (!length(s)) fail("empty requested sample")
+                if (s in want) fail("duplicate requested sample " s)
+                want[s]=1
+            }
+            ARGC=2  # Only the depth table is an input file.
+        }
+        NR==1 {
+            width=NF
+            if ($1!="contigName" || $2!="contigLen" || $3!="totalAvgDepth" || NF<5 || (NF-3)%2)
+                fail("invalid depth table header")
+            printf "%s\t%s\t%s", $1,$2,$3
+            for (i=4; i<=NF; i+=2) {
+                if ($(i+1) != $i "-var") fail("missing variance column for " $i)
+                s=$i
+                sub(/\.sorted(\.bam)?$/, "", s)
+                if (s in seen) fail("duplicate source sample " s)
+                seen[s]=1
+                if (s in want) { cols[++m]=i; printf "\t%s\t%s", $i,$(i+1) }
+            }
+            for (s in want) if (!(s in seen)) fail("missing sample " s)
+            print ""
+            next
+        }
+        {
+            if (NF != width) fail("incorrect field count at row " NR)
+            if ($1 !~ /[^[:space:]]/) fail("missing contig name at row " NR)
+            if ($2 !~ /^[0-9]+$/ || $2+0 < 1 || $2+0 > 2147483647) fail("invalid contig length at row " NR)
+            t=0
+            for (j=1; j<=m; j++) {
+                i=cols[j]
+                if (!depth($i) || !depth($(i+1))) fail("invalid selected depth at row " NR)
+                t+=$i
+            }
+            if (t > dbl_max) fail("selected depth sum overflow at row " NR)
+            if (total=="mean") t/=m
+            printf "%s\t%s\t%s", $1,$2,t
+            for (j=1; j<=m; j++) printf "\t%s\t%s", $(cols[j]),$(cols[j]+1)
+            print ""
+        }
+        END { if (!failed && !NR) fail("empty depth table") }
+    ' "$DEP" "$@" > "$tmp/table" &&
+        { [[ ! -f "$out" ]] || chmod --reference="$out" -- "$tmp/table"; } &&
+        mv -fT -- "$tmp/table" "$out"; then
+        rmdir -- "$tmp"
+        return 0
+    else
+        local status=$?
+        rm -f -- "$tmp/table"
+        rmdir -- "$tmp"
+        return "$status"
+    fi
 }
 
 run_metabat() {  # run_metabat <config> [depth file]
