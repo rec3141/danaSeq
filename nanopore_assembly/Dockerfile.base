@@ -35,8 +35,8 @@ COPY envs/ /tmp/envs/
 # Flye, metaMDBG, myloasm, minimap2, samtools, CoverM, BBMap, filtlong, Nextflow
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-assembly -f /tmp/envs/merged/assembly.yml
-# Flye 2.9.6 from the rec3141/Flye "flye" branch, pinned by commit, built over
-# the bioconda 2.9.6 install. Drop this once the fixes ship in bioconda. The
+# Flye 2.9.7 from the rec3141/Flye "flye" branch, pinned by commit, built over
+# the bioconda install. Drop this once the fixes ship in bioconda. The
 # fork carries:
 #   - repeat-graph speedups: pairhash collisions in "Initializing edges"
 #     (mikolmogorov/Flye#795), per-candidate set copies in the superbubble
@@ -49,11 +49,12 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 #   - polishing/consensus speedups: samtools from PATH, bam index written
 #     during sorting, region queries batched by bases so the bam header is
 #     parsed once per batch
+#   - upstream 2.9.7 (mikolmogorov/Flye#809-#816)
 #
 # The commit is an ARG so the pip install and the danaseq.flye.commit label
 # below come from the same value; reading the label is enough to know which
 # Flye an image carries.
-ARG FLYE_COMMIT=15c9eb53
+ARG FLYE_COMMIT=481716a6
 RUN /opt/conda/envs/dana-mag-assembly/bin/pip install --force-reinstall --no-deps \
     "flye @ git+https://github.com/rec3141/Flye.git@${FLYE_COMMIT}" \
     && /opt/conda/envs/dana-mag-assembly/bin/flye-modules 2>&1 | head -1
