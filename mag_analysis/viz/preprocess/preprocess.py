@@ -1793,9 +1793,11 @@ def build_eukaryotic(results_dir, assembly_info):
         for _, row in mar_df.iterrows():
             tax = row.get('top_taxonomy', '')
             if pd.notna(tax) and tax:
-                # Parse phylum from taxonomy
+                # Lineage is domain;phylum;class;...; NCBI gives many protists
+                # (Dinophyceae, Cryptophyceae, ...) no phylum, so bucket by the
+                # first filled rank below domain.
                 parts = [p.strip() for p in str(tax).split(';')]
-                phylum = parts[1] if len(parts) > 1 else parts[0]
+                phylum = next((p for p in parts[1:] if p), parts[0])
                 if phylum:
                     mar_taxonomy[phylum] += 1
             mar_contigs.append({

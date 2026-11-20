@@ -1398,7 +1398,8 @@ download_silva132() {
 
 download_marferret() {
     local db_path="${DB_DIR}/marferret_db"
-    if [ -d "${db_path}" ] && ls "${db_path}"/*.dmnd 1>/dev/null 2>&1; then
+    if [ -d "${db_path}" ] && ls "${db_path}"/*.dmnd 1>/dev/null 2>&1 \
+        && [ -f "${db_path}/taxdump/nodes.dmp" ]; then
         echo "[INFO] MarFERReT database already exists at ${db_path}"
         echo "  Delete ${db_path} and re-run to force re-download."
         return 0
@@ -1439,6 +1440,21 @@ download_marferret() {
             "${zenodo_base}/MarFERReT.v1.1.1.best_pfam_annotations.csv.gz"
     else
         echo "[INFO] Pfam annotation file already present"
+    fi
+
+    # NCBI taxdump (~70 MB): MarFERReT's taxonomy file holds taxids only, and
+    # parse_marferret_results.py builds lineages from nodes.dmp/names.dmp.
+    if [ ! -f "${db_path}/taxdump/nodes.dmp" ]; then
+        echo "[INFO] Downloading NCBI taxdump for MarFERReT lineages (~70 MB)..."
+        mkdir -p "${db_path}/taxdump"
+        wget -q --show-progress -O "${db_path}/taxdump/taxdump.tar.gz" \
+            "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz" \
+            && tar xzf "${db_path}/taxdump/taxdump.tar.gz" -C "${db_path}/taxdump" \
+                nodes.dmp names.dmp merged.dmp \
+            && rm -f "${db_path}/taxdump/taxdump.tar.gz" \
+            || { echo "[ERROR] NCBI taxdump download failed" >&2; return 1; }
+    else
+        echo "[INFO] NCBI taxdump already present"
     fi
 
     echo "[SUCCESS] MarFERReT database downloaded to ${db_path}"
