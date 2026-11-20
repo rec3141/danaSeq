@@ -6,6 +6,7 @@ on:
     paths:
       - 'nanopore_live/**'
       - '!nanopore_live/conda-envs/**'
+      - '!nanopore_live/sketchdb/**'   # host-side TaxServer DB build, not run in the image
       - '.github/workflows/build-nanopore-live.yml'
   workflow_dispatch:
 
