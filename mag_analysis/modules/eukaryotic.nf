@@ -217,6 +217,8 @@ process MARFERRET_CLASSIFY {
     DMND=\$(ls "${marferret_db}"/*.dmnd 2>/dev/null | head -1)
     TAX=\$(ls "${marferret_db}"/*.taxonomies.tab.gz 2>/dev/null | head -1)
     PFAM=\$(ls "${marferret_db}"/*.best_pfam_annotations.csv.gz 2>/dev/null | head -1)
+    TAXDUMP=""
+    [ -f "${marferret_db}/taxdump/nodes.dmp" ] && TAXDUMP="${marferret_db}/taxdump"
 
     if [ -z "\$DMND" ]; then
         echo "[ERROR] No .dmnd file found in ${marferret_db}; no results stored" >&2
@@ -258,11 +260,18 @@ process MARFERRET_CLASSIFY {
     PFAM_ARG=""
     [ -n "\$TAX" ] && TAX_ARG="--taxonomy \$TAX"
     [ -n "\$PFAM" ] && PFAM_ARG="--pfam \$PFAM"
+    TAXDUMP_ARG=""
+    if [ -n "\$TAXDUMP" ]; then
+        TAXDUMP_ARG="--taxdump \$TAXDUMP"
+    else
+        echo "[WARNING] MarFERReT: ${marferret_db}/taxdump missing; lineages left empty (re-run download-databases.sh --marferret)" >&2
+    fi
 
     parse_marferret_results.py \\
         --diamond diamond_hits.tsv \\
         \$TAX_ARG \\
         \$PFAM_ARG \\
+        \$TAXDUMP_ARG \\
         --out-proteins marferret_proteins.tsv \\
         --out-contigs marferret_contigs.tsv
 
