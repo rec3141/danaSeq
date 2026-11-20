@@ -90,8 +90,9 @@ def validateParams() {
     // Flye's read mode must be chosen, not inferred. Refusing here costs nothing:
     // no node has been allocated to any task yet.
     def readTypes = ['nano-raw', 'nano-hq', 'nano-corr', 'auto']
-    if (params.assembler == 'flye' && !params.read_type && !params.assembly_fasta) {
-        log.error "ERROR: --read_type is required: nano-raw, nano-hq or nano-corr. " +
+    def willPolish = (params.polish != null) ? params.polish.toString().toBoolean() : (params.assembler == 'flye')
+    if ((params.assembler == 'flye' || willPolish) && !params.read_type && !params.assembly_fasta) {
+        log.error "ERROR: --read_type is required when running Flye assembly or polishing: nano-raw, nano-hq or nano-corr. " +
                   "It sets Flye's index, overlap settings and error model, so it is not inferred " +
                   "by default. Flye's criterion is error rate: nano-hq for Guppy5+/Dorado SUP reads " +
                   "under ~5% error, nano-raw for older reads up to ~20%. Judge by error-based " +
@@ -313,7 +314,7 @@ workflow {
     }
 
     // Optional polishing (default: true for flye, false for others)
-    do_polish = (params.polish != null) ? params.polish : (params.assembler == 'flye')
+    do_polish = (params.polish != null) ? params.polish.toString().toBoolean() : (params.assembler == 'flye')
     if (do_polish) {
         FLYE_POLISH(ch_raw_assembly, ch_asm_info, ch_asm_graph, ch_asm_input)
         ch_assembly  = FLYE_POLISH.out.assembly
@@ -406,6 +407,7 @@ workflow {
                     // MD5 of main.nf — pins the source even with no git and no build arg.
                     script_id       : workflow.scriptId,
                     nextflow_version: "${nextflow.version}",
+                    run_name        : workflow.runName,
                     command_line    : workflow.commandLine,
                     started         : "${workflow.start}",
                     completed       : "${workflow.complete}",

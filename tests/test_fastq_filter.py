@@ -145,5 +145,22 @@ class FastqFilterTests(unittest.TestCase):
         self.assertEqual(self.successful(data, target=10000, extra=('--onepass',)), data)
 
 
+    def test_crlf_input_matches_lf(self):
+        # CRLF FASTQ must give the same output as LF: a '\r' kept on the
+        # quality line scores as Q0, and one kept on the header breaks
+        # --exclude_ids and --dedupe matching.
+        lf = record('r1', 19) + record('r2 extra', 300) + record('r1', 19) + record('r3', 200)
+        crlf = lf.replace(b'\n', b'\r\n')
+        with tempfile.NamedTemporaryFile('w', suffix='.ids') as ids:
+            ids.write('r3\n')
+            ids.flush()
+            for extra in ((), ('--onepass',), ('--exclude_ids', ids.name),
+                          ('--nano_hq',)):
+                expected = self.successful(lf, target=100000, extra=extra)
+                self.assertEqual(self.successful(crlf, target=100000, extra=extra), expected, extra)
+                self.assertNotIn(b'\r', expected)
+        mixed = record('dup', 50) + record('dup', 50).replace(b'\n', b'\r\n')
+        self.assertEqual(self.successful(mixed, target=100000), record('dup', 50))
+
 if __name__ == '__main__':
     unittest.main()

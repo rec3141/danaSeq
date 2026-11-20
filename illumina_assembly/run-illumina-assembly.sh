@@ -295,7 +295,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
     mkdir -p "${OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
     "${CONTAINER_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
-    NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1 || true)
+    NF_SESSION=$(awk -F'\t' '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1 || true)
     [[ -z "$NF_SESSION" ]] && { NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1) || true; }
     save_run_command "$OUTDIR_HOST" "$NF_SESSION"
     exit $NF_EXIT

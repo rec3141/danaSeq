@@ -90,11 +90,11 @@ that are not SSU (ITS, 28S LSU, COI) are counted as unplaced. `viz/globe.json.gz
 distance to the nearest reference and region for each placed ASV; microscape.app/earthdna shows every run a user
 can see on that globe. On a 27,606-ASV run (16S V4 + 18S V9) the step takes about 40 s on 8 CPUs.
 
-The reference (SILVA 144, 9 regions, ~1.3 GB download, ~2 GB on disk) is on Zenodo
-([10.5281/zenodo.23936867](https://doi.org/10.5281/zenodo.23936867)):
+The reference (SILVA 144, 12 regions, ~1.8 GB download, ~2.5 GB on disk) is on Zenodo
+([10.5281/zenodo.23936866](https://doi.org/10.5281/zenodo.23936866), which resolves to the latest version):
 
 ```bash
-./download-databases.sh --earthdna      # then --earthdna_db databases/earthdna_db/silva144
+./download-databases.sh --earthdna      # then --earthdna_db databases/earthdna_db/silva144-2
 ```
 
 ## Profiles

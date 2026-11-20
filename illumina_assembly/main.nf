@@ -137,6 +137,52 @@ include { CALCULATE_DEPTHS }       from './modules/mapping'
 // Main workflow
 // ============================================================================
 
+// Strip Illumina mate and lane suffixes (e.g. _S1_L001_R1_001.fastq.gz,
+// _R1.fastq.gz) while preserving underscores inside the sample name.
+def deriveSampleId(String filename) {
+    def stem = filename.replaceFirst(/\.f(?:ast)?q(?:\.gz)?$/, '')
+    if (stem =~ /_R1(?:_|$)/) {
+        return stem.replaceFirst(/(?:_S\d+)?(?:_L\d+)?_R1(?:_(?!.*_R1(?:_|$)).*)?$/, '')
+    }
+    return stem.replaceFirst(/(?:_S\d+)?(?:_L\d+)?_1$/, '')
+}
+
+def discoverReads() {
+    def input_dir = file(params.input)
+    if (!input_dir.isDirectory()) {
+        error "ERROR: --input directory does not exist: ${params.input}\nRun with --help for usage."
+    }
+
+    def r1_files = (file("${params.input}/*_R1_*.fastq.gz") +
+                    file("${params.input}/*_R1.fastq.gz")).unique().findAll { r1 ->
+        !(r1.name.toString() =~ /_R2(?:_(?!.*_R[12](?:_|\.|$))[^\/]*)?\.f(?:ast)?q(?:\.gz)?$/)
+    }
+    if (!r1_files) {
+        error "ERROR: No *_R1_*.fastq.gz files found in ${params.input}.\nRun with --help for usage."
+    }
+
+    def samples = []
+    r1_files.each { r1 ->
+        def name = r1.name.toString()
+        def sample_id = deriveSampleId(name)
+        def r2_name = (name =~ /_R1_/)
+            ? name.replaceFirst(/(.*)_R1_/, '$1_R2_')
+            : name.replaceFirst(/_R1(\.fastq\.gz)$/, '_R2$1')
+        def r2 = r1.resolveSibling(r2_name)
+        if (!r2.exists()) {
+            error "ERROR: Missing R2 mate for ${r1} (expected ${r2})."
+        }
+        samples << [sample_id, r1, r2]
+    }
+
+    def dups = samples.countBy { it[0] }.findAll { k, v -> v > 1 }
+    if (dups) {
+        error "ERROR: Duplicate sample IDs: ${dups.keySet().join(', ')}"
+    }
+
+    return samples.sort { it[0] }.collect { id, r1, r2 -> [[id: id], r1, r2] }
+}
+
 workflow {
 
     main:
@@ -144,25 +190,13 @@ workflow {
     validateParams()
 
     // 1. Discover input reads — scan for *_R1_*.fastq.gz and auto-derive R2
-    def input_dir = file(params.input)
-    if (!input_dir.isDirectory()) {
-        error "ERROR: --input directory does not exist: ${params.input}\nRun with --help for usage."
-    }
+    def samples = discoverReads()
 
-    def r1_files = file("${params.input}/*_R1_*.fastq.gz")
-    if (!r1_files) {
-        error "ERROR: No *_R1_*.fastq.gz files found in ${params.input}.\nRun with --help for usage."
-    }
-
-    log.info "Detected ${r1_files.size()} paired-end samples"
+    log.info "Detected ${samples.size()} paired-end samples"
     log.info "Mode: ${params.coassembly ? 'co-assembly' : 'per-sample assembly'}"
 
     // Create channel of [meta, r1, r2] tuples
-    ch_raw_reads = Channel.fromFilePairs("${params.input}/*_R{1,2}_*.fastq.gz", flat: true)
-        .map { sample_id, r1, r2 ->
-            def prefix = r1.name.toString().split('_')[0]
-            [[id: prefix], r1, r2]
-        }
+    ch_raw_reads = Channel.fromList(samples)
 
     // ======================================================================
     // 2. Preprocessing (per-sample)

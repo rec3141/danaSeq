@@ -55,16 +55,17 @@ RUN curl -fsSL \
         -o /opt/conda/envs/dana-tools/bin/tetramer_freqs_esom.pl \
     && chmod +x /opt/conda/envs/dana-tools/bin/tetramer_freqs_esom.pl
 
-# fastsne (read t-SNE of every read; https://github.com/rec3141/fastsne): pinned
+# fastsne (read t-SNE of every read; https://github.com/rec3141/fastsne): latest
 # release, self-contained binaries. fastsne (GPU; cuFFT / cuBLAS linked in, needs only
 # the NVIDIA driver) runs whenever a GPU is visible (docker run --gpus all, apptainer
 # --nv); otherwise fastsne_cpu (fully static; AVX-512 / AVX2 / generic, picked at run time).
-ARG FASTSNE_VERSION=v0.2.2
-ARG FASTSNE_SHA256=07ebdb1718ff3e28daabb6463114f0bd2d7965c4e287a4b282074831ff6a1e66
-RUN f=fastsne-${FASTSNE_VERSION}-linux-x86_64.tar.gz \
-    && curl -fsSL -o /tmp/$f https://github.com/rec3141/fastsne/releases/download/${FASTSNE_VERSION}/$f \
-    && echo "${FASTSNE_SHA256}  /tmp/$f" | sha256sum -c - \
-    && tar -xzf /tmp/$f --strip-components=1 -C /usr/local && rm /tmp/$f \
+ARG FASTSNE_VERSION=latest
+RUN v=${FASTSNE_VERSION} \
+    && if [ "$v" = latest ]; then v=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/rec3141/fastsne/releases/latest) && v=${v##*/}; fi \
+    && f=fastsne-$v-linux-x86_64.tar.gz \
+    && cd /tmp && curl -fsSL -O https://github.com/rec3141/fastsne/releases/download/$v/$f -O https://github.com/rec3141/fastsne/releases/download/$v/$f.sha256 \
+    && sha256sum -c $f.sha256 \
+    && tar -xzf /tmp/$f --strip-components=1 -C /usr/local && rm /tmp/$f /tmp/$f.sha256 \
     && /usr/local/bin/fastsne_cpu --help 2>&1 | head -1 | grep -q "^fastsne"
 
 # ============================================================================

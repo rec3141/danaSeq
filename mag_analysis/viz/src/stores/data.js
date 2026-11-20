@@ -7,6 +7,8 @@ export const mags = writable(null);
 export const binQuality = writable(null);
 export const taxonomySunburst = writable(null);
 export const keggHeatmap = writable(null);
+// MetaCyc pathway calls per MAG with confidence (metacyc_pathways.json; absent without MetaCyc)
+export const metacycPathways = writable(null);
 export const scgHeatmap = writable(null);
 export const coverage = writable(null);
 export const mgeSummary = writable(null);
@@ -105,6 +107,7 @@ export async function loadAllData() {
       contigLenData,
       samplesData,
       metadataData,
+      metacycData,
     ] = await Promise.all([
       fetchJSON('data/overview.json'),
       fetchJSON('data/mags.json').catch(() => null),
@@ -118,6 +121,7 @@ export async function loadAllData() {
       fetchJSON('data/contig_lengths.json').catch(() => null),
       fetchJSON('data/samples.json').catch(() => null),
       fetchJSON('data/metadata.json').catch(() => null),
+      fetchJSON('data/metacyc_pathways.json').catch(() => null),
     ]);
 
     overview.set(overviewData);
@@ -132,6 +136,7 @@ export async function loadAllData() {
     if (contigLenData) contigLengths.set(contigLenData);
     if (samplesData) samples.set(samplesData);
     if (metadataData) sampleMetadata.set(metadataData);
+    if (metacycData) metacycPathways.set(metacycData);
   } catch (e) {
     error.set(e.message);
     console.error('Data loading error:', e);

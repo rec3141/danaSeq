@@ -58,7 +58,7 @@ def helpMessage() {
                          MAGScoT or CheckM2. For running the binners on a GPU node
                          ahead of a full run that shares --store_dir [default: false]
       --run_vamb         Include VAMB [default: false]
-      --run_vamb_tax     Include taxonomy-guided VAMB [default: false]
+      --run_vamb_tax     Include taxonomy-guided VAMB (needs --run_sendsketch and --sendsketch_address) [default: false]
       --run_binette      Run Binette consensus (needs --checkm2_db) [default: false]
       --run_magscot      Run MAGScoT consensus [default: false]
       --run_derep        Dereplicate consensus bins with galah (needs --checkm2_db)
@@ -73,6 +73,8 @@ def helpMessage() {
     MGE detection:
       --run_genomad, --run_checkv, --run_integronfinder, --run_islandpath,
       --run_macsyfinder, --run_defensefinder
+      --run_mge_annotate (needs --run_genomad; annotates consensus bins, never changes them)
+      --mge_alt_export --mge_export_min_plasmid_score X --mge_export_min_virus_score Y [--mge_rescue_unbinned]
 
     Metabolic profiling:
       --run_metabolism, --run_antismash, --run_ecossdb
@@ -84,6 +86,14 @@ def helpMessage() {
                            nanopore_live --pollutant_dbs.
       --hmm_cut STR        Default hmmsearch cutoff: tc|ga|nc or an E-value [default: tc]
       --protein_db_opts STR  Default DIAMOND cutoffs [default: id=50,qcov=50,scov=50,evalue=1e-5]
+      --protein_db_chunk N   Proteins per parallel hmmsearch job; 0 = one search [default: 50000]
+      --protein_db_cpus N    CPUs for each protein DB search [default: --medium_cpus]
+      --metacyc_db DIR     Licensed MetaCyc flat files (download-databases.sh --metacyc);
+                           MetaCyc pathways per MAG are skipped without it (Bakta only)
+      --metacyc_refs DIR   Open references for MetaCyc pathways (download-databases.sh --metacyc-refs)
+      --metacyc_taxonomy S Taxonomic ranges from gtdbtk | sendsketch | none [default: gtdbtk;
+                           sendsketch is used when GTDB-Tk is off]
+      --metacyc_cpus N     CPUs for its DIAMOND search [default: --medium_cpus]
 
     Eukaryotic:
       --run_eukaryotic, --run_metaeuk, --run_marferret
@@ -110,12 +120,28 @@ def resolveAnnotator() {
 
 // COMEBin on CPU runs for days on a co-assembly (and has failed there), so it
 // runs only where a GPU is visible unless --comebin_on_cpu. A result already
-// in --store_dir (e.g. from a --binners_only run on a GPU node) is always used.
+// in --store_dir can supply the outputs when the BAM inputs are available.
 def runComebin() {
-    if (!params.run_comebin || !params.bam_dir) return false
-    if (params.comebin_on_cpu) return true
-    if (gpuVisible()) return true
-    if (params.store_dir && file("${params.store_dir}/binning/comebin/comebin_bins.tsv").exists()) return true
+    if (!params.run_comebin) return false
+    if (!params.bam_dir) {
+        log.warn "COMEBin skipped: --bam_dir is required."
+        return false
+    }
+    if (!files("${params.bam_dir}/*.sorted.bam")) {
+        log.warn "COMEBin skipped: no *.sorted.bam files in ${params.bam_dir}."
+        return false
+    }
+    if (params.store_dir) {
+        def stored = file("${params.store_dir}/binning/comebin")
+        def assignments = stored.resolve('comebin_bins.tsv')
+        if (assignments.isFile() && stored.resolve('bins').isDirectory()) {
+            if (assignments.size() == 0 && !stored.resolve('status.tsv').isFile()) {
+                log.warn "COMEBin cached no result: empty assignment table without a recorded reason in ${stored}."
+            }
+            return true
+        }
+    }
+    if (params.comebin_on_cpu || gpuVisible()) return true
     log.warn "COMEBin skipped: no GPU visible (--gpu ${params.gpu}). Run it where one is, or pass --comebin_on_cpu true."
     return false
 }
@@ -145,6 +171,63 @@ def proteinDbEntries(String ext, String default_opts) {
         entries << [ sub.name, f, annot.exists() ? annot.toString() : 'NONE', opts ]
     }
     return entries
+}
+
+// MetaCyc pathways need both reference dirs and Bakta's annotation TSV. Returns whether the
+// step runs, logging one line saying why when it does not.
+def metacycEnabled(String annotator) {
+    if (!params.run_metabolism || annotator == 'none') return false
+    if (!params.metacyc_db) {
+        log.info "MetaCyc pathways skipped: no --metacyc_db (licensed MetaCyc; see download-databases.sh --metacyc)."
+        return false
+    }
+    def missing = ['pathways.dat', 'reactions.dat', 'classes.dat'].findAll { !file("${params.metacyc_db}/${it}").exists() }
+    if (missing) {
+        log.warn "MetaCyc pathways skipped: ${params.metacyc_db} lacks ${missing.join(', ')} (install with download-databases.sh --metacyc)."
+        return false
+    }
+    if (!params.metacyc_refs || !file("${params.metacyc_refs}/seqref/seqref.dmnd").exists()) {
+        log.warn "MetaCyc pathways skipped: no open references at --metacyc_refs ${params.metacyc_refs ?: '(unset)'} (download-databases.sh --metacyc-refs)."
+        return false
+    }
+    if (annotator != 'bakta') {
+        log.warn "MetaCyc pathways skipped: they read Bakta's annotation TSV (--annotator bakta)."
+        return false
+    }
+    return true
+}
+
+// SHA-256 over the content of every file in the given bin directories, independent of the
+// order the directories arrive in.
+def fastaDirsDigest(dirs) {
+    def perDir = (dirs instanceof List ? dirs : [dirs]).collect { d ->
+        // Resolve the root (a stored bin directory can be a symlink) and follow links inside it.
+        def root = (d as java.nio.file.Path).toRealPath()
+        def md = java.security.MessageDigest.getInstance('SHA-256')
+        def fs = []
+        java.nio.file.Files.walk(root, java.nio.file.FileVisitOption.FOLLOW_LINKS).withCloseable { st ->
+            st.filter { java.nio.file.Files.isRegularFile(it) }.forEach { fs << it }
+        }
+        def buf = new byte[1 << 16]
+        fs.sort { root.relativize(it).toString() }.each { f ->
+            md.update(root.relativize(f).toString().getBytes('UTF-8'))
+            md.update((byte) 0)
+            java.nio.file.Files.newInputStream(f).withCloseable { ins ->
+                int n
+                while ((n = ins.read(buf)) > 0) md.update(buf, 0, n)
+            }
+            md.update((byte) 0)
+        }
+        md.digest().encodeHex().toString()
+    }.sort()
+    return java.security.MessageDigest.getInstance('SHA-256').digest(perDir.join('\n').getBytes('UTF-8')).encodeHex().toString()
+}
+
+// The CheckM2 DIAMOND database file under --checkm2_db (Binette declares it as an input).
+def checkm2Dmnd() {
+    def found = files("${params.checkm2_db}/**.dmnd")
+    if (!found) error "No .dmnd file found under --checkm2_db ${params.checkm2_db}"
+    return found.sort { it.toString() }[0]
 }
 
 def gpuVisible() {
@@ -216,6 +299,7 @@ include { SENDSKETCH_CLASSIFY } from './modules/taxonomy'
 include { RNA_CLASSIFY }       from './modules/rrna'
 include { GENOMAD_CLASSIFY }    from './modules/mge'
 include { CHECKV_QUALITY }      from './modules/mge'
+include { MGE_BIN_ANNOTATE }    from './modules/mge'
 include { INTEGRONFINDER }      from './modules/mge'
 include { ISLANDPATH_DIMOB }    from './modules/mge'
 include { MACSYFINDER }         from './modules/mge'
@@ -229,6 +313,8 @@ include { EMAPPER }             from './modules/metabolism'
 include { DBCAN }               from './modules/metabolism'
 include { PROTEIN_DB_HMM }      from './modules/metabolism'
 include { PROTEIN_DB_DIAMOND }  from './modules/metabolism'
+include { METACYC_SEARCH }      from './modules/metabolism'
+include { METACYC_PATHWAYS }    from './modules/metabolism'
 include { MERGE_ANNOTATIONS }   from './modules/metabolism'
 include { MAP_TO_BINS }         from './modules/metabolism'
 include { KEGG_MODULES }        from './modules/metabolism'
@@ -291,6 +377,91 @@ process STAGE_INPUTS {
 // Main workflow
 // ============================================================================
 
+// Binner outcome report. Each requested binner and consensus step ends the run in one
+// state: disabled (not requested), skipped (requested, prerequisite missing; reason
+// given), not_run (consensus under --binners_only), or launched. A launched step is
+// reported from what this run's task emitted, never from files left on disk: its
+// status.tsv value where the process writes one, otherwise ok / completed_empty from the
+// emitted assignments. A launched step that emitted nothing is no_result when the run
+// finished (its task failed and was ignored, or its inputs never arrived; the Nextflow
+// log tells which) or not_completed when the run itself stopped. Cached (storeDir or
+// -resume) results emit like fresh ones. Each table names its run, and the previous
+// table is removed when a run starts, so an older table cannot pass for this run's.
+binnerSeen   = new java.util.concurrent.ConcurrentHashMap()
+binnerStatus = new java.util.concurrent.ConcurrentHashMap()
+binnerPlan   = new LinkedHashMap()
+
+def planBinners(boolean comebin_enabled, boolean vamb_tax_enabled) {
+    def p = new LinkedHashMap()
+    def put = { name, requested, launched, reason -> p[name] = requested ? (launched ? ['launched', ''] : ['skipped', reason]) : ['disabled', ''] }
+    put('semibin',  params.run_semibin, params.run_semibin && params.bam_dir, 'needs --bam_dir')
+    put('metabat',  true, true, '')
+    put('maxbin',   params.run_maxbin, params.run_maxbin, '')
+    put('lorbin',   params.run_lorbin, params.run_lorbin && params.bam_dir, 'needs --bam_dir')
+    put('comebin',  params.run_comebin, comebin_enabled, 'needs --bam_dir with *.sorted.bam and a visible GPU (or --comebin_on_cpu, or a stored result); see the COMEBin warning above')
+    put('vamb',     params.run_vamb, params.run_vamb, '')
+    put('vamb_tax', params.run_vamb_tax, vamb_tax_enabled, 'needs --run_sendsketch true and --sendsketch_address')
+    p['dastool'] = params.binners_only ? ['not_run', '--binners_only'] : ['launched', '']
+    if (!params.run_binette)      p['binette'] = ['disabled', '']
+    else if (!params.checkm2_db)  p['binette'] = ['skipped', 'needs --checkm2_db']
+    else if (params.binners_only) p['binette'] = ['not_run', '--binners_only']
+    else                          p['binette'] = ['launched', '']
+    if (!params.run_magscot)      p['magscot'] = ['disabled', '']
+    else if (params.binners_only) p['magscot'] = ['not_run', '--binners_only']
+    else                          p['magscot'] = ['launched', '']
+    return p
+}
+
+def binnerOutcome(String name, boolean runSucceeded) {
+    def (state, reason) = binnerPlan[name]
+    if (state != 'launched') return [state, reason]
+    if (!binnerSeen.containsKey(name)) {
+        return runSucceeded ? ['no_result', 'no output emitted: the task failed and was ignored, or its inputs never arrived (see the Nextflow log)']
+                            : ['not_completed', 'the run stopped before this step finished']
+    }
+    if (binnerStatus.containsKey(name)) {
+        def lines = java.nio.file.Files.readAllLines(binnerStatus[name] as java.nio.file.Path).findAll { it.trim() }
+        def value = lines.size() >= 2 ? lines[1].split('\t')[0].trim() : ''
+        return value ? [value, ''] : ['completed_status_unreadable', 'status.tsv has no value row']
+    }
+    def out = binnerSeen[name] as java.nio.file.Path
+    def nonEmpty
+    if (java.nio.file.Files.isDirectory(out)) {
+        def entries = java.nio.file.Files.list(out)
+        try { nonEmpty = entries.anyMatch { java.nio.file.Files.isRegularFile(it) && java.nio.file.Files.size(it) > 0 } }
+        finally { entries.close() }
+    } else {
+        nonEmpty = java.nio.file.Files.size(out) > 0
+    }
+    return nonEmpty ? ['ok', ''] : ['completed_empty', 'no assignments and no status recorded']
+}
+
+// A table left by an earlier run must not be read as this run's if this run cannot write one.
+def removePreviousBinnerReport() {
+    def old = new File("${params.outdir}/binning/binner_status.tsv")
+    if (old.exists() && !old.delete())
+        log.warn "Could not remove the previous ${old}; check its run_name line before trusting it"
+}
+
+// Written to a temporary name and moved into place, so a reader never sees a partial table.
+def writeBinnerReport(boolean runSucceeded) {
+    if (binnerPlan.isEmpty()) return
+    def dir = new File("${params.outdir}/binning")
+    dir.mkdirs()
+    def tmp = new File(dir, ".binner_status.tsv.${ProcessHandle.current().pid()}.tmp")
+    def rows = ["# run_name=${workflow.runName}\tsession_id=${workflow.sessionId}\tstarted=${workflow.start}\tsuccess=${runSucceeded}",
+                'binner\tstate\tdetail']
+    binnerPlan.keySet().each { name ->
+        def (state, detail) = binnerOutcome(name, runSucceeded)
+        rows << "${name}\t${state}\t${detail}"
+        if (state in ['no_result', 'not_completed', 'skipped', 'completed_empty', 'completed_status_unreadable'])
+            log.warn "Binner ${name}: ${state}${detail ? ' (' + detail + ')' : ''}"
+    }
+    tmp.text = rows.join('\n') + '\n'
+    java.nio.file.Files.move(tmp.toPath(), new File(dir, 'binner_status.tsv').toPath(),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+}
+
 workflow {
 
     main:
@@ -298,6 +469,16 @@ workflow {
     validateParams()
     def effective_annotator = resolveAnnotator()
     def comebin_enabled = runComebin()
+    def vamb_tax_enabled = params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address
+    if (params.run_vamb_tax && !vamb_tax_enabled) {
+        log.warn "VAMB-tax skipped: --run_sendsketch true and --sendsketch_address are required."
+    }
+    def metacyc_enabled = metacycEnabled(effective_annotator)
+    // The consensus steps (and the database lookups they need) run only on a full run.
+    def binette_on = params.run_binette && params.checkm2_db && !params.binners_only
+    def magscot_on = params.run_magscot && !params.binners_only
+    binnerPlan.putAll(planBinners(comebin_enabled as boolean, vamb_tax_enabled as boolean))
+    removePreviousBinnerReport()
 
     // 1. Create channels from file-based inputs
     ch_assembly = Channel.fromPath(params.assembly, checkIfExists: true)
@@ -478,6 +659,11 @@ workflow {
         }
     }
 
+    // MetaCyc reference search starts as soon as the proteins exist; pathways follow in step 6b.
+    if (metacyc_enabled) {
+        METACYC_SEARCH(ch_proteins, file(params.metacyc_refs))
+    }
+
     // 2f. Per-gene depths (requires annotation GFF + BAMs)
     if (effective_annotator != 'none' && params.bam_dir) {
         CALCULATE_GENE_DEPTHS(ch_bam_files, ch_gff)
@@ -527,16 +713,23 @@ workflow {
         )
     }
 
-    if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
+    if (vamb_tax_enabled) {
         BIN_VAMB_TAX(
             ch_assembly,
             ch_depths,
-            SENDSKETCH_CLASSIFY.out.contig_taxonomy
+            SENDSKETCH_CLASSIFY.out.contig_taxonomy.ifEmpty {
+                log.warn "VAMB-tax skipped: SendSketch produced no taxonomy table. Check the SENDSKETCH_CLASSIFY task."
+                return []
+            }.filter { it }
         )
         ch_binner_results = ch_binner_results.mix(
             BIN_VAMB_TAX.out.bins.map { ['vamb_tax', it] }
         )
     }
+
+    ch_binner_results.subscribe { label, f -> binnerSeen[label] = f }
+    if (comebin_enabled)  BIN_COMEBIN.out.status.subscribe  { binnerStatus['comebin']  = it }
+    if (vamb_tax_enabled) BIN_VAMB_TAX.out.status.subscribe { binnerStatus['vamb_tax'] = it }
 
     // 4. DAS Tool consensus. With --binners_only the consensus steps and
     // CheckM2 get no input and do not run, so nothing is stored from a
@@ -550,9 +743,34 @@ workflow {
         ch_bin_files,
         ch_bin_labels
     )
+    DASTOOL_CONSENSUS.out.contig2bin.subscribe { binnerSeen['dastool'] = it }
+
+    // 4a'. Mobile-element annotation of the consensus bins (opt-in; reads geNomad/CheckV outputs)
+    if (params.run_mge_annotate) {
+        if (!(params.run_genomad && params.genomad_db)) {
+            error "--run_mge_annotate needs --run_genomad and --genomad_db"
+        }
+        if (params.mge_alt_export && (params.mge_export_min_plasmid_score == null || params.mge_export_min_virus_score == null)) {
+            error "--mge_alt_export needs explicit --mge_export_min_plasmid_score and --mge_export_min_virus_score (uncalibrated; no defaults)"
+        }
+        def no_file_mge = file("${projectDir}/assets/NO_FILE")
+        def ch_checkv_status  = (params.run_checkv && params.checkv_db) ? CHECKV_QUALITY.out.status  : Channel.value(no_file_mge)
+        def ch_checkv_quality = (params.run_checkv && params.checkv_db) ? CHECKV_QUALITY.out.quality : Channel.value(no_file_mge)
+        MGE_BIN_ANNOTATE(
+            ch_assembly,
+            DASTOOL_CONSENSUS.out.contig2bin,
+            GENOMAD_CLASSIFY.out.status,
+            GENOMAD_CLASSIFY.out.summary,
+            GENOMAD_CLASSIFY.out.virus_summary,
+            GENOMAD_CLASSIFY.out.plasmid_summary,
+            GENOMAD_CLASSIFY.out.provirus_coords,
+            ch_checkv_status,
+            ch_checkv_quality
+        )
+    }
 
     // 4a. Binette consensus refinement
-    if (params.run_binette && params.checkm2_db) {
+    if (binette_on) {
         ch_binner_fastas = BIN_METABAT2.out.fastas
         if (params.run_semibin && params.bam_dir) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_SEMIBIN2.out.fastas)
@@ -569,15 +787,23 @@ workflow {
         if (params.run_vamb) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB.out.fastas)
         }
-        if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
+        if (vamb_tax_enabled) {
             ch_binner_fastas = ch_binner_fastas.mix(BIN_VAMB_TAX.out.fastas)
         }
-        BINETTE_CONSENSUS(ch_assembly, params.binners_only ? Channel.empty() : ch_binner_fastas.collect())
+        // Binette reads FASTA files inside these bin directories; a digest of their content
+        // goes in with them, because the cache does not hash files inside a directory input.
+        BINETTE_CONSENSUS(ch_assembly, ch_binner_fastas.collect().map { dirs -> [dirs, fastaDirsDigest(dirs)] }, checkm2Dmnd())
+        BINETTE_CONSENSUS.out.bins.subscribe { binnerSeen['binette'] = it }
     }
 
     // 4b. MAGScoT consensus refinement
-    if (params.run_magscot) {
-        MAGSCOT_CONSENSUS(ch_assembly, ch_bin_files, ch_bin_labels)
+    if (magscot_on) {
+        MAGSCOT_CONSENSUS(ch_assembly, ch_bin_files, ch_bin_labels,
+            file("${params.magscot_hmm_dir}/gtdbtk_rel207_tigrfam.hmm", checkIfExists: true),
+            file("${params.magscot_hmm_dir}/gtdbtk_rel207_Pfam-A.hmm", checkIfExists: true),
+            file("${params.magscot_hmm_dir}/profiles/gtdb_rel207_default_markers.tsv", checkIfExists: true))
+        MAGSCOT_CONSENSUS.out.bins.subscribe   { binnerSeen['magscot'] = it }
+        MAGSCOT_CONSENSUS.out.status.subscribe { binnerStatus['magscot'] = it }
     }
 
     // 4c. Metabolic merge + map to bins
@@ -659,14 +885,14 @@ workflow {
         if (params.run_vamb) {
             ch_all_bins = ch_all_bins.mix(BIN_VAMB.out.fastas)
         }
-        if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
+        if (vamb_tax_enabled) {
             ch_all_bins = ch_all_bins.mix(BIN_VAMB_TAX.out.fastas)
         }
         ch_all_bins = ch_all_bins.mix(DASTOOL_CONSENSUS.out.bins)
-        if (params.run_binette && params.checkm2_db) {
+        if (binette_on) {
             ch_all_bins = ch_all_bins.mix(BINETTE_CONSENSUS.out.fastas)
         }
-        if (params.run_magscot) {
+        if (magscot_on) {
             ch_all_bins = ch_all_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
         }
         ch_all_bins = params.binners_only ? Channel.empty() : ch_all_bins.collect()
@@ -677,10 +903,10 @@ workflow {
         // best-scoring CheckM2 genome of each cluster
         if (params.run_derep) {
             ch_derep_bins = DASTOOL_CONSENSUS.out.bins
-            if (params.run_binette) {
+            if (binette_on) {
                 ch_derep_bins = ch_derep_bins.mix(BINETTE_CONSENSUS.out.fastas)
             }
-            if (params.run_magscot) {
+            if (magscot_on) {
                 ch_derep_bins = ch_derep_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
             }
             DEREP_GALAH(ch_derep_bins.collect(), CHECKM2.out.report)
@@ -688,7 +914,7 @@ workflow {
     }
 
     // 6. GTDB-Tk phylogenetic classification
-    if (params.run_gtdbtk && params.gtdbtk_db) {
+    if (params.run_gtdbtk && params.gtdbtk_db && !params.binners_only) {
         ch_gtdbtk_bins = BIN_METABAT2.out.fastas
         if (params.run_semibin && params.bam_dir) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_SEMIBIN2.out.fastas)
@@ -705,19 +931,52 @@ workflow {
         if (params.run_vamb) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB.out.fastas)
         }
-        if (params.run_vamb_tax && params.run_sendsketch && params.sendsketch_address) {
+        if (vamb_tax_enabled) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BIN_VAMB_TAX.out.fastas)
         }
         ch_gtdbtk_bins = ch_gtdbtk_bins.mix(DASTOOL_CONSENSUS.out.bins)
-        if (params.run_binette && params.checkm2_db) {
+        if (binette_on) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(BINETTE_CONSENSUS.out.fastas)
         }
-        if (params.run_magscot) {
+        if (magscot_on) {
             ch_gtdbtk_bins = ch_gtdbtk_bins.mix(MAGSCOT_CONSENSUS.out.fastas)
         }
         ch_gtdbtk_bins = ch_gtdbtk_bins.collect()
 
         GTDBTK_CLASSIFY(ch_gtdbtk_bins)
+    }
+
+    // 6b. MetaCyc pathways per DAS Tool MAG and for the community
+    if (metacyc_enabled) {
+        def no_file = file("${projectDir}/assets/NO_FILE")
+        def gtdbtk_on = params.run_gtdbtk && params.gtdbtk_db && !params.binners_only
+        def sketch_on = params.run_sendsketch && params.sendsketch_address
+        // The high tier needs taxonomic ranges (EcoCyc benchmark: precision 0.79 with them,
+        // 0.73 without), so without GTDB-Tk the sendsketch contig calls stand in.
+        if (params.metacyc_taxonomy == 'gtdbtk' && gtdbtk_on) {
+            ch_mc_tax = GTDBTK_CLASSIFY.out.taxonomy.map { ['gtdbtk', it] }
+        } else if (sketch_on && (params.metacyc_taxonomy == 'sendsketch' || params.metacyc_taxonomy == 'gtdbtk')) {
+            if (params.metacyc_taxonomy == 'gtdbtk') {
+                log.warn "MetaCyc taxonomic ranges from sendsketch: GTDB-Tk is not running (--run_gtdbtk / --gtdbtk_db)."
+            }
+            ch_mc_tax = SENDSKETCH_CLASSIFY.out.contig_taxonomy.map { ['sendsketch', it] }
+        } else {
+            if (params.metacyc_taxonomy != 'none') {
+                log.info "MetaCyc taxonomic-range rules off: --metacyc_taxonomy ${params.metacyc_taxonomy} has no results in this run."
+            }
+            ch_mc_tax = Channel.value(['none', no_file])
+        }
+        METACYC_PATHWAYS(
+            METACYC_SEARCH.out.hits,
+            ch_annotation_tsv,
+            MERGE_ANNOTATIONS.out.merged,
+            DASTOOL_CONSENSUS.out.contig2bin,
+            ch_gff,
+            params.kofam_db ? file("${params.kofam_db}/ko_list") : no_file,
+            ch_mc_tax,
+            file(params.metacyc_db),
+            file(params.metacyc_refs)
+        )
     }
 
     // 7. Viz dashboard
@@ -797,17 +1056,25 @@ workflow {
                 ch_viz_stage4 = ch_viz_stage4.mix(ECOSSDB_VIZ.out.json.collect())
             }
         }
+        if (metacyc_enabled) {
+            ch_viz_stage4 = ch_viz_stage4.mix(METACYC_PATHWAYS.out.pathways.collect())
+        }
         if (params.run_antismash) {
             ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.summary.collect())
             ch_viz_stage4 = ch_viz_stage4.mix(ANTISMASH.out.json.collect())
         }
-        if (params.run_gtdbtk && params.gtdbtk_db) {
+        if (params.run_gtdbtk && params.gtdbtk_db && !params.binners_only) {
             ch_viz_stage4 = ch_viz_stage4.mix(GTDBTK_CLASSIFY.out.taxonomy.collect())
         }
         VIZ_STAGE4(ch_viz_stage4.mix(VIZ_STAGE3.out.done).collect(), true, true)
     }
 
     workflow.onComplete = {
+        try {
+            writeBinnerReport(workflow.success as boolean)
+        } catch (Exception e) {
+            log.warn "Could not write binning/binner_status.tsv: ${e.message}"
+        }
         def msg = """\
             Pipeline completed at : ${workflow.complete}
             Duration              : ${workflow.duration}

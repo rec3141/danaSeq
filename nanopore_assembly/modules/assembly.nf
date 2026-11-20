@@ -157,6 +157,10 @@ process FLYE_POLISH {
     script:
     """
     # Determine read type
+    if [ -z "${params.read_type}" ] || [ "${params.read_type}" = "null" ]; then
+        echo "[ERROR] FLYE_POLISH requires --read_type (nano-raw, nano-hq, nano-corr, or auto)" >&2
+        exit 1
+    fi
     if [ "${params.read_type}" = "auto" ]; then
         echo "[WARNING] --read_type auto: guessing Flye's mode from the first 10,000 reads only" >&2
         MEDIAN_Q=\$(zcat -f ${reads} | head -40000 | awk 'NR%4==0' | head -10000 | \
@@ -195,19 +199,92 @@ print(int(quals[len(quals)//2]) if quals else 10)
         --out-dir polish_out \\
         --threads \$FLYE_THREADS
 
-    # Use polished output if it exists, otherwise keep original
+    # Use polished output if it exists, otherwise keep unpolished assembly.
+    # Staged inputs may share target filenames as symlinks into upstream workdirs,
+    # so write updated metadata via temp files and atomic replace without mutating
+    # symlink targets in place.
     if [ -s polish_out/polished_1.fasta ]; then
         mv polish_out/polished_1.fasta assembly.fasta
         echo "[INFO] Polishing complete"
+        python3 - assembly.fasta "${info}" "${graph}" <<'PYEOF'
+import os
+import sys
+
+fasta_path, info_in, graph_in = sys.argv[1], sys.argv[2], sys.argv[3]
+
+seqs_meta = {}
+with open(fasta_path, "rb") as fh:
+    cur_name = None
+    cur_off = 0
+    cur_len = 0
+    while True:
+        line = fh.readline()
+        if not line:
+            break
+        if line.startswith(b">"):
+            if cur_name is not None:
+                seqs_meta[cur_name] = (cur_off, cur_len)
+            cur_name = line[1:].rstrip(b"\\r\\n").split()[0].decode("utf-8", errors="replace")
+            cur_off = fh.tell()
+            cur_len = 0
+        else:
+            cur_len += len(line.rstrip(b"\\r\\n"))
+    if cur_name is not None:
+        seqs_meta[cur_name] = (cur_off, cur_len)
+
+
+def read_seq(fh, offset, length):
+    fh.seek(offset)
+    buf = bytearray()
+    rem = length
+    while rem > 0:
+        ln = fh.readline()
+        if not ln or ln.startswith(b">"):
+            break
+        s = ln.rstrip(b"\\r\\n")
+        buf.extend(s)
+        rem -= len(s)
+    return bytes(buf)
+
+
+info_tmp = ".assembly_info.txt.tmp"
+with open(info_in, "r", encoding="utf-8", errors="replace") as fin, open(info_tmp, "w", encoding="utf-8") as fout:
+    for line in fin:
+        stripped = line.rstrip("\\r\\n")
+        if not stripped or stripped.startswith("#"):
+            fout.write(stripped + "\\n")
+            continue
+        cols = stripped.split("\\t")
+        if len(cols) >= 2 and cols[0] in seqs_meta:
+            cols[1] = str(seqs_meta[cols[0]][1])
+        fout.write("\\t".join(cols) + "\\n")
+os.replace(info_tmp, "assembly_info.txt")
+
+graph_tmp = ".assembly_graph.gfa.tmp"
+with open(fasta_path, "rb") as fseq, open(graph_in, "rb") as fin, open(graph_tmp, "wb") as fout:
+    for line in fin:
+        if not line.startswith(b"S\\t"):
+            fout.write(line)
+            continue
+        fields = line.rstrip(b"\\r\\n").split(b"\\t")
+        if len(fields) >= 3:
+            cid = fields[1].decode("utf-8", errors="replace")
+            if cid in seqs_meta:
+                off, slen = seqs_meta[cid]
+                if fields[2] != b"*":
+                    fields[2] = read_seq(fseq, off, slen)
+                for idx in range(3, len(fields)):
+                    if fields[idx].startswith(b"LN:i:"):
+                        fields[idx] = f"LN:i:{slen}".encode("ascii")
+        fout.write(b"\\t".join(fields) + b"\\n")
+os.replace(graph_tmp, "assembly_graph.gfa")
+PYEOF
     else
         echo "[WARNING] Polishing produced no output, keeping unpolished assembly"
-        cp ${assembly} assembly.fasta
+        [ "${assembly}" != "assembly.fasta" ] && cp "${assembly}" assembly.fasta || true
+        [ "${info}" != "assembly_info.txt" ] && cp "${info}" assembly_info.txt || true
+        [ "${graph}" != "assembly_graph.gfa" ] && cp "${graph}" assembly_graph.gfa || true
     fi
-
-    # Pass through info and graph unchanged (polishing doesn't alter these)
-    # Use ln -f to handle case where staged input already has the target name
-    [ "${info}" != "assembly_info.txt" ] && cp ${info} assembly_info.txt || true
-    [ "${graph}" != "assembly_graph.gfa" ] && cp ${graph} assembly_graph.gfa || true
     """
 }
 

@@ -498,13 +498,16 @@ static int run_main(int argc, char** argv) {
 
             total_reads++;
 
-            // Strip newlines
-            int hlen = strlen(hdr_buf);
-            if (hlen > 0 && hdr_buf[hlen-1] == '\n') hdr_buf[--hlen] = '\0';
-            int slen = strlen(seq_buf);
-            if (slen > 0 && seq_buf[slen-1] == '\n') seq_buf[--slen] = '\0';
-            int qlen = strlen(qual_buf);
-            if (qlen > 0 && qual_buf[qlen-1] == '\n') qual_buf[--qlen] = '\0';
+            // Strip line endings, LF or CRLF: a '\r' left on the quality line
+            // scores as Q0 and one left on the header breaks ID matching.
+            auto rstrip_eol = [](char* buf) {
+                int len = strlen(buf);
+                while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) buf[--len] = '\0';
+                return len;
+            };
+            int hlen = rstrip_eol(hdr_buf);
+            int slen = rstrip_eol(seq_buf);
+            int qlen = rstrip_eol(qual_buf);
             if (hdr_buf[0] != '@' || plus_buf[0] != '+' || !slen || slen != qlen)
                 throw std::runtime_error("Invalid FASTQ record or sequence/quality length mismatch");
             input_bases += slen;
@@ -513,7 +516,7 @@ static int run_main(int argc, char** argv) {
             // result is the same in every selection mode.
             if (!exclude_ids.empty()) {
                 const char* end = hdr_buf + 1;
-                while (*end && *end != ' ' && *end != '\t') end++;
+                while (*end && *end != ' ' && *end != '\t' && *end != '\r') end++;
                 if (exclude_ids.count(std::string(hdr_buf + 1, end - hdr_buf - 1))) {
                     excluded_reads++;
                     continue;
@@ -525,7 +528,7 @@ static int run_main(int argc, char** argv) {
                 // Extract ID: skip '@', take up to first space/tab
                 const char* start = hdr_buf + 1;
                 const char* end = start;
-                while (*end && *end != ' ' && *end != '\t') end++;
+                while (*end && *end != ' ' && *end != '\t' && *end != '\r') end++;
                 std::string rid(start, end - start);
                 if (!seen_ids.insert(rid).second) {
                     dup_reads++;
@@ -731,7 +734,7 @@ static int run_main(int argc, char** argv) {
                 int sl = strlen(seq_buf) - 1;
                 uint64_t h = 1469598103934665603ULL;
                 for (const char* p = hdr_buf + 1; *p && *p != ' ' &&
-                     *p != '\t' && *p != '\n'; ++p) {
+                     *p != '\t' && *p != '\r' && *p != '\n'; ++p) {
                     h ^= (unsigned char)*p;
                     h *= 1099511628211ULL;
                 }
@@ -752,7 +755,7 @@ static int run_main(int argc, char** argv) {
                 at(cd.off);
                 if (dedupe) {
                     const char* end = hdr_buf + 1;
-                    while (*end && *end != ' ' && *end != '\t' && *end != '\n') ++end;
+                    while (*end && *end != ' ' && *end != '\t' && *end != '\r' && *end != '\n') ++end;
                     if (!seen_ids.emplace(hdr_buf + 1, end - hdr_buf - 1).second) {
                         ++dup_reads;
                         continue;

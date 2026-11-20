@@ -111,8 +111,8 @@ link_dir "$RESULTS/mapping" "$STORE/mapping"
 # Concat (per-sample fastq.gz)
 link_dir "$RESULTS/concat" "$STORE/concat"
 
-# DAS Tool consensus
-link_dir "$RESULTS/binning/dastool" "$STORE/binning/dastool"
+# The consensus steps (DAS Tool, Binette, MAGScoT) are not stored: they rerun under
+# -resume whenever their inputs change, so there is nothing to seed for them.
 
 # CheckM2
 link_dir "$RESULTS/binning/checkm2" "$STORE/binning/checkm2"

@@ -90,7 +90,8 @@ usage() {
     echo "  --bakta_db PATH      Bakta database [default: db-light from config]"
     echo "  --hmm_databases LIST Comma-separated HMM file paths"
     echo "  --pollutant_dbs DIR  Pollutant protein DBs (<name>/<name>.hmm|.dmnd, e.g. CANT-HYD, HADEG)"
-    echo "  --protein_dbs LIST   Comma-separated DIAMOND .dmnd paths (local mode only)"
+    echo "  --protein_dbs LIST   Comma-separated DIAMOND .dmnd paths"
+    echo "  --mapping_refs DIR   Minimap2 reference directory (<name>/<name>.idx)"
     echo "  --metadata FILE      Sample metadata TSV (flowcell, barcode, lat, lon, etc.)"
     echo ""
     echo "Pipeline flags (passed to Nextflow):"
@@ -176,6 +177,10 @@ ARCHIVE_RAW_DEST="${ARCHIVE_RAW_DEST:-}"
 ARCHIVE_OUT_DEST="${ARCHIVE_OUT_DEST:-}"
 ARCHIVE_POLL=30
 POLLUTANT_DBS_HOST=""
+BAKTA_DB_HOST=""
+MAPPING_REFS_HOST=""
+PROTEIN_DBS_HOST=""
+METADATA_HOST=""
 STORE_DIR_HOST=""
 
 while (( $# )); do
@@ -198,14 +203,57 @@ while (( $# )); do
             [[ -z "${2:-}" ]] && die "--input requires a directory path"
             INPUT_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
             shift 2 ;;
+        --input=*)
+            INPUT_HOST="$(realpath "${1#--input=}" 2>/dev/null || echo "${1#--input=}")"
+            shift ;;
         --outdir)
             [[ -z "${2:-}" ]] && die "--outdir requires a directory path"
             OUTDIR_HOST="$(realpath -m "$2")"
             shift 2 ;;
+        --outdir=*)
+            OUTDIR_HOST="$(realpath -m "${1#--outdir=}")"
+            shift ;;
         --kraken_db)
             [[ -z "${2:-}" ]] && die "--kraken_db requires a directory path"
             KRAKEN_DB_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
             shift 2 ;;
+        --kraken_db=*)
+            KRAKEN_DB_HOST="$(realpath "${1#--kraken_db=}" 2>/dev/null || echo "${1#--kraken_db=}")"
+            shift ;;
+        --bakta_db)
+            [[ -z "${2:-}" ]] && die "--bakta_db requires a directory path"
+            BAKTA_DB_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
+            [[ -d "$BAKTA_DB_HOST" ]] || die "--bakta_db directory does not exist: $2"
+            shift 2 ;;
+        --bakta_db=*)
+            BAKTA_DB_HOST="$(realpath "${1#--bakta_db=}" 2>/dev/null || echo "${1#--bakta_db=}")"
+            [[ -d "$BAKTA_DB_HOST" ]] || die "--bakta_db directory does not exist: ${1#--bakta_db=}"
+            shift ;;
+        --mapping_refs)
+            [[ -z "${2:-}" ]] && die "--mapping_refs requires a directory path"
+            MAPPING_REFS_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
+            [[ -d "$MAPPING_REFS_HOST" ]] || die "--mapping_refs directory does not exist: $2"
+            shift 2 ;;
+        --mapping_refs=*)
+            MAPPING_REFS_HOST="$(realpath "${1#--mapping_refs=}" 2>/dev/null || echo "${1#--mapping_refs=}")"
+            [[ -d "$MAPPING_REFS_HOST" ]] || die "--mapping_refs directory does not exist: ${1#--mapping_refs=}"
+            shift ;;
+        --protein_dbs)
+            [[ -z "${2:-}" ]] && die "--protein_dbs requires file path(s)"
+            PROTEIN_DBS_HOST="$2"
+            shift 2 ;;
+        --protein_dbs=*)
+            PROTEIN_DBS_HOST="${1#--protein_dbs=}"
+            shift ;;
+        --metadata)
+            [[ -z "${2:-}" ]] && die "--metadata requires a file path"
+            METADATA_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
+            [[ -f "$METADATA_HOST" ]] || die "--metadata file does not exist: $2"
+            shift 2 ;;
+        --metadata=*)
+            METADATA_HOST="$(realpath "${1#--metadata=}" 2>/dev/null || echo "${1#--metadata=}")"
+            [[ -f "$METADATA_HOST" ]] || die "--metadata file does not exist: ${1#--metadata=}"
+            shift ;;
         --danadir)
             # Accepted but ignored — auto-detected from script location
             warn "--danadir is deprecated and auto-detected; ignoring"
@@ -214,11 +262,18 @@ while (( $# )); do
             [[ -z "${2:-}" ]] && die "--hmm_databases requires file path(s)"
             HMM_HOST="$2"
             shift 2 ;;
+        --hmm_databases=*)
+            HMM_HOST="${1#--hmm_databases=}"
+            shift ;;
         --pollutant_dbs)
             [[ -z "${2:-}" ]] && die "--pollutant_dbs requires a directory path"
             POLLUTANT_DBS_HOST="$(realpath "$2" 2>/dev/null || echo "$2")"
             [[ -d "$POLLUTANT_DBS_HOST" ]] || die "--pollutant_dbs directory does not exist: $2"
             shift 2 ;;
+        --pollutant_dbs=*)
+            POLLUTANT_DBS_HOST="$(realpath "${1#--pollutant_dbs=}" 2>/dev/null || echo "${1#--pollutant_dbs=}")"
+            [[ -d "$POLLUTANT_DBS_HOST" ]] || die "--pollutant_dbs directory does not exist: ${1#--pollutant_dbs=}"
+            shift ;;
         --session)
             [[ -z "${2:-}" ]] && die "--session requires a session ID"
             RESUME_SESSION="$2"
@@ -231,6 +286,10 @@ while (( $# )); do
             STORE_DIR_HOST="$(realpath -m "$2")"
             NF_ARGS+=("--store_dir" "$STORE_DIR_HOST")
             shift 2 ;;
+        --store_dir=*)
+            STORE_DIR_HOST="$(realpath -m "${1#--store_dir=}")"
+            NF_ARGS+=("--store_dir" "$STORE_DIR_HOST")
+            shift ;;
         --deploy_slug)
             [[ -z "${2:-}" ]] && die "--deploy_slug requires a value"
             DEPLOY_SLUG="$2"
@@ -308,6 +367,43 @@ if [[ ! -d "$OUTDIR_HOST" ]]; then
     mkdir -p "$OUTDIR_HOST" || die "Cannot create output directory: $OUTDIR_HOST"
 fi
 [[ -w "$OUTDIR_HOST" ]] || die "Output directory is not writable: $OUTDIR_HOST"
+
+if [[ -n "$STORE_DIR_HOST" ]]; then
+    mkdir -p "$STORE_DIR_HOST" || die "Cannot create store directory: $STORE_DIR_HOST"
+    [[ -w "$STORE_DIR_HOST" ]] || die "Store directory is not writable: $STORE_DIR_HOST"
+fi
+
+trim_ws() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
+# Resolve comma-separated HMM and DIAMOND database lists before changing cwd to OUTDIR_HOST
+RESOLVED_HMM_DBS=()
+if [[ -n "$HMM_HOST" ]]; then
+    IFS=',' read -ra HMM_FILES <<< "$HMM_HOST"
+    for hmm_file in "${HMM_FILES[@]}"; do
+        hmm_file="$(trim_ws "$hmm_file")"
+        [[ -n "$hmm_file" ]] || continue
+        hmm_resolved="$(realpath "$hmm_file" 2>/dev/null || echo "$hmm_file")"
+        [[ -f "$hmm_resolved" ]] || die "HMM file does not exist: $hmm_file"
+        RESOLVED_HMM_DBS+=("$hmm_resolved")
+    done
+fi
+
+RESOLVED_PROTEIN_DBS=()
+if [[ -n "$PROTEIN_DBS_HOST" ]]; then
+    IFS=',' read -ra DMND_FILES <<< "$PROTEIN_DBS_HOST"
+    for dmnd_file in "${DMND_FILES[@]}"; do
+        dmnd_file="$(trim_ws "$dmnd_file")"
+        [[ -n "$dmnd_file" ]] || continue
+        dmnd_resolved="$(realpath "$dmnd_file" 2>/dev/null || echo "$dmnd_file")"
+        [[ -f "$dmnd_resolved" ]] || die "DIAMOND database file does not exist: $dmnd_file"
+        RESOLVED_PROTEIN_DBS+=("$dmnd_resolved")
+    done
+fi
 
 # ============================================================================
 # microscape.app deploy hook — DB_SYNC invokes <sync dir>/deploy.sh each tick,
@@ -434,22 +530,50 @@ if [[ "$USE_DOCKER" == true ]]; then
         NF_ARGS+=("--pollutant_dbs" "/pollutant_dbs")
     fi
 
+    if [[ -n "$BAKTA_DB_HOST" ]]; then
+        MOUNTS+=("-v" "${BAKTA_DB_HOST}:${BAKTA_DB_HOST}:ro")
+        NF_ARGS+=("--bakta_db" "$BAKTA_DB_HOST")
+    fi
+
+    if [[ -n "$MAPPING_REFS_HOST" ]]; then
+        MOUNTS+=("-v" "${MAPPING_REFS_HOST}:${MAPPING_REFS_HOST}:ro")
+        NF_ARGS+=("--mapping_refs" "$MAPPING_REFS_HOST")
+    fi
+
+    if [[ -n "$METADATA_HOST" ]]; then
+        MOUNTS+=("-v" "${METADATA_HOST}:${METADATA_HOST}:ro")
+        NF_ARGS+=("--metadata" "$METADATA_HOST")
+    fi
+
+    # Outdir is mounted at /data/output, while --store_dir passes STORE_DIR_HOST;
+    # always bind STORE_DIR_HOST at its host path even when equal to OUTDIR_HOST.
+    if [[ -n "$STORE_DIR_HOST" ]]; then
+        MOUNTS+=("-v" "${STORE_DIR_HOST}:${STORE_DIR_HOST}")
+    fi
+
+    if [[ ${#RESOLVED_PROTEIN_DBS[@]} -gt 0 ]]; then
+        for dmnd_resolved in "${RESOLVED_PROTEIN_DBS[@]}"; do
+            MOUNTS+=("-v" "${dmnd_resolved}:${dmnd_resolved}:ro")
+            dmnd_base="${dmnd_resolved%.*}"
+            [[ -f "${dmnd_base}.genes.tsv" ]] && MOUNTS+=("-v" "${dmnd_base}.genes.tsv:${dmnd_base}.genes.tsv:ro")
+            [[ -f "${dmnd_base}.opts" ]] && MOUNTS+=("-v" "${dmnd_base}.opts:${dmnd_base}.opts:ro")
+        done
+        dmnd_joined="$(IFS=','; printf '%s' "${RESOLVED_PROTEIN_DBS[*]}")"
+        NF_ARGS+=("--protein_dbs" "$dmnd_joined")
+    fi
+
     # HMM databases
-    if [[ -n "$HMM_HOST" ]]; then
+    if [[ ${#RESOLVED_HMM_DBS[@]} -gt 0 ]]; then
         container_hmm_paths=()
         hmm_counter=0
-        IFS=',' read -ra HMM_FILES <<< "$HMM_HOST"
-        for hmm_file in "${HMM_FILES[@]}"; do
-            hmm_file="$(echo "$hmm_file" | xargs)"  # trim whitespace
-            hmm_resolved="$(realpath "$hmm_file" 2>/dev/null || echo "$hmm_file")"
-            [[ -f "$hmm_resolved" ]] || die "HMM file does not exist: $hmm_file"
+        for hmm_resolved in "${RESOLVED_HMM_DBS[@]}"; do
             hmm_name="$(basename "$hmm_resolved")"
             container_path="/hmm/${hmm_name}"
             MOUNTS+=("-v" "${hmm_resolved}:${container_path}:ro")
             container_hmm_paths+=("$container_path")
             hmm_counter=$((hmm_counter + 1))
         done
-        hmm_joined="$(IFS=','; echo "${container_hmm_paths[*]}")"
+        hmm_joined="$(IFS=','; printf '%s' "${container_hmm_paths[*]}")"
         NF_ARGS+=("--hmm_databases" "$hmm_joined")
         echo "[INFO] Mounting $hmm_counter HMM database(s)"
     fi
@@ -517,18 +641,20 @@ if [[ -n "$KRAKEN_DB_HOST" ]]; then
     NF_ARGS+=("--kraken_db" "$KRAKEN_DB_HOST")
 fi
 
-# HMM databases — validate paths exist
-if [[ -n "$HMM_HOST" ]]; then
-    IFS=',' read -ra HMM_FILES <<< "$HMM_HOST"
-    for hmm_file in "${HMM_FILES[@]}"; do
-        hmm_file="$(echo "$hmm_file" | xargs)"
-        hmm_resolved="$(realpath "$hmm_file" 2>/dev/null || echo "$hmm_file")"
-        [[ -f "$hmm_resolved" ]] || die "HMM file does not exist: $hmm_file"
-    done
-    NF_ARGS+=("--hmm_databases" "$HMM_HOST")
+# HMM databases — pass pre-resolved paths
+if [[ ${#RESOLVED_HMM_DBS[@]} -gt 0 ]]; then
+    hmm_joined="$(IFS=','; printf '%s' "${RESOLVED_HMM_DBS[*]}")"
+    NF_ARGS+=("--hmm_databases" "$hmm_joined")
 fi
 
 [[ -n "$POLLUTANT_DBS_HOST" ]] && NF_ARGS+=("--pollutant_dbs" "$POLLUTANT_DBS_HOST")
+[[ -n "$BAKTA_DB_HOST" ]] && NF_ARGS+=("--bakta_db" "$BAKTA_DB_HOST")
+[[ -n "$MAPPING_REFS_HOST" ]] && NF_ARGS+=("--mapping_refs" "$MAPPING_REFS_HOST")
+[[ -n "$METADATA_HOST" ]] && NF_ARGS+=("--metadata" "$METADATA_HOST")
+if [[ ${#RESOLVED_PROTEIN_DBS[@]} -gt 0 ]]; then
+    dmnd_joined="$(IFS=','; printf '%s' "${RESOLVED_PROTEIN_DBS[*]}")"
+    NF_ARGS+=("--protein_dbs" "$dmnd_joined")
+fi
 
 LOCAL_CMD=(
     mamba run -p "${SCRIPT_DIR}/conda-envs/dana-tools"

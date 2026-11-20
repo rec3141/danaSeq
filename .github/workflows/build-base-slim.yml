@@ -80,12 +80,24 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=
 
+      - name: Resolve the latest fastsne release
+        id: fastsne
+        # Passed as FASTSNE_VERSION so a new release changes the build arg and misses the
+        # layer cache (the Dockerfile's own default, latest, would stay cached forever).
+        # A fastsne release triggers nothing here: it lands at the next build, or dispatch
+        # this workflow by hand, as for papa2.
+        run: |
+          v=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/rec3141/fastsne/releases/latest)
+          echo "version=${v##*/}" >> "$GITHUB_OUTPUT"
+          echo "fastsne ${v##*/}"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: mag_analysis
           file: mag_analysis/Dockerfile.base-slim
           build-args: |
+            FASTSNE_VERSION=${{ steps.fastsne.outputs.version }}
             TORCH_VARIANT=${{ matrix.variant }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}

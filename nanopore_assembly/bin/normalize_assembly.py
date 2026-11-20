@@ -128,8 +128,9 @@ HEADER_PARSERS = {
 }
 
 
-def remap_gfa(in_path, out_path, name_map):
-    """Rewrite S/P/L lines in a GFA with new contig names."""
+def remap_gfa(in_path, out_path, name_map, dropped_names=None):
+    """Rewrite S/P/L/C lines in a GFA with new contig names and prune dropped contigs."""
+    dropped = set(dropped_names) if dropped_names else set()
     n_renamed = 0
     with open(in_path, "rb") as fin, open(out_path, "wb") as fout:
         for line in fin:
@@ -142,29 +143,50 @@ def remap_gfa(in_path, out_path, name_map):
                 continue
             rec = fields[0]
             if rec == b"S" and len(fields) >= 2:
-                old = fields[1].decode()
+                old = fields[1].decode("utf-8", errors="replace")
+                if old in dropped:
+                    continue
                 if old in name_map:
-                    fields[1] = name_map[old].encode()
+                    fields[1] = name_map[old].encode("utf-8")
                     n_renamed += 1
-            elif rec == b"L" and len(fields) >= 5:
-                for idx in (1, 3):
-                    old = fields[idx].decode()
-                    if old in name_map:
-                        fields[idx] = name_map[old].encode()
+            elif rec in (b"L", b"C") and len(fields) >= 5:
+                u = fields[1].decode("utf-8", errors="replace")
+                v = fields[3].decode("utf-8", errors="replace")
+                if u in dropped or v in dropped:
+                    continue
+                if u in name_map:
+                    fields[1] = name_map[u].encode("utf-8")
+                if v in name_map:
+                    fields[3] = name_map[v].encode("utf-8")
             elif rec == b"P" and len(fields) >= 3:
-                # P lines have comma-separated segments with optional +/- orientation
-                segs = fields[2].split(b",")
-                new_segs = []
-                for seg in segs:
-                    m = re.match(rb"^([^+\-]+)([+\-]?)$", seg)
-                    if m:
-                        old = m.group(1).decode()
-                        orient = m.group(2)
-                        new_name = name_map.get(old, old).encode()
+                pname = fields[1].decode("utf-8", errors="replace")
+                if pname in dropped:
+                    continue
+                if pname in name_map:
+                    fields[1] = name_map[pname].encode("utf-8")
+                # P lines carry comma-separated segments with optional trailing +/- orientation.
+                if fields[2] != b"*":
+                    segs = fields[2].split(b",")
+                    new_segs = []
+                    drop_path = False
+                    for seg in segs:
+                        if not seg:
+                            new_segs.append(seg)
+                            continue
+                        if seg[-1:] in (b"+", b"-"):
+                            old = seg[:-1].decode("utf-8", errors="replace")
+                            orient = seg[-1:]
+                        else:
+                            old = seg.decode("utf-8", errors="replace")
+                            orient = b""
+                        if old in dropped:
+                            drop_path = True
+                            break
+                        new_name = name_map.get(old, old).encode("utf-8")
                         new_segs.append(new_name + orient)
-                    else:
-                        new_segs.append(seg)
-                fields[2] = b",".join(new_segs)
+                    if drop_path:
+                        continue
+                    fields[2] = b",".join(new_segs)
             fout.write(b"\t".join(fields))
             fout.write(b"\n")
     return n_renamed
@@ -291,10 +313,11 @@ def main():
             with open(args.gfa_out, "w") as fout:
                 fout.write("H\tVN:Z:1.0\n")
         else:
+            dropped_names = {h.split()[0] for (h, _, _) in entries} - set(name_map.keys())
             sys.stderr.write(
                 f"[normalize_assembly] remapping GFA {args.gfa_in} -> {args.gfa_out}\n"
             )
-            n_renamed = remap_gfa(args.gfa_in, args.gfa_out, name_map)
+            n_renamed = remap_gfa(args.gfa_in, args.gfa_out, name_map, dropped_names)
             sys.stderr.write(f"[normalize_assembly] remapped {n_renamed} GFA S-lines\n")
 
 

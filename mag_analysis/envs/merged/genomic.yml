@@ -8,4 +8,5 @@ dependencies:
   - integron_finder
   - dbcan>=4.0
   - hmmer>=3.3
+  - cath-tools=0.16.5     # cath-resolve-hits: protein DBs with 'resolve' in <name>.opts
   - python>=3.9,<3.13    # integron_finder uses distutils, removed in 3.13

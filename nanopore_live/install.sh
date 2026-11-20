@@ -31,9 +31,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_DIR="${SCRIPT_DIR}/conda-envs"
 ENVS_YAML_DIR="${SCRIPT_DIR}/envs"
 TETRAMER_URL="https://raw.githubusercontent.com/tetramerFreqs/Binning/master/tetramer_freqs_esom.pl"
-# fastsne (read-level t-SNE of every read): pinned release, self-contained binaries
-FASTSNE_VERSION="v0.2.2"
-FASTSNE_SHA256="07ebdb1718ff3e28daabb6463114f0bd2d7965c4e287a4b282074831ff6a1e66"
+# fastsne (read-level t-SNE of every read): latest release unless FASTSNE_VERSION names
+# one, self-contained binaries
+FASTSNE_VERSION="${FASTSNE_VERSION:-latest}"
 FASTSNE_URL="https://github.com/rec3141/fastsne"
 
 # Detect conda/mamba
@@ -182,12 +182,17 @@ do_install() {
     # sklearn sample). The read map runs the GPU fastsne (needs only the NVIDIA driver)
     # when a GPU is visible, else fastsne_cpu.
     echo ""
-    echo "Installing fastsne ${FASTSNE_VERSION}..."
-    local tools_env="${ENV_DIR}/dana-tools" fs_tmp fs_tar="fastsne-${FASTSNE_VERSION}-linux-x86_64.tar.gz"
+    local tools_env="${ENV_DIR}/dana-tools" fs_tmp fs_tar fs_version="${FASTSNE_VERSION}"
+    if [[ "${fs_version}" == latest ]]; then
+        fs_version=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "${FASTSNE_URL}/releases/latest") && fs_version=${fs_version##*/}
+    fi
+    echo "Installing fastsne ${fs_version}..."
+    fs_tar="fastsne-${fs_version}-linux-x86_64.tar.gz"
     if [[ -d "${tools_env}" ]]; then
         fs_tmp=$(mktemp -d)
-        if curl -fsSL -o "${fs_tmp}/${fs_tar}" "${FASTSNE_URL}/releases/download/${FASTSNE_VERSION}/${fs_tar}" \
-            && echo "${FASTSNE_SHA256}  ${fs_tmp}/${fs_tar}" | sha256sum -c --quiet - \
+        if curl -fsSL -o "${fs_tmp}/${fs_tar}" "${FASTSNE_URL}/releases/download/${fs_version}/${fs_tar}" \
+            -o "${fs_tmp}/${fs_tar}.sha256" "${FASTSNE_URL}/releases/download/${fs_version}/${fs_tar}.sha256" \
+            && (cd "${fs_tmp}" && sha256sum -c --quiet "${fs_tar}.sha256") \
             && tar -xzf "${fs_tmp}/${fs_tar}" --strip-components=1 -C "${tools_env}"; then
             echo "  Installed to: ${tools_env}/bin (fastsne, fastsne_cpu)"
         else

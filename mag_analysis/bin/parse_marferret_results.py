@@ -93,7 +93,8 @@ class Taxdump:
             for line in f:
                 p = line.split('\t|\t')
                 self.parent[p[0]] = p[1]
-                self.rank[p[0]] = RANK_ALIASES.get(p[2], p[2])
+                rank = p[2].rstrip('\t|\n')
+                self.rank[p[0]] = RANK_ALIASES.get(rank, rank)
         with open(os.path.join(taxdump_dir, 'names.dmp')) as f:
             for line in f:
                 p = line.split('\t|\t')
@@ -130,13 +131,19 @@ class Taxdump:
 
 
 def extract_contig_id(protein_id):
-    """Source contig of a MetaEuk protein.
+    """Extract the contig ID from a MetaEuk protein header.
 
-    MetaEuk headers are TargetID|ContigID|strand|..., so the contig is the
-    second field; the first is the MetaEuk reference protein that was matched.
+    MetaEuk easy-predict headers are T_acc|C_acc|strand|bitscore|evalue|...:
+    the first field is the reference target the gene was predicted from, and
+    the contig is the field(s) between it and the strand token (+ or -). A
+    contig name containing '|' is kept whole. An ID without a strand token is
+    not a MetaEuk header and is returned up to its first '|'.
     """
-    parts = protein_id.split('|')
-    return parts[1] if len(parts) > 1 else parts[0]
+    fields = protein_id.split('|')
+    for i in range(2, len(fields)):
+        if fields[i] in ('+', '-'):
+            return '|'.join(fields[1:i])
+    return fields[0]
 
 
 def read_diamond(path):

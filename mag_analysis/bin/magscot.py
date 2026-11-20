@@ -167,11 +167,16 @@ def main():
               f"got {contig_to_bin.shape[1]}", file=sys.stderr)
         sys.exit(1)
 
-    n_bins = contig_to_bin["bin"].nunique()
-    n_contigs = contig_to_bin["contig"].nunique()
-    if n_bins > n_contigs:
-        print("ERROR: More unique bins than contigs. "
-              "Expected format: bin, contig, set (no header)", file=sys.stderr)
+    # Within one binning tool there cannot be more bins than contigs unless the
+    # bin and contig columns are swapped. Across tools there can: k tools that
+    # each keep a one-contig bin give k bins for that contig.
+    per_set = contig_to_bin.groupby("set").agg(n_bins=("bin", "nunique"),
+                                               n_contigs=("contig", "nunique"))
+    bad = per_set[per_set["n_bins"] > per_set["n_contigs"]]
+    if len(bad):
+        print(f"ERROR: More unique bins than contigs for binning tool "
+              f"'{bad.index[0]}'. Expected format: bin, contig, set (no header)",
+              file=sys.stderr)
         sys.exit(1)
 
     # Build contig index map (sorted unique contigs → integer index)
@@ -332,12 +337,19 @@ def main():
                 f"MAGScoT_{it}_{j + 1}" for j in range(len(bisco_out))
             ]
 
-            # Build contig-to-bin for merged bins
+            # Build contig-to-bin for merged bins: the seed's contigs (a merged
+            # bin from the previous iteration when it > 1) plus the partner's
+            # contigs from the original bins, as in upstream MAGScoT's
+            # merge_bins() (R/merge.R).
             merged_rows = []
             for _, row in bisco_out.iterrows():
-                pair_contigs = contig_to_bin[
-                    contig_to_bin["bin"].isin([row["bin_a"], row["bin_b"]])
-                ][["contig"]].drop_duplicates()
+                seed = row["seed"]
+                partner = row["bin_b"] if row["bin_a"] == seed else row["bin_a"]
+                pair_contigs = pd.concat([
+                    contig_to_bin_bisco_it.loc[
+                        contig_to_bin_bisco_it["bin"] == seed, ["contig"]],
+                    contig_to_bin.loc[contig_to_bin["bin"] == partner, ["contig"]],
+                ]).drop_duplicates()
                 for contig in pair_contigs["contig"]:
                     merged_rows.append({
                         "bin": row["bin"],
@@ -388,7 +400,7 @@ def main():
     recalc = set(contig_to_bin_remain["bin"].unique())
     iteration = 1
 
-    while len(contig_to_bin_remain) > 1:
+    while len(contig_to_bin_remain) > 0:
         print(f"Refining bins, iteration: {iteration}", file=sys.stderr)
         print("Extracting SCG information for bins...", file=sys.stderr)
 
@@ -440,12 +452,17 @@ def main():
         if len(scoreframe) == 0:
             break
 
-        # Winner streak: consecutive bins from same binner don't affect each other
+        # Winner streak: consecutive bins from same binner don't affect each
+        # other, so they are accepted without rescoring, but each must still
+        # reach the score cutoff (upstream MAGScoT refine_bins(), R/refine.R).
+        # If none does, nothing is picked this round and the loop ends on the
+        # cutoff check above.
         winnerset = scoreframe.iloc[0]["bintool"]
         row_idx = 0
 
         while (row_idx < len(scoreframe) and
-               scoreframe.iloc[row_idx]["bintool"] == winnerset):
+               scoreframe.iloc[row_idx]["bintool"] == winnerset and
+               scoreframe.iloc[row_idx]["score"] >= args.threshold):
             winnerbin = scoreframe.iloc[row_idx]["bin"]
             scoreframe_out.append(scoreframe.iloc[row_idx].to_dict())
             print(f"The highest scoring bin is: {winnerbin}", file=sys.stderr)
@@ -514,6 +531,10 @@ def main():
             binning_file, sep="\t", index=False
         )
     else:
+        if not args.score_only:
+            pd.DataFrame(columns=["binnew", "contig"]).to_csv(
+                f"{args.out}.refined.contig_to_bin.out", sep="\t", index=False
+            )
         print(f"No bins with score >= {args.threshold} were found.",
               file=sys.stderr)
 

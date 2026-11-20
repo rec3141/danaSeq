@@ -51,6 +51,8 @@ resolve_db_dir() {
         [--eggnog_db]="eggnog_db"
         [--dbcan_db]="dbcan_db"
         [--protein_db_dir]="protein_dbs"
+        [--metacyc_db]="metacyc"
+        [--metacyc_refs]="metacyc_refs"
         [--macsyfinder_models]="macsyfinder_models"
         [--defensefinder_models]="defensefinder_models"
         [--marferret_db]="marferret_db"
@@ -162,7 +164,8 @@ usage() {
     echo "Shortcuts:"
     echo "  --all              Enable all optional modules (still requires DB paths)"
     echo "  --db_dir DIR       Auto-resolve database paths from download-databases.sh layout"
-    echo "                     (<db_dir>/protein_dbs becomes --protein_db_dir)"
+    echo "                     (<db_dir>/protein_dbs becomes --protein_db_dir; <db_dir>/metacyc and"
+    echo "                     <db_dir>/metacyc_refs become --metacyc_db and --metacyc_refs)"
     echo ""
     echo "Protein reference DBs (with --run_metabolism or --all):"
     echo "  --protein_db_dir DIR  One subdir per DB: <name>/<name>.hmm and/or .dmnd, optional"
@@ -196,6 +199,7 @@ usage() {
 # ============================================================================
 
 ASSEMBLY_HOST=""
+EXTRA_INPUTS=()   # --tnf / --assembly_info files, each mounted read-only in container mode
 DEPTHS_HOST=""
 BAM_DIR_HOST=""
 OUTDIR_HOST=""
@@ -204,6 +208,8 @@ RESUME_SESSION=""
 DO_RESUME=false
 DB_DIR_HOST=""
 PROTEIN_DB_DIR_HOST=""
+METACYC_DB_HOST=""
+METACYC_REFS_HOST=""
 STORE_DIR_HOST=""
 
 # Store mode keeps every finished stage in $OUTDIR (storeDir), so a timeout or
@@ -276,6 +282,12 @@ while (( $# )); do
             PROTEIN_DB_DIR_HOST="$(realpath "$2")"
             NF_ARGS+=("--protein_db_dir" "$PROTEIN_DB_DIR_HOST")
             shift 2 ;;
+        --metacyc_db|--metacyc_refs)
+            [[ -z "${2:-}" ]] && die "$1 requires a directory path"
+            [[ -d "$2" ]] || die "$1 directory does not exist: $2"
+            [[ "$1" == --metacyc_db ]] && METACYC_DB_HOST="$(realpath "$2")" || METACYC_REFS_HOST="$(realpath "$2")"
+            NF_ARGS+=("$1" "$(realpath "$2")")
+            shift 2 ;;
         --store_dir)
             [[ -z "${2:-}" ]] && die "--store_dir requires a directory path"
             STORE_DIR_HOST="$(realpath -m "$2")"
@@ -292,6 +304,7 @@ while (( $# )); do
             # path inside the container where it isn't bound.
             [[ -z "${2:-}" ]] && die "$1 requires a file path"
             NF_ARGS+=("$1" "$(realpath "$2" 2>/dev/null || echo "$2")")
+            EXTRA_INPUTS+=("${NF_ARGS[-1]}")
             shift 2 ;;
         --all)
             NF_ARGS+=(
@@ -423,7 +436,7 @@ if [[ "$DO_RESUME" == true && -z "$RESUME_SESSION" ]]; then
                  "${OUTDIR_HOST}/.nextflow-cache/dotdir/history" \
                  "${OUTDIR_HOST}/.nextflow/history"; do
         if [[ -f "$_hist" ]]; then
-            RESUME_SESSION=$(awk '{print $6}' "$_hist" | tail -1)
+            RESUME_SESSION=$(awk -F'\t' '{print $6}' "$_hist" | tail -1)
             break
         fi
     done
@@ -500,6 +513,16 @@ if [[ "$USE_CONTAINER" == true ]]; then
     done
     NF_ARGS=("--outdir" "/data/output" "${NF_ARGS[@]}")
 
+    # --tnf and --assembly_info can live anywhere; mount each file's folder.
+    n=0
+    for f in "${EXTRA_INPUTS[@]}"; do
+        n=$((n + 1))
+        BINDS+=("$(dirname "$f"):/data/input${n}:ro")
+        for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+            [[ "${NF_ARGS[$i]}" == "$f" ]] && NF_ARGS[$i]="/data/input${n}/$(basename "$f")"
+        done
+    done
+
     if [[ -n "${BAM_DIR_HOST:-}" ]]; then
         BINDS+=("${BAM_DIR_HOST}:/data/bams:ro")
         for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
@@ -515,6 +538,17 @@ if [[ "$USE_CONTAINER" == true ]]; then
             [[ "${NF_ARGS[$i]}" == "$PROTEIN_DB_DIR_HOST" ]] && NF_ARGS[$i]=/data/protein_dbs
         done
     fi
+
+    # Explicit MetaCyc dirs outside --db_dir get their own read-only mounts, like --protein_db_dir.
+    for pair in "${METACYC_DB_HOST:-}|/data/metacyc" "${METACYC_REFS_HOST:-}|/data/metacyc_refs"; do
+        host="${pair%%|*}"; mnt="${pair#*|}"
+        [[ -n "$host" ]] || continue
+        [[ -n "${DB_DIR_HOST:-}" && "$host" == "${DB_DIR_HOST}"/* ]] && continue
+        BINDS+=("${host}:${mnt}:ro")
+        for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+            [[ "${NF_ARGS[$i]}" == "$host" ]] && NF_ARGS[$i]="$mnt"
+        done
+    done
 
     if [[ -n "${DB_DIR_HOST:-}" ]]; then
         BINDS+=("${DB_DIR_HOST}:/data/db:ro")
@@ -632,7 +666,7 @@ if [[ "$USE_CONTAINER" == true ]]; then
     # launcher's exit status under set -e/pipefail: Nextflow keeps history in
     # its launch directory, not the bound NXF_HOME, so the first lookup usually
     # finds nothing.
-    NF_SESSION=$(awk '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1 || true)
+    NF_SESSION=$(awk -F'\t' '{print $6}' "${NF_CACHE}/dotdir/history" 2>/dev/null | tail -1 || true)
     [[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1 || true)
     save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
     exit $NF_EXIT
@@ -689,7 +723,7 @@ mkdir -p "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info" 2>/dev/null || true
 "${LOCAL_CMD[@]}" && NF_EXIT=0 || NF_EXIT=$?
 
 # As above: the lookups must not decide the launcher's exit status.
-NF_SESSION=$(awk '{print $6}' .nextflow/history 2>/dev/null | tail -1 || true)
+NF_SESSION=$(awk -F'\t' '{print $6}' .nextflow/history 2>/dev/null | tail -1 || true)
 [[ -z "$NF_SESSION" ]] && NF_SESSION=$(grep -oP 'Session UUID: \K[0-9a-f-]{36}' "${STORE_DIR_HOST:-$OUTDIR_HOST}/pipeline_info/nextflow.log" 2>/dev/null | tail -1 || true)
 save_run_command "${STORE_DIR_HOST:-$OUTDIR_HOST}" "$NF_SESSION"
 

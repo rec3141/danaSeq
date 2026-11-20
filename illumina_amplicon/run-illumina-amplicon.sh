@@ -31,30 +31,155 @@ DO_PULL=false
 # Parse wrapper-specific arguments (strip them before passing to Nextflow)
 # ============================================================================
 NF_ARGS=()
+EXTRA_RO_BINDS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --runtime)  CONTAINER_RUNTIME="$2"; shift 2 ;;
-        --image)    CONTAINER_IMAGE="$2"; shift 2 ;;
-        --pull)     DO_PULL=true; shift ;;
-        --sif)      SIF_PATH="$2"; shift 2 ;;
-        *)          NF_ARGS+=("$1"); shift ;;
+        --runtime)   CONTAINER_RUNTIME="$2"; shift 2 ;;
+        --runtime=*) CONTAINER_RUNTIME="${1#--runtime=}"; shift ;;
+        --image)     CONTAINER_IMAGE="$2"; shift 2 ;;
+        --image=*)   CONTAINER_IMAGE="${1#--image=}"; shift ;;
+        --pull)      DO_PULL=true; shift ;;
+        --sif)       SIF_PATH="$2"; shift 2 ;;
+        --sif=*)     SIF_PATH="${1#--sif=}"; shift ;;
+        --bind)      EXTRA_RO_BINDS+=("$(realpath -m "$2")"); shift 2 ;;
+        --bind=*)    EXTRA_RO_BINDS+=("$(realpath -m "${1#--bind=}")"); shift ;;
+        *)           NF_ARGS+=("$1"); shift ;;
     esac
 done
 
 # ============================================================================
-# Parse --outdir and --input from Nextflow args for bind mounts
+# Parse host path arguments from Nextflow args for container bind mounts
 # ============================================================================
 OUTDIR="results"
-INPUT_DIR=""
-for i in "${!NF_ARGS[@]}"; do
-    case "${NF_ARGS[$i]}" in
-        --outdir)   OUTDIR="${NF_ARGS[$((i+1))]}" ;;
-        --outdir=*) OUTDIR="${NF_ARGS[$i]#--outdir=}" ;;
-        --input)    INPUT_DIR="${NF_ARGS[$((i+1))]}" ;;
-        --input=*)  INPUT_DIR="${NF_ARGS[$i]#--input=}" ;;
+RW_PATHS=()
+RO_PATHS=("${EXTRA_RO_BINDS[@]}")
+SAMPLESHEET_PATH=""
+
+RO_PATH_FLAGS=" --input --samplesheet --metadata --forward_bcs --reverse_bcs --primers_fwd --primers_rev --earthdna_db --dada2_db --dada2_species --dada2_species_db --sintax_db --globe_db "
+RW_PATH_FLAGS=" --store_dir -w -work-dir --work-dir "
+
+extract_ref_db_paths() {
+    local spec="$1" entry rest db_path
+    IFS=';' read -ra entries <<< "$spec"
+    for entry in "${entries[@]}"; do
+        [[ "$entry" == *:* ]] || continue
+        rest="${entry#*:}"
+        db_path="${rest%%:*}"
+        [[ -n "$db_path" ]] && RO_PATHS+=("$db_path")
+    done
+}
+
+for (( i=0; i<${#NF_ARGS[@]}; i++ )); do
+    arg="${NF_ARGS[$i]}"
+    case "$arg" in
+        --outdir)
+            [[ $((i+1)) -lt ${#NF_ARGS[@]} ]] && OUTDIR="${NF_ARGS[$((i+1))]}" ;;
+        --outdir=*)
+            OUTDIR="${arg#--outdir=}" ;;
+        --ref_databases)
+            [[ $((i+1)) -lt ${#NF_ARGS[@]} ]] && extract_ref_db_paths "${NF_ARGS[$((i+1))]}" ;;
+        --ref_databases=*)
+            extract_ref_db_paths "${arg#--ref_databases=}" ;;
+        --*=*|-*=*)
+            flag="${arg%%=*}"
+            val="${arg#*=}"
+            if [[ "$RO_PATH_FLAGS" == *" ${flag} "* && -n "$val" ]]; then
+                RO_PATHS+=("$val")
+                [[ "$flag" == "--samplesheet" ]] && SAMPLESHEET_PATH="$val"
+            elif [[ "$RW_PATH_FLAGS" == *" ${flag} "* && -n "$val" ]]; then
+                RW_PATHS+=("$val")
+            fi ;;
+        *)
+            if [[ "$RO_PATH_FLAGS" == *" ${arg} "* && $((i+1)) -lt ${#NF_ARGS[@]} ]]; then
+                val="${NF_ARGS[$((i+1))]}"
+                RO_PATHS+=("$val")
+                [[ "$arg" == "--samplesheet" ]] && SAMPLESHEET_PATH="$val"
+            elif [[ "$RW_PATH_FLAGS" == *" ${arg} "* && $((i+1)) -lt ${#NF_ARGS[@]} ]]; then
+                RW_PATHS+=("${NF_ARGS[$((i+1))]}")
+            fi ;;
     esac
 done
+
 OUTDIR="$(mkdir -p "$OUTDIR" && cd "$OUTDIR" && pwd)"
+RW_PATHS=("$OUTDIR" "${RW_PATHS[@]}")
+
+# Ensure writable host directories (e.g. --store_dir, -w) exist before container launch
+RESOLVED_RW=()
+for p in "${RW_PATHS[@]}"; do
+    [[ -n "$p" ]] || continue
+    mkdir -p "$p"
+    RESOLVED_RW+=("$(realpath -m "$p")")
+done
+if [[ ${#RESOLVED_RW[@]} -gt 0 ]]; then
+    mapfile -t RESOLVED_RW < <(printf '%s\n' "${RESOLVED_RW[@]}" | awk 'NF' | sort -u)
+fi
+
+# Include read parent directories referenced inside --samplesheet (RFC-4180 CSV by column name)
+if [[ -n "$SAMPLESHEET_PATH" && -f "$SAMPLESHEET_PATH" ]]; then
+    PY_CSV=""
+    for pycand in "$(command -v python3 2>/dev/null || true)" /usr/bin/python3 /opt/miniforge3/bin/python3; do
+        if [[ -n "$pycand" && -x "$pycand" ]]; then PY_CSV="$pycand"; break; fi
+    done
+    if [[ -n "$PY_CSV" ]]; then
+        mapfile -t SHEET_READ_DIRS < <(
+            "$PY_CSV" - "$SAMPLESHEET_PATH" <<'PYEOF'
+import csv, os, sys
+
+sheet = sys.argv[1]
+sheet_dir = os.path.dirname(os.path.abspath(sheet))
+with open(sheet, newline="") as fh:
+    lines = [ln for ln in fh if ln.strip() and not ln.lstrip().startswith("#")]
+for row in csv.DictReader(lines):
+    if not row:
+        continue
+    for key in ("r1_path", "r2_path", "r1", "r2"):
+        val = (row.get(key) or "").strip()
+        if not val:
+            continue
+        for cand in (val, os.path.join(sheet_dir, val)):
+            if os.path.lexists(cand):
+                print(os.path.dirname(os.path.abspath(cand)))
+                print(os.path.dirname(os.path.realpath(cand)))
+                break
+PYEOF
+        )
+        for d in "${SHEET_READ_DIRS[@]}"; do
+            [[ -n "$d" ]] && RO_PATHS+=("$d")
+        done
+    fi
+fi
+
+# Expand symlinks and file parent directories, deduplicate, and drop paths covered by a bound parent
+ALL_RO_CANDIDATES=()
+for p in "${RO_PATHS[@]}"; do
+    [[ -n "$p" ]] || continue
+    if [[ -L "$p" || -f "$p" ]]; then
+        ALL_RO_CANDIDATES+=("$(dirname "$(realpath -m "$p")")")
+        [[ -L "$p" ]] && ALL_RO_CANDIDATES+=("$(dirname "$p")")
+    elif [[ -d "$p" ]]; then
+        ALL_RO_CANDIDATES+=("$(cd "$p" && pwd)")
+        r="$(realpath -m "$p")"
+        [[ "$r" != "$p" && -d "$r" ]] && ALL_RO_CANDIDATES+=("$r")
+    fi
+done
+if [[ ${#ALL_RO_CANDIDATES[@]} -gt 0 ]]; then
+    mapfile -t ALL_RO_CANDIDATES < <(printf '%s\n' "${ALL_RO_CANDIDATES[@]}" | awk 'NF' | sort -u)
+fi
+
+RESOLVED_RO=()
+for p in "${ALL_RO_CANDIDATES[@]}"; do
+    [[ -d "$p" || -f "$p" ]] || continue
+    covered=false
+    for rw in "${RESOLVED_RW[@]}"; do
+        [[ "$p" == "$rw" || "$p" == "$rw"/* ]] && { covered=true; break; }
+    done
+    if [[ "$covered" == false ]]; then
+        for q in "${ALL_RO_CANDIDATES[@]}"; do
+            [[ "$q" != "$p" && "$p" == "$q"/* ]] && { covered=true; break; }
+        done
+    fi
+    [[ "$covered" == false ]] && RESOLVED_RO+=("$p")
+done
 
 # ============================================================================
 # Auto-detect container runtime
@@ -95,8 +220,13 @@ case "$CONTAINER_RUNTIME" in
             docker pull "$CONTAINER_IMAGE"
         fi
 
-        BIND_ARGS=("-v" "${OUTDIR}:${OUTDIR}")
-        [[ -n "$INPUT_DIR" ]] && BIND_ARGS+=("-v" "$(cd "$INPUT_DIR" && pwd):$(cd "$INPUT_DIR" && pwd):ro")
+        BIND_ARGS=()
+        for rw in "${RESOLVED_RW[@]}"; do
+            BIND_ARGS+=("-v" "${rw}:${rw}")
+        done
+        for ro in "${RESOLVED_RO[@]}"; do
+            BIND_ARGS+=("-v" "${ro}:${ro}:ro")
+        done
 
         docker run --rm \
             --user "$(id -u):$(id -g)" \
@@ -130,11 +260,16 @@ case "$CONTAINER_RUNTIME" in
             "$RUNTIME_CMD" pull --force "$SIF_PATH" "docker://${CONTAINER_IMAGE}"
         fi
 
-        BIND_ARGS="--bind ${OUTDIR}:${OUTDIR}"
-        [[ -n "$INPUT_DIR" ]] && BIND_ARGS="${BIND_ARGS},$(cd "$INPUT_DIR" && pwd):$(cd "$INPUT_DIR" && pwd):ro"
+        APPTAINER_BINDS=()
+        for rw in "${RESOLVED_RW[@]}"; do
+            APPTAINER_BINDS+=("--bind" "${rw}:${rw}")
+        done
+        for ro in "${RESOLVED_RO[@]}"; do
+            APPTAINER_BINDS+=("--bind" "${ro}:${ro}:ro")
+        done
 
         "$RUNTIME_CMD" run \
-            $BIND_ARGS \
+            "${APPTAINER_BINDS[@]}" \
             --pwd "$(pwd)" \
             ${container_ca:+--env "REQUESTS_CA_BUNDLE=${container_ca}"} \
             ${container_ca:+--env "SSL_CERT_FILE=${container_ca}"} \

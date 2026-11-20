@@ -13,46 +13,109 @@ Usage:
       [trna_genes.tsv] [gene_depths.tsv] [assembly.fasta]
 """
 import os
+import re
 import sys
 
 
+TYPE_MAP = {
+    'cds': 'cds', 'trna': 'trna', 'rrna': 'rrna',
+    'tmrna': 'tmrna', 'ncrna': 'ncrna', 'ncrna-region': 'ncrna',
+    'misc_rna': 'ncrna',
+    'crispr': 'crispr', 'crispr-repeat': 'crispr',
+    'crispr-spacer': 'crispr',
+    'regulatory_region': 'reg', 'oric': 'ori', 'orit': 'ori',
+}
+
+
+def load_gff_locus_coords(tsv_path):
+    """Load {locus_tag: (contig, start, end, strand)} from a sibling GFF/GFF3 file if present."""
+    annot_dir = os.path.dirname(os.path.abspath(tsv_path))
+    stem = os.path.splitext(os.path.basename(tsv_path))[0]
+    candidates = [
+        os.path.join(annot_dir, f'{stem}.gff'),
+        os.path.join(annot_dir, f'{stem}.gff3'),
+        os.path.join(annot_dir, 'annotation.gff'),
+        os.path.join(annot_dir, 'annotation.gff3'),
+    ]
+    gff_path = next((p for p in candidates if os.path.isfile(p)), None)
+    coords = {}
+    if not gff_path:
+        return coords
+
+    with open(gff_path) as fh:
+        for line in fh:
+            if line.startswith('##FASTA'):
+                break
+            if not line or line.startswith('#'):
+                continue
+            cols = line.rstrip('\r\n').split('\t')
+            if len(cols) < 9 or cols[2].lower() == 'region':
+                continue
+            try:
+                start = int(cols[3])
+                end = int(cols[4])
+            except ValueError:
+                continue
+            attrs = cols[8]
+            m = re.search(r'(?:^|;)locus_tag=([^;]+)', attrs) or re.search(r'(?:^|;)ID=([^;]+)', attrs)
+            if m:
+                coords[m.group(1)] = (cols[0], start, end, cols[6])
+    return coords
+
+
 def load_bakta(tsv_path):
-    """Parse Bakta annotation TSV into feature dict."""
+    """Parse Bakta 9-column or Prokka 7-column annotation TSV into feature dict."""
     genes = {}
     n = 0
 
     with open(tsv_path) as f:
+        is_prokka = None
+        gff_coords = {}
         for line in f:
             if line.startswith('#'):
                 continue
-            parts = line.rstrip('\n').split('\t')
-            if len(parts) < 8:
+            stripped = line.rstrip('\r\n')
+            if not stripped:
                 continue
+            parts = stripped.split('\t')
+            if is_prokka is None:
+                if parts[0] == 'locus_tag':
+                    is_prokka = True
+                    gff_coords = load_gff_locus_coords(tsv_path)
+                    continue
+                is_prokka = False
 
-            contig = parts[0]
-            ftype = parts[1].lower()
+            if is_prokka:
+                # Prokka schema: locus_tag, ftype, length_bp, gene, EC_number, COG, product
+                if len(parts) < 2:
+                    continue
+                locus_tag = parts[0]
+                if locus_tag not in gff_coords:
+                    continue
+                contig, start, end, strand_char = gff_coords[locus_tag]
+                ftype = parts[1].lower()
+                gene = parts[3] if len(parts) > 3 and parts[3] else ''
+                product = parts[6] if len(parts) > 6 and parts[6] else ''
+            else:
+                if len(parts) < 8:
+                    continue
+                contig = parts[0]
+                ftype = parts[1].lower()
+                try:
+                    start = int(parts[2])
+                    end = int(parts[3])
+                except ValueError:
+                    continue
+                strand_char = parts[4]
+                locus_tag = parts[5] if len(parts) > 5 and parts[5] else ''
+                gene = parts[6] if len(parts) > 6 and parts[6] else ''
+                product = parts[7] if len(parts) > 7 and parts[7] else ''
+
             if ftype == 'region':
                 continue
 
-            try:
-                start = int(parts[2])
-                end = int(parts[3])
-            except ValueError:
-                continue
-
-            strand = 1 if parts[4] == '+' else -1
-            locus_tag = parts[5] if len(parts) > 5 and parts[5] else ''
-            gene = parts[6] if len(parts) > 6 and parts[6] else ''
-            product = parts[7] if len(parts) > 7 and parts[7] else ''
-
-            type_map = {
-                'cds': 'cds', 'trna': 'trna', 'rrna': 'rrna',
-                'tmrna': 'tmrna', 'ncrna': 'ncrna', 'ncrna-region': 'ncrna',
-                'crispr': 'crispr', 'crispr-repeat': 'crispr',
-                'crispr-spacer': 'crispr',
-                'regulatory_region': 'reg', 'oric': 'ori', 'orit': 'ori',
-            }
-            ftype = type_map.get(ftype, ftype)
+            strand = 1 if strand_char == '+' else -1
+            ftype = TYPE_MAP.get(ftype, ftype)
 
             feat = {'s': start, 'e': end, 'd': strand, 't': ftype}
             if locus_tag:

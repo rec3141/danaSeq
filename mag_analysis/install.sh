@@ -156,7 +156,7 @@ declare -A ENV_EXTRAS=(
     [dana-mag-quality]="checkm2 checkv tiara"
     [dana-mag-annotate]="emapper.py diamond"
     [dana-mag-classify]="kraken2 barrnap exec_annotation metaeuk"
-    [dana-mag-genomic]="hmmscan macsyfinder defense-finder run_dbcan"
+    [dana-mag-genomic]="hmmscan macsyfinder defense-finder run_dbcan cath-resolve-hits"
     [dana-mag-pathviz]="node npm python3"
     [dana-mag-strain]="strainy floria"
     [dana-mag-derep]="galah skani"
@@ -336,14 +336,19 @@ post_install_merged() {
             echo "  MinPath installed to ${minpath_dir}"
         fi
 
-        # fastsne (contig t-SNE; optional, the viz falls back to sklearn): pinned
-        # release, self-contained binaries (GPU fastsne needs only the NVIDIA driver)
-        local fs_version="v0.2.2" fs_sha256="07ebdb1718ff3e28daabb6463114f0bd2d7965c4e287a4b282074831ff6a1e66" fs_tmp
-        local fs_tar="fastsne-${fs_version}-linux-x86_64.tar.gz"
+        # fastsne (contig t-SNE; optional, the viz falls back to sklearn): latest release
+        # unless FASTSNE_VERSION names one, self-contained binaries (GPU fastsne needs only
+        # the NVIDIA driver)
+        local fs_url="https://github.com/rec3141/fastsne/releases" fs_version="${FASTSNE_VERSION:-latest}" fs_tmp fs_tar
+        if [[ "${fs_version}" == latest ]]; then
+            fs_version=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "${fs_url}/latest") && fs_version=${fs_version##*/}
+        fi
+        fs_tar="fastsne-${fs_version}-linux-x86_64.tar.gz"
         echo "  Installing fastsne ${fs_version}..."
         fs_tmp=$(mktemp -d)
-        if curl -fsSL -o "${fs_tmp}/${fs_tar}" "https://github.com/rec3141/fastsne/releases/download/${fs_version}/${fs_tar}" \
-            && echo "${fs_sha256}  ${fs_tmp}/${fs_tar}" | sha256sum -c --quiet - \
+        if curl -fsSL -o "${fs_tmp}/${fs_tar}" "${fs_url}/download/${fs_version}/${fs_tar}" \
+            -o "${fs_tmp}/${fs_tar}.sha256" "${fs_url}/download/${fs_version}/${fs_tar}.sha256" \
+            && (cd "${fs_tmp}" && sha256sum -c --quiet "${fs_tar}.sha256") \
             && tar -xzf "${fs_tmp}/${fs_tar}" --strip-components=1 -C "${env_path}"; then
             echo "  fastsne installed to ${env_path}/bin"
         else

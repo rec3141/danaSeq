@@ -88,6 +88,8 @@ cd mag_analysis
 | 6l | `ECOSSDB_SCORE` | Python (ecossdb) | Ecosystem service scoring |
 | 6m | `ECOSSDB_SDG` | Python (ecossdb) | UN Sustainable Development Goal mapping |
 | 6n | `ECOSSDB_VIZ` | Python (ecossdb) | Ecosystem services visualization |
+| 6o | `METACYC_SEARCH` | DIAMOND | Proteins against Rhea-annotated UniProtKB proteins (`--metacyc_refs`) |
+| 6p | `METACYC_PATHWAYS` | Python | MetaCyc reactions and pathway calls per DAS Tool MAG and community, with confidence (`--metacyc_db`) |
 
 #### Protein reference databases
 
@@ -101,7 +103,7 @@ in `DIR`, one subdirectory per database. The layout is the one nanopore_live's
 | `<name>/<name>.hmm` | HMM profiles, searched with `hmmsearch` |
 | `<name>/<name>.dmnd` | DIAMOND database, searched with `diamond blastp` (best hit per protein) |
 | `<name>/<name>.genes.tsv` | Optional catalogue: `target gene category pathway subpathway description [threshold score_type motif]` |
-| `<name>/<name>.opts` | Optional cutoff: `tc`, `ga`, `nc` or an E-value for HMMs; `id=,qcov=,scov=,evalue=,len=,bits=` for DIAMOND |
+| `<name>/<name>.opts` | Optional cutoff: `tc`, `ga`, `nc` or an E-value for HMMs, optionally followed by `resolve`; `id=,qcov=,scov=,evalue=,len=,bits=` for DIAMOND |
 
 Without an `.opts` file, HMMs use `--hmm_cut` (default `tc`), or the
 catalogue's per-target thresholds when `<name>.genes.tsv` has a `threshold`
@@ -112,9 +114,128 @@ comma-separated). The results are stored per database, so adding one later
 searches only that one; after changing a database or its `.opts`, delete its
 `metabolism/protein_dbs/<name>/` to search it again.
 
+An HMM search over more than `--protein_db_chunk` proteins (default 50,000) is
+split into chunks searched in parallel, 4 `hmmsearch` threads per chunk, since
+one `hmmsearch` gains little from more threads. E-values are computed against
+the whole protein set, so the hits are those of a single search. Give the step
+the node with `--protein_db_cpus`: on 72,231 proteins PGAP took ~2.2 CPU-hours
+and the full CATH FunFam library ~8.7, and both scale with total protein length.
+
+With `resolve` (e.g. `1e-3 resolve`), the per-domain hits go through
+`cath-resolve-hits`, and only each protein's best non-overlapping set of models
+is kept. This is for libraries of overlapping families, such as CATH FunFam,
+where one protein otherwise matches dozens of related models.
+
+`./download-databases.sh --funfam` writes `<db_dir>/protein_dbs/CATH-FunFam/`:
+CATH FunFam v4.3.0 (212,872 models), searched at `1e-3 resolve`;
+`--funfam-superfamilies 3.40.50.300,1.10.8` keeps only some superfamilies.
+
 `./download-databases.sh --pgap` writes `<db_dir>/protein_dbs/PGAP/`: NCBI's
 PGAP HMMs, which hold the maintained TIGRFAMs (accessions `TIGR*`) plus
-NCBIfam and PRK models, searched at their trusted cutoffs.
+NCBIfam and PRK models, searched at their noise cutoffs (`nc`; the trusted
+cutoffs NCBI uses for genomes are often too strict for metagenomes).
+
+#### MetaCyc pathways
+
+With `--metacyc_db` (and `--metacyc_refs`), mag_analysis predicts which MetaCyc pathways
+each DAS Tool MAG, and the community as a whole, carries. It does not run Pathway Tools on
+your data. Proteins get MetaCyc reactions through Rhea: DIAMOND hits to Rhea-annotated
+UniProtKB proteins, plus Bakta/eggNOG EC numbers and KofamScan/eggNOG KOs. Pathways are then
+called with PathoLogic's published rules (Karp et al. 2011,
+[doi:10.4056/sigs.1794338](https://doi.org/10.4056/sigs.1794338)). Those rules are
+permissive, so every call carries a confidence value built from its evidence:
+
+- each reaction is weighted by its strongest evidence: a DIAMOND hit scores 0.5 at 35%
+  identity rising to 1.0 at 80%; EC-only and KO-only evidence score 0.45; an EC mapped
+  straight to a MetaCyc reaction without a Rhea link scores 0.30
+- `confidence` is the mean weight over the pathway's reactions (0-1)
+- tier **high** means confidence >= 0.7, at least half of the present reactions backed by a
+  sequence hit, every key reaction sequence-backed, and the MAG not outside the pathway's
+  MetaCyc taxonomic range; **medium** means confidence >= 0.35; everything else is **low**
+
+**How reliable the tiers are.** The high-tier cut-offs (confidence 0.7 and the taxonomic-range
+condition) were fitted against EcoCyc, the hand-curated *E. coli* K-12 database, with
+*E. coli* MG1655 run through mag_analysis; the weights are the original estimates. For base
+(non-super) pathways that exist in MetaCyc:
+
+| Tier | Share of calls that are curated EcoCyc pathways | Share of curated pathways called in this tier |
+|---|---|---|
+| high | 0.79 | 0.54-0.68 |
+| medium | 0.29-0.38 | 0.18-0.29 |
+| low | 0.04-0.07 | 0.02-0.03 |
+
+Ranges span runs with the full reference and with every *Escherichia*, Enterobacteriaceae or
+Enterobacterales protein removed from it, which is closer to a MAG from a novel genus. With
+20-60% of the genes removed (an incomplete MAG) the high tier stayed at 0.75-0.79 precision
+and its recall fell to 0.18-0.53. Super-pathways are less reliable (high tier ~0.64), because
+they are called whenever all their components are. Treat low-tier calls as possibilities
+rather than findings. `tools/metacyc_benchmark.py` reruns the comparison for any curated PGDB
+you have (`export`, `compare`, `degrade`); see its `--help`.
+The step needs Bakta annotation (`--annotator bakta`). It is skipped, with one log line, when
+`--metacyc_db` is not given.
+
+**Getting MetaCyc.** MetaCyc is licensed by SRI International and is never downloaded
+automatically. You need one of:
+
+| You have | Where it comes from |
+|---|---|
+| MetaCyc flat files (a tarball or directory containing `pathways.dat`, `reactions.dat`, `classes.dat`) | a BioCyc subscription (flat-file download for MetaCyc) |
+| the Pathway Tools Linux installer (`pathway-tools-XX.X-linux-64-tier1-install`) | a Pathway Tools licence from SRI (free for academic use) |
+| an existing Pathway Tools Apptainer image (`.sif`), e.g. from MetaPathways `build_pt` | your site |
+
+**Setup (once per site):**
+
+```bash
+./download-databases.sh --db_dir /path/to/databases --metacyc-refs          # open references
+./download-databases.sh --db_dir /path/to/databases --metacyc <tarball|dir|installer|.sif>
+# installer on an Apptainer-only host (e.g. an HPC cluster): give the MetaPathways image as the runtime
+apptainer pull mp.sif docker://quay.io/hallamlab/metapathways:4.0.3
+./download-databases.sh --db_dir /path/to/databases --metacyc pathway-tools-30.0-linux-64-tier1-install \
+    --metacyc-runtime mp.sif
+```
+
+| Step | Writes | Time | Disk |
+|---|---|---|---|
+| `--metacyc-refs` | `<db_dir>/metacyc_refs/`: Rhea, KEGG ko->reaction, GTDB r226->NCBI taxids, and the DIAMOND reference (Swiss-Prot plus one Rhea-annotated protein per UniRef90 cluster, 9.4M sequences) | ~1 h, mostly downloads (UniProt idmapping 7 GB; TrEMBL ~40 GB is streamed through a filter, never stored) | ~15 GB scratch at peak, 5.5 GB kept |
+| `--metacyc` (flat files) | `<db_dir>/metacyc/` | seconds | ~140 MB |
+| `--metacyc` (installer or .sif) | `<db_dir>/metacyc/`, exported in batch mode from a temporary Pathway Tools install | ~3 min | 3.5 GB temporary |
+
+The installer runs as your own user, with no root, inside the Pathway Tools runtime that ships
+in the MetaPathways image, and the install is deleted afterwards. `<db_dir>/metacyc/` is
+created owner-only and carries a `VERSION.json` (MetaCyc release, source, date).
+
+**Licence.** Keep `<db_dir>/metacyc/` private. Don't put it in container images, git
+repositories or shared or public locations. The pipeline outputs carry MetaCyc pathway and
+reaction identifiers and names, so share them under the same terms as MetaCyc itself.
+
+`--db_dir` finds `<db_dir>/metacyc` and `<db_dir>/metacyc_refs` automatically. Taxonomic-range
+rules use GTDB-Tk's classification (`--run_gtdbtk`). Without GTDB-Tk they use SendSketch
+contig calls (`--run_sendsketch`), which are less reliable, and the log says so; with neither,
+the range rules are off. Without them the high tier is less precise (0.73 instead of 0.79 on
+the EcoCyc benchmark). `--metacyc_taxonomy sendsketch` forces the SendSketch calls; `none` turns
+the range rules off.
+
+Outputs in `metabolism/metacyc/`:
+
+- `metacyc_pathways.tsv`: one row per bin (plus `_community`) and pathway with any
+  evidence: the call and the rule that decided it, `confidence` and `confidence_tier`,
+  reaction counts by evidence (`n_seq`, `n_ec_only`, `n_ko_only`, `n_ec_direct_only`,
+  `n_linked_only`: reactions credited only through a link to a sequence-supported reaction
+  that shares a complete EC number or a MetaCyc enzyme),
+  sequence identity, key and unique reaction support, up to 12 supporting hits
+  (`reaction=protein:UniProt:identity`), and a MinPath-style parsimony flag (`minpath`)
+- `metacyc_reactions.tsv.gz`: one row per protein and MetaCyc reaction, with its evidence
+  classes, DIAMOND identity, coverage and hit, and the ECs and KOs behind it
+- `metacyc_bin_taxonomy.tsv`: each bin's GTDB lineage and the NCBI taxids used for the
+  taxonomic ranges
+- `metacyc_hits.tsv.gz`: the DIAMOND hits
+
+On 72,231 proteins (7 MAGs), the DIAMOND search took 21 min on 8 threads with a 17 GB peak
+(`sensitive`, `-b 2`), and the scorer took 14 s and 0.6 GB. For a co-assembly of ~13M
+proteins, expect the search to take ~1.5-2.5 h on a 192-CPU node (`--metacyc_cpus 192`;
+raise `--metacyc_block_size` to 4-6 and `--metacyc_memory` to ~96 GB for fewer passes over
+the reference). The scorer then takes ~20 min, ~5 GB, and as much scratch in its work dir as
+the input tables. Results do not depend on `--metacyc_chunk`; a smaller value only lowers memory.
 
 ### Mobile Genetic Elements
 
@@ -236,10 +357,19 @@ breaks included). `--derep_min_size_bp` counts sequence bases.
 | `--protein_db_dir` | `null` | Directory of protein reference DBs (see Protein reference databases) |
 | `--hmm_cut` | `tc` | Default hmmsearch cutoff: `tc`, `ga`, `nc` or an E-value |
 | `--protein_db_opts` | `id=50,qcov=50,scov=50,evalue=1e-5` | Default DIAMOND cutoffs |
+| `--protein_db_chunk` | `50000` | Proteins per parallel hmmsearch job (`0`: one search per database) |
+| `--protein_db_cpus` | `--medium_cpus` | CPUs for each protein DB search |
 | `--emapper_batch_size` | `50000` | eggNOG-mapper batch size (proteins) |
 | `--run_antismash` | `false` | Run antiSMASH BGC detection |
 | `--antismash_db` | (required if antismash) | antiSMASH database path |
 | `--run_ecossdb` | `true` | Enable ecosystem services mapping |
+| `--metacyc_db` | `null` | Licensed MetaCyc flat files (see MetaCyc pathways); step skipped without it |
+| `--metacyc_refs` | `null` | Open references for MetaCyc pathways (`download-databases.sh --metacyc-refs`) |
+| `--metacyc_taxonomy` | `gtdbtk` | Taxonomic ranges from `gtdbtk` (SendSketch when GTDB-Tk is off), `sendsketch` (contig calls) or `none` |
+| `--metacyc_sensitivity` | `sensitive` | DIAMOND mode (`fast`, `sensitive`, `more-sensitive`) |
+| `--metacyc_block_size` | `2.0` | DIAMOND `-b`; memory grows with it |
+| `--metacyc_chunk` | `500000` | Proteins per scorer chunk (~1.7 GB of `METACYC_PATHWAYS` memory each) |
+| `--metacyc_cpus` / `--metacyc_memory` | `--medium_cpus` / `32 GB` | `METACYC_SEARCH` resources |
 
 ### Mobile Genetic Elements
 
@@ -317,6 +447,7 @@ results/
 │   ├── modules/                KEGG module completeness
 │   ├── minpath/                MinPath pathway analysis
 │   ├── kegg_decoder/           Pathway heatmaps
+│   ├── metacyc/                MetaCyc pathway calls + confidence (--metacyc_db)
 │   ├── antismash/              Biosynthetic gene clusters
 │   └── ecossdb/                Ecosystem services (CICES + SDG)
 ├── mge/
@@ -368,6 +499,8 @@ Defaults from `nextflow.config`; the `--medium_cpus/--medium_memory`,
 | GTDB-Tk | 16 | 160 GB | Most memory-intensive step (R232 placement needs >=140 GB) |
 | Kraken2 / Kaiju | 8 | 24 GB | `process_kraken` label; depends on database |
 | CheckM2 | 8 | 16 GB | `process_medium` |
+| MetaCyc search (DIAMOND) | 8 | 32 GB | `--metacyc_cpus` / `--metacyc_memory` |
+| MetaCyc pathways | 2 | 8 GB | Single-threaded; memory set by `--metacyc_chunk` |
 
 ## Databases
 
@@ -386,6 +519,8 @@ Or download individually:
 ./download-databases.sh --kaiju     # Kaiju nr_euk (~60 GB)
 ./download-databases.sh --gtdbtk    # GTDB-Tk (~85 GB)
 ./download-databases.sh --pgap      # NCBI PGAP HMMs incl. TIGRFAM (~2.7 GB)
+./download-databases.sh --metacyc-refs        # MetaCyc open references (~5.5 GB)
+./download-databases.sh --metacyc <source>    # licensed MetaCyc you supply (see MetaCyc pathways)
 ```
 
 Use `--db_dir` to auto-resolve paths from a standard layout:
