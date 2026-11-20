@@ -205,7 +205,7 @@ CONVERT_TO_FASTA        Header cleanup
 | `--protein_db_opts` | `id=50,qcov=50,scov=50,evalue=1e-5` | DIAMOND cutoffs (HADEG-recommended); per-DB `<name>.opts` overrides |
 | `--pollutant_dbs` | (skip) | Directory of pollutant DBs (`<name>/<name>.hmm` or `.dmnd` + sidecars), e.g. `/data/scratch/refdbs/pollutants` |
 | `--run_sketch` | `false` | Enable per-read GTDB sendsketch classification |
-| `--sendsketch_address` | `$DANA_SENDSKETCH_ADDRESS`, else `http://localhost:3068/sketch` | Local GTDB sendsketch server URL |
+| `--sendsketch_address` | `$DANA_SENDSKETCH_ADDRESS`, else `http://localhost:3068/sketch` | Local GTDB sendsketch server URL (built with [`sketchdb/`](sketchdb/README.md)) |
 | `--run_tetra` | `false` | Enable tetranucleotide frequency |
 | `--watch` | `false` | Monitor for new files during live sequencing (watch globs are auto-detected from the depth of `fastq_pass/` below `--input`) |
 | `--db_sync_minutes` | `10` | DuckDB sync interval in watch mode |
