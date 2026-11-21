@@ -21,7 +21,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REL=$(basename "$TARBALL" | grep -o 'r[0-9]\+' | head -1)
 [ -n "$REL" ] || { echo "cannot tell the GTDB release from $TARBALL" >&2; exit 1; }
 CP=${BBTOOLS_CP:-$(dirname "$(readlink -f "$(command -v sketch.sh)")")/current}
-BATCH=${BATCH:-2000}   # genomes per SketchMaker run
+BATCH=${BATCH:-500}    # genomes per SketchMaker run; their paths share one argument
 JOBS=${JOBS:-6}        # concurrent SketchMaker runs, 5 threads and 12 GB heap each
 mkdir -p "$WORK/genomes" "$WORK/batches"
 cd "$WORK"
@@ -45,6 +45,11 @@ echo "[$(date +%T)] $(wc -l < genome_list.txt) genomes"
 # on every run and a finished batch is never redone.
 rm -f batches/list_*
 split -l "$BATCH" -d -a 4 genome_list.txt batches/list_
+# Linux caps a single argument at 128 KB, and in= carries a whole batch.
+longest=$(for l in batches/list_*; do wc -c < "$l"; done | sort -n | tail -1)
+[ "$longest" -lt 131000 ] || {
+    echo "a batch's file list is $longest bytes, over the 128 KB argument limit; lower BATCH" >&2
+    exit 1; }
 sketch_one() {  # $1 = batch list file
     local list=$1 out=${1/list_/batch_}.sketch
     [ -s "$out" ] && return 0
