@@ -26,7 +26,10 @@ process MAP_REFERENCE {
     storeDir { params.store_dir ? "${params.store_dir}/${meta.flowcell}/${meta.barcode}/map/${meta.id}" : null }
 
     input:
-    tuple val(meta), path(fastq), val(refname), path(ref_idx)
+    // reads/* : one chunk in watch mode, every chunk of the barcode in batch
+    // mode (main.nf groups them). minimap2 takes multiple query files directly
+    // — no cat, so chunk boundaries can't corrupt the stream.
+    tuple val(meta), path("reads/*"), val(refname), path(ref_idx)
 
     output:
     tuple val(meta), val(refname), path("${refname}.txt"), emit: hits
@@ -47,7 +50,7 @@ process MAP_REFERENCE {
         -t ${task.cpus} \\
         --secondary=no \\
         "${ref_idx}" \\
-        "${fastq}" \\
+        reads/* \\
       | awk -f ${projectDir}/bin/filter_minimap2.awk \\
       > "${refname}.txt"
     """

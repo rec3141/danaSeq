@@ -477,7 +477,24 @@ workflow {
         log.info "Mapping references (${idx_entries.size()}): ${idx_entries.collect { it[0] }.join(', ')}"
 
         ch_refs = Channel.fromList(idx_entries)
-        ch_map_in = QC_FASTQ_FILTER.out.filtered.combine(ch_refs)
+        // Batch mode: group all QC'd fastqs per sample so each (multi-GB)
+        // index loads once per barcode instead of once per read-chunk.
+        // Output lands in map/<flowcell>_<barcode>/ — still disjoint read
+        // sets per subdir, so import_mapping.py's map/*/*.txt union holds
+        // (watch vs batch is locked per --outdir, so layouts never mix).
+        // Watch mode: one task per chunk for live results.
+        if (params.watch) {
+            ch_map_reads = QC_FASTQ_FILTER.out.filtered
+        } else {
+            ch_map_reads = QC_FASTQ_FILTER.out.filtered
+                .map { meta, fastq -> [ meta.sample, meta, fastq ] }
+                .groupTuple(by: 0)
+                .map { sample, metas, fastqs ->
+                    def meta = metas[0] + [id: sample]
+                    [ meta, fastqs ]
+                }
+        }
+        ch_map_in = ch_map_reads.combine(ch_refs)
             .map { meta, fastq, refname, idx -> [ meta, fastq, refname, idx ] }
         MAP_REFERENCE(ch_map_in)
         ch_map_hits = MAP_REFERENCE.out.hits
