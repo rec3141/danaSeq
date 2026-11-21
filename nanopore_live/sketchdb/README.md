@@ -23,7 +23,9 @@ build_sketch.sh gtdb_genomes_reps_r232.tar.gz <dir with taxonomy tables> <workdi
 ```
 
 The genomes unpack to about the size of the tarball. `BATCH` and `JOBS` set the
-batch size and concurrency (default 2000 genomes, 6 runs of 5 threads / 12 GB).
+batch size and concurrency (default 500 genomes, 6 runs of 5 threads / 12 GB).
+A batch's file paths go to SketchMaker as one argument, which Linux caps at
+128 KB, so the script stops if `BATCH` makes that list too long.
 
 ## Serve
 
