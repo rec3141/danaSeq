@@ -51,6 +51,15 @@ bin/archive_run.sh \
     --out-dest /vistara/dana/out_dana_bc
 ```
 
+**Re-used flow cells.** If `<out-dest>/<FC>` already exists (the flow cell was
+washed and run again), the outputs are merged into it rather than skipped: files
+are rsync'd alongside the earlier run's, and each barcode's archived `dana.duckdb`
+is kept and the new files appended to it with `import_all.py`. A preflight check
+refuses the merge, touching nothing, if any file other than `dana.duckdb` exists
+on both sides with different content. That happens when both runs were batch
+mode, because Kraken, Bakta and mapping outputs are named per barcode, not per
+run. The script then exits 1 and leaves the run's outputs in place.
+
 Raw reads move to `/matika/`, processed reads and pipeline outputs move to `/vistara`,
 
 ### Per-barcode concatenation

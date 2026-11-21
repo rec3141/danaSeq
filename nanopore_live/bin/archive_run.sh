@@ -8,8 +8,11 @@
 #                       rsync'd to <out-dest>/<FC>/
 #
 # Paths are configurable so this is portable to other sites. Defaults fall
-# back to ARCHIVE_RAW_DEST / ARCHIVE_OUT_DEST environment variables. Refuses
-# to clobber an existing destination — safe to re-run.
+# back to ARCHIVE_RAW_DEST / ARCHIVE_OUT_DEST environment variables. Never
+# clobbers an existing destination — safe to re-run. A raw run dir that already
+# exists is skipped. An output FC dir that already exists (flow cell re-used for
+# a second run) is merged: files rsync'd alongside, each barcode's dana.duckdb
+# kept and the new files appended to it with import_all.py (see merge_fc_out).
 #
 # Usage:
 #   archive_run.sh --input DIR --outdir DIR \
@@ -97,10 +100,95 @@ fi
 # Destinations we actually archived this run (for the post-archive integrity scan).
 ARCHIVED_DESTS=()
 
+# Set when a merge could not be completed; the script exits non-zero at the end
+# (after the integrity scan) so the caller knows the source was left in place.
+ARCHIVE_FAILED=false
+
+# import_all.py needs duckdb. run-realtime.sh calls this script outside the
+# conda envs, so prefer the pipeline's dana-tools python when it is installed.
+IMPORT_PY=python3
+if [[ -x "$SCRIPT_DIR/../conda-envs/dana-tools/bin/python3" ]]; then
+    IMPORT_PY="$SCRIPT_DIR/../conda-envs/dana-tools/bin/python3"
+fi
+
+# Merge a pipeline FC output dir into an archive FC dir that already exists.
+#
+# A flow cell can be washed and re-run, so a second run lands on the same
+# <FC>/<barcode> paths. Per-run output files carry the run hash in their names
+# (or, in batch mode, sit under per-sample names), so the trees union cleanly;
+# the one file that genuinely overlaps is each barcode's dana.duckdb. Instead
+# of overwriting it, rsync everything else and let import_all.py append the new
+# files — it skips anything already recorded in import_log, so the existing
+# rows are untouched.
+#
+# Safety:
+#   - Preflight first: any file present on both sides with DIFFERENT content
+#     (other than dana.duckdb) aborts the merge for this FC before anything is
+#     touched. Identical files (e.g. the fixed tnfs.txt header) are fine.
+#   - Each archived dana.duckdb is copied aside before import and restored if
+#     the import fails; the run's own dana.duckdb is then kept in the source.
+merge_fc_out() {
+    local src="$1" dst="$2"
+    log "out: $dst exists (flow cell re-used) — merging and importing into dana.duckdb"
+
+    local conflicts=() rel
+    while IFS= read -r -d '' f; do
+        rel="${f#"$src"/}"
+        [[ "$(basename "$rel")" == dana.duckdb ]] && continue
+        if [[ -e "$dst/$rel" ]] && ! cmp -s "$f" "$dst/$rel"; then
+            conflicts+=("$rel")
+        fi
+    done < <(find "$src" -type f -print0)
+    if (( ${#conflicts[@]} )); then
+        log "ERROR out: ${#conflicts[@]} file(s) differ between $src and $dst; not merging. First few:"
+        printf '    %s\n' "${conflicts[@]:0:10}" >&2
+        ARCHIVE_FAILED=true
+        return 0
+    fi
+
+    # Files directly under the FC dir (not in a barcode dir), if any.
+    run rsync -aH --remove-source-files --exclude='*/' "$src/" "$dst/"
+
+    local bdir bn bak
+    for bdir in "$src"/*/; do
+        [[ -d "$bdir" ]] || continue
+        bn=$(basename "$bdir")
+        if [[ ! -d "$dst/$bn" ]]; then
+            log "out: $bn new to this flow cell — copying as is"
+            run rsync -aH --remove-source-files "$bdir" "$dst/$bn/"
+            continue
+        fi
+        bak=""
+        if [[ -f "$dst/$bn/dana.duckdb" ]]; then
+            bak="$dst/$bn/dana.duckdb.pre-merge.$$"
+            run cp -p "$dst/$bn/dana.duckdb" "$bak"
+        fi
+        log "out: $bn: rsync (except dana.duckdb), then import_all.py"
+        run rsync -aH --remove-source-files --exclude=/dana.duckdb "$bdir" "$dst/$bn/"
+        if run "$IMPORT_PY" "$SCRIPT_DIR/import_all.py" "$dst/$bn"; then
+            [[ -n "$bak" ]] && run rm -f "$bak"
+            run rm -f "$bdir/dana.duckdb"
+        else
+            log "ERROR out: import_all.py failed for $dst/$bn; restoring its dana.duckdb," \
+                "keeping the run's own copy at $bdir/dana.duckdb"
+            [[ -n "$bak" ]] && run mv -f "$bak" "$dst/$bn/dana.duckdb"
+            ARCHIVE_FAILED=true
+        fi
+    done
+
+    run find "$src" -depth -type d -empty -delete
+    run rmdir "$src" 2>/dev/null || true
+    ARCHIVED_DESTS+=("$dst")
+}
+
 archive_one() {
     local src="$1" dst="$2" kind="$3"
     if [[ -d "$dst" ]]; then
-        log "SKIP $kind: destination already exists ($dst)"
+        if [[ "$kind" == out ]]; then
+            merge_fc_out "${src%/}" "$dst"
+        else
+            log "SKIP $kind: destination already exists ($dst)"
+        fi
         return 0
     fi
     log "$kind: rsync $src/ -> $dst/"
@@ -183,4 +271,8 @@ log "outputs archive: processed $out_count FC subdir(s)"
 # ---------- Post-archive integrity scan ----------
 verify_archives "${OUTDIR}/pipeline_info/archive_integrity_report.txt" "${ARCHIVED_DESTS[@]}"
 
+if $ARCHIVE_FAILED; then
+    log "archive_run finished WITH ERRORS — see ERROR lines above; affected sources left in place"
+    exit 1
+fi
 log "archive_run done"
