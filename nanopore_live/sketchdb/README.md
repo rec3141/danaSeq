@@ -30,14 +30,21 @@ A batch's file paths go to SketchMaker as one argument, which Linux caps at
 ## Serve
 
 ```bash
-java -da -Xmx<heap> -cp <bbtools>/current tax.TaxServer port=3068 k=32,24 \
-    index=auto tree=gtdb_r232.taxtree.gz gtdb_r232_k2432.sketch
+java -da -Xmx85g -cp <bbtools>/current tax.TaxServer port=3068 k=32,24 \
+    index=auto prealloc=0.8 tree=gtdb_r232.taxtree.gz gtdb_r232_k2432.sketch
 ```
 
 `k=32,24` is dual-k, which stock BBTools serves correctly; a single-k server
 needs the `SketchTool.loadSketchesFromString` fix (bbushnell/BBTools#22).
-The indexed server holds roughly 40 GB for 143,614 sketches, growing in steps
-as its hash tables double; leave the heap well above that.
+Set `prealloc`. Without it the index's hash tables grow by doubling, and each
+doubling briefly holds the old and new tables together: R232 (199,923 sketches,
+1.6 billion unique hash codes) runs out of a 100 GB heap that way. `prealloc`
+sizes the tables once at startup from that fraction of the heap. R232 loads in
+about 3 minutes and holds about 72 GB at `-Xmx85g prealloc=0.8`, or 70 GB at
+`-Xmx100g prealloc=0.7`.
+
+The R232 database built with these scripts is on Zenodo:
+https://doi.org/10.5281/zenodo.24409943
 
 ## Output
 

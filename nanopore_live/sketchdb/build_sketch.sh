@@ -13,8 +13,9 @@
 # Finished sketch batches are kept, so a rerun resumes where it stopped.
 # BBTools comes from sketch.sh on PATH, or from $BBTOOLS_CP (its current/ dir).
 # Run the server against the result with:
-#   java -Xmx<heap> -cp <bbtools>/current tax.TaxServer port=3068 k=32,24 \
-#       index=auto tree=gtdb_rNNN.taxtree.gz gtdb_rNNN_k2432.sketch
+#   java -da -Xmx85g -cp <bbtools>/current tax.TaxServer port=3068 k=32,24 \
+#       index=auto prealloc=0.8 tree=gtdb_rNNN.taxtree.gz gtdb_rNNN_k2432.sketch
+# (README.md, Serve, explains prealloc and the memory it needs)
 set -euo pipefail
 TARBALL=$(readlink -f "$1") TAXDIR=$(readlink -f "$2") WORK=$3
 HERE=$(cd "$(dirname "$0")" && pwd)
