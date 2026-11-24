@@ -36,6 +36,11 @@ process BAKTA_CDS {
 
     cat fastas/* > combined.fa
 
+    # --keep-contig-headers: contigs keep the read UUID instead of bakta's
+    # contig_N, which restarts at contig_1 in every part below (duplicate ids
+    # once a barcode exceeds bakta_chunk_mb) and could only be tied back to
+    # reads through FASTA order. import_all.py maps UUID contigs straight to
+    # read_contig_map.
     # Bakta --meta holds every read's sequence + gene objects in RAM at once;
     # a multi-GB per-barcode FASTA can OOM the host (observed: 6.2 GB input
     # -> >61 GB RSS). Split on record boundaries into <= bakta_chunk_mb MiB
@@ -53,6 +58,7 @@ process BAKTA_CDS {
         bakta \
             --db "${params.bakta_db}" \
             --meta \
+            --keep-contig-headers \
             --tmp-dir "\$TMPDIR" \
             --threads ${task.cpus} \
             --output part_out \
@@ -110,6 +116,7 @@ process BAKTA_FULL {
     bakta \
         --db "${params.bakta_db}" \
         --meta \
+        --keep-contig-headers \
         --threads 1 \
         --output "${meta.id}" \
         --prefix "${meta.id}" \

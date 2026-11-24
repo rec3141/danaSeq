@@ -18,6 +18,9 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db_schema import ensure_schema
+
+# Bakta/prokka default contig names; anything else is a kept read header.
+_CONTIG_N = re.compile(r'^contig_\d+$')
 from import_mapping import import_mapping
 from import_protein_hits import import_protein_hits
 
@@ -315,7 +318,15 @@ def import_annotations(con, imported):
             all_stats.extend(stats_rows)
             all_locus.extend(locus_rows)
 
-            # Build read_contig_map
+            # Build read_contig_map. Bakta runs with --keep-contig-headers, so
+            # contigs are named after their read: map them directly. Legacy
+            # contig_N outputs (older runs, prokka) are matched to reads by
+            # FASTA order, which needs the per-file fa/<fileid>.fa — batch-mode
+            # outputs annotated many FASTAs at once and have none.
+            if contig_order and not _CONTIG_N.match(contig_order[0]):
+                for raw in contig_order:
+                    all_map.append((raw, f"{fileid}:{raw}", fileid))
+                contig_order = []
             fa_path = os.path.join('fa', f"{fileid}.fa")
             if os.path.exists(fa_path) and contig_order:
                 uuids = []
