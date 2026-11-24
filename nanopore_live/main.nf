@@ -327,11 +327,23 @@ def create_fastq_channel() {
             def parentName = fastq.parent.name
             def barcode = (parts.size() > 2 && parts[2] =~ /^barcode/) \
                 ? parts[2] : (parentName == 'fastq_pass' ? 'barcode00' : parentName)
+            // Batch-mode per-barcode tasks are named after the run, not just
+            // the flow cell: a washed flow cell can be sequenced again, and
+            // FLOWCELL_barcodeNN alone collided between the two runs in the
+            // archive (kraken/bakta/map outputs, and bakta contig ids in
+            // dana.duckdb). MinKNOW chunk names are
+            // FLOWCELL_pass_barcodeNN_RUNID_ACQID_N, so dropping the chunk
+            // index gives the run-level name — the same name
+            // concat_run_fastqs.sh gives the collapsed per-barcode file, and it
+            // keeps barcode in field 3, where import_all.py's krakenreport
+            // parser reads it. Other layouts fall back to FLOWCELL_barcodeNN.
+            def run_sample = (parts.size() >= 6 && parts[1] in ['pass', 'fail'] && parts[-1] =~ /^\d+$/) \
+                ? parts[0..-2].join('_') : "${flowcell}_${barcode}"
             def meta = [
                 id:       name,
                 flowcell: flowcell,
                 barcode:  barcode,
-                sample:   "${flowcell}_${barcode}"
+                sample:   run_sample
             ]
             [ meta, fastq ]
         }

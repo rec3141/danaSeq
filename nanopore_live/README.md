@@ -58,7 +58,10 @@ is kept and the new files appended to it with `import_all.py`. A preflight check
 refuses the merge, touching nothing, if any file other than `dana.duckdb` exists
 on both sides with different content. That happens when both runs were batch
 mode, because Kraken, Bakta and mapping outputs are named per barcode, not per
-run. The script then exits 1 and leaves the run's outputs in place.
+run. Since 2026-11-24 batch outputs carry the run in their name
+(`FLOWCELL_pass_barcodeNN_RUNID_ACQID`), so this only affects batch outputs
+produced before then. The script then exits 1 and leaves the run's outputs in
+place.
 
 Raw reads move to `/matika/`, processed reads and pipeline outputs move to `/vistara`,
 
