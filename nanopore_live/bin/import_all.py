@@ -328,6 +328,13 @@ def import_annotations(con, imported):
                     all_map.append((raw, f"{fileid}:{raw}", fileid))
                 contig_order = []
             fa_path = os.path.join('fa', f"{fileid}.fa")
+            if contig_order and not os.path.exists(fa_path):
+                # Batch-mode bakta (before --keep-contig-headers) annotated a
+                # barcode's per-chunk FASTAs concatenated in sorted order.
+                rids = _batch_read_order(fileid, contig_order, stats_rows)
+                for rid, raw in zip(rids or [], contig_order):
+                    all_map.append((rid, f"{fileid}:{raw}", fileid))
+                contig_order = []
             if os.path.exists(fa_path) and contig_order:
                 uuids = []
                 with open(fa_path) as f:
@@ -423,6 +430,54 @@ def _read_annotation_tsv(path, is_bakta):
                     row.get('cog', '') or '', row.get('product', '') or '',
                 ))
     return rows
+
+
+def _fasta_reads(path):
+    """[(read_id, length)] in file order."""
+    out, rid, n = [], None, 0
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith('>'):
+                if rid is not None:
+                    out.append((rid, n))
+                rid, n = line[1:].split()[0], 0
+            else:
+                n += len(line.strip())
+    if rid is not None:
+        out.append((rid, n))
+    return out
+
+
+def _batch_read_order(fileid, contig_order, stats_rows):
+    """Read ids for a batch-mode bakta output whose contigs are contig_N.
+
+    BAKTA_CDS ran `cat fastas/*` over the barcode's per-chunk FASTAs, so the
+    contigs follow those files in sorted order. Candidates: fa/<fileid>_*.fa
+    (run-named batch ids), else every fa/*.fa, else each run's group. Accepted
+    only if every contig length equals its read's length; returns None
+    otherwise (e.g. a >bakta_chunk_mb barcode, whose contig_N restarts).
+    """
+    if len(set(contig_order)) != len(contig_order):
+        print(f"[WARNING] read_contig_map: duplicate contig ids in {fileid}; not mapped", file=sys.stderr)
+        return None
+    lengths = [ln for _, ln in stats_rows]
+    cands = [sorted(glob.glob(os.path.join('fa', f'{fileid}_*.fa')))]
+    allfa = sorted(glob.glob(os.path.join('fa', '*.fa')))
+    cands.append(allfa)
+    groups = {}
+    for f in allfa:
+        p = os.path.basename(f)[:-3].split('_')
+        if len(p) >= 6:
+            groups.setdefault('_'.join(p[:5]), []).append(f)
+    cands.extend(groups[k] for k in sorted(groups))
+    for files in cands:
+        if not files:
+            continue
+        reads = [r for f in files for r in _fasta_reads(f)]
+        if len(reads) == len(lengths) and all(r[1] == ln for r, ln in zip(reads, lengths)):
+            return [r[0] for r in reads]
+    print(f"[WARNING] read_contig_map: no FASTA order matches {fileid}'s contigs; not mapped", file=sys.stderr)
+    return None
 
 
 def _read_gff(path, fileid, is_bakta):
