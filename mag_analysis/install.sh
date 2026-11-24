@@ -158,7 +158,7 @@ declare -A ENV_EXTRAS=(
     [dana-mag-classify]="kraken2 barrnap exec_annotation metaeuk"
     [dana-mag-genomic]="hmmscan macsyfinder defense-finder run_dbcan cath-resolve-hits"
     [dana-mag-pathviz]="node npm python3"
-    [dana-mag-strain]="strainy floria"
+    [dana-mag-strain]="strainy floria longshot"
     [dana-mag-derep]="galah skani"
 )
 
@@ -315,7 +315,7 @@ post_install_merged() {
     if [[ "${env_name}" == "dana-mag-strain" ]]; then
         echo "  Installing inStrain via pip..."
         "${env_path}/bin/pip" install --no-deps \
-            'instrain==1.11.0' \
+            'instrain==1.12.0' \
             > /dev/null 2>&1
         echo "  inStrain installed"
     fi

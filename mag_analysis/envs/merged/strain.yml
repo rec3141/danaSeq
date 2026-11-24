@@ -5,6 +5,7 @@ channels:
 dependencies:
   - strainy=1.2
   - floria=0.0.2
+  - longshot=1.0.0
   - samtools
   - pysam
   - numpy
