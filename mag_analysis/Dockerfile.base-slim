@@ -103,12 +103,12 @@ RUN --mount=type=cache,target=/opt/conda/pkgs \
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-derep     -f /tmp/envs/derep.yml
 
-# 8. Strain: strainy, instrain (pip), floria
+# 8. Strain: strainy, instrain (pip), floria, longshot (variant calls for floria)
 RUN --mount=type=cache,target=/opt/conda/pkgs \
     mamba env create -y -p /opt/conda/envs/dana-mag-strain    -f /tmp/envs/strain.yml
 # inStrain 1.11.0 is the first release with modern Biopython support; its
 # runtime dependencies all come from strain.yml.
-RUN /opt/conda/envs/dana-mag-strain/bin/pip install --no-deps 'instrain==1.11.0' \
+RUN /opt/conda/envs/dana-mag-strain/bin/pip install --no-deps 'instrain==1.12.0' \
     && /opt/conda/envs/dana-mag-strain/bin/python -c 'import inStrain'
 
 # 9. PathViz: pathway tools, viz, nodejs
@@ -266,7 +266,7 @@ RUN mkdir -p /usr/local/bin/dana-tools \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
     done \
     # --- strain env ---
-    && for tool in strainy floria inStrain; do \
+    && for tool in strainy floria longshot inStrain; do \
         printf '#!/bin/sh\nexport PATH=/opt/conda/envs/dana-mag-strain/bin:$PATH\nexec /opt/conda/envs/dana-mag-strain/bin/%s "$@"\n' "$tool" \
             > "/usr/local/bin/dana-tools/$tool" \
         && chmod +x "/usr/local/bin/dana-tools/$tool"; \
