@@ -328,6 +328,13 @@ def import_annotations(con, imported):
                     all_map.append((raw, f"{fileid}:{raw}", fileid))
                 contig_order = []
             fa_path = os.path.join('fa', f"{fileid}.fa")
+            if contig_order and is_bakta:
+                # Bakta's JSON records each contig's input header (orig_id).
+                orig = _bakta_orig_ids(tsv_path.replace('.tsv', '.json'))
+                if orig and all(raw in orig for raw in contig_order):
+                    for raw in contig_order:
+                        all_map.append((orig[raw], f"{fileid}:{raw}", fileid))
+                    contig_order = []
             if contig_order and not os.path.exists(fa_path):
                 # Batch-mode bakta (before --keep-contig-headers) annotated a
                 # barcode's per-chunk FASTAs concatenated in sorted order.
@@ -446,6 +453,39 @@ def _fasta_reads(path):
     if rid is not None:
         out.append((rid, n))
     return out
+
+
+def _bakta_orig_ids(path):
+    """{contig id: input header id} from a Bakta JSON's sequences[], or None.
+
+    The JSON is large (features first, sequences near the end), so it is
+    scanned for the sequences array and read line by line from there.
+    """
+    if not os.path.exists(path):
+        return None
+    pat = b'"sequences": ['
+    out, cur = {}, None
+    with open(path, 'rb') as f:
+        off, tail = 0, b''
+        while True:
+            buf = f.read(1 << 26)
+            if not buf:
+                return None
+            i = (tail + buf).find(pat)
+            if i >= 0:
+                f.seek(off - len(tail) + i + len(pat))
+                break
+            tail, off = buf[-len(pat):], off + len(buf)
+        for line in f:
+            s = line.strip()
+            if s.startswith(b'"id":'):
+                cur = s.split(b'"')[3].decode()
+            elif s.startswith(b'"orig_id":') and cur is not None:
+                out[cur] = s.split(b'"')[3].decode()
+                cur = None
+            elif s in (b']', b'],'):
+                break
+    return out or None
 
 
 def _batch_read_order(fileid, contig_order, stats_rows):
